@@ -1,0 +1,27 @@
+# The showcase's Chart (#710: U4): a ```showcase-chart fence drawn as an
+# SVG bar chart of a base's rows counted by a property.
+id = "showcase.chart"
+name = "Chart"
+version = "0.1.0"
+kind = "luau"
+api = "0.1"
+description = "A ```showcase-chart fence (`base: <path>`, `by: <property>`) drawn as an SVG bar chart in the theme's chart colours. Stands in for Obsidian Charts and Tracker."
+authors = ["FastTrackStudios"]
+
+[capabilities]
+actions = ["BASES_ROWS"]
+
+[[actions]]
+id = "SHOWCASE_CHART_COUNT"
+name = "Chart: count"
+description = "Counts base `base`'s rows by property `by`: {by, bars: [{label, count}]}, in first-seen order."
+group = "Showcase"
+params = '{"type":"object","properties":{"base":{"type":"string"},"by":{"type":"string"}},"required":["base","by"]}'
+script = "count.luau"
+
+[[embeds]]
+id = "chart"
+title = "Showcase chart"
+page = "pages/chart.tsx"
+claims = { fence = ["showcase-chart"] }
+max_height = 320

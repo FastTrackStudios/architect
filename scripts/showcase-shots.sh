@@ -10,6 +10,13 @@
 #   <vault path>             opens it (EXT_OPEN) and shoots it
 #   <ACTION>[@<json args>]   runs the action, then shoots
 #   +<ACTION>[@<json args>]  runs the action, no shot
+#   ^<ACTION>[@<json args>]  runs it right before each shot, the earlier
+#                            toasts gone, and shoots once its toast shows
+#                            (one that changes data runs once, both schemes
+#                            shot from that run)
+#   &<ACTION>[@<json args>]  runs it in the background before each shot
+#                            and shoots while it waits (a prompt, a
+#                            picker, a menu), then dismisses it with Esc
 # A shot is named for its step (the note's or the action's name). Writes
 # target/showcase/desktop/<name>-<width>-<light|dark>.png at the widths in
 # SHOWCASE_WIDTHS (default "390 1280"). Builds nothing: build the binary
@@ -137,21 +144,97 @@ for width in "${widths[@]}"; do
     act run CAPTURE_CLOSE >/dev/null 2>&1 || true
     act run LAB_GO --arg tab=vault >/dev/null 2>&1 || true
 
+    last_toast=0
+    # Waits until the last step's toast is gone (a toast stays TOAST_FOR,
+    # 6 s, then goes), and past it: only this step's on screen. Clearing
+    # them (NOTIFY_CLEAR), or a shot as one goes, crashed Blitz's painter
+    # (an invalid SlotMap key): it is let go well before a shot.
+    toasts_gone() {
+        local now wait_s
+        now="$(date +%s.%N)"
+        wait_s="$(python3 -I -c 'import sys; print("%.3f" % max(0.0, float(sys.argv[1]) + 7.5 - float(sys.argv[2])))' "$last_toast" "$now")"
+        sleep "$wait_s"
+    }
+    # Runs a step's action (id and JSON args in $2 $3) and waits until what
+    # it shows is on screen: its toast (^), or a prompt or menu still
+    # waiting for its answer (&).
+    pre_shot() {
+        case "$1" in
+            '^')
+                toasts_gone
+                act run "$2" --json "$3" >/dev/null || echo "showcase-shots: $2 failed" >&2
+                last_toast="$(date +%s.%N)"
+                # Its toast, drawn: it is raised as the action runs, so it is
+                # in the next frames. (Polling NOTIFY_LIST for it instead
+                # crashed Blitz's painter in three runs of four.)
+                sleep 0.5
+                ;;
+            '&')
+                toasts_gone
+                act run "$2" --json "$3" >/dev/null 2>&1 &
+                waiting=$!
+                pids+=("$waiting")
+                # Still waiting for an answer after a moment: what it asks is
+                # on screen (a run that ends at once asked nothing).
+                for _ in $(seq 1 8); do
+                    sleep 0.1
+                    kill -0 "$waiting" 2>/dev/null || { echo "showcase-shots: $2 asked nothing" >&2; break; }
+                done
+                sleep 0.4
+                ;;
+        esac
+    }
+    # Dismisses what a background step left open (Esc until its run ends).
+    post_shot() {
+        [ "$1" = '&' ] || return 0
+        for _ in 1 2 3 4 5 6; do
+            kill -0 "$waiting" 2>/dev/null || break
+            (cd "$loft" && nix run .#input -- -s "$session" key Escape >/dev/null 2>&1) || true
+            sleep 0.5
+        done
+        kill "$waiting" 2>/dev/null || true
+        wait "$waiting" 2>/dev/null || true
+    }
+    # Sets the scheme and waits until it shows.
+    scheme_to() {
+        local want
+        act run THEME_SET --json "{\"appearance\":\"$1\",\"layer\":\"pick\"}" >/dev/null
+        for _ in $(seq 1 20); do
+            want="$(act run THEME_GET 2>/dev/null | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("scheme",""))' || true)"
+            [ "$want" = "$1" ] && break
+            sleep 0.25
+        done
+    }
     shoot() {
-        local name="$1" scheme want
+        local name="$1" mode="${2:-}" id="${3:-}" json="${4:-}" scheme effect once=0
+        # An action that changes data runs once, both schemes shot from
+        # that run, not once per scheme.
+        if [ "$mode" = '^' ]; then
+            effect="$(act describe "$id" 2>/dev/null | awk '/^effect:/ { print $2; exit }')"
+            if [ "$effect" != "read-only" ]; then
+                once=1
+                scheme_to light
+                pre_shot '^' "$id" "$json"
+            fi
+        fi
         for scheme in light dark; do
-            act run THEME_SET --json "{\"appearance\":\"$scheme\",\"layer\":\"pick\"}" >/dev/null
-            # The shot is the window as last laid out: wait for the scheme,
-            # then shoot twice (the first after a change can be a frame old).
-            for _ in $(seq 1 20); do
-                want="$(act run THEME_GET 2>/dev/null | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("scheme",""))' || true)"
-                [ "$want" = "$scheme" ] && break
-                sleep 0.25
-            done
-            sleep 1
-            act run APP_SHOT --arg "path=$out/$name-$width-$scheme.png" >/dev/null
-            sleep 1
-            act run APP_SHOT --arg "path=$out/$name-$width-$scheme.png" >/dev/null
+            scheme_to "$scheme"
+            if [ -n "$mode" ]; then
+                if [ "$once" = 0 ]; then
+                    pre_shot "$mode" "$id" "$json"
+                else
+                    sleep 0.3
+                fi
+                act run APP_SHOT --arg "path=$out/$name-$width-$scheme.png" >/dev/null
+                sleep 0.3
+                act run APP_SHOT --arg "path=$out/$name-$width-$scheme.png" >/dev/null
+                post_shot "$mode"
+            else
+                sleep 1
+                act run APP_SHOT --arg "path=$out/$name-$width-$scheme.png" >/dev/null
+                sleep 1
+                act run APP_SHOT --arg "path=$out/$name-$width-$scheme.png" >/dev/null
+            fi
             echo "showcase-shots: $out/$name-$width-$scheme.png"
         done
     }
@@ -159,11 +242,20 @@ for width in "${widths[@]}"; do
 
     for step in "${steps[@]}"; do
         quiet=0
-        case "$step" in +*) quiet=1; step="${step#+}" ;; esac
+        mode=""
+        case "$step" in
+            +*) quiet=1; step="${step#+}" ;;
+            '^'*) mode='^'; step="${step#^}" ;;
+            '&'*) mode='&'; step="${step#&}" ;;
+        esac
         if [[ "$step" =~ ^[A-Z][A-Z0-9_]*(@.*)?$ ]]; then
             id="${step%%@*}"
             json="{}"
             [ "$id" != "$step" ] && json="${step#*@}"
+            if [ -n "$mode" ]; then
+                shoot "$(slug "$id")" "$mode" "$id" "$json"
+                continue
+            fi
             act run "$id" --json "$json" >/dev/null || echo "showcase-shots: $id failed" >&2
             sleep 1.5
             [ "$quiet" = 1 ] || shoot "$(slug "$id")"

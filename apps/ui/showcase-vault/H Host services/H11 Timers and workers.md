@@ -12,7 +12,8 @@ example: "Timers sampler"
 
 ## Try
 
-1. Turn on the Timers sampler and wait a minute.
+1. Wait ten seconds: the status row's `ticks` counts up.
+2. Run `Timers sampler: count primes`.
 
 ## You should see
 

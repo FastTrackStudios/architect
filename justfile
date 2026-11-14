@@ -372,6 +372,14 @@ showcase-shots *ARGS:
     fi
     exec devenv shell -- bash scripts/showcase-shots.sh {{ARGS}}
 
+# The showcase in the web app, in a real browser (apps/web/test/app-showcase.test.mjs):
+# /app/?showcase on the release bundle, its vault's folders and notes, in a
+# headless Firefox; its screenshots (390 and 1280, light and dark) into
+# target/showcase/web.
+showcase-web-shots:
+    devenv shell -- bash scripts/web-bundle.sh target/web-bundle
+    ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" ARCHITECT_SHOTS="$PWD/target/showcase/web" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-showcase.test.mjs
+
 # The showcase's screenshots (target/showcase/<platform>) onto the media
 # branch under 710-showcase/, where the matrix links them; PUSH=1 pushes.
 showcase-publish PUSH="0":

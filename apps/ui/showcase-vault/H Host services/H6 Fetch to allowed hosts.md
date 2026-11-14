@@ -12,7 +12,8 @@ example: "Secrets and fetch"
 
 ## Try
 
-1. Run `Secrets and fetch: call` and `Secrets and fetch: call elsewhere`.
+1. Start its echo server first: `python3 -I examples/showcase/secrets-fetch/echo.py` (127.0.0.1:8765).
+2. Run `Secrets and fetch: call` and `Secrets and fetch: call elsewhere`.
 
 ## You should see
 

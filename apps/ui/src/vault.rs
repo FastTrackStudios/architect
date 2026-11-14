@@ -346,6 +346,39 @@ pub fn show_note(workspace: Signal<Workspace>, path: &str, target: Target) {
     show_vault_note(workspace, path, target);
 }
 
+/// The Vault views' receivers of notes opened by path (an extension's
+/// `open`, a notification's "go to"), oldest first.
+fn path_receivers()
+-> std::sync::MutexGuard<'static, Vec<futures_channel::mpsc::UnboundedSender<String>>> {
+    static RECEIVERS: std::sync::Mutex<Vec<futures_channel::mpsc::UnboundedSender<String>>> =
+        std::sync::Mutex::new(Vec::new());
+    RECEIVERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The app's opener of a path no extension claims: a Markdown note, sent to
+/// the newest Vault view still open.
+fn open_by_path(path: &str) -> Result<serde_json::Value, String> {
+    let markdown = std::path::Path::new(path)
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("md"));
+    if !markdown {
+        return Err(format!("nothing opens {path}"));
+    }
+    let tx = {
+        let mut receivers = path_receivers();
+        receivers.retain(|tx| !tx.is_closed());
+        receivers
+            .last()
+            .cloned()
+            .ok_or_else(|| "no Vault view is open".to_owned())?
+    };
+    tx.unbounded_send(path.to_owned())
+        .map_err(|_| "the window is gone".to_owned())?;
+    Ok(serde_json::json!({ "opened_by": "app", "path": path }))
+}
+
 fn show_vault_note(workspace: Signal<Workspace>, path: &str, target: Target) {
     let mut workspace = workspace;
     let mut w = workspace.write();
@@ -707,6 +740,31 @@ pub fn VaultPage() -> Element {
     // A phone's action bar: the workspace's tabs button, counted.
     architect_workspace::use_tabs_button(workspace);
     use_vault_focus(workspace);
+    // A vault note opened by path from anywhere (an extension's `open`, a
+    // notification's "go to"): its pane in the main area, as a click in the
+    // navigator. Here, where the workspace lives, not in the navigator's
+    // tab: that one goes when its dock shows another tab or is a drawer
+    // (a phone), and its receiver went with it, so every later open said
+    // "the window is gone" (#739, #725). The receivers of every Vault page
+    // open are kept for the process; an open goes to the newest one left.
+    let ui = use_hook(try_consume_context::<architect_extensions::interface::ExtensionUi>);
+    let opener_disk = lab.disk;
+    use_future(move || {
+        let ui = ui.clone();
+        async move {
+            use futures_util::StreamExt as _;
+            let Some(ui) = ui else { return };
+            let (tx, mut rx) = futures_channel::mpsc::unbounded::<String>();
+            path_receivers().push(tx);
+            ui.host().set_path_opener(open_by_path);
+            while let Some(path) = rx.next().await {
+                // Only a vault on disk has notes by path.
+                if opener_disk.peek().is_some() {
+                    show_vault_note(workspace, &path, Target::Tab);
+                }
+            }
+        }
+    });
     // The Vault tab's surface (`crate::favourites`): back to the notes from
     // the projects list or the calendar.
     architect_commands::use_command(
@@ -1826,40 +1884,6 @@ fn VaultFiles(providers: Vec<LoadedProvider>) -> Element {
             }
         }
     });
-    // A vault note opened by path from anywhere (an extension's `open`, a
-    // notification's "go to"): its pane in the main area, as a click here.
-    let path_pane = pane.clone();
-    let opener = use_hook(move || {
-        let (tx, rx) = futures_channel::mpsc::unbounded::<String>();
-        if let Some(ui) = try_consume_context::<architect_extensions::interface::ExtensionUi>() {
-            ui.host().set_path_opener(move |path| {
-                let markdown = std::path::Path::new(path)
-                    .extension()
-                    .is_some_and(|e| e.eq_ignore_ascii_case("md"));
-                if !markdown {
-                    return Err(format!("nothing opens {path}"));
-                }
-                tx.unbounded_send(path.to_owned())
-                    .map_err(|_| "the window is gone".to_owned())?;
-                Ok(serde_json::json!({ "opened_by": "app", "path": path }))
-            });
-        }
-        std::rc::Rc::new(std::cell::RefCell::new(Some(rx)))
-    });
-    use_future(move || {
-        let taken = opener.borrow_mut().take();
-        let workspace = path_pane.workspace();
-        async move {
-            use futures_util::StreamExt as _;
-            let Some(mut rx) = taken else { return };
-            while let Some(path) = rx.next().await {
-                // Only a vault on disk has notes by path.
-                if disk.peek().is_some() {
-                    show_vault_note(workspace, &path, Target::Tab);
-                }
-            }
-        }
-    });
     use_drop(move || {
         let mut kept = kept;
         let view = nav.view_state();
@@ -2719,5 +2743,56 @@ mod start_tests {
                 "{path} is a demo vault file"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod path_opener_tests {
+    use super::{open_by_path, path_receivers};
+
+    /// An open by path goes to the newest Vault page still open; one whose
+    /// page went is skipped and forgotten; with none, it says so; and only
+    /// a Markdown note opens this way (#739, #725).
+    #[test]
+    fn an_open_goes_to_the_newest_vault_page_still_open() {
+        path_receivers().clear();
+        assert_eq!(
+            open_by_path("Notes/a.txt").unwrap_err(),
+            "nothing opens Notes/a.txt"
+        );
+        assert_eq!(
+            open_by_path("Notes/a.md").unwrap_err(),
+            "no Vault view is open"
+        );
+
+        let (older, mut older_rx) = futures_channel::mpsc::unbounded::<String>();
+        let (newer, newer_rx) = futures_channel::mpsc::unbounded::<String>();
+        path_receivers().push(older);
+        path_receivers().push(newer);
+        // The newest page went: its receiver is skipped, the older one gets it.
+        drop(newer_rx);
+        let answer = open_by_path("Notes/a.md").unwrap();
+        assert_eq!(answer["path"], "Notes/a.md");
+        assert_eq!(older_rx.try_recv().ok().as_deref(), Some("Notes/a.md"));
+        assert_eq!(path_receivers().len(), 1, "the closed one is forgotten");
+
+        // A page opened since is the newest: it gets the next.
+        let (newest, mut newest_rx) = futures_channel::mpsc::unbounded::<String>();
+        path_receivers().push(newest);
+        open_by_path("Songs/b.MD").unwrap();
+        assert_eq!(newest_rx.try_recv().ok().as_deref(), Some("Songs/b.MD"));
+        assert!(
+            older_rx.try_recv().is_err(),
+            "nothing more for the older page"
+        );
+
+        // Every page gone: it says so.
+        drop(older_rx);
+        drop(newest_rx);
+        assert_eq!(
+            open_by_path("Notes/c.md").unwrap_err(),
+            "no Vault view is open"
+        );
+        path_receivers().clear();
     }
 }

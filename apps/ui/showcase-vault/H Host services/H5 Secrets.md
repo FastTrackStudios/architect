@@ -12,7 +12,8 @@ A secret entered once and inserted by the host into a request header, never read
 
 ## Try
 
-1. Run `Secrets and fetch: set token`, then `Secrets and fetch: call`.
+1. Start its echo server first: `python3 -I examples/showcase/secrets-fetch/echo.py` (127.0.0.1:8765).
+2. Run `Secrets and fetch: set token` (the app asks, in its own prompt), then `Secrets and fetch: call`.
 
 ## You should see
 

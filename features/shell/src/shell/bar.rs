@@ -228,6 +228,21 @@ impl BarModel {
         row.into_iter().map(|(_, a)| a).collect()
     }
 
+    /// [`Self::shown`], then the extensions' buttons (`contributed`,
+    /// `Chrome::bar`) after it, not counted against [`BAR_MAX`]: an
+    /// extension's button never takes the app's or a page's place, and a
+    /// bar past six scrolls sideways (#726). Before, they came last among
+    /// the app's and were the first to go, so none ever showed.
+    fn shown_with(&self, app: &[BarAction], contributed: &[BarAction]) -> Vec<BarAction> {
+        let mut row = self.shown(app);
+        for c in contributed {
+            if !row.iter().any(|r| r.id == c.id) {
+                row.push(c.clone());
+            }
+        }
+        row
+    }
+
     /// The editing bar's actions and what they edit: the editor with the
     /// text focus, else (when no page or view says it has the focus) the
     /// one registered last; nothing with no editor.
@@ -451,7 +466,7 @@ pub(super) fn PhoneFoot(
             div { style: "flex-shrink: 0; height: {lift.max(ins.bottom)}px;" }
         };
     }
-    let items = model.shown(&shell.bar_actions);
+    let items = model.shown_with(&shell.bar_actions, &shell.bar_contributed);
     let tab_bar = !tabs.is_empty() || separate.is_some();
     // A field has the focus and the keyboard is down (Hide, an
     // `autofocus`, a scroll that began on it): the button that brings it
@@ -485,11 +500,18 @@ fn ActionBar(items: Vec<BarAction>, keyboard_button: bool, bottom: f64, screen: 
     let t = use_shell().theme;
     let ins = screen.insets;
     let runner = try_use_context::<CommandRunner>();
+    // Past six (the extensions' after the app's), the row scrolls sideways.
+    let scrolls = items.len().saturating_add(usize::from(keyboard_button)) > BAR_MAX;
+    let (justify, overflow, gap) = if scrolls {
+        ("flex-start", "auto", 8)
+    } else {
+        ("space-around", "visible", 0)
+    };
     rsx! {
         div {
             "data-bar": "actions",
             style: "flex-shrink: 0; height: {BAR_ROW + bottom}px; box-sizing: border-box; display: flex; \
-                    align-items: center; justify-content: space-around; \
+                    align-items: center; justify-content: {justify}; overflow-x: {overflow}; gap: {gap}px; \
                     padding: 0 {12.0 + ins.right}px {bottom}px {12.0 + ins.left}px; \
                     background: {t.desk}; border-top: 1px solid {t.rule};",
             onpointerdown: move |e: PointerEvent| input_debug::hit("the action bar", &e),
@@ -616,6 +638,13 @@ mod tests {
         }
         // Only the pages' now, the latest past six let go.
         assert_eq!(ids(&m.shown(&app)), ["TABS", "P1", "P2", "P3", "P4", "P5"]);
+        // An extension's button (#726) comes after the six, taking no
+        // one's place (the bar scrolls); one the app has already counts once.
+        let full = BarModel::default();
+        assert_eq!(
+            ids(&full.shown_with(&app, &[a("EXT_FOCUS"), a("A2")])),
+            ["A1", "A2", "A3", "A4", "A5", "A6", "EXT_FOCUS"]
+        );
         // The app's own duplicates count once.
         let twice = [a("BACK"), a("BACK")];
         assert_eq!(ids(&BarModel::default().shown(&twice)), ["BACK"]);
