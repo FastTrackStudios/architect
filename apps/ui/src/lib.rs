@@ -15,6 +15,7 @@
 mod accounts;
 mod arrange;
 mod capture;
+mod collection;
 mod confirm;
 mod cursors;
 mod decks;
@@ -957,6 +958,8 @@ pub fn LabApp() -> Element {
     // Extensions, and what they add to the window: the shell's chrome
     // (above the shell), a pane's context menu, the menus, their views.
     let ext_ui = extensions::use_lab_extensions(metronome);
+    // The Now Playing card's art: an item's cover from the app's vault.
+    let now_playing_art = vault::use_now_playing_art();
     use_context_provider(|| ext_ui);
     // The interface as files (layouts/<name>.json, keys.json under the
     // lab's folder), live: the layout shown fills the shell's slots over
@@ -1639,7 +1642,7 @@ pub fn LabApp() -> Element {
                         // The Now Playing bar (#589): whatever an extension
                         // queued on the playhead, on a silent clock here
                         // (audible native playback is a later step).
-                        now_playing: rsx! { architect_playhead::ui::NowPlayingBar {} },
+                        now_playing: rsx! { architect_playhead::ui::NowPlayingBar { art: now_playing_art } },
                         // A phone's action bar (a page adds its own: the
                         // Vault, its tabs).
                         actions: vec![

@@ -164,6 +164,7 @@ pub fn write_demo(dir: &Path) -> std::io::Result<bool> {
     }
     std::fs::create_dir_all(dir)?;
     DEMO.extract(dir)?;
+    write_demo_recordings(dir, &DEMO)?;
     let empty = dir.join(crate::notes::EMPTY_FOLDERS);
     if let Ok(list) = std::fs::read_to_string(&empty) {
         for line in list.lines().map(str::trim).filter(|l| !l.is_empty()) {
@@ -172,6 +173,48 @@ pub fn write_demo(dir: &Path) -> std::io::Result<bool> {
         std::fs::remove_file(empty)?;
     }
     Ok(true)
+}
+
+/// The demo's silent recording (`apps/web/app/demo-recording.mp3`): the
+/// web demo plays it for every song's recording, and the demo vault on
+/// disk has it at each (#668), so its setlist plays the same way.
+const SILENT: &[u8] = include_bytes!("../../web/app/demo-recording.mp3");
+
+/// The silent recording at every `recording:`/`media:` an `.md` note of
+/// `demo` names (a vault path ending `.mp3`), under `dir`.
+fn write_demo_recordings(dir: &Path, demo: &include_dir::Dir<'_>) -> std::io::Result<()> {
+    for entry in demo.entries() {
+        match entry {
+            include_dir::DirEntry::Dir(d) => write_demo_recordings(dir, d)?,
+            include_dir::DirEntry::File(f) => {
+                let Some(text) = f.contents_utf8() else {
+                    continue;
+                };
+                if f.path().extension().is_none_or(|e| e != "md") {
+                    continue;
+                }
+                let path = f.path().to_string_lossy();
+                let item =
+                    architect_media::Item::read(&path, &architect_media::front::fields(text));
+                let Some(media) = item.media.filter(|m| {
+                    architect_playhead::model::vault_path(m)
+                        && Path::new(m)
+                            .extension()
+                            .is_some_and(|e| e.eq_ignore_ascii_case("mp3"))
+                }) else {
+                    continue;
+                };
+                let to = dir.join(&media);
+                if !to.exists() {
+                    if let Some(parent) = to.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    std::fs::write(to, SILENT)?;
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// A new, empty vault: `~/Documents/Architect` (`Architect 2`, … when

@@ -87,6 +87,17 @@ Where it draws:
   note's words show as a reading (`apps/web/src/reading.rs` `blocks`), with
   the listing fence left out and its text area folded under "Edit the note's
   text".
+- **The desktop and phone apps** (`apps/ui/src/collection.rs`
+  `CollectionHead`): the list is the fallback of the note type's `EmbedView`,
+  so an extension that claims the type draws instead. Rows come from the vault
+  on disk, and covers are `data:` URLs read from inside it (`art_url`, which
+  the Now Playing card uses too). The Properties bar leaves the list's rows
+  out (`PropertiesBar`'s `hidden`), and the editor folds a listing fence to one
+  line until the caret goes into it (`NoteEditor`'s `fold_listing`,
+  `architect_media::listing_fences`). The demo vault on disk gets the demo's
+  silent recording at each song's `recording` (`apps/ui/src/vaults.rs`
+  `write_demo`), so its setlist plays as the web demo's does. Playback is the
+  native silent clock until audible native playback lands.
 - **A share link's guest** (`apps/web/src/app/guest.rs`, #679): the list comes
   from what the link's node gives the guest, never from a vault. Each
   `ListedNote` (`features/spaces/src/guest.rs`) carries its `subtitle`,
@@ -112,6 +123,9 @@ Where it draws:
   draws instead of the core list.
 - `apps/web/src/guest_view.rs` `collection_rows`: a guest's rows from the
   node's sets, only what the link serves plays.
+- `apps/ui/src/collection.rs`: the demo vault's setlist lists two sets and
+  nine rows, four greyed, every cover as a `data:` URL, nothing outside the
+  vault.
 - `features/media/src/collection.rs`: Studio's named sets with the flat list's
   remainder; the generic names; rows numbered across sections; only what plays
   is queued; a guest resolves only the listed notes.

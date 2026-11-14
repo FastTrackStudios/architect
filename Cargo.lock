@@ -836,6 +836,7 @@ dependencies = [
  "architect-files",
  "architect-guide",
  "architect-input",
+ "architect-media",
  "architect-navigator",
  "architect-navigator-api",
  "architect-navigator-extension",

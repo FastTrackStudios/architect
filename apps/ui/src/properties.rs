@@ -488,6 +488,10 @@ pub fn PropertiesBar(
     types: Types,
     on_change: Callback<String>,
     #[props(default)] on_link: Option<Callback<String>>,
+    /// Keys not shown as rows (a collection's list draws them, #668); the
+    /// block keeps them.
+    #[props(default)]
+    hidden: Vec<String>,
 ) -> Element {
     let t = use_shell().theme;
     let mut open = use_signal(|| false);
@@ -501,52 +505,57 @@ pub fn PropertiesBar(
         .to_owned();
     let count = list.len();
     let last = count.saturating_sub(1);
+    let shown = list.iter().filter(|e| !hidden.contains(&e.key)).count();
     let vars = format!("--np-hover: {};", t.pill);
-    let rows = list.into_iter().enumerate().map(|(i, e)| {
-        let k = kind_of(&types, &kind, &e.key, &e.value);
-        let on_value = {
-            let (block, key) = (block.clone(), e.key.clone());
-            move |v: Value| on_change.call(set(&block, &key, v))
-        };
-        let on_rename = {
-            let (block, key) = (block.clone(), e.key.clone());
-            move |to: String| {
-                if let Some(b) = rename(&block, &key, &to) {
-                    on_change.call(b);
+    let rows = list
+        .into_iter()
+        .enumerate()
+        .filter(|(_, e)| !hidden.contains(&e.key))
+        .map(|(i, e)| {
+            let k = kind_of(&types, &kind, &e.key, &e.value);
+            let on_value = {
+                let (block, key) = (block.clone(), e.key.clone());
+                move |v: Value| on_change.call(set(&block, &key, v))
+            };
+            let on_rename = {
+                let (block, key) = (block.clone(), e.key.clone());
+                move |to: String| {
+                    if let Some(b) = rename(&block, &key, &to) {
+                        on_change.call(b);
+                    }
+                }
+            };
+            let on_remove = {
+                let (block, key) = (block.clone(), e.key.clone());
+                move |()| on_change.call(remove(&block, &key))
+            };
+            let on_move = {
+                let block = block.clone();
+                move |up: bool| {
+                    let to = if up {
+                        i.saturating_sub(1)
+                    } else {
+                        i.saturating_add(1)
+                    };
+                    on_change.call(move_to(&block, i, to));
+                }
+            };
+            rsx! {
+                PropertyRow {
+                    key: "{e.key}",
+                    name: e.key.clone(),
+                    value: e.value,
+                    kind: k,
+                    first: i == 0,
+                    last: i == last,
+                    on_value,
+                    on_rename,
+                    on_remove,
+                    on_move,
+                    on_link,
                 }
             }
-        };
-        let on_remove = {
-            let (block, key) = (block.clone(), e.key.clone());
-            move |()| on_change.call(remove(&block, &key))
-        };
-        let on_move = {
-            let block = block.clone();
-            move |up: bool| {
-                let to = if up {
-                    i.saturating_sub(1)
-                } else {
-                    i.saturating_add(1)
-                };
-                on_change.call(move_to(&block, i, to));
-            }
-        };
-        rsx! {
-            PropertyRow {
-                key: "{e.key}",
-                name: e.key.clone(),
-                value: e.value,
-                kind: k,
-                first: i == 0,
-                last: i == last,
-                on_value,
-                on_rename,
-                on_remove,
-                on_move,
-                on_link,
-            }
-        }
-    });
+        });
     rsx! {
         document::Style { {STYLE} }
         div {
@@ -566,7 +575,7 @@ pub fn PropertiesBar(
                 span { style: "font-weight: 600; color: {t.ink_2};", "Properties" }
                 span {
                     style: "font-size: 11px; color: {t.ink_3}; background: {t.pill}; border-radius: 999px; padding: 0 7px; line-height: 18px;",
-                    "{count}"
+                    "{shown}"
                 }
             }
             if open() {

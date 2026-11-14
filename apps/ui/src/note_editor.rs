@@ -593,8 +593,18 @@ pub fn NoteEditor(
     #[props(default)] incoming: Option<(u64, String)>,
     #[props(default)] vault: Option<NoteVault>,
     #[props(default)] on_link: Option<Callback<String>>,
+    /// Fold the fences that repeat a collection's list (#668:
+    /// `architect_media::listing_fences`) while the core list draws them;
+    /// each shows as one line until the caret goes into it.
+    #[props(default)]
+    fold_listing: bool,
 ) -> Element {
     let state = use_signal(|| EditorState::new(text.clone()));
+    let fold = use_hook(|| CopyValue::new(fold_listing));
+    if *fold.peek() != fold_listing {
+        let mut fold = fold;
+        fold.set(fold_listing);
+    }
     let history = use_signal(History::new);
     let applied = use_hook(|| CopyValue::new(0_u64));
     use_effect(use_reactive!(|incoming| {
@@ -709,6 +719,9 @@ pub fn NoteEditor(
                 |v| v.preview(s),
             );
             out.extend(ext::decorations(&specs, &text));
+            if *fold.peek() {
+                out.extend(listing_folds(&text, s.selection.primary().head));
+            }
             out.extend(
                 claimed_fences(&text, &claimed())
                     .iter()
@@ -813,6 +826,34 @@ pub fn NoteEditor(
             CommandPalette { state, palette, on_action: move |a: String| run(a) }
         }
     }
+}
+
+/// The listing fences of `text` folded (#668): each hidden and shown as
+/// one quiet line, unless the caret at `caret` is in it.
+fn listing_folds(text: &str, caret: usize) -> Vec<DecoratedRange> {
+    architect_media::listing_fences(text)
+        .into_iter()
+        .filter(|(_, r)| !(r.start..=r.end).contains(&caret))
+        .flat_map(|(info, r)| {
+            let name: String = info
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
+                .collect();
+            [
+                DecoratedRange {
+                    from: r.start,
+                    to: r.end,
+                    kind: DecorationKind::Replace,
+                },
+                DecoratedRange::widget(
+                    r.start,
+                    format!(
+                        "<span class=\"media-fold\" data-media-fold=\"{name}\" style=\"opacity: .6; font-size: 12px;\">{name}: shown as the list above</span>"
+                    ),
+                ),
+            ]
+        })
+        .collect()
 }
 
 /// A fenced block an extension claims, in a note's text.
