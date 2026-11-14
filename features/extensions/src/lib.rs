@@ -121,6 +121,10 @@ mod invocation;
 pub use invocation::{caller_json, invocation_json};
 #[cfg(any(feature = "linked-core", all(feature = "guest", unix)))]
 pub mod linked;
+#[cfg(feature = "scenes")]
+pub mod scene;
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+mod web_scene;
 #[cfg(feature = "host")]
 pub mod logs;
 #[cfg(all(feature = "host", not(target_family = "wasm")))]
