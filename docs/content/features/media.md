@@ -99,7 +99,11 @@ Where it draws:
   Covers are `data:` URLs read from inside it (`art_url`, which the Now Playing
   card uses too): opened as the vault's own file (no `.` or `..` segment, no
   link out of it), kept for the 64 most recent within 32 MiB, read again once
-  a file's modification time or size changes, a missing one never kept. The
+  a file's modification time or size changes, a missing one never kept, and
+  one changed in the last two seconds read every time (`ART_SETTLED`: a
+  rewrite of the same size within the clock's grain is never stale). The list
+  is keyed by the vault's root, so another vault is heard from its own
+  subscription. The
   Properties bar leaves the list's rows out (`PropertiesBar`'s `hidden`), and
   the editor folds a listing fence to one line until the caret goes into it
   (`NoteEditor`'s `fold_listing`, `architect_media::listing_fences`), and

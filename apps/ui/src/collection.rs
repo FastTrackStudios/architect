@@ -15,7 +15,7 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use architect_media::{Collection, Item, Row, front};
 use architect_navigator::VaultSource;
@@ -30,6 +30,10 @@ const ART_MAX: u64 = 4 * 1024 * 1024;
 /// The most covers kept read, and the most bytes of `data:` URLs.
 const ART_KEPT: usize = 64;
 const ART_KEPT_BYTES: usize = 32 * 1024 * 1024;
+/// How old a cover's modification time must be before its read is kept:
+/// past any file system's clock grain, so a rewrite of the same size
+/// within it is never mistaken for the file read.
+const ART_SETTLED: Duration = Duration::from_secs(2);
 
 /// The list collection note `path` (its text `text`) makes in `vault`:
 /// its sections and rows. `None` when it is no collection.
@@ -98,6 +102,13 @@ impl ArtCache {
         }
     }
 
+    fn forget(&mut self, key: &Path) {
+        if let Some(old) = self.kept.remove(key) {
+            self.bytes = self.bytes.saturating_sub(old.url.len());
+            self.order.retain(|k| k != key);
+        }
+    }
+
     fn put(&mut self, key: PathBuf, art: Art) {
         if let Some(old) = self.kept.remove(&key) {
             self.bytes = self.bytes.saturating_sub(old.url.len());
@@ -131,7 +142,9 @@ pub fn art_url(root: &Path, path: &str) -> Option<String> {
     use base64::Engine as _;
     use std::io::Read as _;
     if !architect_playhead::model::vault_path(path)
-        || path.split('/').any(|s| s.is_empty() || s == "." || s == "..")
+        || path
+            .split('/')
+            .any(|s| s.is_empty() || s == "." || s == "..")
     {
         return None;
     }
@@ -151,7 +164,18 @@ pub fn art_url(root: &Path, path: &str) -> Option<String> {
     }
     let (modified, len) = (meta.modified().ok(), meta.len());
     let key = root.join(path);
-    if let Some(hit) = ART.with(|cache| cache.borrow_mut().get(&key, modified, len)) {
+    // A file changed within the clock's grain of now may change again
+    // with the same time and size: read it, keep nothing of it (as git's
+    // racy index does), so a cover rewritten in place never shows stale.
+    let settled = modified.is_some_and(|m| {
+        SystemTime::now()
+            .duration_since(m)
+            .is_ok_and(|age| age >= ART_SETTLED)
+    });
+    if let Some(hit) = ART
+        .with(|cache| cache.borrow_mut().get(&key, modified, len))
+        .filter(|_| settled)
+    {
         return Some(hit);
     }
     let mut bytes = Vec::new();
@@ -159,6 +183,10 @@ pub fn art_url(root: &Path, path: &str) -> Option<String> {
     let data = base64::engine::general_purpose::STANDARD.encode(bytes);
     let url = format!("data:{mime};base64,{data}");
     ART.with(|cache| {
+        if !settled {
+            cache.borrow_mut().forget(&key);
+            return;
+        }
         cache.borrow_mut().put(
             key,
             Art {
@@ -176,6 +204,23 @@ pub fn art_url(root: &Path, path: &str) -> Option<String> {
 /// once per text and per change to the vault, not per draw.
 #[component]
 pub fn CollectionHead(
+    vault: VaultHandle,
+    path: String,
+    title: String,
+    text: String,
+    on_open: EventHandler<String>,
+) -> Element {
+    // Keyed by the vault's root: another vault is another list, heard
+    // from its own subscription.
+    let root = vault.0.vault().root().display().to_string();
+    rsx! {
+        VaultList { key: "{root}", vault, path, title, text, on_open }
+    }
+}
+
+/// [`CollectionHead`] for one vault: subscribed to its changes once.
+#[component]
+fn VaultList(
     vault: VaultHandle,
     path: String,
     title: String,
@@ -207,11 +252,11 @@ pub fn CollectionHead(
         let _ = changed();
         rows(vault.0.vault(), &path, &text)
     }));
+    let root = vault.0.vault().root();
+    let art = use_callback(move |p: String| art_url(&root, &p));
     let Some(sections) = sections() else {
         return rsx! {};
     };
-    let root = vault.0.vault().root();
-    let art = use_callback(move |p: String| art_url(&root, &p));
     rsx! {
         architect_media::ui::MediaList {
             source: SOURCE.to_owned(),
@@ -300,16 +345,73 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         for i in 0..ART_KEPT + 10 {
-            std::fs::write(root.join(format!("{i}.png")), format!("png {i}")).unwrap();
+            write_settled(
+                &root.join(format!("{i}.png")),
+                format!("png {i}").as_bytes(),
+            );
             assert!(art_url(root, &format!("{i}.png")).is_some());
         }
         ART.with(|c| {
             let c = c.borrow();
             assert_eq!(c.kept.len(), ART_KEPT);
             assert_eq!(c.order.len(), ART_KEPT);
-            assert!(!c.kept.contains_key(&root.join("0.png")), "the oldest dropped");
-            assert!(c.kept.contains_key(&root.join(format!("{}.png", ART_KEPT + 9))));
+            assert!(
+                !c.kept.contains_key(&root.join("0.png")),
+                "the oldest dropped"
+            );
+            assert!(
+                c.kept
+                    .contains_key(&root.join(format!("{}.png", ART_KEPT + 9)))
+            );
         });
+    }
+
+    #[test]
+    fn a_cover_rewritten_with_the_same_time_and_size_is_never_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.png");
+        // Rewritten in place within the clock's grain: the same time, the
+        // same size. Read fresh each time while it may still change.
+        let now = SystemTime::now();
+        for bytes in [b"one".as_slice(), b"two".as_slice()] {
+            std::fs::write(&path, bytes).unwrap();
+            std::fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(now)
+                .unwrap();
+            let url = art_url(dir.path(), "a.png").unwrap();
+            assert!(url.ends_with(&base64_of(bytes)), "{url}");
+        }
+        ART.with(|c| {
+            assert!(
+                !c.borrow().kept.contains_key(&path),
+                "a racy read is not kept"
+            )
+        });
+        // Settled: kept.
+        write_settled(&path, b"six");
+        assert!(
+            art_url(dir.path(), "a.png")
+                .unwrap()
+                .ends_with(&base64_of(b"six"))
+        );
+        ART.with(|c| assert!(c.borrow().kept.contains_key(&path)));
+    }
+
+    /// `bytes` at `path`, its modification time past [`ART_SETTLED`].
+    fn write_settled(path: &Path, bytes: &[u8]) {
+        std::fs::write(path, bytes).unwrap();
+        let old = SystemTime::now()
+            .checked_sub(ART_SETTLED.saturating_add(Duration::from_secs(5)))
+            .unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
     }
 
     fn base64_of(bytes: &[u8]) -> String {
