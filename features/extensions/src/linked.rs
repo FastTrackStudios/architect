@@ -199,6 +199,23 @@ pub trait Extension: Send + Sync + 'static {
     fn build(&self, ext: &mut Builder);
 }
 
+/// A paint view's pane: a `V`, hosted as a Blitz widget, its wake in
+/// its `ctx.extras`.
+#[cfg(feature = "paint")]
+fn paint_root<V>() -> Element
+where
+    V: architect_workspace::paint::PaintView + Default,
+{
+    use architect_workspace::paint::{PaintMount, PaintPane};
+    use dioxus::prelude::*;
+    let mount = use_hook(|| {
+        let mount = PaintMount::new(|_| V::default());
+        let wake = mount.wake_handle();
+        mount.extras(architect_workspace::Extras::default().with(wake))
+    });
+    rsx! { PaintPane { mount } }
+}
+
 /// What an [`Extension`] builds.
 #[derive(Clone, Default)]
 pub struct Builder {
@@ -256,6 +273,27 @@ impl Builder {
     /// Its view `id` (one of its manifest's `[[views]]`), drawn by `root`.
     pub fn view(&mut self, id: impl Into<String>, root: fn() -> Element) -> &mut Self {
         self.views.insert(id.into(), root);
+        self
+    }
+
+    /// Its paint view `id` (one of its manifest's `[[views]]`, `kind =
+    /// "paint"`), drawn by a `V` made for each pane it opens in (feature
+    /// `paint`, #591).
+    ///
+    /// `V` records an anyrender scene for the pane's size and scale
+    /// (`architect_workspace::paint::PaintView::paint`) and is given the
+    /// pane's input in its own logical pixels: pointer, wheel, touch,
+    /// keys and composed text (`PaintView::input`). It is hosted as a
+    /// Blitz widget in the pane (`architect_workspace::paint::PaintPane`).
+    /// A frame is drawn after input that changed something, every frame
+    /// while it says it is `animating`, and when it asks: its
+    /// `ctx.extras` holds the pane's `PaintWake`.
+    #[cfg(feature = "paint")]
+    pub fn paint<V>(&mut self, id: impl Into<String>) -> &mut Self
+    where
+        V: architect_workspace::paint::PaintView + Default,
+    {
+        self.views.insert(id.into(), paint_root::<V>);
         self
     }
 

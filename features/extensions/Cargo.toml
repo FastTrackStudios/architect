@@ -64,6 +64,10 @@ crdt = ["dep:crdt"]
 # linked into the app as a built-in (its views Dioxus components in the
 # app's document), or served as a process by `guest`.
 linked = ["host", "dep:dioxus"]
+# A linked extension's paint views (`linked::Builder::paint`, #591): a
+# view that records an anyrender scene for its pane and takes the pane's
+# input, hosted as a Blitz widget (`architect_workspace::paint`).
+paint = ["linked", "architect-workspace/paint-ui"]
 ui = [
     "host",
     "linked",
@@ -267,7 +271,10 @@ sha2 = { workspace = true }
 hex = { workspace = true }
 # Its own host, so `cargo test --workspace` builds the tests with it; the
 # guest too, since the remote-view tests spawn themselves as one.
-architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked", "manager", "wasi", "net"] }
+architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked", "manager", "wasi", "net", "paint"] }
+# tests/linked_paint.rs: a linked paint view's widget painted, as the
+# window's renderer does.
+blitz-paint = { workspace = true, features = ["custom-widget"] }
 # tests/wasi.rs: the WIT world read, to compare with the wire's types.
 wit-parser = "0.261"
 futures = "0.3"
