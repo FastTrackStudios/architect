@@ -50,6 +50,8 @@ pub mod index;
 pub mod interop;
 pub mod manifest;
 pub mod package;
+#[cfg(feature = "host")]
+pub mod person_sync;
 pub mod platform;
 pub mod project;
 pub mod reapack;

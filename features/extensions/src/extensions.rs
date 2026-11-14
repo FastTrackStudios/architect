@@ -218,7 +218,7 @@ impl Extensions {
         &self.inner.installs
     }
 
-    fn sources(&self) -> Vec<Arc<dyn Source>> {
+    pub(crate) fn sources(&self) -> Vec<Arc<dyn Source>> {
         let mut sources = lock(&self.inner.sources).clone();
         if let Some(r) = self.registries() {
             sources.extend(r.sources());

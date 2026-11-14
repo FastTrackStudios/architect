@@ -105,10 +105,16 @@ pub enum SyncError {
     BadPath(String),
 }
 
-/// Walk `vault_root` and return one [`LocalEntry`] per regular
-/// file. Hidden files (`.git`, `.obsidian`, anything beginning
-/// with `.`) are skipped — they're operational state, not vault
-/// content.
+/// The one top-level dot-folder a vault syncs (#683): its own.
+pub const SYNCED_DOT: &str = ".architect";
+
+/// Walk `vault_root` and return one [`LocalEntry`] per regular file.
+///
+/// Hidden files (`.git`, `.obsidian`, anything beginning with `.`) are
+/// skipped — they're operational state, not vault content — but for the
+/// vault's own folder at its top, [`SYNCED_DOT`] (`.architect`: the
+/// extensions it needs, the archives it carries, each person's installs;
+/// #683's decision), and nothing hidden inside it.
 pub fn index_local(vault_root: &Path) -> Result<Vec<LocalEntry>, SyncError> {
     let mut out = Vec::new();
     for entry in walkdir::WalkDir::new(vault_root)
@@ -121,7 +127,11 @@ pub fn index_local(vault_root: &Path) -> Result<Vec<LocalEntry>, SyncError> {
             if e.depth() == 0 {
                 return true;
             }
-            e.file_name().to_str().is_none_or(|s| !s.starts_with('.'))
+            let name = e.file_name().to_str();
+            if e.depth() == 1 && name == Some(SYNCED_DOT) {
+                return true;
+            }
+            name.is_none_or(|s| !s.starts_with('.'))
         })
     {
         let entry = entry.map_err(|source| SyncError::Walk {
@@ -468,6 +478,42 @@ mod tests {
         let entries = index_local(root).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].path, "a.md");
+    }
+
+    /// The vault's own folder syncs (#683): the extensions it needs, the
+    /// archives it carries, each person's installs; `.git` and the rest
+    /// stay on the machine, and so does anything hidden inside it.
+    #[test]
+    fn index_local_keeps_the_vaults_own_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join("a.md"), b"hello").unwrap();
+        for (path, body) in [
+            (".architect/extensions.toml", "[[extensions]]\nid = \"x\"\n"),
+            (".architect/extensions/x-0.1.0.archext", "bytes"),
+            (".architect/people/alice/extensions.toml", ""),
+            (".architect/.cache/tmp", "local"),
+            (".git/config", "token"),
+            ("notes/.architect/x", "nested: hidden"),
+        ] {
+            std::fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
+            std::fs::write(root.join(path), body).unwrap();
+        }
+        let mut paths: Vec<String> = index_local(root)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.path)
+            .collect();
+        paths.sort();
+        assert_eq!(
+            paths,
+            [
+                ".architect/extensions.toml",
+                ".architect/extensions/x-0.1.0.archext",
+                ".architect/people/alice/extensions.toml",
+                "a.md",
+            ]
+        );
     }
 
     /// A local copy follows no symlink: none is indexed (so none is

@@ -5,6 +5,7 @@
 //! | action | what it does |
 //! |---|---|
 //! | `EXT_SHARE_NEEDS` / `EXT_SHARE_NEEDS_SET` | what a share link's guests run, and choosing it: `{folder, code}` (`+ extensions`) |
+//! | `EXT_INSTALLS_PUBLISH` / `EXT_INSTALLS_APPLY` | a person's installs and grants, to and from the vault: `{folder, person}` |
 //! | `EXT_LIST` | the extensions there are: each one's id, name, version, kind, which copy runs, what it adds, its `platforms` and why it cannot run here (`not_here`) |
 //! | `EXT_NEEDS` | what opening a vault or project folder takes: what is ready, to install, to offer, missing (with why) and refused |
 //! | `EXT_SEARCH` | searches every registry: `{query}` → the newest of each that matches |
@@ -78,6 +79,20 @@ static SHARE_NEEDS_SET: ActionMeta = meta(
      as its signed archive copied into the link (sha256 pinned). A development copy or an \
      unsigned install is refused: guests take signed packages only. `hosts` must be ones its \
      manifest asks for. Empty `extensions` clears it.",
+);
+static INSTALLS_PUBLISH: ActionMeta = meta(
+    "EXT_INSTALLS_PUBLISH",
+    "Share my installs with my devices",
+    "Writes `person`'s record in the vault at `folder` (.architect/people/<person>/extensions.toml): \
+     each extension installed here from a signed archive, its pin, signer and grants, its archive \
+     copied into .architect/extensions/. Their other devices take it with EXT_INSTALLS_APPLY.",
+);
+static INSTALLS_APPLY: ActionMeta = meta(
+    "EXT_INSTALLS_APPLY",
+    "Install what I installed on my other devices",
+    "Installs here what `person` installed on another device (their record in the vault at \
+     `folder`), with their grants and no prompt. Each archive must be the one the record pins, \
+     signed by the key it names, a key this device already trusts; never a downgrade.",
 );
 static INSTALL: ActionMeta = meta(
     "EXT_INSTALL",
@@ -165,6 +180,15 @@ pub struct ShareNeedsSetArgs {
     pub folder: String,
     pub code: String,
     pub extensions: Vec<crate::share_pick::LinkPick>,
+}
+
+/// `EXT_INSTALLS_PUBLISH` and `EXT_INSTALLS_APPLY`'s arguments.
+#[derive(Debug, Facet)]
+pub struct InstallsArgs {
+    /// The vault's folder, absolute.
+    pub folder: String,
+    /// The person's account id.
+    pub person: String,
 }
 
 /// `EXT_INSTALL`'s arguments.
@@ -285,6 +309,37 @@ impl Extensions {
                 Ok::<_, String>(RawJson::from(
                     serde_json::to_string(&needs).map_err(|e| e.to_string())?,
                 ))
+            },
+        )?;
+        let me = self.clone();
+        list.register_with(
+            &INSTALLS_PUBLISH,
+            Effect::Mutating,
+            move |_: &ActionCaller, a: InstallsArgs| {
+                let record = me.publish_installs(std::path::Path::new(&a.folder), &a.person)?;
+                let ids: Vec<&str> = record.installs.iter().map(|i| i.id.as_str()).collect();
+                Ok::<_, String>(RawJson::from(json!({ "published": ids }).to_string()))
+            },
+        )?;
+        let me = self.clone();
+        list.register_with(
+            &INSTALLS_APPLY,
+            Effect::Mutating,
+            move |_: &ActionCaller, a: InstallsArgs| {
+                let out = me.apply_installs(std::path::Path::new(&a.folder), &a.person)?;
+                let rows: Vec<Value> = out
+                    .into_iter()
+                    .map(|r| match r {
+                        Ok(crate::person_sync::Applied::Installed { id, version }) => {
+                            json!({ "id": id, "installed": version })
+                        }
+                        Ok(crate::person_sync::Applied::Here { id }) => {
+                            json!({ "id": id, "here": true })
+                        }
+                        Err((id, e)) => json!({ "id": id, "error": e.to_string() }),
+                    })
+                    .collect();
+                Ok::<_, String>(RawJson::from(json!({ "applied": rows }).to_string()))
             },
         )?;
         let me = self.clone();

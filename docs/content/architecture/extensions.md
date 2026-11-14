@@ -4462,6 +4462,42 @@ file (see "A share link's extensions").
 
 Tests: `features/extensions/tests/vault_needs.rs`.
 
+### A person's installs on all their devices
+
+What a person trusted and installed on one device installs on their
+others with the same grants and no new prompt (#683's decision). Their
+record is in the vault's own folder, which syncs:
+`.architect/people/<account id>/extensions.toml`
+(`features/extensions/src/person_sync.rs` `PersonInstalls`): each install's
+id, version, pin, signer (its name and key), its signed archive's file in
+`.architect/extensions/` and that file's SHA-256, and the person's grants.
+Every install keeps the archive it came as, so it can be shared
+(`Installs::archive_of`).
+
+- `Extensions::publish_installs(vault, person)` (`EXT_INSTALLS_PUBLISH`)
+  writes it and copies the archives in; the app does after "Install all".
+- `Extensions::apply_installs(vault, person)` (`EXT_INSTALLS_APPLY`)
+  installs from it on another device, the person's grants given first; the
+  app does when it plans the open vault for the signed-in account.
+
+The same rules hold on every device: the archive is the one the record
+pins, at most 16 MB, no link followed, signed by the key the record names,
+and that key must be one **this device already trusts** (the org key or a
+publisher of its own registries): a vault, which its other members can
+write, cannot bring a new key. No downgrade, no step past a pin; an
+installed copy signed by another key is kept (`SignerChanged`).
+
+Other people (the vault's other members, a share's guests) are not in a
+person's record: grants never transfer. They get the vault's (or link's)
+needs list and are prompted once.
+
+The sync client's local index keeps `.architect/` (only that top-level
+dot-folder: `vault_sync_client::SYNCED_DOT`), and vault-live's manifest
+lists it; both are tested (`features/vault/vault-sync-client/src/lib.rs`,
+`features/vault/vault-live/src/sync.rs`).
+
+Tests: `features/extensions/tests/person_sync.rs`.
+
 ### A share link's extensions
 
 A share link's guests run what the owner chose for that link, not the

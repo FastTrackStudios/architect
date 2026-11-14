@@ -696,6 +696,8 @@ const FORWARDED: &[&str] = &[
     "EXT_LIST",
     "EXT_NEEDS",
     "EXT_SHARE_NEEDS",
+    "EXT_INSTALLS_PUBLISH",
+    "EXT_INSTALLS_APPLY",
     "EXT_SHARE_NEEDS_SET",
     "EXT_VIEWS",
     "EXT_SEARCH",
@@ -1208,18 +1210,31 @@ pub fn VaultNeedsBanner() -> Element {
     // of its own (reading carried archives, previews), never the window's.
     let planner = browse.clone();
     let round = again();
+    // Who is signed in: their installs on their other devices come here
+    // first, with their grants (#683's decision).
+    let person = architect_accounts::ui::try_use_accounts()
+        .and_then(|a| a.accounts().active())
+        .map(|a| a.id);
+    let vault_root = root;
     let mut planned = use_signal(VaultNeeds::default);
-    use_effect(use_reactive!(|target, round| {
+    use_effect(use_reactive!(|target, round, person| {
         let _ = round;
         let (Some(browse), Some(target)) = (planner.clone(), target) else {
             planned.set(VaultNeeds::default());
             return;
         };
+        let vault_root = vault_root.clone();
         spawn(async move {
             let (tx, rx) = futures_channel::oneshot::channel();
             let spawned = std::thread::Builder::new()
                 .name("vault-needs".to_owned())
                 .spawn(move || {
+                    if let (Some(person), Some(vault)) = (person.as_deref(), vault_root.as_deref())
+                    {
+                        if let Err(error) = browse.extensions().apply_installs(vault, person) {
+                            tracing::warn!(%error, "app.extensions.sync");
+                        }
+                    }
                     let _ = tx.send(browse.extensions().open_vault(&target));
                 });
             if spawned.is_ok() {

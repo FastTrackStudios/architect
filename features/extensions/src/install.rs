@@ -622,6 +622,8 @@ struct Record {
 }
 
 const RECORD: &str = "installed.toml";
+/// The signed archive an install came as, kept beside it.
+const KEPT_ARCHIVE: &str = ".archive.archext";
 
 /// One installed package.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -865,6 +867,43 @@ impl Installs {
         read_record(&self.slot(id))
     }
 
+    /// The signed archive `id`'s install came as, when it came as one.
+    #[must_use]
+    pub fn archive_of(&self, id: &str) -> Option<Vec<u8>> {
+        std::fs::read(self.slot(id).join(KEPT_ARCHIVE)).ok()
+    }
+
+    /// The keys an archive may be signed by here past the app's own: those
+    /// `sources` trust (the registries' publishers).
+    #[must_use]
+    pub fn trust_with(&self, sources: &[std::sync::Arc<dyn Source>]) -> Trust {
+        sources
+            .iter()
+            .fold(self.trust.clone(), |t, s| t.and(&s.trust()))
+    }
+
+    /// Installs `bytes`, a signed archive, as `id` at `version` from
+    /// `from`, trusting `trust` (in place of the app's keys): the archive
+    /// path's every check.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::install`].
+    pub fn install_bytes(
+        &self,
+        bytes: Vec<u8>,
+        listing: &Listing,
+        from: &str,
+        trust: Trust,
+    ) -> Result<Install, InstallError> {
+        let one = OneArchive {
+            from: from.to_owned(),
+            bytes,
+            trust,
+        };
+        self.install(&one, listing)
+    }
+
     /// Installs `listing` from `source`, in place of the version there
     /// was. An extension's manifest must say the id and version listed.
     ///
@@ -924,6 +963,10 @@ impl Installs {
                     )));
                 }
                 v.extract(incoming)?;
+                // The signed archive itself, kept: what a person's other
+                // devices install from (`crate::person_sync`).
+                let kept = incoming.join(KEPT_ARCHIVE);
+                std::fs::write(&kept, &bytes).map_err(io(&kept))?;
                 None
             }
         };
