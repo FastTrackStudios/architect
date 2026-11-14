@@ -131,6 +131,8 @@ pub mod manage;
 pub mod manager;
 #[cfg(feature = "host")]
 pub mod net;
+#[cfg(any(feature = "host", feature = "vox"))]
+pub mod node;
 #[cfg(all(feature = "pickers", target_os = "ios"))]
 pub(crate) mod pickers_ios;
 // Language servers through the host (#512): `Host::open_code`, the
