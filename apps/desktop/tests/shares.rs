@@ -3786,6 +3786,8 @@ async fn the_node_claims_its_links_for_the_configured_apps_alone() {
         "/s/merrybrightstack/",
         "/s/merrybrightstack/joy/",
         "/s/merrybrightstack/Songs/Joy/",
+        // A deep link into an action (#186).
+        "/a/capture",
     ] {
         assert!(claims(page), "{page} opens the app");
     }

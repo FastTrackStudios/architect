@@ -30,6 +30,7 @@ mod guide;
 mod items;
 #[cfg(feature = "keyflow-lab")]
 mod keyflow;
+pub mod links;
 mod note;
 mod note_editor;
 mod notes;
@@ -907,6 +908,9 @@ pub fn LabApp() -> Element {
         hosts.extend(architect_accounts::org_host_from_env());
         hosts
     };
+    // Deep links into actions (#186): a declared route's action, run as
+    // the OS's link, asking the person before any write.
+    links::use_links(&list);
     let guest = guest::use_guest(&list, lab, org_hosts, move |origin: &str| {
         let Some(accounts) = accounts.map(|a| a.accounts()) else {
             return String::new();

@@ -1013,6 +1013,10 @@ pub fn use_guest(
         for link in links_in(std::env::args().skip(1)) {
             incoming(link, Source::Os);
         }
+        // And its deep links into actions (#186).
+        for arg in std::env::args().skip(1) {
+            let _ = crate::links::incoming(arg);
+        }
     });
     use_hook(move || {
         let taken = inbox()
