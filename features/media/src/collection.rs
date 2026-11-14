@@ -84,8 +84,11 @@ impl Collection {
             s.links.truncate(room);
             room = room.saturating_sub(s.links.len());
         }
-        sections.retain(|s| !s.links.is_empty());
-        (!sections.is_empty()).then_some(Self { sections })
+        // A named section stays even with nothing in it (an "Encore" yet
+        // to fill); the flat list's rest goes when empty.
+        sections.retain(|s| s.name.is_some() || !s.links.is_empty());
+        let c = Self { sections };
+        (!c.is_empty()).then_some(c)
     }
 
     /// Of [`SECTIONS`] and [`ITEMS`], those `fields` has: the property
@@ -145,7 +148,7 @@ impl Collection {
                 }
                 (s.name.clone(), entries)
             })
-            .filter(|(_, entries)| !entries.is_empty())
+            .filter(|(name, entries)| name.is_some() || !entries.is_empty())
             .collect();
         Resolved {
             from: from.to_owned(),
@@ -343,6 +346,26 @@ mod tests {
     }
 
     #[test]
+    fn a_named_section_with_nothing_in_it_stays() {
+        let c = Collection::read(&front::fields(
+            "---\nsets:\n  - name: Opening\n    songs: [\"[[A]]\"]\n  - name: Encore\n    songs: []\n---\n",
+        ))
+        .unwrap();
+        assert_eq!(c.sections.len(), 2);
+        assert_eq!(c.sections[1].name.as_deref(), Some("Encore"));
+        let resolved = c.resolve("M.md", ["A.md"]);
+        assert_eq!(resolved.sections.len(), 2);
+        assert!(resolved.sections[1].1.is_empty());
+        // A list of empty sections alone lists nothing: no collection.
+        assert!(
+            Collection::read(&front::fields(
+                "---\nsets:\n  - name: Encore\n    songs: []\n---\n"
+            ))
+            .is_none()
+        );
+    }
+
+    #[test]
     fn the_generic_names_and_a_flat_list_read_the_same() {
         let c = Collection::read(&front::fields(
             "---\ntype: playlist\nsections:\n  - name: Side A\n    items: [\"[[One]]\", \"[[Two]]\"]\n---\n",
@@ -422,7 +445,10 @@ mod tests {
             "---\nsets:\n  - name: One\n    songs: [\"[[A]]\", \"[[Songs/A/A]]\"]\n---\n",
         ))
         .unwrap();
-        assert_eq!(twice.resolve("M.md", ["Songs/A/A.md"]).sections[0].1.len(), 2);
+        assert_eq!(
+            twice.resolve("M.md", ["Songs/A/A.md"]).sections[0].1.len(),
+            2
+        );
     }
 
     #[test]
@@ -430,7 +456,10 @@ mod tests {
         let many: Vec<String> = (0..MAX_ROWS + 50).map(|i| format!("[[n{i}]]")).collect();
         let mut fields = Map::new();
         let first = many.get(..600).unwrap_or_default();
-        fields.insert("sets".into(), serde_json::json!([{"name": "A", "songs": first}]));
+        fields.insert(
+            "sets".into(),
+            serde_json::json!([{"name": "A", "songs": first}]),
+        );
         fields.insert("songs".into(), serde_json::json!(many));
         let c = Collection::read(&fields).unwrap();
         assert_eq!(c.len(), MAX_ROWS);
