@@ -17,11 +17,12 @@
 //! is the hosts an app links:
 //!
 //! - **`desk`** ([`desk::use_desk_web_views`]): a wry child web view of
-//!   the pane's window (WebKitGTK on Linux under X11 or XWayland,
-//!   WKWebView on macOS, WebView2 on Windows), clipped to the pane.
-//! - **the web app** draws a sandboxed `<iframe>` itself
-//!   (`apps/web`'s `webview` module), on the same messages.
-//! - **iOS** puts a WKWebView in the pane's `UIView` on the same messages
+//!   the pane's window (`WebKitGTK` on Linux under X11 or `XWayland`,
+//!   `WKWebView` on macOS, `WebView2` on Windows), clipped to the pane.
+//! - **a browser**: a sandboxed `<iframe>` on the same messages, from the
+//!   npm package (`features/extensions/web/webview-host.js` `mountWebView`),
+//!   which the web app mounts once it hosts extensions (#495).
+//! - **iOS** puts a `WKWebView` in the pane's `UIView` on the same messages
 //!   (the iOS host's, beside `apps/mobile`).
 //!
 //! An app registers the kind with [`register`] so extensions naming it
