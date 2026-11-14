@@ -44,7 +44,10 @@ use wasm_bindgen_futures::{JsFuture, future_to_promise, spawn_local};
 
 use crate::hostcall::{HostAnswer, HostError, HostRequest};
 use crate::manifest::{ActionDecl, Capabilities, Manifest, Reach};
-use crate::wire::{Edit, EventData, KeyData, Mods, Pointer, Value, ViewEvent};
+use crate::wire::{
+    Edit, EventData, KeyData, Mods, Pointer, PointerData, ScrollData, TouchData, TouchPoint, Value,
+    ViewEvent, WheelData,
+};
 
 /// A body as an answer carries it: text, or (`binary`) base64.
 fn body_json(bytes: &[u8], binary: bool) -> Json {
@@ -1502,19 +1505,26 @@ impl Pane {
             let mut at = e
                 .target()
                 .and_then(|t| t.dyn_into::<web_sys::Element>().ok());
-            let element = loop {
+            let (element, found) = loop {
                 let Some(el) = at else { return };
                 if let Some(id) = el
                     .get_attribute(DIOXUS_ID)
                     .and_then(|v| v.parse::<u64>().ok())
                 {
-                    break id;
+                    break (id, el);
                 }
                 if el.is_same_node(Some(&root)) {
                     return;
                 }
                 at = el.parent_element();
             };
+            // A press holds the pointer, as a remote view's host does:
+            // its moves and its release come here, over it or not.
+            if let Some(p) = e.dyn_ref::<web_sys::PointerEvent>()
+                && e.type_() == "pointerdown"
+            {
+                let _ = found.set_pointer_capture(p.pointer_id());
+            }
             on_event(view_event(element, &e));
         });
         self.root
@@ -1543,19 +1553,82 @@ fn event_data(e: &web_sys::Event) -> EventData {
         meta,
         shift,
     };
+    let at = |m: &web_sys::MouseEvent| Pointer {
+        client_x: f64::from(m.client_x()),
+        client_y: f64::from(m.client_y()),
+        page_x: f64::from(m.page_x()),
+        page_y: f64::from(m.page_y()),
+        screen_x: f64::from(m.screen_x()),
+        screen_y: f64::from(m.screen_y()),
+        element_x: f64::from(m.offset_x()),
+        element_y: f64::from(m.offset_y()),
+        button: m.button(),
+        buttons: m.buttons(),
+        mods: mods(m.alt_key(), m.ctrl_key(), m.meta_key(), m.shift_key()),
+    };
+    if let Some(w) = e.dyn_ref::<web_sys::WheelEvent>() {
+        // Pages (2) are sent as lines.
+        let lines = w.delta_mode() != 0;
+        return EventData::Wheel(WheelData {
+            at: at(w),
+            delta_x: w.delta_x(),
+            delta_y: w.delta_y(),
+            delta_mode: u8::from(lines),
+        });
+    }
+    if let Some(p) = e.dyn_ref::<web_sys::PointerEvent>() {
+        #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+        return EventData::Pointer(PointerData {
+            at: at(p),
+            pointer_id: p.pointer_id(),
+            pointer_type: p.pointer_type(),
+            is_primary: p.is_primary(),
+            pressure: p.pressure(),
+            tilt_x: p.tilt_x(),
+            tilt_y: p.tilt_y(),
+            twist: p.twist(),
+        });
+    }
     if let Some(m) = e.dyn_ref::<web_sys::MouseEvent>() {
-        return EventData::Mouse(Pointer {
-            client_x: f64::from(m.client_x()),
-            client_y: f64::from(m.client_y()),
-            page_x: f64::from(m.page_x()),
-            page_y: f64::from(m.page_y()),
-            screen_x: f64::from(m.screen_x()),
-            screen_y: f64::from(m.screen_y()),
-            element_x: f64::from(m.offset_x()),
-            element_y: f64::from(m.offset_y()),
-            button: m.button(),
-            buttons: m.buttons(),
-            mods: mods(m.alt_key(), m.ctrl_key(), m.meta_key(), m.shift_key()),
+        return EventData::Mouse(at(m));
+    }
+    if let Some(t) = e.dyn_ref::<web_sys::TouchEvent>() {
+        let points = |list: web_sys::TouchList| -> Vec<TouchPoint> {
+            (0..list.length())
+                .filter_map(|i| list.get(i))
+                .map(|t| TouchPoint {
+                    id: t.identifier(),
+                    client_x: f64::from(t.client_x()),
+                    client_y: f64::from(t.client_y()),
+                    page_x: f64::from(t.page_x()),
+                    page_y: f64::from(t.page_y()),
+                    screen_x: f64::from(t.screen_x()),
+                    screen_y: f64::from(t.screen_y()),
+                    force: f64::from(t.force()),
+                })
+                .collect()
+        };
+        return EventData::Touch(TouchData {
+            touches: points(t.touches()),
+            changed: points(t.changed_touches()),
+            mods: mods(t.alt_key(), t.ctrl_key(), t.meta_key(), t.shift_key()),
+        });
+    }
+    if let Some(c) = e.dyn_ref::<web_sys::CompositionEvent>() {
+        return EventData::Composition(c.data().unwrap_or_default());
+    }
+    if e.type_() == "scroll"
+        && let Some(el) = e
+            .target()
+            .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+    {
+        return EventData::Scroll(ScrollData {
+            top: f64::from(el.scroll_top()),
+            left: f64::from(el.scroll_left()),
+            width: el.scroll_width(),
+            height: el.scroll_height(),
+            client_width: el.client_width(),
+            client_height: el.client_height(),
         });
     }
     if let Some(k) = e.dyn_ref::<web_sys::KeyboardEvent>() {
@@ -1588,18 +1661,32 @@ fn event_data(e: &web_sys::Event) -> EventData {
     EventData::Focus
 }
 
+/// A wire pointer as the world's `pointer` (jco's shape).
+fn jco_pointer(m: &Pointer) -> Json {
+    json!({
+        "clientX": m.client_x, "clientY": m.client_y,
+        "pageX": m.page_x, "pageY": m.page_y,
+        "screenX": m.screen_x, "screenY": m.screen_y,
+        "elementX": m.element_x, "elementY": m.element_y,
+        "button": m.button, "buttons": m.buttons,
+        "mods": { "alt": m.mods.alt, "ctrl": m.mods.ctrl, "meta": m.mods.meta, "shift": m.mods.shift },
+    })
+}
+
+/// A wire finger as the world's `touch-point` (jco's shape).
+fn jco_touch(t: &TouchPoint) -> Json {
+    json!({
+        "id": t.id, "clientX": t.client_x, "clientY": t.client_y,
+        "pageX": t.page_x, "pageY": t.page_y,
+        "screenX": t.screen_x, "screenY": t.screen_y, "force": t.force,
+    })
+}
+
 /// A wire event as the world's `view-event` (jco's shape).
 fn jco_event(e: &ViewEvent) -> Json {
     let mods = |m: &Mods| json!({ "alt": m.alt, "ctrl": m.ctrl, "meta": m.meta, "shift": m.shift });
     let data = match &e.data {
-        EventData::Mouse(m) => json!({ "tag": "mouse", "val": {
-            "clientX": m.client_x, "clientY": m.client_y,
-            "pageX": m.page_x, "pageY": m.page_y,
-            "screenX": m.screen_x, "screenY": m.screen_y,
-            "elementX": m.element_x, "elementY": m.element_y,
-            "button": m.button, "buttons": m.buttons,
-            "mods": mods(&m.mods),
-        }}),
+        EventData::Mouse(m) => json!({ "tag": "mouse", "val": jco_pointer(m) }),
         EventData::Key(k) => json!({ "tag": "key", "val": {
             "key": k.key, "code": k.code, "location": k.location,
             "repeat": k.repeat, "composing": k.composing,
@@ -1607,6 +1694,25 @@ fn jco_event(e: &ViewEvent) -> Json {
         }}),
         EventData::Form(value) => json!({ "tag": "form", "val": value }),
         EventData::Focus => json!({ "tag": "focus" }),
+        EventData::Pointer(p) => json!({ "tag": "pointer", "val": {
+            "at": jco_pointer(&p.at), "pointerId": p.pointer_id,
+            "pointerType": p.pointer_type, "isPrimary": p.is_primary,
+            "pressure": p.pressure, "tiltX": p.tilt_x, "tiltY": p.tilt_y, "twist": p.twist,
+        }}),
+        EventData::Touch(t) => json!({ "tag": "touch", "val": {
+            "touches": t.touches.iter().map(jco_touch).collect::<Vec<_>>(),
+            "changed": t.changed.iter().map(jco_touch).collect::<Vec<_>>(),
+            "mods": mods(&t.mods),
+        }}),
+        EventData::Wheel(w) => json!({ "tag": "wheel", "val": {
+            "at": jco_pointer(&w.at), "deltaX": w.delta_x, "deltaY": w.delta_y,
+            "deltaMode": w.delta_mode,
+        }}),
+        EventData::Scroll(s) => json!({ "tag": "scroll", "val": {
+            "top": s.top, "left": s.left, "width": s.width, "height": s.height,
+            "clientWidth": s.client_width, "clientHeight": s.client_height,
+        }}),
+        EventData::Composition(text) => json!({ "tag": "composition", "val": text }),
     };
     json!({ "element": e.element, "name": e.name, "bubbles": e.bubbles, "data": data })
 }
