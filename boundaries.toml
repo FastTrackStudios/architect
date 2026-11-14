@@ -217,6 +217,12 @@ layer = "L0"
 note = "media items and collections read from frontmatter: pure data"
 
 [[row]]
+package = "architect-media"
+features = ["ui"]
+layer = "L4"
+note = "the native list of a collection, on the playhead"
+
+[[row]]
 package = "architect-theme"
 features = ["actions"]
 layer = "L0"

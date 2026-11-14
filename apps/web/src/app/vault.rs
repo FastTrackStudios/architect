@@ -59,7 +59,7 @@ pub struct WebVault {
 
 /// Unix milliseconds now.
 #[allow(clippy::as_conversions, clippy::cast_possible_truncation)] // a time in ms, well inside i64
-fn now() -> Millis {
+pub fn now() -> Millis {
     js_sys::Date::now() as Millis
 }
 
@@ -981,6 +981,27 @@ fn NoteText(path: String, text: String) -> Element {
         .iter()
         .map(|(k, v)| (k.clone(), shown(v)))
         .collect();
+    // A collection (#668) draws as the core list at its head, unless an
+    // island claims its type: then the island's view draws instead. The
+    // list's own rows (`sets`, `songs`, …) leave the property table, and
+    // its words are read with the fences that repeat the list folded out.
+    let fields = architect_media::front::fields(&text);
+    let listing = super::frames::use_listing();
+    let claimed = listing
+        .read()
+        .as_ref()
+        .is_some_and(|l| crate::ext_host::claimed(l, &note_type).is_some());
+    let core_list = !claimed && super::collection::is_collection(&fields);
+    let listed_keys = if core_list {
+        architect_media::Collection::fields_in(&fields)
+    } else {
+        Vec::new()
+    };
+    let table: Vec<(String, PropertyValue)> = properties
+        .iter()
+        .filter(|(k, _)| !listed_keys.contains(&k.as_str()))
+        .cloned()
+        .collect();
     // A note's recording (its `recording` property, a vault path) plays on
     // the app's own source in the Now Playing bar (#589).
     let recording = prop("recording");
@@ -992,6 +1013,13 @@ fn NoteText(path: String, text: String) -> Element {
         document::Style { {LAYOUT} }
         div { style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: 24px 28px 96px; color: {t.ink};",
             div { class: "web-note", "data-note": "{path}",
+                if core_list {
+                    super::collection::CollectionHead {
+                        path: path.clone(),
+                        title: note_title.clone(),
+                        text: text.clone(),
+                    }
+                }
                 if !note_type.is_empty() {
                     super::embed::NoteEmbed {
                         // The signed-in person's own vault, or the demo; a
@@ -1010,11 +1038,11 @@ fn NoteText(path: String, text: String) -> Element {
                         artist: prop("artist"), cover: prop("cover"),
                     }
                 }
-                if !properties.is_empty() {
+                if !table.is_empty() {
                     dl { "data-testid": "note-properties",
                         style: "display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0 0 16px; \
                                 font-size: 13px; color: {t.ink_3};",
-                        for (k, v) in properties {
+                        for (k, v) in table {
                             Property { key: "{k}", value: shown(&v), name: k }
                         }
                     }
@@ -1036,6 +1064,10 @@ fn NoteText(path: String, text: String) -> Element {
                         "Not live ({why}). Reconnecting; what you type is kept and sent then."
                     }
                 }
+                if core_list {
+                    super::collection::ReadingBody { body: body0.to_owned() }
+                    details { "data-testid": "note-text-fold",
+                        summary { style: "cursor: pointer; font-size: 13px; color: {t.ink_3}; margin: 0 0 10px;", "Edit the note's text" }
                 textarea {
                     id: "{id}",
                     "data-testid": "note-text",
@@ -1049,6 +1081,23 @@ fn NoteText(path: String, text: String) -> Element {
                     oncompositionend: on_composed,
                     onfocusin: move |_| editing.focus(),
                     onfocusout: move |_| editing.blur(),
+                }
+                    }
+                } else {
+                textarea {
+                    id: "{id}",
+                    "data-testid": "note-text",
+                    "data-live": if read_only { "connecting" } else { "ready" },
+                    "aria-label": "{title_of(&path)}",
+                    spellcheck: "true",
+                    readonly: read_only,
+                    value: "{initial}",
+                    oninput: on_input,
+                    oncompositionstart: on_compose,
+                    oncompositionend: on_composed,
+                    onfocusin: move |_| editing.focus(),
+                    onfocusout: move |_| editing.blur(),
+                }
                 }
             }
         }

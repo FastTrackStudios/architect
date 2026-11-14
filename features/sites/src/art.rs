@@ -25,11 +25,18 @@ pub fn is_image(path: &str) -> bool {
     })
 }
 
+/// The property a media item names its art by when it has no `art:`
+/// (`architect_media::Item`'s `cover`).
+pub const COVER_PROPERTY: &str = "cover";
+
 /// The link `fields` (a note's frontmatter) give as its art, as written:
-/// the property's text, or its list's first; `None` without one.
+/// the property's text, or its list's first (`art:`, else `cover:`);
+/// `None` without one.
 #[must_use]
 pub fn art_link(fields: &Map<String, Value>) -> Option<String> {
-    let value = fields.get(ART_PROPERTY)?;
+    let value = fields
+        .get(ART_PROPERTY)
+        .or_else(|| fields.get(COVER_PROPERTY))?;
     let text = match value {
         Value::String(s) => s.as_str(),
         Value::Array(list) => list.iter().find_map(Value::as_str)?,
@@ -172,5 +179,14 @@ mod tests {
         assert_eq!(art_link(&fields).as_deref(), Some("[[a.png]]"));
         fields.insert("art".into(), Value::Bool(true));
         assert_eq!(art_link(&fields), None);
+    }
+
+    #[test]
+    fn a_media_items_cover_is_its_art_when_it_has_no_art() {
+        let mut fields = Map::new();
+        fields.insert("cover".into(), Value::String("Songs/Joy/cover.png".into()));
+        assert_eq!(art_link(&fields).as_deref(), Some("Songs/Joy/cover.png"));
+        fields.insert("art".into(), Value::String("[[art.png]]".into()));
+        assert_eq!(art_link(&fields).as_deref(), Some("[[art.png]]"));
     }
 }

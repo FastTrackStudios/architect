@@ -230,6 +230,64 @@ pub fn queue<S: std::hash::BuildHasher>(link: &GuestLink, served: &HashSet<&str,
     items
 }
 
+/// The link's root note as a collection (#668).
+///
+/// Its sets, as the node listed them (`ListedNote::sets`: only notes this link lists), each a
+/// row of `architect_media`'s list numbered through every set, with its
+/// subtitle and length, its media (its `media`, else its first file that
+/// plays) and its art, each only when the link serves it (`served`).
+/// `None` when the root note is no collection.
+#[must_use]
+pub fn collection_rows<S: std::hash::BuildHasher>(
+    link: &GuestLink,
+    served: &HashSet<&str, S>,
+) -> Option<Vec<(Option<String>, Vec<architect_media::Row>)>> {
+    let root = root_note(link).filter(|r| !r.sets.is_empty())?;
+    let by_path: HashMap<&str, &ListedNote> =
+        link.notes.iter().map(|n| (n.path.as_str(), n)).collect();
+    let mut n = 0_usize;
+    let sections = root
+        .sets
+        .iter()
+        .map(|set| {
+            let rows = set
+                .notes
+                .iter()
+                .filter_map(|p| by_path.get(p.as_str()))
+                .map(|note| {
+                    n = n.saturating_add(1);
+                    let served = |f: &&String| served.contains(f.as_str());
+                    let media = note
+                        .media
+                        .as_ref()
+                        .filter(served)
+                        .or_else(|| note.files.iter().filter(served).find(|f| plays(f)))
+                        .cloned();
+                    #[allow(clippy::as_conversions, clippy::cast_precision_loss)]
+                    let duration = note.duration_ms.map(|ms| ms as f64 / 1000.0);
+                    architect_media::Row {
+                        id: format!("{}#{n}", root.path),
+                        number: n,
+                        item: architect_media::Item {
+                            path: note.path.clone(),
+                            title: note.title.clone(),
+                            subtitle: note.subtitle.clone(),
+                            duration,
+                            media: None,
+                            cover: None,
+                        },
+                        media,
+                        art: note.art.as_ref().filter(served).cloned(),
+                    }
+                })
+                .collect::<Vec<_>>();
+            (set.name.clone(), rows)
+        })
+        .filter(|(_, rows)| !rows.is_empty())
+        .collect::<Vec<_>>();
+    (!sections.is_empty()).then_some(sections)
+}
+
 /// The link's files by note, in its order: each listed note that
 /// attaches any, with them.
 #[must_use]
@@ -285,6 +343,10 @@ mod tests {
             page: page.map(str::to_owned),
             files: files.iter().map(|f| (*f).to_owned()).collect(),
             art: None,
+            subtitle: None,
+            duration_ms: None,
+            media: None,
+            sets: Vec::new(),
         }
     }
 
@@ -386,6 +448,50 @@ mod tests {
         let less: HashSet<&str> = ["Gig/noel.wav"].into();
         assert_eq!(queue(&link, &less).len(), 1);
         assert!(queue(&link, &less)[0].get("art").is_none());
+    }
+
+    #[test]
+    fn a_collection_roots_sets_are_the_list_and_only_what_the_link_serves_plays() {
+        let mut link = gig();
+        link.notes[0].sets = vec![
+            architect_spaces::ListedSet {
+                name: Some("Opening".into()),
+                notes: vec!["Gig/noel.md".into(), "Gig/joy.md".into()],
+            },
+            architect_spaces::ListedSet {
+                name: Some("Encore".into()),
+                notes: vec!["Gig/eve.md".into(), "Gig/elsewhere.md".into()],
+            },
+        ];
+        link.notes[1].subtitle = Some("Choir".into());
+        link.notes[1].duration_ms = Some(186_000);
+        link.notes[1].media = Some("Gig/joy.mp3".into());
+        let served: HashSet<&str> = ["Gig/joy.mp3", "Gig/art/joy.png"].into();
+        let rows = collection_rows(&link, &served).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].0.as_deref(), Some("Opening"));
+        let titles: Vec<(usize, &str, bool)> = rows
+            .iter()
+            .flat_map(|(_, r)| {
+                r.iter()
+                    .map(|r| (r.number, r.item.title.as_str(), r.plays()))
+            })
+            .collect();
+        // Noel's recording is not served; a note the link does not list
+        // is no row.
+        assert_eq!(
+            titles,
+            vec![(1, "Noel", false), (2, "Joy", true), (3, "Eve", false)]
+        );
+        let joy = &rows[0].1[1];
+        assert_eq!(joy.id, "Gig/set.md#2");
+        assert_eq!(joy.item.duration, Some(186.0));
+        assert_eq!(joy.art.as_deref(), Some("Gig/art/joy.png"));
+        let q = architect_media::collection::queue(&rows);
+        assert_eq!(q.len(), 1);
+        assert_eq!(q[0]["subtitle"], "Choir");
+        // A root with no sets is no collection.
+        assert!(collection_rows(&gig(), &served).is_none());
     }
 
     #[test]

@@ -25,6 +25,8 @@ base64 = { workspace = true }
 architect-favourites = { workspace = true }
 # The playhead's deck (#589): what a frame's ask moves (src/ext_host.rs).
 architect-playhead = { workspace = true }
+# Media items and collections (#668): a guest's list (src/guest_view.rs).
+architect-media = { workspace = true }
 # What a view on a note is handed of it (`architect_spaces::view`, the
 # node's rules too), and a share link's guest service (`ShareGuest`, #669).
 architect-spaces = { workspace = true }
@@ -69,6 +71,8 @@ futures-timer = { workspace = true, features = ["wasm-bindgen"] }
 # The playhead (#589): the deck every frame and the Now Playing bar read,
 # heard through the app's own audio element (src/app/audio.rs).
 architect-playhead = { workspace = true, features = ["ui"] }
+# A collection note's native list (src/app/collection.rs, #668).
+architect-media = { workspace = true, features = ["ui"] }
 
 [dev-dependencies]
 # src/read_only.rs's tests: the navigator's source, natively (no UI).

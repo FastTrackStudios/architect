@@ -10,9 +10,19 @@ description = "Core media primitives (#668): a media item (a note with a title, 
 # apps draw it (`apps/web/src/app/collection.rs`, `apps/ui/src/collection.rs`),
 # the node lists it to a share's guests (`apps/desktop/src/node/shares.rs`).
 
+[features]
+# The native list (`ui::MediaList`): Dioxus, the shell's theme, the
+# playhead it plays on. The desktop and web apps turn it on.
+ui = ["dep:dioxus", "dep:architect-shell", "dep:architect-playhead", "dep:lucide-dioxus", "dep:tracing"]
+
 [dependencies]
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
+dioxus = { workspace = true, optional = true }
+architect-shell = { workspace = true, features = ["ui"], optional = true }
+architect-playhead = { workspace = true, features = ["ui"], optional = true }
+lucide-dioxus = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
 
 [lib]
 doctest = false

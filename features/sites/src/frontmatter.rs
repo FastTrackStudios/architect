@@ -19,8 +19,12 @@ pub struct Meta {
     pub tags: Vec<String>,
     /// `draft: true` or `publish: false`: left out of the site.
     pub hidden: bool,
-    /// `art:`, as written: the link to its image ([`crate::art`]).
+    /// `art:` (else `cover:`), as written: the link to its image
+    /// ([`crate::art`]).
     pub art: Option<String>,
+    /// `media:` (else `recording:`), as written: the link to what it
+    /// plays (a media item's, `architect_media::Item`).
+    pub media: Option<String>,
 }
 
 impl Meta {
@@ -80,6 +84,7 @@ impl Meta {
             tags,
             hidden: flag("draft") == Some(true) || flag("publish") == Some(false),
             art: crate::art::art_link(fields),
+            media: architect_media::item::MEDIA.iter().find_map(|k| text(k)),
         }
     }
 }

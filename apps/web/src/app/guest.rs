@@ -310,8 +310,11 @@ fn query_value(to: &str) -> String {
 }
 
 /// The link's recordings as the app's own source, not playing, and its
-/// files as the paths [`file_url`] resolves.
-fn load_player(opened: &Opened) {
+/// files as the paths [`file_url`] resolves. With `core_list` (its root
+/// is a collection no island claims, #668), the queue is the list's: its
+/// rows that play, in its order, as `architect_media::ui::MediaList`
+/// plays them.
+fn load_player(opened: &Opened, core_list: bool) {
     let o = origin().unwrap_or_default();
     let code = opened
         .link
@@ -330,7 +333,10 @@ fn load_player(opened: &Opened) {
         })
         .collect();
     let served: HashSet<&str> = map.keys().map(String::as_str).collect();
-    let queue = guest_view::queue(&opened.link, &served);
+    let queue = match guest_view::collection_rows(&opened.link, &served).filter(|_| core_list) {
+        Some(rows) => architect_media::collection::queue(&rows),
+        None => guest_view::queue(&opened.link, &served),
+    };
     FILES.with(|f| *f.borrow_mut() = map.clone());
     if queue.is_empty() {
         return;
@@ -453,8 +459,20 @@ pub fn GuestPage(code: String, rest: String) -> Element {
         open.set(Some(next));
     });
     let state = opened.read().clone();
+    // The root note as the core list (#668): a collection whose type no
+    // island claims (an island that does draws its own view instead).
+    let listing = super::frames::use_listing();
+    let core_list = match &state {
+        Some(Ok(o)) => guest_view::root_note(&o.link).is_some_and(|r| {
+            !r.sets.is_empty()
+                && !listing.read().as_ref().is_some_and(|l| {
+                    crate::ext_host::claimed(l, r.kind.as_deref().unwrap_or_default()).is_some()
+                })
+        }),
+        _ => false,
+    };
     if let Some(Ok(o)) = &state {
-        load_player(o);
+        load_player(o, core_list);
     }
     let body = match state {
         None => rsx! { p { style: "color: {t.ink_3};", "Opening the shared link…" } },
@@ -467,6 +485,12 @@ pub fn GuestPage(code: String, rest: String) -> Element {
                     Open::Files => rsx! { FilesView { opened: o.clone() } },
                     // The root note: its list first (what a setlist is
                     // opened for), then its words; any other, its words.
+                    Open::Note(path) if core_list && guest_view::root_note(&o.link).is_some_and(|r| r.path == path) => rsx! {
+                        div { style: "display: flex; flex-direction: column; gap: 20px;",
+                            GuestCollection { opened: o.clone(), on_open: choose }
+                            GuestNoteView { key: "{path}-{revision}", code: code.clone(), path: path.clone(), core_list: true }
+                        }
+                    },
                     Open::Note(path) if guest_view::root_note(&o.link).is_some_and(|r| r.path == path) => rsx! {
                         div { style: "display: flex; flex-direction: column; gap: 20px;",
                             NoteList { opened: o.clone(), chosen: path.clone(), on_open: choose }
@@ -476,12 +500,20 @@ pub fn GuestPage(code: String, rest: String) -> Element {
                     Open::Note(path) => rsx! {
                         div { style: "display: flex; flex-direction: column; gap: 20px;",
                             GuestNoteView { key: "{path}-{revision}", code: code.clone(), path: path.clone() }
-                            NoteList { opened: o.clone(), chosen: path, on_open: choose }
+                            if core_list {
+                                GuestCollection { opened: o.clone(), on_open: choose }
+                            } else {
+                                NoteList { opened: o.clone(), chosen: path, on_open: choose }
+                            }
                         }
                     },
                     Open::Nothing => rsx! {
                         p { "data-testid": "guest-problem", "This page is not on the link any more." }
-                        NoteList { opened: o.clone(), chosen: String::new(), on_open: choose }
+                        if core_list {
+                            GuestCollection { opened: o.clone(), on_open: choose }
+                        } else {
+                            NoteList { opened: o.clone(), chosen: String::new(), on_open: choose }
+                        }
                     },
                 }
             }
@@ -599,6 +631,29 @@ fn LinkHead(opened: Opened, at: Open, on_open: EventHandler<Open>) -> Element {
                     }
                 }
             }
+        }
+    }
+}
+
+/// The link's root note as a collection's core list (#668): its sets as
+/// the node listed them (only notes the link lists), each row's art and
+/// media only what the link serves ([`file_url`]); a row's chevron, and a
+/// row with nothing to play, opens its note.
+#[component]
+fn GuestCollection(opened: Opened, on_open: EventHandler<Open>) -> Element {
+    let served: HashSet<String> = FILES.with(|f| f.borrow().keys().cloned().collect());
+    let served: HashSet<&str> = served.iter().map(String::as_str).collect();
+    let Some(sections) = guest_view::collection_rows(&opened.link, &served) else {
+        return rsx! {};
+    };
+    let art = use_callback(|p: String| file_url(&p));
+    rsx! {
+        architect_media::ui::MediaList {
+            source: SOURCE.to_owned(),
+            name: opened.link.title.clone(),
+            sections,
+            art: Some(art),
+            on_open: move |p: String| on_open.call(Open::Note(p)),
         }
     }
 }
@@ -743,7 +798,7 @@ fn FilesView(opened: Opened) -> Element {
 /// Note `path` of link `code`: the view its type's island claims, handed
 /// what the node gave a guest, then its page's words and images.
 #[component]
-fn GuestNoteView(code: String, path: String) -> Element {
+fn GuestNoteView(code: String, path: String, #[props(default)] core_list: bool) -> Element {
     // Read again when the note asked for changes (props are not signals).
     let note = use_resource(use_reactive!(|(code, path)| {
         {
@@ -781,7 +836,20 @@ fn GuestNoteView(code: String, path: String) -> Element {
                             files,
                         }
                     }
-                    Blocks { code, blocks: note.blocks.clone() }
+                    Blocks {
+                        code,
+                        // The core list says what a listing fence repeats.
+                        blocks: note
+                            .blocks
+                            .iter()
+                            .filter(|b| {
+                                !(core_list
+                                    && b.kind == BlockKind::Code
+                                    && b.info.as_deref().is_some_and(architect_media::is_listing_fence))
+                            })
+                            .cloned()
+                            .collect::<Vec<_>>(),
+                    }
                 }
             }
         }

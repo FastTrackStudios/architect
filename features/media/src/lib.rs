@@ -24,6 +24,8 @@ pub mod collection;
 pub mod front;
 pub mod item;
 pub mod link;
+#[cfg(feature = "ui")]
+pub mod ui;
 
 pub use collection::{Collection, Entry, Resolved, Row, Section};
 pub use item::Item;

@@ -2654,8 +2654,37 @@ async fn listing(
     let mut notes = Vec::new();
     let mut files = Vec::new();
     let mut seen = std::collections::HashSet::new();
+    // A collection's links resolve among the notes this link lists and
+    // no others (#668): a guest never learns of a note outside it.
+    let listed_paths: Vec<&str> = listed.entries.iter().map(|e| e.path.as_str()).collect();
     for entry in listed.entries.iter() {
+        let item = architect_media::Item::read(&entry.path, &entry.properties);
+        let sets = architect_media::Collection::read(&entry.properties)
+            .map(|c| {
+                c.resolve(&entry.path, listed_paths.iter().copied())
+                    .sections
+                    .into_iter()
+                    .map(|(name, entries)| architect_spaces::ListedSet {
+                        name,
+                        notes: entries.into_iter().filter_map(|e| e.path).collect(),
+                    })
+                    .filter(|s| !s.notes.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
         notes.push(ListedNote {
+            subtitle: item.subtitle.clone(),
+            #[allow(
+                clippy::as_conversions,
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss
+            )]
+            duration_ms: item.duration.map(|d| (d * 1000.0).round() as u64),
+            // Only media the link serves at this layer: one of its files.
+            media: item
+                .media_in(entry.files.iter().map(String::as_str))
+                .map(str::to_owned),
+            sets,
             path: entry.path.clone(),
             title: entry.title.clone(),
             kind: entry

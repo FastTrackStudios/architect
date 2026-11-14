@@ -124,6 +124,12 @@ pub fn select(vault: &Vault, scope: &Scope, filter: &FilterNode) -> Vec<Entry> {
                     }
                 }
             }
+            if let Some(media) =
+                media_file(&meta, &path, &attachments).filter(|m| scope.holds_file(m))
+                && !files.iter().any(|f| f == media)
+            {
+                files.insert(0, media.to_owned());
+            }
             let art = art_file(&meta, &path, &attachments).filter(|a| scope.holds_file(a));
             if let Some(art) = art {
                 if !files.iter().any(|f| f == art) {
@@ -143,6 +149,19 @@ pub fn select(vault: &Vault, scope: &Scope, filter: &FilterNode) -> Vec<Entry> {
             })
         })
         .collect()
+}
+
+/// The attachment note `path`'s media (`media:`, else `recording:`, a
+/// media item's: `architect_media::Item`) names, of `attachments`: a file
+/// it plays, listed first among its files as its embeds are (#668).
+fn media_file<'a>(meta: &Meta, path: &str, attachments: &HashSet<&'a str>) -> Option<&'a str> {
+    let link = meta.media.as_deref()?;
+    architect_media::link::resolve(
+        link,
+        architect_media::link::folder_of(path),
+        attachments.iter().copied(),
+    )
+    .filter(|f| crate::media::media_kind(f).is_some())
 }
 
 /// The attachment note `path`'s art names, of `attachments`.
@@ -181,6 +200,11 @@ pub fn every_note(vault: &Vault) -> Vec<Entry> {
                 }
             }
             let meta = Meta::of(page);
+            if let Some(media) = media_file(&meta, &page.rel_path, &attachments)
+                && !files.iter().any(|f| f == media)
+            {
+                files.insert(0, media.to_owned());
+            }
             let art = art_file(&meta, &page.rel_path, &attachments);
             if let Some(art) = art {
                 if !files.iter().any(|f| f == art) {
