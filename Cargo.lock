@@ -1327,6 +1327,7 @@ dependencies = [
 name = "architect-extensions"
 version = "0.1.0"
 dependencies = [
+ "anyrender",
  "architect",
  "architect-commands",
  "architect-editor",
@@ -1370,6 +1371,7 @@ dependencies = [
  "objc2-ui-kit",
  "objc2-uniform-type-identifiers",
  "objc2-user-notifications",
+ "peniko 0.6.1",
  "regex",
  "reqwest 0.12.28",
  "rfd",
@@ -1957,6 +1959,23 @@ dependencies = [
  "js-sys",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "architect-sandbox-sketch"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-extensions",
+ "architect-workspace",
+ "architect-workspace-hack",
+ "blitz-dom",
+ "blitz-paint",
+ "blitz-traits",
+ "dioxus",
+ "dioxus-native-dom",
+ "futures",
+ "tempfile",
 ]
 
 [[package]]

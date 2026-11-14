@@ -134,6 +134,12 @@ pub struct RemoteDocument {
     /// Whether an input method is composing (a `compositionstart` was
     /// sent and its end not yet).
     composing: bool,
+    /// The scenes the view sent, by hash (#175).
+    scenes: crate::scene::SceneCache,
+    /// The elements it paints: their scene and transform now.
+    painted: HashMap<NodeId, (crate::scene::Commands, crate::scene::Affine)>,
+    /// How many bytes of scenes and transforms it sent (for a benchmark).
+    scene_bytes: u64,
 }
 
 impl std::fmt::Debug for RemoteDocument {
@@ -193,6 +199,9 @@ impl RemoteDocument {
             fitted: false,
             held: None,
             composing: false,
+            scenes: crate::scene::SceneCache::new(),
+            painted: HashMap::new(),
+            scene_bytes: 0,
         }
     }
 
@@ -239,6 +248,60 @@ impl RemoteDocument {
                 data: EventData::Composition(String::new()),
             });
         }
+    }
+
+    /// How many bytes of scene content and transforms the view has sent.
+    #[must_use]
+    pub const fn scene_bytes(&self) -> u64 {
+        self.scene_bytes
+    }
+
+    /// An element's scene (`scene::SCENE_ATTR`) or transform
+    /// (`scene::TRANSFORM_ATTR`) changed: it is drawn as a widget.
+    fn paint_attr(&mut self, node: NodeId, name: &str, value: Option<&str>) -> Result<(), String> {
+        use crate::scene::{Affine, SCENE_ATTR, parse_transform};
+        let len = value.map_or(0, str::len);
+        self.scene_bytes = self
+            .scene_bytes
+            .saturating_add(u64::try_from(len).unwrap_or(u64::MAX));
+        let (mut commands, mut transform) = self
+            .painted
+            .get(&node)
+            .cloned()
+            .unwrap_or_else(|| (std::sync::Arc::default(), Affine::IDENTITY));
+        if name == SCENE_ATTR {
+            let Some(v) = value else {
+                self.painted.remove(&node);
+                self.doc.remove_custom_widget(node);
+                return Ok(());
+            };
+            commands = self.scenes.receive(v)?;
+        } else {
+            transform = value.map_or(Affine::IDENTITY, parse_transform);
+        }
+        self.painted
+            .insert(node, (std::sync::Arc::clone(&commands), transform));
+        self.install(node);
+        Ok(())
+    }
+
+    /// Draws `node` as its scene, at its transform.
+    fn install(&mut self, node: NodeId) {
+        let Some((commands, transform)) = self.painted.get(&node).cloned() else {
+            return;
+        };
+        let element = self.elements.get(&node).copied().unwrap_or(0);
+        self.doc.set_custom_widget(
+            node,
+            Box::new(crate::scene::SceneWidget {
+                commands,
+                transform,
+                element,
+                events: self.events.clone(),
+                size: None,
+                dirty: true,
+            }),
+        );
     }
 
     /// Gives the view the host window's input method, clipboard and
@@ -419,6 +482,10 @@ impl RemoteDocument {
         {
             self.ids.remove(&old);
         }
+        // A scene set before its element had an id: its size goes there now.
+        if self.painted.contains_key(&node) {
+            self.install(node);
+        }
     }
 
     /// Forgets the ids of `node` and everything below it.
@@ -431,6 +498,7 @@ impl RemoteDocument {
             if let Some(id) = self.elements.remove(&n) {
                 self.ids.remove(&id);
             }
+            self.painted.remove(&n);
         }
     }
 
@@ -550,6 +618,13 @@ impl RemoteDocument {
                 value,
             } => {
                 let (node, _) = self.top()?;
+                if name == crate::scene::SCENE_ATTR || name == crate::scene::TRANSFORM_ATTR {
+                    let text = match &value {
+                        Value::Text(t) => Some(t.as_str()),
+                        _ => None,
+                    };
+                    return self.paint_attr(node, &name, text);
+                }
                 let value = match value {
                     Value::None => None,
                     Value::Bool(false) if name == "checked" => None,

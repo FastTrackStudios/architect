@@ -115,6 +115,7 @@ members = [
     "apps/sandbox/board",
     "apps/sandbox/kanban",
     "apps/sandbox/pane-events",
+    "apps/sandbox/sketch",
     "apps/sandbox/wasi-counter",
     "apps/sandbox/web",
     "apps/sandbox/media",

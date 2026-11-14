@@ -240,7 +240,7 @@ recording, not the GPU's raster. WebGL context restoration and a WebGPU backend
 are not implemented.
 
 A linked extension registers a paint view with
-`features/extensions/src/linked.rs` `Builder::paint` (feature `paint` of
+`features/extensions/src/linked.rs` `Builder::paint` (feature `paint`, and `paint-ui` to draw it linked in, of
 `architect-extensions`, #591): `ext.paint::<Sketch>("sketch")` for a
 `[[views]]` entry with `kind = "paint"`, where `Sketch` is a
 `PaintView + Default` made once for each pane it opens in. The view is
@@ -248,7 +248,10 @@ mounted as a `PaintPane`, so it takes the pane's input and draws in the
 window's scene. Its `ctx.extras` holds the pane's `PaintWake`, which it
 calls after its own data changes. The app registers the kind
 (`KindSpec::paint`) for `Host::load` to accept the view. Test:
-`features/extensions/tests/linked_paint.rs`. A Frame
+`features/extensions/tests/linked_paint.rs`. With feature `paint-ui` it is
+drawn in-process. Served as a process (`guest`), the same view records its
+frames there, and they cross as scenes (`features/extensions/src/scene.rs`
+`remote_paint_root`; [Remote views](@/features/remote-views.md), "Scenes"). A Frame
 surface can draw through it in-process instead of in a process of its
 own.
 
