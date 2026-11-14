@@ -117,6 +117,25 @@ pub trait DataStore: Send + Sync {
     fn keep(&self, id: &str, data: &BTreeMap<String, Value>) -> Result<(), String>;
 }
 
+/// The vault query service's client as a host keeps it: as it is
+/// natively; in a browser, where vox's clients hold `Rc`s and the page
+/// has one thread, wrapped so the host stays `Send` and `Sync` (touched
+/// from another thread, it panics rather than race), #495.
+#[cfg(not(target_family = "wasm"))]
+type HeldQuery = Box<vault_proto::query::VaultQueryClient>;
+#[cfg(target_family = "wasm")]
+type HeldQuery = send_wrapper::SendWrapper<vault_proto::query::VaultQueryClient>;
+
+#[cfg(not(target_family = "wasm"))]
+fn held_query(client: vault_proto::query::VaultQueryClient) -> HeldQuery {
+    Box::new(client)
+}
+
+#[cfg(target_family = "wasm")]
+fn held_query(client: vault_proto::query::VaultQueryClient) -> HeldQuery {
+    send_wrapper::SendWrapper::new(client)
+}
+
 /// Settings' values in memory, for the run.
 #[derive(Debug, Default)]
 pub struct MemoryValues(Mutex<BTreeMap<String, Value>>);
@@ -171,7 +190,7 @@ pub(crate) struct Services {
     /// The app's documents, for the document calls.
     documents: Mutex<Option<Arc<dyn Documents>>>,
     /// The vault's query service, when the app keeps a vault index.
-    vault_query: Mutex<Option<vault_proto::query::VaultQueryClient>>,
+    vault_query: Mutex<Option<HeldQuery>>,
     /// The app's editors, for the editor calls (`crate::editor`).
     editors: Mutex<Option<Arc<dyn crate::editor::Editors>>>,
     values: Mutex<Arc<dyn SettingValues>>,
@@ -455,7 +474,7 @@ impl Host {
     ) {
         *lock(&self.services().documents) = Some(documents);
         *lock(&self.services().vault_query) = match scope {
-            VaultScope::Person => Some(queries),
+            VaultScope::Person => Some(held_query(queries)),
             VaultScope::Guest => None,
         };
     }
@@ -463,7 +482,9 @@ impl Host {
     /// The vault's query service's client, when the app gave one.
     #[must_use]
     pub fn vault_query(&self) -> Option<vault_proto::query::VaultQueryClient> {
-        lock(&self.services().vault_query).clone()
+        lock(&self.services().vault_query)
+            .as_ref()
+            .map(|held| (**held).clone())
     }
 
     /// The app's editors, for extensions that may read and change the one
