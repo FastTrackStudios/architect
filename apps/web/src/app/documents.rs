@@ -26,7 +26,7 @@ use std::cell::RefCell;
 
 use architect::action::{ActionList, Principal};
 use architect_extensions::documents::{
-    DocEdit, DocError, DocInfo, Documents, apply_edits, is_under,
+    DocEdit, DocError, DocInfo, Documents, Edited, apply_edits, is_under,
 };
 use architect_extensions::events::DocEvent;
 use architect_navigator::markdown::note_from_markdown;
@@ -224,11 +224,16 @@ impl Documents for WebDocuments {
         edits: &[DocEdit],
         _step: &str,
         by: &Principal,
-    ) -> Result<String, DocError> {
+    ) -> Result<Edited, DocError> {
         let base = self.text(path).ok_or_else(|| not_found(path))?;
         let text = apply_edits(&base, edits, by)?;
-        self.keep(path, &text)?;
-        Ok(text)
+        // An edit that changes nothing writes nothing (and raises no
+        // `doc.saved`).
+        let changed = text != base;
+        if changed {
+            self.keep(path, &text)?;
+        }
+        Ok(Edited { text, changed })
     }
 
     fn rename(&self, path: &str, to: &str, _by: &Principal) -> Result<DocInfo, DocError> {
