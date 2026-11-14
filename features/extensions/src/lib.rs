@@ -126,6 +126,7 @@ pub mod manager;
 pub mod net;
 #[cfg(all(feature = "pickers", target_os = "ios"))]
 pub(crate) mod pickers_ios;
+pub mod overlay;
 #[cfg(feature = "scenes")]
 pub mod scene;
 #[cfg(all(feature = "web", target_arch = "wasm32"))]

@@ -315,10 +315,14 @@ impl ViewDecl {
 
 /// A layer it draws over a kind of view (`session.arrange`).
 ///
-/// A live Luau script with `Canvas` and `ImGui` (`architect-canvas`),
-/// started while the extension is loaded, drawing in the view's
-/// coordinates on one of its planes. The app's canvas host runs it; the
-/// script may open tool windows too.
+/// Either a live Luau script with `Canvas` and `ImGui`
+/// (`architect-canvas`, `script`), started while the extension is loaded,
+/// drawing in the view's coordinates on one of its planes; the app's
+/// canvas host runs it, and it may open tool windows too. Or one of the
+/// extension's own views (`draws`, #175): a process's, WASM's or linked
+/// view, mounted over the view's box on its plane, clipped to it and
+/// passing the pointer through, given the view's coordinate spaces
+/// (`crate::overlay::OverlaySpaces`) whenever they change.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct OverlayDecl {
     /// Unique among its contributions.
@@ -328,8 +332,13 @@ pub struct OverlayDecl {
     /// `under` the view's items, `over` them (the default), or `top`.
     #[serde(default = "over")]
     pub plane: String,
-    /// The script that draws it, in the package.
+    /// The script that draws it, in the package (a Luau extension's).
+    #[serde(default)]
     pub script: String,
+    /// The view that draws it: one of its `[[views]]` (an extension with
+    /// views of its own). Exactly one of `script` and `draws`.
+    #[serde(default)]
+    pub draws: Option<String>,
 }
 
 /// A worker: heavy work in an instance of its own, off every view's
@@ -728,6 +737,9 @@ pub enum ManifestError {
     BadWorker { worker: String, why: String },
     /// An overlay on a plane that is not `under`, `over` or `top`.
     BadPlane { overlay: String, plane: String },
+    /// An overlay with neither or both of `script` and `draws`, or that
+    /// draws a view it doesn't declare.
+    BadOverlay { overlay: String, why: String },
     /// A theme token outside its namespace, not a token name, or whose
     /// value does not read.
     BadToken { token: String, why: String },
@@ -768,6 +780,7 @@ impl std::fmt::Display for ManifestError {
             Self::BadCapability(why) => write!(f, "capabilities: {why}"),
             Self::Interop { field, why } => write!(f, "{field}: {why}"),
             Self::BadShareLayers(why) => write!(f, "share_layers: {why}"),
+            Self::BadOverlay { overlay, why } => write!(f, "overlay {overlay}: {why}"),
             Self::BadPlane { overlay, plane } => {
                 write!(
                     f,
@@ -1064,8 +1077,26 @@ impl Manifest {
             }
         }
         for overlay in &self.overlays {
-            if self.kind != Kind::Luau {
-                return Err(ManifestError::ScriptKind(overlay.id.clone()));
+            let bad = |why: &str| ManifestError::BadOverlay {
+                overlay: overlay.id.clone(),
+                why: why.to_owned(),
+            };
+            match (&overlay.draws, overlay.script.is_empty()) {
+                (Some(_), false) | (None, true) => {
+                    return Err(bad("give it a script or a view it draws (draws), not both"));
+                }
+                (Some(view), true) => {
+                    if !self.views.iter().any(|v| &v.id == view) {
+                        return Err(bad(&format!(
+                            "it draws {view}, which is not one of its [[views]]"
+                        )));
+                    }
+                }
+                (None, false) => {
+                    if self.kind != Kind::Luau {
+                        return Err(ManifestError::ScriptKind(overlay.id.clone()));
+                    }
+                }
             }
             if !seen.insert(overlay.id.as_str()) {
                 return Err(ManifestError::Duplicate(overlay.id.clone()));
@@ -1076,7 +1107,9 @@ impl Manifest {
                     plane: overlay.plane.clone(),
                 });
             }
-            inside(&overlay.script)?;
+            if !overlay.script.is_empty() {
+                inside(&overlay.script)?;
+            }
         }
         self.check_workers()?;
         if let Some(source) = &self.source {

@@ -1403,7 +1403,7 @@ async fn follow(
             if let Some(css) = theme {
                 remote.set_theme_css(&css.peek());
             }
-            if fit.is_some() {
+            if fit.as_ref().is_some_and(|f| f.sized) {
                 remote.fit_content();
             }
             let (x, y) = pane_at(doc, at);
@@ -1660,12 +1660,45 @@ pub fn RemoteEmbed(
     }
 }
 
+/// Extension `extension`'s view `view` as an overlay layer over another
+/// view (`[[overlays]] draws`, `crate::overlay`): filling its parent (the
+/// view's box), clipped to it, given `spaces` (the view's coordinates) as
+/// its input whenever they change. Mount it in a box that passes the
+/// pointer through (`pointer-events: none`) over the view.
+#[component]
+pub fn RemoteOverlay(
+    processes: Processes,
+    extension: String,
+    view: String,
+    /// The kind of view it draws over.
+    over: String,
+    spaces: crate::overlay::OverlaySpaces,
+) -> Element {
+    let input = crate::contrib::EmbedInput {
+        claim: crate::overlay::claim(&over),
+        source: String::new(),
+        props: serde_json::to_value(&spaces).unwrap_or_default(),
+    };
+    let mut signal = use_signal(|| input.clone());
+    if *signal.peek() != input {
+        signal.set(input);
+    }
+    let key = format!("{extension}/{view}");
+    rsx! {
+        for key in [key] {
+            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: Some(signal), max_height: None, overlay: false }
+        }
+    }
+}
+
 /// An embed's input, shared between its component and its view's
 /// session: the latest, and where to send it while a session is open.
 #[derive(Clone)]
 struct Fit {
     latest: Rc<RefCell<crate::contrib::EmbedInput>>,
     live: Rc<RefCell<Option<mpsc::UnboundedSender<ViewEvent>>>>,
+    /// Sized to its content (an inline embed); an overlay fills its box.
+    sized: bool,
 }
 
 /// The [`crate::wire::EMBED_EVENT`] that carries `input`.
@@ -1736,6 +1769,7 @@ fn Mount(
     // measured.
     let fit = use_hook(|| {
         input.map(|i| Fit {
+            sized: max_height.is_some(),
             latest: Rc::new(RefCell::new(i.peek().clone())),
             live: Rc::default(),
         })
@@ -1803,7 +1837,7 @@ fn Mount(
                     fit.clone(),
                     layer.clone(),
                 ));
-                if fit.is_some() {
+                if fit.as_ref().is_some_and(|f| f.sized) {
                     spawn(measure(node, height));
                 }
             }
@@ -1825,7 +1859,11 @@ fn Mount(
             let _ = retry_to.unbounded_send(());
         }
     };
+    // An overlay layer (`RemoteOverlay`) says nothing over the view it
+    // draws on while its process starts or is gone: it is simply absent.
+    let layer_only = input.is_some() && max_height.is_none();
     let placeholder = match shown() {
+        _ if layer_only => None,
         Shown::Live => None,
         Shown::Waiting(why) => Some((why, false)),
         Shown::Stopped(why) => Some((why, true)),
@@ -1874,7 +1912,7 @@ fn Mount(
                     data: over,
                 }
             }
-            if busy() && placeholder.is_none() {
+            if busy() && placeholder.is_none() && !layer_only {
                 architect_shell::BusyBadge {}
             }
             if let Some((why, stopped)) = placeholder {

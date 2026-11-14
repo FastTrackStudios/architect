@@ -120,10 +120,45 @@ pub fn ArrangeView() -> Element {
                         span { style: "position: absolute; left: 8px; bottom: 6px; font-size: 12px; color: {t.ink_2};", "{name}" }
                     }
                 }
-                // Each script's layers over the arrangement's items.
+                // Each script's layers over the arrangement's items, and
+                // the layers extensions draw with views of their own
+                // (`[[overlays]] draws`).
                 CanvasLayers { view: ARRANGE, plane: Plane::Over }
+                architect_extensions::interface::ExtensionViewOverlays {
+                    view: ARRANGE,
+                    plane: "over",
+                    spaces: overlay_spaces(size(), start(), zoom()),
+                }
             }
         }
+    }
+}
+
+/// The arrangement's spaces as an extension's overlay is given them
+/// (`architect_extensions::overlay`).
+fn overlay_spaces(
+    (width, height): (f32, f32),
+    start: f64,
+    zoom: f64,
+) -> architect_extensions::overlay::OverlaySpaces {
+    use architect_extensions::overlay::{Lane, OverlaySpaces, TimeAxis};
+    OverlaySpaces {
+        width,
+        height,
+        time: Some(TimeAxis {
+            start,
+            pixels_per_second: zoom,
+        }),
+        lanes: LANES
+            .iter()
+            .enumerate()
+            .map(|(i, (id, name))| Lane {
+                id: (*id).to_owned(),
+                name: (*name).to_owned(),
+                top: lane_top(i),
+                height: LANE,
+            })
+            .collect(),
     }
 }
 

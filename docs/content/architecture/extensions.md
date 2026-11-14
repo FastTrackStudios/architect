@@ -998,13 +998,44 @@ The same mechanism lets a first-party feature draw on the timeline (a
 lyrics lane, chord symbols over the sections) without the timeline
 knowing about it.
 
-**Status.** In-process Luau overlays exist
-(`features/canvas/src/layer.rs` `Overlays`, `OverlayDecl`). A remote
-extension's scene can't be an overlay layer in a view's coordinate
-spaces yet; that is the next piece of #175. Today, an installed
-extension that needs to draw outside its pane declares `overlay`
+**Two ways to draw one.** A Luau extension's overlay is a script
+(`[[overlays]] script`), drawn through `architect-canvas`
+(`features/canvas/src/layer.rs` `Overlays`, `OverlayDecl`; the view
+mounts `CanvasLayers`). Any extension with views of its own (a process's,
+a WASI component's, a linked one's) can instead name one of them
+(`draws`, #175):
+
+```toml
+[[views]]
+id = "marks"
+title = "Marks"
+
+[[overlays]]
+id = "marks"
+view = "session.arrange"   # the kind of view it draws over
+plane = "over"             # under | over | top
+draws = "marks"            # one of its [[views]]; or script = "…" (Luau), never both
+```
+
+The view it draws over mounts `features/extensions/src/interface.rs`
+`ExtensionViewOverlays { view, plane, spaces }` at that plane, filling its
+box, with its coordinate spaces now (`features/extensions/src/overlay.rs`
+`OverlaySpaces`: size, time across, lanes down, scrolled). For each such
+overlay the host mounts the extension's view over the box, clipped to it,
+and passing the pointer through to the view
+(`remote::RemoteOverlay`, or the linked view itself). The view is handed
+the spaces as its embed input whenever they change: `overlay::spaces()`
+reads them, so it draws in the view's terms (a `scene::RemoteScene`
+filling its box, its coordinates the view's). A process that isn't
+running yet, or died, is simply absent; nothing is said over the view.
+The lab's arrangement (`apps/ui/src/arrange.rs`) mounts it beside its Luau
+layers. Test: `features/extensions/tests/remote_overlay.rs` (a mark on a
+lane at a time, following the view as it scrolls, a click let through).
+Not yet: a layer that claims regions to take the pointer there.
+
+An extension that needs to draw outside any one view declares `overlay`
 (`capabilities.ui`, above): its scenes then draw over the whole window,
-in window coordinates, not tied to one view's spaces.
+in window coordinates.
 
 ## What an extension costs
 
