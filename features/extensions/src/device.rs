@@ -84,6 +84,12 @@ const fn ht(
     }
 }
 
+/// Why an extension not compiled into the app is refused health data.
+///
+/// It is the app's own extensions' alone (the Health bundle, #371), and
+/// stays on the device unless the person saves it to a note.
+pub const HEALTH_LINKED_ONLY: &str = "health data is for the app's own compiled-in extensions (the Health bundle): an installed or development extension may not read or write it";
+
 /// The health data an extension may ask for.
 pub const HEALTH_TYPES: [HealthType; 10] = [
     ht(

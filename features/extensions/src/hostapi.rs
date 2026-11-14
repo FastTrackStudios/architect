@@ -719,6 +719,23 @@ impl ExtensionApi {
         if !matches!(request, HostRequest::Run { .. }) {
             Self::checked(manifest, &may, &request)?;
         }
+        // Health data is the app's own compiled-in extensions' alone (the
+        // Health bundle, #371): an installed or a development copy is
+        // refused even with the entry in its manifest.
+        if matches!(
+            request,
+            HostRequest::HealthRead(_) | HostRequest::HealthWrite(_)
+        ) && loaded.origin != Origin::Builtin
+        {
+            return Self::decide(
+                "device",
+                Err((
+                    "device.health".to_owned(),
+                    crate::device::HEALTH_LINKED_ONLY.to_owned(),
+                )),
+            )
+            .map(|()| Value::Null);
+        }
         match request {
             HostRequest::Run {
                 ref action,

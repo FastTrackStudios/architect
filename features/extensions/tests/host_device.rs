@@ -23,6 +23,7 @@ use architect_extensions::host::{Host, SharedSections};
 use architect_extensions::hostcall::{HostError, HostRequest};
 use architect_extensions::install::Installs;
 use architect_extensions::manifest::{Capabilities, Manifest};
+use architect_extensions::package::Package;
 use architect_settings::Registry;
 use futures::executor::block_on;
 use serde_json::{Value, json};
@@ -61,16 +62,34 @@ fn package(tmp: &Path, manifest: &str) -> std::path::PathBuf {
     dir
 }
 
+/// The app with the meal plan compiled in (health data is the app's own
+/// extensions' alone).
 fn app(tmp: &Path, device: Option<&FakeDevice>, manifest: &str) -> (ActionList, Extensions) {
+    app_as(tmp, device, manifest, true)
+}
+
+fn app_as(
+    tmp: &Path,
+    device: Option<&FakeDevice>,
+    manifest: &str,
+    builtin: bool,
+) -> (ActionList, Extensions) {
     let list = ActionList::new();
     let mut host = Host::new(list.clone(), SharedSections::new(Registry::new()))
         .with_data_root(tmp.join("data"));
     if let Some(device) = device {
         host = host.with_device(device.clone());
     }
-    let ext = Extensions::new(host, Installs::new(tmp.join("installs")));
+    let mut ext = Extensions::new(host, Installs::new(tmp.join("installs")));
+    if builtin {
+        ext = ext.with_builtin(Package::embedded(manifest, &[("log.luau", LOG)]).unwrap());
+    }
     ext.install_contribution_actions().unwrap();
-    let _ = ext.dev(&package(tmp, manifest));
+    if builtin {
+        let _ = ext.sync();
+    } else {
+        let _ = ext.dev(&package(tmp, manifest));
+    }
     assert!(
         ext.host().get("lab.meals").is_some(),
         "{:?}",
@@ -221,6 +240,30 @@ fn every_device_call_is_refused_outside_its_entry() {
         )
         .is_ok()
     );
+}
+
+#[test]
+fn health_data_is_the_compiled_in_extensions_alone() {
+    let tmp = tempfile::tempdir().unwrap();
+    let device = FakeDevice::new();
+    // The same manifest, as a development copy (an installed one is the
+    // same): the entry is there, the data is not.
+    let (_list, ext) = app_as(tmp.path(), Some(&device), MANIFEST, false);
+    for request in [
+        r#"{"op":"health_read","type":"steps","from_ms":0,"to_ms":1}"#,
+        r#"{"op":"health_write","type":"dietary_energy","value":1}"#,
+    ] {
+        match call(&ext, request) {
+            Err(HostError::Refused { capability, why }) => {
+                assert_eq!(capability, "device.health", "{request}");
+                assert!(why.contains("compiled-in"), "{why}");
+            }
+            other => panic!("{request}: {other:?}"),
+        }
+    }
+    assert!(device.asked().is_empty(), "nothing reached the device");
+    // Its other device entries still work.
+    assert!(call(&ext, r#"{"op":"os_notify","title":"t"}"#).is_ok());
 }
 
 #[test]

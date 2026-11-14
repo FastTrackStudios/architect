@@ -3236,11 +3236,24 @@ unsupported there), `PHAsset` and `PHImageManager`, and `HKHealthStore`.
 The OS asks the person too, the first time each is needed: its own
 prompts, after the manifest's consent. The app's Info.plist carries the
 usage strings (`NSCameraUsageDescription`, `NSPhotoLibraryUsageDescription`,
-`NSHealthShareUsageDescription`, `NSHealthUpdateUsageDescription`); the
-HealthKit entitlement comes from the App Store profile
-(`apps/mobile/ios/deploy-testflight.sh` signs with the profile's
-entitlements), so the App ID needs the HealthKit capability. A Simulator
-build is signed ad hoc with no entitlements, and HealthKit there answers
+`NSHealthShareUsageDescription`, `NSHealthUpdateUsageDescription`).
+
+**Health data is the app's own extensions' alone.** Only an extension
+compiled into the distribution (the Health bundle, #371) may read or
+write it; an installed or development copy is refused (`device.health`,
+`features/extensions/src/device.rs` `HEALTH_LINKED_ONLY`) even with the
+entry in its manifest. It stays on the device unless the person saves it
+to a note.
+
+**Signing.** A phone's build is signed with the app's own entitlements
+(`apps/mobile/ios/Architect.entitlements`: HealthKit with an empty
+`healthkit.access`, so no clinical health records, and no background
+delivery), each only where the App Store profile allows it, with the
+profile's identity; never the profile's whole set, which for HealthKit
+offers clinical records and background delivery.
+`apps/mobile/ios/sign-entitlements.py` makes the set and checks the signed
+app carries exactly it (`deploy-testflight.sh`). A Simulator build is
+signed ad hoc with no entitlements, and HealthKit there answers
 `Missing com.apple.developer.healthkit entitlement`. A desk and a browser answer every device
 call `unsupported` until they have a `Device` of their own: the shape is
 the platform's business only inside it. Tests: `features/extensions/tests/host_device.rs`
