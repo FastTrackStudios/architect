@@ -95,8 +95,10 @@ Task's own layers on the vault stay there: its task, goal and area types (entity
 
 Bases (the views over `.base` files, their toolbar, the `BASES_*` actions, view types extensions add) are `architect-bases`: `references/bases.md`.
 
-## The vault index (`vault-query`, wasm-clean)
+## The vault's query service (`vault-query`, wasm-clean)
 
-- **Index** (`vault_query::index`): an `Entry` per note (title, props, inline tags, body links, headings, task lines; no body) and per `.base` (YAML). `Builder::sync(&dyn NoteSource)` is incremental (stamp, then text hash) and returns an `IndexDelta {from, to, put, gone}`; `Builder::since(rev)`; `vault_query::Built` keeps a builder over a source. `OpenVault` is a `NoteSource` (`OpenVault::revision`). Wire: JSON (`VaultIndex::to_bytes`, `IndexDelta::to_bytes`). Filter per reader with `filtered(may_read)`; a delta never names a hidden path.
-- **Sync** (`vault_proto::index_sync::VaultIndexSync`): `snapshot(vault)`, `since(vault, from)`; the node serves it on the org lane (a `read` of `vaults/**`).
-- `vault_live::bases`, `vault_live::refs` and `vault_obsidian::obsidian_parse` live in `vault-query` now (re-exported where they were).
+- **Index** (`vault_query::index`): an `Entry` per note (title, props, inline tags, body links, headings, task lines; no body) and per `.base` (YAML). `Builder::sync(&dyn NoteSource)` is incremental (stamp, then text hash) and returns an `IndexDelta {from, to, put, gone}`; `Builder::since(rev)`. `OpenVault` is a `NoteSource`. Wire: JSON (`VaultIndex::to_bytes`, `IndexDelta::to_bytes`). Filter per reader with `filtered(may_read)`; a delta never names a hidden path.
+- **Engine** (`vault_query::QueryEngine::new(Arc<dyn IndexFeed>)`): the one `vault_proto::query::VaultQuery` implementation. Serve it in process (`architect::serve_local(engine, &scope)`) over `vault_query::Built<S>` (a vault you hold) or `engine::Replica` (a synced copy); hold only `VaultQueryClient`. Never query note bodies; full-text search is another service.
+- **Sync** (`vault_proto::index_sync::VaultIndexSync`): `snapshot(vault)`, `since(vault, from)`; the node serves it on the org lane. The node answers no queries.
+- `vault_live::bases`, `vault_live::refs` and `vault_obsidian::obsidian_parse` live in `vault-query` now (re-exported where they were); `BaseRow::frontmatter` is an `Arc` shared with the index entry (`BaseRow::from_shared`).
+- **Extensions**: the host call `query_vault` (`HostRequest::QueryVault {path|source, view, if_changed, limit}`, needs `reads = ["documents"]`), answered through `Host::with_vault_query(client)`. Redraw on `doc.*`, ask again with `if_changed`.

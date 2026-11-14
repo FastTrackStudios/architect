@@ -891,6 +891,7 @@ dependencies = [
  "url",
  "vault",
  "vault-doc",
+ "vault-proto",
 ]
 
 [[package]]
@@ -1375,6 +1376,8 @@ dependencies = [
  "tracing",
  "unicode-normalization",
  "url",
+ "vault-proto",
+ "vault-query",
  "vox",
  "vox-core",
  "vox-stream",

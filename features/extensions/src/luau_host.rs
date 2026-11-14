@@ -161,6 +161,11 @@ impl Module for HostModule {
         op!("read_document", String, |lua, a| Ok(
             HostRequest::ReadDocument { path: a }
         ));
+        op!("query_vault", LuaValue, |lua, a| request_of(
+            &lua,
+            "query_vault",
+            Some(a)
+        ));
         op!("list_documents", Option<String>, |lua, a| Ok(
             HostRequest::ListDocuments { under: a }
         ));

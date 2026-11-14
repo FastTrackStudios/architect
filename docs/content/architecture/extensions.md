@@ -3507,35 +3507,102 @@ calls).
 
 ## The vault's query service
 
-The vault keeps an index of its notes, as Obsidian's metadata cache is
-what Dataview, Tasks and Bases read (`features/vault/vault-query`,
-wasm-clean).
+The vault keeps an index of its notes, and extensions query it, as
+Obsidian's metadata cache is what Dataview, Tasks and Bases read. Two
+parts, both in `features/vault/vault-query` (wasm-clean):
 
-**The index** (`vault_query::index`). One compact `Entry` per note: its
-title, frontmatter properties, inline tags, body links, headings and task
-lines, never its prose; and one per `.base` file, its YAML.
-`index::Builder` keeps it from a vault that changes (`NoteSource`), a
-note at a time: a note whose stamp moved and whose text changed gets a
-new entry, and each sync is an `IndexDelta` (entries put, paths gone).
-It reads a vault on disk `index::CHUNK` notes at a time under its read
-lock, so an editor's save never waits on a large vault's index.
+- **The index** (`vault_query::index`). One compact `Entry` per note:
+  its title, frontmatter properties, inline tags, body links, headings
+  and task lines, never its prose; and one per `.base` file, its YAML.
+  `index::Builder` keeps it from a vault that changes (`NoteSource`), a
+  note at a time: a note whose stamp moved and whose text changed gets a
+  new entry, and each sync is an `IndexDelta` (entries put, paths gone).
+  It runs wherever the vault lives: on a desk and a phone over their own
+  copy (`vault::actions::OpenVault` is a `NoteSource`), on the node for
+  the web. A browser holds no vault, only the notes it opens and a copy of
+  the index (`engine::Replica`). It gets the index from the node's
+  `vault_proto::index_sync::VaultIndexSync`: a `snapshot`, then `since`
+  a revision as one delta, on the org lane, permitted as a `read` of
+  `vaults/**` like `Notes`' `read`, and filtered to what the caller may
+  read (`VaultIndex::filtered`, `IndexDelta::filtered`, which never name
+  a path the caller may not read). The wire form is JSON with short keys
+  (`VaultIndex::to_bytes`, `IndexDelta::to_bytes`).
+- **The engine** (`vault_query::QueryEngine`). It runs a base's view over
+  the index: filters, formulas, sort and group-by (`vault_query::bases`,
+  over `vault_proto::grouping`), never over a note's body. It is the one
+  implementation of `vault_proto::query::VaultQuery`, and every client
+  serves it in process (`architect::serve_local`) over its own index: a
+  desk's and a phone's kept from their vault (`vault_query::Built`), a
+  browser's synced (`engine::Replica`). The node answers no queries.
+  Full-text search over bodies is a separate service.
 
-- **Where it runs:** wherever the vault lives. A desk and a phone build
-  it over their own copy (`vault::actions::OpenVault` is a `NoteSource`;
-  `vault_query::Built` keeps one). The node builds it for the web.
-- **In a browser:** a browser holds no vault, only the notes it opens and
-  a copy of the index. It gets the copy from the node's
-  `vault_proto::index_sync::VaultIndexSync` on the org lane, permitted as
-  a `read` of `vaults/**` like `Notes`' `read`: a `snapshot`, then
-  everything `since` a revision as one delta.
-- **What each reader gets:** only what the caller may read
-  (`VaultIndex::filtered`, `IndexDelta::filtered`). A delta never names a
-  path the caller may not read.
-- **On the wire:** JSON with short keys (`VaultIndex::to_bytes`,
-  `IndexDelta::to_bytes`).
+**From an extension.** The host holds only the service's client
+(`Host::with_vault_query`). An extension asks with the host call
+`query_vault` (`HostRequest::QueryVault`: `{path? | source?, view?,
+if_changed?, limit?}`; `host.query_vault{…}` in Luau), which needs
+`reads = ["documents"]`, as the document calls do. The answer has:
 
-The query engine over it, and how extensions ask it, is the next layer
-of #710's stack.
+- the base's views;
+- the view (`type`, `name`, `order`, `sort`, `groupBy`, `filters`,
+  `limit`, `options`);
+- its rows in groups (`{label, rows: [{path, name, values, formulas}]}`)
+  and `total`;
+- every column it could show, and its formulas and filters;
+- the index's `revision` and a `hash` of the answer.
+
+A view hears the document events (`doc.saved`, `doc.created`,
+`doc.renamed`, `doc.deleted`) and asks again with `if_changed: <hash>`.
+When nothing it shows changed, the answer is `{unchanged: true, revision,
+hash}`.
+
+**Cost.** The engine keeps a row per entry between queries. When the
+index moves, only the entries that changed are made rows again, and a
+query on an index that has not moved makes none. The builder reads a
+vault on disk `index::CHUNK` notes at a time under its read lock, and
+looks again only at the notes whose stamp moved, so an editor's save
+never waits on a large vault's index.
+
+**The boundary.** The index, its builder, its sync and the engine are the
+core. Bases is an extension over them, using only what a third party
+could. It opens `.base` files, draws a base with its toolbar and view
+picker, adds table, cards and list as `[[base_views]]`, keeps the
+`BASES_*` actions, draws the fence, and provides `architect.bases` to
+other extensions. Reading and parsing a `.base` file, and writing one
+back, go through the document calls.
+
+What it costs, on a generated vault of 10 000 notes (about a kilobyte
+each: properties, tags, links, headings, tasks, prose), with a base that
+has a filter, a formula, a sort and a group-by
+(`features/vault/vault/tests/query_bench.rs`, ignored: run it with
+`--release --ignored --nocapture`):
+
+| the index | |
+|---|---:|
+| built from an open vault | 136 ms |
+| a snapshot on the wire (JSON) | 2.60 MiB (272 B a note) |
+| in memory: the entries and the builder's stamps | 17.2 MiB (1806 B a note) |
+| in memory: the engine's rows, kept between queries | 21.1 MiB (2207 B a note) |
+| a delta for one property set, on the wire | 296 B |
+
+| what | n | p50 | p99 |
+|---|---:|---:|---:|
+| first query (a row made for every note) | 1 | 127 ms | 127 ms |
+| query, index not moved, all 7 500 matching rows answered | 50 | 103 ms | 279 ms |
+| query, `limit: 50` | 50 | 12–29 ms | 38 ms |
+| query, `if_changed` and unchanged | 50 | 0.00 ms | 0.00 ms |
+| the index synced after one edit | 20 | 19 ms | 25 ms |
+| query after one edit | 20 | 96 ms | 153 ms |
+| a save, nothing else running | 200 | 0.23 ms | 2.0 ms |
+| a save, with syncs and queries on two other threads | 200 | 0.02 ms | 0.45 ms |
+
+Measured 2026-11-14 on THEBATTLESHIP in release, beside other builds
+(the spread is theirs). The open vault itself holds 99 MiB for 8.7 MiB
+of markdown, which is its own cost, not the index's. A query's time is
+mostly the rows it answers (building and serializing 7 500 of them), so
+a view asks for a page (`limit`). Evaluating the filter, formula, sort
+and group-by over 10 000 rows is the `limit: 50` row. Before this, a
+query made every note a row under the vault's lock, every time; now a
+save never waits for one.
 
 ## The editor: commands, keys, decorations, slash rows
 

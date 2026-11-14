@@ -25,6 +25,9 @@ description = "Extensions: adding to an app at run time — data, Luau, WASM and
 default = []
 host = [
     "dep:architect",
+    # The vault's query service: the host holds its client
+    # (`Host::with_vault_query`), answering `query_vault`.
+    "dep:vault-proto",
     "dep:architect-scripting",
     "architect-scripting/luau",
     "dep:tracing",
@@ -185,6 +188,9 @@ architect-ui = { workspace = true, optional = true }
 # The view kinds an extension's views may name (the model, wasm-clean).
 architect-workspace = { workspace = true }
 facet = { workspace = true }
+# `VaultQueryClient`, which the host answers `query_vault` with (feature
+# `host`): the wire contract only, wasm-clean.
+vault-proto = { workspace = true, optional = true, features = ["vox"] }
 serde = { workspace = true }
 toml = { workspace = true }
 semver = "1"
@@ -252,6 +258,8 @@ web-sys = { version = "0.3", optional = true, features = [
 ] }
 
 [dev-dependencies]
+# tests/vault_query.rs: the vault's query engine, served in process.
+vault-query = { workspace = true }
 # tests/editor_view.rs: a linked extension's view holds the editor's
 # component, through architect's door (#512).
 architect-editor = { workspace = true, features = ["native", "lsp-stub"] }
@@ -277,7 +285,7 @@ architect-workspace = { workspace = true, features = ["home"] }
 dioxus-ssr = { workspace = true }
 # tests/host_gate.rs: a vox-served server behind a `PermissionsGate`, called
 # on an extension's behalf.
-architect = { workspace = true, features = ["action-list", "host", "connect"] }
+architect = { workspace = true, features = ["action-list", "host", "connect", "local"] }
 vox = { workspace = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 

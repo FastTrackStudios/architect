@@ -138,6 +138,8 @@ pub(crate) struct Services {
     app: Mutex<Option<Arc<dyn AppContext>>>,
     /// The app's documents, for the document calls.
     documents: Mutex<Option<Arc<dyn Documents>>>,
+    /// The vault's query service, when the app keeps a vault index.
+    vault_query: Mutex<Option<vault_proto::query::VaultQueryClient>>,
     /// The app's editors, for the editor calls (`crate::editor`).
     editors: Mutex<Option<Arc<dyn crate::editor::Editors>>>,
     values: Mutex<Arc<dyn SettingValues>>,
@@ -201,6 +203,7 @@ impl Default for Services {
             logs: Logs::default(),
             app: Mutex::new(None),
             documents: Mutex::new(None),
+            vault_query: Mutex::new(None),
             editors: Mutex::new(None),
             values: Mutex::new(Arc::new(MemoryValues::default())),
             data_root: Mutex::new(None),
@@ -287,6 +290,27 @@ impl Host {
     #[must_use]
     pub fn documents(&self) -> Option<Arc<dyn Documents>> {
         lock(&self.services().documents).clone()
+    }
+
+    /// The vault's query service (`vault_proto::query::VaultQuery`), for
+    /// extensions that may read the documents (`query_vault`): its client,
+    /// served wherever the app keeps its vault index (in process on a desk
+    /// and a phone, over a browser's synced index).
+    #[must_use]
+    pub fn with_vault_query(self, client: vault_proto::query::VaultQueryClient) -> Self {
+        self.set_vault_query(client);
+        self
+    }
+
+    /// [`Self::with_vault_query`] on a host already shared.
+    pub fn set_vault_query(&self, client: vault_proto::query::VaultQueryClient) {
+        *lock(&self.services().vault_query) = Some(client);
+    }
+
+    /// The vault's query service's client, when the app gave one.
+    #[must_use]
+    pub fn vault_query(&self) -> Option<vault_proto::query::VaultQueryClient> {
+        lock(&self.services().vault_query).clone()
     }
 
     /// The app's editors, for extensions that may read and change the one
@@ -722,6 +746,33 @@ impl ExtensionApi {
                         what: format!("document {path}"),
                     }),
                 }
+            }
+            HostRequest::QueryVault {
+                path,
+                source,
+                view,
+                if_changed,
+                limit,
+            } => {
+                let client = host.vault_query().ok_or_else(|| HostError::Unsupported {
+                    what: "the vault's query service: this app keeps no vault index".to_owned(),
+                })?;
+                let request = vault_proto::query::QueryRequest {
+                    path,
+                    source,
+                    view,
+                    if_changed,
+                    limit,
+                };
+                let answer = client
+                    .query(request)
+                    .await
+                    .map_err(|e| HostError::Failed {
+                        message: e.to_string(),
+                    })?;
+                serde_json::from_str(&answer).map_err(|e| HostError::Failed {
+                    message: format!("the query service's answer: {e}"),
+                })
             }
             HostRequest::ListDocuments { .. }
             | HostRequest::CreateDocument { .. }

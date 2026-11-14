@@ -459,6 +459,7 @@ impl WebHost {
             HostRequest::Selection => Ok(context("selection")),
             HostRequest::Open { .. }
             | HostRequest::ReadDocument { .. }
+            | HostRequest::QueryVault { .. }
             | HostRequest::ListDocuments { .. }
             | HostRequest::CreateDocument { .. }
             | HostRequest::EditDocument { .. }
