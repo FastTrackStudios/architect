@@ -3110,7 +3110,7 @@ ui = ["notify", "clipboard", "pickers", "prompts", "menus", "badges"]
 |---|---|---|---|
 | `notify {text, kind?, title?}` | a toast (`info`, `success`, `warning`, `error`), and a line in its log | `null` | `notify` |
 | `clipboard_read` / `clipboard_write {text}` | the clipboard's text | the text, or `null` | `clipboard` |
-| `pick {kind, title?, filters?, folder?, name?}` | a picker (`open`, `open_many`, `folder`) or a save dialog (`save`) | a path, a list (`open_many`), `null` when cancelled | `pickers` |
+| `pick {kind, title?, filters?, folder?, name?}` | a picker (`open`, `open_many`, `folder`), a save dialog (`save`), or the person's photos (`photo`, `photos`: a copy of each image made for it) | a path, a list (`open_many`, `photos`), `null` when cancelled | `pickers` |
 | `prompt {kind, title, message?, default?, placeholder?, choices?}` | asks for text (`text`), a yes or no (`confirm`), one of a list (`pick_one`) | the text, `true`/`false`, the choice's id; `null` when cancelled | `prompts` |
 | `menu {items, x?, y?}` | a context menu of its own items (`{id, label, icon?, shortcut?, disabled?, separator?}`) at a point in the window (none: its middle) | the id chosen, `null` when dismissed | `menus` |
 | `decorate {target, decoration?}` | an icon or badge (`{icon?, badge?, color?, tooltip?}`) on a file-tree row (`{kind: "file", id: <path>}`) or a tab (`{kind: "tab", id: <view kind or pane id>}`); none takes it off | `null` | `badges` |
@@ -3118,6 +3118,16 @@ ui = ["notify", "clipboard", "pickers", "prompts", "menus", "badges"]
 `pick`, `prompt` and `menu` wait for the person: the call answers when
 they do. A path picked is one the extension may then read for the run (a
 save, or inside a folder picked: write), past `capabilities.folders`.
+On a desk the pickers are the platform's own (rfd: the portal on Linux,
+the system's panels on macOS and Windows), and a photo pick is a file
+picker for images. On iOS (#708, `features/extensions/src/pickers_ios.rs`)
+they are UIKit's: `UIDocumentPickerViewController` opens a file as the
+app's own copy and a folder through its security scope (kept for the
+run); a save is a folder picked and the suggested `name` in it (iOS saves
+by exporting a file that exists); `photo` and `photos` are
+`PHPickerViewController`, which runs outside the app, so no photo-library
+permission is asked, and each image picked is copied to the app's
+temporary folder and that copy's path answered.
 Every runtime makes the same calls: Luau's `host.notify`,
 `host.clipboard_read`, `host.pick`, `host.prompt`, `host.menu`,
 `host.decorate` (`features/extensions/src/luau_host.rs`; a cancel is

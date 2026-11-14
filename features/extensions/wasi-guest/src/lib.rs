@@ -623,9 +623,11 @@ pub mod host {
         wit_host::clipboard_write(text).map_err(|e| HostError::from_text(&e))
     }
 
-    /// A file or folder picker, or a save dialog (`request`: `{kind,
-    /// title?, filters?, folder?, name?}`): the path picked (`open_many`:
-    /// a list), `null` when the person cancelled. It waits for them.
+    /// A file or folder picker, a save dialog, or a photo picker
+    /// (`request`: `{kind, title?, filters?, folder?, name?}`; `kind`
+    /// `photo` or `photos` for the person's photos): the path picked
+    /// (`open_many`, `photos`: a list), `null` when the person cancelled.
+    /// It waits for them.
     ///
     /// # Errors
     ///

@@ -36,7 +36,7 @@
 //! | `window {id, open, state?}` | opens or closes one of its own windows (`[[windows]]`) | nothing |
 //! | `notify {text, kind?, title?}` | a notification (a toast) | `ui = ["notify"]` |
 //! | `clipboard_read` / `clipboard_write {text}` | the clipboard's text, or sets it | `ui = ["clipboard"]` |
-//! | `pick {kind, title?, filters?, folder?, name?}` | a file or folder picker, or a save dialog: the path(s) picked, `null` when cancelled | `ui = ["pickers"]` |
+//! | `pick {kind, title?, filters?, folder?, name?}` | a file or folder picker, a save dialog, or a photo picker (`photo`, `photos`: images from the person's photos, copied for it): the path(s) picked, `null` when cancelled | `ui = ["pickers"]` |
 //! | `prompt {kind, title, message?, default?, placeholder?, choices?}` | asks for text, a yes or no, or one of a list: the answer, `null` when cancelled | `ui = ["prompts"]` |
 //! | `menu {items, x?, y?}` | a context menu of its own items at a point: the id chosen, `null` when dismissed | `ui = ["menus"]` |
 //! | `decorate {target, decoration?}` | an icon or badge on a file-tree row or a tab (none: takes it off) | `ui = ["badges"]` |
@@ -472,6 +472,39 @@ pub enum PickKind {
     Folder,
     /// Where to save: the path (it need not exist).
     Save,
+    /// One image from the person's photos: the path of a copy made for
+    /// it. The system's photo picker (iOS: `PHPickerViewController`, out
+    /// of the app's process, so no photo-library permission); on a
+    /// platform without one, a file picker for images.
+    Photo,
+    /// Images from the person's photos: the paths of copies.
+    Photos,
+}
+
+impl PickKind {
+    /// Whether it answers a list (`open_many`, `photos`), not one path.
+    #[must_use]
+    pub const fn many(self) -> bool {
+        matches!(self, Self::OpenMany | Self::Photos)
+    }
+
+    /// Whether it picks from the person's photos.
+    #[must_use]
+    pub const fn photos(self) -> bool {
+        matches!(self, Self::Photo | Self::Photos)
+    }
+}
+
+/// The image files a photo pick shows where the platform has no photo
+/// picker of its own (a file picker in their place).
+#[must_use]
+pub fn image_filter() -> FileFilter {
+    FileFilter {
+        name: "Images".to_owned(),
+        extensions: ["png", "jpg", "jpeg", "heic", "heif", "gif", "webp", "tiff"]
+            .map(str::to_owned)
+            .to_vec(),
+    }
 }
 
 /// Files of one kind a picker shows (`Images`, `["png", "jpg"]`).
@@ -484,8 +517,8 @@ pub struct FileFilter {
 
 /// A file or folder picker, or a save dialog.
 ///
-/// Its answer: a path (`open`, `folder`, `save`), a list of them
-/// (`open_many`), or `null` when the person cancelled. A path picked is
+/// Its answer: a path (`open`, `folder`, `save`, `photo`), a list of
+/// them (`open_many`, `photos`), or `null` when the person cancelled. A path picked is
 /// one the extension may read (`save`: write; `folder`: read and write
 /// in) for the run.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1004,6 +1037,11 @@ mod tests {
                 ..Pick::default()
             })
         );
+        let r: HostRequest = serde_json::from_str(r#"{"op":"pick","kind":"photos"}"#).unwrap();
+        let HostRequest::Pick(Pick { kind, .. }) = r else {
+            panic!("{r:?}")
+        };
+        assert!(kind.many() && kind.photos());
         let r: HostRequest = serde_json::from_str(
             r#"{"op":"prompt","kind":"pick_one","title":"Which?","choices":[{"id":"a","label":"A"}]}"#,
         )
