@@ -601,8 +601,14 @@ impl Forward<'_> {
 fn captured(name: &str) -> bool {
     matches!(
         name,
-        "pointermove" | "pointerup" | "pointercancel" | "mousemove" | "mouseup" | "touchmove"
-            | "touchend" | "touchcancel"
+        "pointermove"
+            | "pointerup"
+            | "pointercancel"
+            | "mousemove"
+            | "mouseup"
+            | "touchmove"
+            | "touchend"
+            | "touchcancel"
     )
 }
 
@@ -747,7 +753,8 @@ impl ShellProvider for HostShell {
 
     fn set_ime_cursor_area(&self, x: f32, y: f32, width: f32, height: f32) {
         let (dx, dy) = *self.at.lock().unwrap_or_else(PoisonError::into_inner);
-        self.window.set_ime_cursor_area(x + dx, y + dy, width, height);
+        self.window
+            .set_ime_cursor_area(x + dx, y + dy, width, height);
     }
 
     fn request_clipboard_text(&self) -> Result<(), ClipboardError> {

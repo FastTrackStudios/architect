@@ -1618,7 +1618,9 @@ fn event_data(e: &web_sys::Event) -> EventData {
         return EventData::Composition(c.data().unwrap_or_default());
     }
     if e.type_() == "scroll"
-        && let Some(el) = e.target().and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+        && let Some(el) = e
+            .target()
+            .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
     {
         return EventData::Scroll(ScrollData {
             top: f64::from(el.scroll_top()),

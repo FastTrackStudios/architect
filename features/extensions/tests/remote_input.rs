@@ -37,8 +37,8 @@ use architect_extensions::{Origin, Package};
 use blitz_dom::{BaseDocument, Document as _, DocumentConfig};
 use blitz_traits::events::{
     BlitzImeEvent, BlitzKeyEvent, BlitzPointerEvent, BlitzPointerId, BlitzWheelDelta,
-    BlitzWheelEvent, Code, Key, KeyState, Location, Modifiers, MouseEventButton, MouseEventButtons, Point,
-    PointerCoords, PointerDetails, UiEvent,
+    BlitzWheelEvent, Code, Key, KeyState, Location, Modifiers, MouseEventButton, MouseEventButtons,
+    Point, PointerCoords, PointerDetails, UiEvent,
 };
 use blitz_traits::shell::{ColorScheme, ShellProvider, Viewport};
 use dioxus::html::geometry::WheelDelta;
@@ -313,7 +313,10 @@ fn a_press_holds_the_pointer_and_its_moves_and_release_reach_the_element_pressed
     // Dragged over the lane: the card still gets the moves.
     for i in 0..=10 {
         let t = i as f32 / 10.0;
-        let at = (card.0 + (lane.0 - card.0) * t, card.1 + (lane.1 - card.1) * t);
+        let at = (
+            card.0 + (lane.0 - card.0) * t,
+            card.1 + (lane.1 - card.1) * t,
+        );
         doc.handle_ui_event(UiEvent::PointerMove(pointer(MOUSE, at, HELD)));
     }
     let want = format!("{}", lane.0 - 50.0);
@@ -323,7 +326,10 @@ fn a_press_holds_the_pointer_and_its_moves_and_release_reach_the_element_pressed
     doc.handle_ui_event(UiEvent::PointerUp(pointer(MOUSE, lane, FREE)));
     pump(&mut doc, "the release", |d| logged(d).contains("up"));
     let log = logged(&doc.inner.borrow());
-    assert!(!log.contains("lane-move"), "the lane saw a held move: {log}");
+    assert!(
+        !log.contains("lane-move"),
+        "the lane saw a held move: {log}"
+    );
 
     // Free, a move over the lane is the lane's.
     doc.handle_ui_event(UiEvent::PointerMove(pointer(MOUSE, lane, FREE)));
@@ -424,7 +430,10 @@ fn an_input_method_composes_into_a_field_in_the_view() {
         window.ime.lock().unwrap().last() == Some(&true)
     });
     let (_, y) = window.area.lock().unwrap().unwrap();
-    assert!(y >= 30.0 + 200.0, "the caret area is at {y}, not in the window");
+    assert!(
+        y >= 30.0 + 200.0,
+        "the caret area is at {y}, not in the window"
+    );
 
     doc.handle_ui_event(UiEvent::Ime(BlitzImeEvent::Preedit(
         "にほ".to_owned(),
@@ -491,7 +500,9 @@ fn round_trips() {
         let t = Instant::now();
         click(&mut doc, rows);
         let want = if i % 2 == 0 { "500" } else { "0" };
-        pump(&mut doc, "the rows", |d| in_view(d, "#count").as_deref() == Some(want));
+        pump(&mut doc, "the rows", |d| {
+            in_view(d, "#count").as_deref() == Some(want)
+        });
         frames.push(t.elapsed());
     }
     println!("| round trip | n | p50 ms | p99 ms |");
@@ -501,6 +512,11 @@ fn round_trips() {
         ("held move to echo", &mut moves),
         ("500 rows in and out", &mut frames),
     ] {
-        println!("| {what} | {} | {:.2} | {:.2} |", s.len(), p(s, 50), p(s, 99));
+        println!(
+            "| {what} | {} | {:.2} | {:.2} |",
+            s.len(),
+            p(s, 50),
+            p(s, 99)
+        );
     }
 }

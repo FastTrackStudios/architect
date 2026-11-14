@@ -1379,31 +1379,40 @@ fn dispatch(vdom: &VirtualDom, event: wit::ViewEvent) {
         wit::EventData::Focus => Rc::new(PlatformEventData::new(Box::new(
             SerializedFocusData::default(),
         ))),
-        wit::EventData::Pointer(p) => serialised!(dioxus::html::SerializedPointerData, merged(
-            point(&p.at),
-            serde_json::json!({
-                "pointer_id": p.pointer_id, "width": 1.0, "height": 1.0,
-                "pressure": p.pressure, "tangential_pressure": 0.0,
-                "tilt_x": p.tilt_x, "tilt_y": p.tilt_y, "twist": p.twist,
-                "pointer_type": p.pointer_type, "is_primary": p.is_primary,
-            }),
-        )),
+        wit::EventData::Pointer(p) => serialised!(
+            dioxus::html::SerializedPointerData,
+            merged(
+                point(&p.at),
+                serde_json::json!({
+                    "pointer_id": p.pointer_id, "width": 1.0, "height": 1.0,
+                    "pressure": p.pressure, "tangential_pressure": 0.0,
+                    "tilt_x": p.tilt_x, "tilt_y": p.tilt_y, "twist": p.twist,
+                    "pointer_type": p.pointer_type, "is_primary": p.is_primary,
+                }),
+            )
+        ),
         wit::EventData::Touch(t) => {
             let all: Vec<Json> = t.touches.iter().map(touch_point).collect();
             let changed: Vec<Json> = t.changed.iter().map(touch_point).collect();
-            serialised!(dioxus::html::SerializedTouchData, serde_json::json!({
-                "alt_key": t.mods.alt, "ctrl_key": t.mods.ctrl,
-                "meta_key": t.mods.meta, "shift_key": t.mods.shift,
-                "touches": &all, "changed_touches": changed, "target_touches": &all,
-            }))
+            serialised!(
+                dioxus::html::SerializedTouchData,
+                serde_json::json!({
+                    "alt_key": t.mods.alt, "ctrl_key": t.mods.ctrl,
+                    "meta_key": t.mods.meta, "shift_key": t.mods.shift,
+                    "touches": &all, "changed_touches": changed, "target_touches": &all,
+                })
+            )
         }
-        wit::EventData::Wheel(w) => serialised!(dioxus::html::SerializedWheelData, merged(
-            point(&w.at),
-            serde_json::json!({
-                "delta_mode": w.delta_mode, "delta_x": w.delta_x,
-                "delta_y": w.delta_y, "delta_z": 0.0,
-            }),
-        )),
+        wit::EventData::Wheel(w) => serialised!(
+            dioxus::html::SerializedWheelData,
+            merged(
+                point(&w.at),
+                serde_json::json!({
+                    "delta_mode": w.delta_mode, "delta_x": w.delta_x,
+                    "delta_y": w.delta_y, "delta_z": 0.0,
+                }),
+            )
+        ),
         wit::EventData::Scroll(s) => Rc::new(PlatformEventData::new(Box::new(
             dioxus::html::SerializedScrollData {
                 scroll_top: s.top,
@@ -1414,7 +1423,10 @@ fn dispatch(vdom: &VirtualDom, event: wit::ViewEvent) {
                 client_height: s.client_height,
             },
         ))),
-        wit::EventData::Composition(text) => serialised!(dioxus::html::SerializedCompositionData, serde_json::json!({ "data": text })),
+        wit::EventData::Composition(text) => serialised!(
+            dioxus::html::SerializedCompositionData,
+            serde_json::json!({ "data": text })
+        ),
     };
     vdom.runtime().handle_event(
         &event.name,
@@ -1422,7 +1434,6 @@ fn dispatch(vdom: &VirtualDom, event: wit::ViewEvent) {
         ElementId::from_raw(element),
     );
 }
-
 
 fn point(p: &wit::Pointer) -> Json {
     serde_json::json!({

@@ -26,6 +26,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use anyrender::PaintScene as _;
 use architect::action::ActionList;
 use architect_extensions::host::{Host, SharedSections};
 use architect_extensions::process::{ProcessRunner, Processes, Restart};
@@ -34,16 +35,16 @@ use architect_extensions::remote::{RemoteView, mounted_views};
 use architect_extensions::{Origin, Package};
 use architect_sandbox_kanban::ID;
 use architect_theme::{Registry, RootCss, Scheme};
-use anyrender::PaintScene as _;
-use peniko::kurbo::{Affine, Rect};
-use peniko::{Color, Fill};
 use blitz_dom::{Document as _, DocumentConfig};
 use blitz_traits::events::{
-    BlitzPointerEvent, BlitzPointerId, Modifiers, MouseEventButton, MouseEventButtons, Point, PointerCoords, PointerDetails, UiEvent,
+    BlitzPointerEvent, BlitzPointerId, Modifiers, MouseEventButton, MouseEventButtons, Point,
+    PointerCoords, PointerDetails, UiEvent,
 };
 use blitz_traits::shell::{ColorScheme, Viewport};
 use dioxus::prelude::*;
 use dioxus_native_dom::DioxusDocument;
+use peniko::kurbo::{Affine, Rect};
+use peniko::{Color, Fill};
 
 #[test]
 fn guest() {
@@ -56,11 +57,10 @@ fn guest() {
 fn package(dir: &Path) -> Package {
     let exe = std::env::current_exe().unwrap();
     std::os::unix::fs::symlink(exe, dir.join("guest")).unwrap();
-    let manifest = include_str!("../extension.toml")
-        .replace(
-            "path = \"architect-sandbox-kanban\"",
-            "path = \"guest\"\nargs = [\"guest\", \"--exact\", \"--nocapture\", \"--test-threads=1\"]",
-        );
+    let manifest = include_str!("../extension.toml").replace(
+        "path = \"architect-sandbox-kanban\"",
+        "path = \"guest\"\nargs = [\"guest\", \"--exact\", \"--nocapture\", \"--test-threads=1\"]",
+    );
     std::fs::write(dir.join("extension.toml"), manifest).unwrap();
     Package::read(dir).unwrap()
 }
@@ -167,12 +167,24 @@ fn shoot(doc: &DioxusDocument, (w, h, scale): (u32, u32, f64), bg: Color, path: 
 fn act(doc: &mut DioxusDocument) {
     let none = Modifiers::empty();
     let (from, to) = ((60.0_f32, 45.0_f32), (190.0_f32, 120.0_f32));
-    doc.handle_ui_event(UiEvent::PointerMove(pointer(from, MouseEventButtons::None, none)));
-    doc.handle_ui_event(UiEvent::PointerDown(pointer(from, MouseEventButtons::Primary, none)));
+    doc.handle_ui_event(UiEvent::PointerMove(pointer(
+        from,
+        MouseEventButtons::None,
+        none,
+    )));
+    doc.handle_ui_event(UiEvent::PointerDown(pointer(
+        from,
+        MouseEventButtons::Primary,
+        none,
+    )));
     for i in 1..=10 {
         let t = i as f32 / 10.0;
         let at = (from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t);
-        doc.handle_ui_event(UiEvent::PointerMove(pointer(at, MouseEventButtons::Primary, none)));
+        doc.handle_ui_event(UiEvent::PointerMove(pointer(
+            at,
+            MouseEventButtons::Primary,
+            none,
+        )));
         pump(doc, 2);
     }
     pump(doc, 20);
@@ -198,7 +210,8 @@ fn shots() {
                     .with_socket_dir(dir.path())
                     .with_restart(Restart::never());
                 let processes = runner.processes();
-                let host = Host::new(ActionList::new(), SharedSections::default()).with_runner(runner);
+                let host =
+                    Host::new(ActionList::new(), SharedSections::default()).with_runner(runner);
                 host.load(&package(dir.path()), Origin::Installed).unwrap();
                 let css = root_css(scheme);
                 let vdom = VirtualDom::new_with_props(
