@@ -815,7 +815,7 @@ pub fn check(
     match request {
         HostRequest::Run { action, .. } => (
             "actions",
-            may.may_run(&manifest.action_prefix(), action, effect)
+            may.may_run_app(&manifest.action_prefix(), action, effect)
                 .map_err(|(c, why)| (c.to_owned(), why)),
         ),
         HostRequest::Org => ("reads", reads(ORG)),

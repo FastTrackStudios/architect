@@ -42,6 +42,9 @@ path = "extensions/dayplan"
 actions = ["VAULT_", "BASES_", "EXT_VIEW_OPEN"]
 # Destructive: "Reset to template" deletes a day's plan (VAULT_DELETE).
 effect = "destructive"
+reads = ["documents"]
+# The vault's actions change notes: the documents (VAULT_*).
+writes = ["documents"]
 
 [[views]]
 id = "templates"

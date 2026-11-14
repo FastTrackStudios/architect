@@ -74,9 +74,11 @@ pub use walker::{VaultEntry, VaultEntryKind, open_own, walk_vault};
 pub use watcher::{VaultEvent, WatchError, watch};
 
 pub mod aliases;
+pub mod metadata;
 pub mod outline;
 pub mod properties;
 pub use aliases::{AliasEntry, list_aliases, total_aliases};
+pub use metadata::{MetaBlock, MetaField, MetaHeading, MetaListItem, NoteMetadata, metadata};
 pub use outline::{Heading, PageOutline, outline};
 pub use properties::{list_property_keys, property_values, read_property};
 

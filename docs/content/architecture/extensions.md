@@ -3445,6 +3445,35 @@ keeps its in-memory spaces, `notes` and `archive`
 #495's; it gives the same shape (a `Documents` over its vault and the
 person's edits raised as `doc.*` on the list).
 
+**A note's parsed metadata** is the read-only action `VAULT_METADATA`
+(`features/vault/vault-obsidian/src/metadata.rs` `metadata`): `{path}`
+answers one note's headings `{level, text, line}`, list items `{line,
+text, depth, parent, ordered, task, done, block, section}`, its tasks
+(indices into the list items), block ids `{id, line}` and inline fields
+`{key, value, line}` (`key:: value`, `[key:: value]`, `(key:: value)`);
+`{folder, limit?, cursor?}` answers a page of the notes' under `folder`
+(`""`: the whole vault) in path order, `{notes, next}`, at most `limit`
+(100 by default, 1000 at most) after `cursor`. Neither is refused: a
+caller never parses the whole vault without asking. Each note is parsed
+outside the vault's lock and kept by its modified time and length, so a
+note is parsed once until it changes. The parser follows CommonMark's
+fences (a closing run at least the opening's, of its character, nothing
+after it; an inline ```` ``` ```` opens none), counts frontmatter only
+when it closes, and leaves out `%%` comments, `$$` math and indented
+code. It is an action, like `VAULT_READ` and `BASES_ROWS`, not a host
+call: an extension runs it with `capabilities.actions = ["VAULT_"]`,
+and so do the CLI, MCP and the node, with no runtime-specific binding;
+the document calls stay what every app's document set has, and metadata
+is the vault's.
+
+**The vault's actions are the documents.** An extension runs a
+`VAULT_*` action only with `reads = ["documents"]` (a read-only one:
+`VAULT_READ`, `VAULT_LIST`, `VAULT_SEARCH`, `VAULT_METADATA`) or
+`writes = ["documents"]` (the rest), past its `actions` grant
+(`capabilities::VAULT_ACTIONS`, `Capabilities::may_run`), so the consent
+prompt says "Read your documents" or "Change your documents" for it and
+an `actions = ["VAULT_"]` grant alone reads no note.
+
 **Extension data and settings persist.** `host.data`/`set_data` are a
 file per extension under the host's data root (the app's
 `<app dir>/extension-data`), written whole (a temporary file, synced,
@@ -3467,6 +3496,7 @@ Tests: `features/navigator/tests/documents.rs` (`lab.tidy` in a vault
 on disk: lists, creates, tidies, renames and files notes; the person's
 save, new note, rename and delete heard once each; an edit merged into
 an open note's typing; its data after a restart),
+`features/vault/vault/tests/actions.rs` (`VAULT_METADATA`),
 `features/extensions/tests/documents.rs` (`lab.tidy` in the
 sandbox's spaces: creates, tidies as one undo step, renames, files and
 hears each; the person's concurrent typing merges with its transaction;

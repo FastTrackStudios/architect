@@ -489,7 +489,7 @@ impl Host {
                 return Ok(());
             }
             host.capabilities_of(&manifest, origin)
-                .may_run(&manifest.action_prefix(), &info.id, reach(info.effect))
+                .may_run_app(&manifest.action_prefix(), &info.id, reach(info.effect))
                 .map_err(|(_, why)| why)
         })
     }

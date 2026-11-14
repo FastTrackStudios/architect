@@ -43,6 +43,9 @@ path = "extensions/calendar"
 actions = ["VAULT_", "BASES_", "EXT_VIEW_OPEN", "NAVIGATOR_OPEN_DAILY_NOTE"]
 # Destructive: deleting an event deletes its note (VAULT_DELETE).
 effect = "destructive"
+reads = ["documents"]
+# The vault's actions change notes: the documents (VAULT_*).
+writes = ["documents"]
 # Subscribed calendars are fetched from whatever address the person
 # gives (CALENDAR_SUBSCRIBE): any host, read only (GET).
 hosts = ["*"]
