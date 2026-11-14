@@ -43,7 +43,7 @@ architect-orgs = { workspace = true, features = ["ui"] }
 # the switcher, the sheet, ACCOUNT_*.
 architect-accounts = { workspace = true, features = ["ui", "keychain"] }
 # `crdt`: the lab's spaces as documents extensions reach (src/extensions.rs).
-architect-extensions = { workspace = true, features = ["ui", "remote", "page", "pickers", "crdt"] }
+architect-extensions = { workspace = true, features = ["ui", "remote", "page", "pickers", "crdt", "device"] }
 # Extensions' ports and the targets of their control surfaces (#311).
 architect-input = { workspace = true, features = ["udp"] }
 # The lab's example extension, linked in (apps/sandbox/board).

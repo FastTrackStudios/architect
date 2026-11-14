@@ -45,8 +45,16 @@
 	<string>16.0</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>An extension you installed asks to take a photo, for example of a meal; you choose whether to take one.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Extensions you allowed read the health data they named when you installed them, such as today's steps.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Extensions you allowed add the health data they named when you installed them, such as a meal's calories.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Architect connects to an Architect node on your local network when you sign in to one there.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Extensions you allowed list your recent photos and copy the ones they use, such as a meal photo.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
