@@ -1,0 +1,35 @@
+[package]
+name = "architect-sandbox-kanban"
+description = "Kanban-lite, the showcase's drag-and-drop example (#176, #710 U2): a board whose cards drag between columns, drawn by a process of its own and shown in a pane over vox. Stands in for Obsidian's Kanban plugin."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[[bin]]
+name = "architect-sandbox-kanban"
+path = "src/main.rs"
+
+[dependencies]
+architect-extensions = { workspace = true, features = ["guest"] }
+dioxus = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# tests/drag.rs: its view in a pane of a headless Blitz host, dragged.
+architect = { workspace = true, features = ["action-list"] }
+architect-extensions = { workspace = true, features = ["guest", "host", "process", "remote"] }
+futures = "0.3"
+tempfile = "3"
+blitz-dom = { workspace = true }
+blitz-traits = { workspace = true }
+dioxus-native-dom = { workspace = true }
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../../workspace-hack" }

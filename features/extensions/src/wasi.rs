@@ -2112,7 +2112,7 @@ const fn mods_to(m: wire::Mods) -> wit::Mods {
     }
 }
 
-fn pointer_to(p: wire::Pointer) -> wit::Pointer {
+const fn pointer_to(p: wire::Pointer) -> wit::Pointer {
     wit::Pointer {
         client_x: p.client_x,
         client_y: p.client_y,
@@ -2128,7 +2128,7 @@ fn pointer_to(p: wire::Pointer) -> wit::Pointer {
     }
 }
 
-fn touch_point_to(t: wire::TouchPoint) -> wit::TouchPoint {
+const fn touch_point_to(t: wire::TouchPoint) -> wit::TouchPoint {
     wit::TouchPoint {
         id: t.id,
         client_x: t.client_x,

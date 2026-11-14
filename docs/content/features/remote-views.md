@@ -93,6 +93,59 @@ dispatches the events that come back. When the frames stop (the process
 died or was unloaded), the view removes the sub-document, shows the
 placeholder, and follows the process when it restarts.
 
+## Input
+
+Every kind of input reaches the view's handlers (wire 7, `INPUT_WIRE` in
+`features/extensions/src/wire.rs`), in a process view, a WASI view
+(`features/extensions/wit/extension.wit` `event-data`), a TSX or Luau
+page (`features/pages/src/api.rs` `PageEvent`: `dx`, `dy`, `pointer_id`,
+`pointer_type`, `buttons`, `scroll_top`) and in a browser
+(`features/extensions/src/web.rs` `Pane`):
+
+| Handler | Carries |
+|---|---|
+| `onclick`, `onmouse*`, `oncontextmenu` | `Pointer`: where, buttons, modifiers |
+| `onpointerdown`, `onpointermove`, `onpointerup`, `onpointercancel`, `onpointerenter`… | `PointerData`: the pointer's id and type (`mouse`, `pen`, `touch`), pressure, tilt |
+| `ontouchstart`, `ontouchmove`, `ontouchend`, `ontouchcancel` | `TouchData`: every finger down, those that changed |
+| `onwheel` | `WheelData`, signed as the web's (a positive `delta_y` scrolls down; Blitz's own sign is winit's, the host turns it round) |
+| `onscroll` | `ScrollData`: where the element is scrolled to |
+| `oncompositionstart`, `oncompositionupdate`, `oncompositionend` | the text an input method is composing, then the text it committed |
+| `onkeydown`, `onkeyup`, `oninput`, `onfocus`, `onblur` | as before |
+
+- **A press holds the pointer.** After a `pointerdown`, the moves and the
+  release go to the element pressed, over it or not, as a touch is captured
+  on the web (in a browser, `web::Pane` calls `setPointerCapture`). A
+  drag-and-drop list works without knowing where the pointer went. A
+  release outside the pane reaches the view as a `pointercancel` when the
+  pointer comes back with no button held (Blitz holds the pointer for
+  custom widgets only, not for a sub-document).
+- **Fast events are coalesced.** While the view has not yet answered an
+  event, the moves, wheels, scrolls and composition updates that follow
+  wait; a run of them on one element keeps only the latest (a wheel's
+  deltas are summed), and any other event sends what waits first, in
+  order (`Coalescer`). A slow view gets the latest move, not a queue of
+  stale ones.
+- **The input method.** A field in the view turns the window's IME on
+  when it takes the focus, with the caret area moved to where the pane is
+  in the window, and its clipboard is the window's (`HostShell`).
+- **Older processes.** A process at wire 6 or below is sent none of the
+  new kinds (`EventData::since`); it never had them.
+
+Measured (`cargo test -p architect-extensions --features "remote guest
+process wasi" --test remote_input round_trips -- --ignored --nocapture`;
+a debug build on THEBATTLESHIP, the host document headless):
+
+| Round trip | n | p50 | p99 |
+|---|---|---|---|
+| a key into a field, to its echo | 200 | 1.34 ms | 3.76 ms |
+| a held move, to its echo | 200 | 1.15 ms | 2.23 ms |
+| 500 rows in, then out | 40 | 3.84 ms | 6.63 ms |
+
+The budget is 16 ms from key to echo in a local pane (a frame at 60 Hz);
+`REMOTE_BUDGET` marks a view busy past 33 ms. 200 held moves sent before
+the view answered any reach it as a handful
+(`moves_while_the_view_is_busy_are_coalesced_to_the_latest`).
+
 ## Tests to read
 
 - `features/extensions/tests/remote_view.rs` (the test binary starts itself
@@ -103,13 +156,19 @@ placeholder, and follows the process when it restarts.
   or a program that never says hello, fails to load; nonsense frames (unknown
   ids, cycles, a pop past the root, a child that is not there, raw HTML) are
   refused without a crash.
+- `features/extensions/tests/remote_input.rs`: a press holds the pointer
+  over another element; a release lost outside the pane is a cancel; 200
+  moves are coalesced to the latest; a finger is a touch and a touch
+  pointer; a wheel reaches the view and scrolls its list; an input method
+  composes into a field, the window's IME on and its caret area in window
+  coordinates. `features/pages/tests/js.rs`
+  `a_tsx_page_gets_pointer_wheel_and_composition_events`.
 
 ## Status
 
 Done in architect on Unix desks; the sandbox runs the clicker. Not yet: a stdio
 transport, starting lazily and stopping when idle, handing state over on a
-reload, a host service extensions call back into, Windows; pointer, touch,
-wheel and scroll events, IME, and an element and CSS allowlist (only raw HTML
-is refused today).
+reload, a host service extensions call back into, Windows, `mounted` measurements, and an element and CSS allowlist (only raw
+HTML is refused today).
 
 - **Task** and **Studio** do not use it yet.

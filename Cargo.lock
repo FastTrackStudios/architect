@@ -1899,6 +1899,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-sandbox-kanban"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-extensions",
+ "architect-workspace-hack",
+ "blitz-dom",
+ "blitz-traits",
+ "dioxus",
+ "dioxus-native-dom",
+ "futures",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "architect-sandbox-media"
 version = "0.1.0"
 dependencies = [

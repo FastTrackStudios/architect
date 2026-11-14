@@ -1394,7 +1394,7 @@ fn dispatch(vdom: &VirtualDom, event: wit::ViewEvent) {
             serialised!(dioxus::html::SerializedTouchData, serde_json::json!({
                 "alt_key": t.mods.alt, "ctrl_key": t.mods.ctrl,
                 "meta_key": t.mods.meta, "shift_key": t.mods.shift,
-                "touches": all.clone(), "changed_touches": changed, "target_touches": all,
+                "touches": &all, "changed_touches": changed, "target_touches": &all,
             }))
         }
         wit::EventData::Wheel(w) => serialised!(dioxus::html::SerializedWheelData, merged(
