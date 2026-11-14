@@ -15,8 +15,10 @@ authors = ["FastTrackStudios"]
 # The vault's notes, through the app's own actions; it never deletes.
 actions = ["VAULT_LIST", "VAULT_READ", "VAULT_CREATE", "EXT_VIEW_OPEN"]
 effect = "mutating"
-# The note being typed in.
-writes = ["editor"]
+# The vault's actions read and make notes: the documents (VAULT_*).
+reads = ["documents"]
+# The note being typed in; the notes it makes.
+writes = ["editor", "documents"]
 ui = ["prompts", "notify"]
 
 [[actions]]
