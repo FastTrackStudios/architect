@@ -127,7 +127,10 @@ fn press(x: f32, y: f32, buttons: MouseEventButtons) -> BlitzPointerEvent {
 /// The widget's node, and where it is in the window.
 fn widget(doc: &DioxusDocument) -> (f32, f32, f32, f32) {
     let d = doc.inner.borrow();
-    let node = d.query_selector("object").unwrap().expect("the paint widget");
+    let node = d
+        .query_selector("object")
+        .unwrap()
+        .expect("the paint widget");
     let n = d.get_node(node).unwrap();
     let at = n.absolute_position(0.0, 0.0);
     let size = n.final_layout().size;
@@ -151,16 +154,26 @@ fn a_linked_paint_view_takes_the_panes_input_and_draws_in_the_window() {
     // A press in the middle reaches the view in its own pixels.
     let (px, py) = (x + w / 2.0, y + h / 2.0);
     doc.handle_ui_event(UiEvent::PointerMove(press(px, py, MouseEventButtons::None)));
-    doc.handle_ui_event(UiEvent::PointerDown(press(px, py, MouseEventButtons::Primary)));
+    doc.handle_ui_event(UiEvent::PointerDown(press(
+        px,
+        py,
+        MouseEventButtons::Primary,
+    )));
     doc.handle_ui_event(UiEvent::PointerUp(press(px, py, MouseEventButtons::None)));
     let pressed = PRESSED.lock().unwrap().clone();
     assert_eq!(pressed.len(), 1, "one press: {pressed:?}");
     let (vx, vy) = pressed[0];
-    assert!((vx - w / 2.0).abs() < 1.0 && (vy - h / 2.0).abs() < 1.0, "{pressed:?}");
+    assert!(
+        (vx - w / 2.0).abs() < 1.0 && (vy - h / 2.0).abs() < 1.0,
+        "{pressed:?}"
+    );
 
     // What it draws is in the window's scene.
     let mut scene = Scene::new();
     blitz_paint::paint_scene(&mut scene, &mut doc.inner.borrow_mut(), 1.0, 400, 300, 0, 0);
     let drew = format!("{:?}", scene.commands);
-    assert!(drew.contains(&format!("{INK:?}")), "no dot in the window's scene");
+    assert!(
+        drew.contains(&format!("{INK:?}")),
+        "no dot in the window's scene"
+    );
 }
