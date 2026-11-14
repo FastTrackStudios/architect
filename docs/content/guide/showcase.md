@@ -138,6 +138,7 @@ next steps: a web cell that says only "#495" waits on them.
 |---|---|---|---|---|---|---|
 | W1 | The web app runs its distribution's linked extensions | n/a | ⚠️ `architect_web::run(<Distribution>)` runs the Architect app's own linked extensions (tested); `cargo xtask dist web`'s path for a distribution crate's own wasm (`web` feature) is not run by any test yet (studio#500 is its first) | n/a | Tasks, Calendar | `apps/web/test/app-linked-extensions.test.mjs` (light and dark, 390 and 1280 px) |
 | W2 | Installed Luau, pages and WASI run in the browser, with documents and storage | n/a | ❌ #495 | n/a | - | `features/extensions/tests/wasi_web.rs` (the runner, not the app) |
+| G1 | Share-link guests run extensions, scoped to the share (#495; model in #495's G1 comment) | ❌ the guest profile is the install workstream's (`share_needs::guest_capabilities`, #755); the `apps/ui` host does not run a guest's extensions yet | ❌ the same; the web app runs none for a guest (asserted by `apps/web/test/app-share-guest.test.mjs`) | ❌ the same (a universal link, #635) | - | - |
 
 ## The example extensions
 

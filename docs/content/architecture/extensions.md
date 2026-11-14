@@ -756,6 +756,20 @@ a `web` feature (`xtask/src/dist.rs` `build_web`).
 `apps/web/test/app-documents.test.mjs` drives all of it through the
 demo's probe extension (`/app/?demo&probe` only).
 
+### A share link's guests
+
+A share link's guests will run extensions, scoped to the share (#495 G1;
+the model is #495's G1 comment). What an extension may do for a guest is
+the install workstream's guest profile, one function every host uses:
+`share_needs::guest_capabilities` (#755: the share's documents read-only,
+no writes, no secrets, `fetch` only to hosts the owner approved, no app
+actions past its own). Which extensions a link runs, and the packages
+and signers it trusts, are the link's owner-signed or node-held needs
+(`share_needs::LinkNeeds`, `plan_link`, `verify_package`), never a vault
+file. The guest host scopes the documents and the vault query engine to
+the share: `GUEST_READS`' `documents` is the generic capability. Until the
+hosts run a guest's extensions, a guest runs none.
+
 ## Processes over vox
 
 A process extension is a program the host starts and speaks
