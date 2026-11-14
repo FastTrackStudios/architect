@@ -42,6 +42,8 @@ comment = "studio v26.11.4 SHA256SUMS"
 [core.linked]
 crate     = "setlists"
 features  = ["extension", "share"]
+# "ios": builds only from a Studio tag carrying studio#492 (PDF export off
+# on iOS); v26.11.4 fails there (azul-core). Bump the tag before shipping it.
 platforms = ["desktop", "node", "ios"]
 extension = "setlists::ext::Setlists"
 blocks    = "setlists::share::blocks"
@@ -71,6 +73,8 @@ comment = "studio v26.11.4 SHA256SUMS"
 [core.linked]
 crate     = "studio-views"
 features  = ["extension"]
+# "ios": builds only from a Studio tag carrying studio#492 (PDF export off
+# on iOS); v26.11.4 fails there (azul-core). Bump the tag before shipping it.
 platforms = ["desktop", "ios"]
 extension = "studio_views::ext::StudioViews"
 patch."https://github.com/FastTrackStudios/daw" = ["daw", "dawfile-reaper", "fts-sample"]

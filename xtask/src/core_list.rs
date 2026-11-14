@@ -652,7 +652,6 @@ fn member_path(root: &Root, name: &str) -> Result<String, String> {
         .ok_or_else(|| format!("architect has no member `{name}`"))
 }
 
-/// Who `e` is, for a comment.
 /// Where a linked crate is built: on the desk's window, the node, the
 /// iOS app.
 fn targets(l: &Linked) -> (bool, bool, bool) {
@@ -679,13 +678,13 @@ fn linked_cfg(l: &Linked) -> Option<&'static str> {
     }
 }
 
-/// The dependency table a linked crate goes in: every target when it is
-/// built for iOS and for the desk or the node, iOS's alone, or every
-/// target but iOS (a crate not listed for iOS is never built for it).
 const DEPS_ALL: &str = "[dependencies]";
 const DEPS_IOS: &str = "[target.'cfg(target_os = \"ios\")'.dependencies]";
 const DEPS_NOT_IOS: &str = "[target.'cfg(not(target_os = \"ios\"))'.dependencies]";
 
+/// The dependency table a linked crate goes in: every target when it is
+/// built for iOS and for the desk or the node, iOS's alone, or every
+/// target but iOS (a crate not listed for iOS is never built for it).
 fn deps_table(l: &Linked) -> &'static str {
     match targets(l) {
         (_, _, false) => DEPS_NOT_IOS,
@@ -718,6 +717,7 @@ fn linked_dep(e: &Entry, l: &Linked) -> String {
     format!("{} = {{ {} }}", key(&l.krate), fields.join(", "))
 }
 
+/// Who `e` is, for a comment.
 fn about(e: &Entry) -> String {
     format!("{} {}: {} {} ({})", e.id, e.version, e.source, e.tag, e.rev)
 }

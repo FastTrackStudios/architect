@@ -51,6 +51,10 @@ for a in "$@"; do
         *) echo "usage: $0 [--dry-run | --build-only]" >&2; exit 2 ;;
     esac
 done
+if [ "$DRY_RUN" = 1 ] && [ "$BUILD_ONLY" = 1 ]; then
+    echo "--dry-run and --build-only are exclusive: --build-only stops before the signing --dry-run checks" >&2
+    exit 2
+fi
 
 # Checked first: a missing version must not cost a whole build.
 : "${MARKETING_VER:?MARKETING_VER is required: the version of the release tag being shipped (e.g. 0.12.0)}"
