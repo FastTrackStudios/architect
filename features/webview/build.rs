@@ -15,7 +15,11 @@ fn wpe() {
         return;
     }
     let mut build = cc::Build::new();
-    build.file("src/wpe/glue.c").warnings(true);
+    build
+        .file("src/wpe/glue.c")
+        .warnings(true)
+        // GObject vfuncs and signal handlers take what they do not use.
+        .flag_if_supported("-Wno-unused-parameter");
     for lib in ["wpe-webkit-2.0", "wpe-platform-2.0", "epoxy", "gbm"] {
         match pkg_config::Config::new().probe(lib) {
             Ok(found) => {

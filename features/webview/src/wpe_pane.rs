@@ -21,8 +21,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyrender::{RenderContext, ResourceId, Scene};
-use architect_extensions::host::Host;
+use anyrender::{PaintScene as _, RenderContext, ResourceId, Scene};
 use architect_extensions::interface::WebAsk;
 use architect_extensions::webview::{self, Bridge, Outbound};
 use architect_workspace::use_pane;
@@ -267,7 +266,7 @@ impl Widget for WpeWidget {
 }
 
 /// The CSS cursor names WPE gives, as the window's cursors.
-fn cursor(name: &str) -> Option<blitz_traits::shell::CursorIcon> {
+fn cursor(name: &str) -> Option<cursor_icon::CursorIcon> {
     name.parse().ok()
 }
 

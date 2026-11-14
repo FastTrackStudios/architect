@@ -118,7 +118,7 @@ impl Backend {
     pub fn here() -> Self {
         #[cfg(all(feature = "wpe", target_os = "linux"))]
         {
-            use wry::raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
+            use wry::raw_window_handle::RawWindowHandle;
             let window: Option<Arc<dyn OsWindow>> = try_consume_context::<Arc<dyn OsWindow>>()
                 .or_else(|| try_consume_context::<MainWindow>().and_then(|m| m.window()));
             let wayland = window.is_some_and(|w| {

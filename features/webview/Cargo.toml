@@ -36,6 +36,7 @@ wpe = [
     "dep:kurbo",
     "dep:wgpu",
     "dep:wgpu_context",
+    "dep:cursor-icon",
 ]
 
 [dependencies]
@@ -58,6 +59,8 @@ kurbo = { workspace = true, optional = true }
 # The window renderer's: frames are uploaded and converted on its device.
 wgpu = { version = "30", optional = true }
 wgpu_context = { version = "0.10", optional = true }
+# The page's cursor, by its CSS name, as the window's.
+cursor-icon = { version = "1.2", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = { version = "0.18.2", optional = true }

@@ -2399,17 +2399,28 @@ dependencies = [
 name = "architect-webview"
 version = "0.1.0"
 dependencies = [
+ "anyrender",
  "architect-extensions",
  "architect-theme",
  "architect-workspace",
  "architect-workspace-hack",
+ "blitz-dom",
+ "blitz-traits",
+ "cc",
+ "cursor-icon",
  "dioxus",
  "dioxus-native",
+ "dioxus-native-dom",
  "futures-timer",
  "gtk",
+ "kurbo 0.13.1",
+ "peniko 0.6.1",
+ "pkg-config",
  "serde_json",
  "tempfile",
  "tracing",
+ "wgpu 30.0.1",
+ "wgpu_context",
  "wry",
 ]
 
