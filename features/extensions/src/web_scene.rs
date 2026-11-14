@@ -52,7 +52,9 @@ impl Scenes {
         on_event: &dyn Fn(ViewEvent),
     ) -> Result<(), String> {
         let mut painted = self.painted.borrow_mut();
-        let at = painted.iter().position(|p| p.element.is_same_node(Some(element)));
+        let at = painted
+            .iter()
+            .position(|p| p.element.is_same_node(Some(element)));
         let index = match at {
             Some(i) => i,
             None => {
@@ -113,10 +115,10 @@ fn css(c: Color) -> String {
 fn brush_css(brush: &anyrender::Paint) -> String {
     match brush {
         anyrender::Paint::Solid(c) => css(*c),
-        anyrender::Paint::Gradient(g) => g
-            .stops
-            .first()
-            .map_or_else(|| "transparent".to_owned(), |s| css(s.color.to_alpha_color())),
+        anyrender::Paint::Gradient(g) => g.stops.first().map_or_else(
+            || "transparent".to_owned(),
+            |s| css(s.color.to_alpha_color()),
+        ),
         _ => "transparent".to_owned(),
     }
 }
@@ -146,7 +148,11 @@ fn draw(p: &mut Painted, on_event: &dyn Fn(ViewEvent)) {
             data: EventData::Form(size.to_string()),
         });
     }
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::as_conversions)]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::as_conversions
+    )]
     {
         p.canvas.set_width((f64::from(w) * ratio) as u32);
         p.canvas.set_height((f64::from(h) * ratio) as u32);

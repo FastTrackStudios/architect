@@ -280,7 +280,10 @@ impl Graph {
         if self.placed {
             return;
         }
-        let (w, h) = (f64::from(ctx.geometry.width), f64::from(ctx.geometry.height));
+        let (w, h) = (
+            f64::from(ctx.geometry.width),
+            f64::from(ctx.geometry.height),
+        );
         if w <= 0.0 || h <= 0.0 {
             return;
         }

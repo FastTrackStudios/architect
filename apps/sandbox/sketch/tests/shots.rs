@@ -244,7 +244,8 @@ fn shots() {
                     .with_socket_dir(dir.path())
                     .with_restart(Restart::never());
                 let processes = runner.processes();
-                let host = Host::new(ActionList::new(), SharedSections::default()).with_runner(runner);
+                let host =
+                    Host::new(ActionList::new(), SharedSections::default()).with_runner(runner);
                 host.load(&package(dir.path()), Origin::Installed).unwrap();
                 let css = root_css(scheme);
                 let vdom = VirtualDom::new_with_props(
