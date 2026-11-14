@@ -40,6 +40,7 @@
 pub mod capabilities;
 pub mod catalog;
 pub mod contrib;
+pub mod device;
 pub mod documents;
 // The editor being typed in, for extensions (#312).
 pub mod editor;
@@ -71,6 +72,8 @@ pub mod clone;
 pub mod consent;
 #[cfg(feature = "host")]
 pub mod contrib_actions;
+#[cfg(all(feature = "device", target_os = "ios"))]
+pub mod device_ios;
 #[cfg(feature = "crdt")]
 pub mod doc;
 #[cfg(feature = "host")]
