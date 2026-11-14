@@ -1,7 +1,7 @@
 //! The extension showcase's pages (#710, `examples/showcase`), run as the
 //! app runs them: Templater-lite's Templates tab
 //! (`examples/showcase/templater-lite/pages/templates.tsx`), a TSX page on
-//! QuickJS, draws the templates its extension's action answers with, and
+//! `QuickJS`, draws the templates its extension's action answers with, and
 //! its New button runs that extension's action for the one it is on.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -78,7 +78,7 @@ impl Pane {
         }
     }
 
-    fn click(&mut self, selector: &str) {
+    fn click(&self, selector: &str) {
         let doc = self.view.document();
         let node = doc.query_selector(selector).unwrap().unwrap();
         let id: u64 = doc
