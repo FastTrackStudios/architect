@@ -1150,6 +1150,12 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
     // Inline embeds drawn by a page (the Board's ```kf fences): a
     // sub-document in the note, sized to its content.
     let _ = architect_pages::ui::use_embed_pages(pages);
+    // Extensions' `web` views in a native web view clipped to their pane.
+    #[cfg(all(
+        feature = "webview",
+        any(target_os = "macos", target_os = "linux", target_os = "windows")
+    ))]
+    let _ = architect_webview::desk::use_desk_web_views(extensions.host().clone());
     use_extension_ui(extensions.host().clone(), Arc::clone(&lab))
 }
 

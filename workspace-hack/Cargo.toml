@@ -188,6 +188,7 @@ url = { version = "2.5.8", features = ["serde"] }
 uuid = { version = "1.26.1", features = ["js", "serde", "v1", "v3", "v4", "v5", "v6", "v7", "v8"] }
 web-sys = { version = "0.3.104", features = ["AbortSignal", "AnimationEvent", "BlobPropertyBag", "ClipboardEvent", "CloseEvent", "Comment", "CompositionEvent", "CssStyleDeclaration", "CustomEvent", "DataTransfer", "DataTransferItem", "DataTransferItemList", "Document", "DomRect", "DragEvent", "File", "FileList", "FileReader", "FocusEvent", "FormData", "Headers", "History", "HtmlFormElement", "HtmlHeadElement", "HtmlInputElement", "HtmlSelectElement", "HtmlTextAreaElement", "InputEvent", "IntersectionObserverEntry", "KeyboardEvent", "Location", "MessageEvent", "NodeList", "PointerEvent", "QueuingStrategy", "ReadableByteStreamController", "ReadableStream", "ReadableStreamByobReader", "ReadableStreamByobRequest", "ReadableStreamDefaultController", "ReadableStreamDefaultReader", "ReadableStreamGetReaderOptions", "ReadableStreamReadResult", "ReadableStreamReaderMode", "ReadableStreamType", "ReadableWritablePair", "Request", "RequestInit", "ResizeObserverEntry", "ResizeObserverSize", "Response", "ScrollBehavior", "ScrollIntoViewOptions", "ScrollLogicalPosition", "ScrollRestoration", "ScrollToOptions", "Selection", "StreamPipeOptions", "Text", "Touch", "TouchEvent", "TouchList", "TransformStream", "TransformStreamDefaultController", "Transformer", "TransitionEvent", "UnderlyingSink", "UnderlyingSource", "Url", "WebSocket", "WheelEvent", "Window", "Worker", "WorkerOptions", "WorkerType", "WritableStream", "WritableStreamDefaultController", "WritableStreamDefaultWriter", "console"] }
 writeable = { version = "0.6.4", default-features = false, features = ["alloc"] }
+wry = { version = "0.57.1", default-features = false, features = ["devtools", "os-webview", "x11"] }
 xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64", "std", "xxh3", "xxh32", "xxh64"] }
 yoke = { version = "0.8.4", default-features = false, features = ["alloc", "derive"] }
 zerocopy = { version = "0.8.57", default-features = false, features = ["derive", "simd"] }
@@ -310,7 +311,10 @@ twox-hash = { version = "2.1.4" }
 wayland-backend = { version = "0.3.17", default-features = false, features = ["client_system", "dlopen"] }
 wayland-protocols = { version = "0.32.13", default-features = false, features = ["client", "staging", "unstable"] }
 wayland-sys = { version = "0.31.11", default-features = false, features = ["dlopen", "egl"] }
+webkit2gtk = { version = "2.0.2", default-features = false, features = ["v2_40"] }
+webkit2gtk-sys = { version = "2.0.2", default-features = false, features = ["v2_40"] }
 winnow = { version = "1.0.4" }
+wry = { version = "0.57.1", default-features = false, features = ["linux-body"] }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
