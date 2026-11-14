@@ -584,11 +584,23 @@ fn Detail(browse: Browse, row: Row) -> Element {
                         Badge { variant: BadgeVariant::Outline, "{row.at.label()}" }
                         if row.loaded { Badge { "Running" } }
                         if row.disabled { Badge { variant: BadgeVariant::Destructive, "Off" } }
+                        if row.not_here.is_some() { Badge { variant: BadgeVariant::Secondary, "Can't run here" } }
                         if let Some(p) = &pin { Badge { variant: BadgeVariant::Outline, "Pinned {p}" } }
                     }
                     KeyValueRow { label: "Id".to_owned(), value: row.id.clone() }
                     if let Some(runs) = &row.runs {
                         KeyValueRow { label: "Runs".to_owned(), value: runs.clone(), mono: false }
+                    }
+                    if let Some(why) = &row.not_here {
+                        KeyValueRow {
+                            label: "Here".to_owned(),
+                            value: if row.at == Where::Available {
+                                format!("{why}. It cannot be installed here.")
+                            } else {
+                                format!("{why}. It is kept, with its data; it runs where it can.")
+                            },
+                            mono: false,
+                        }
                     }
                     if let Some(a) = &about {
                         KeyValueRow { label: "Where it runs".to_owned(), value: a.runner.clone(), mono: false }
@@ -720,7 +732,7 @@ fn Actions(browse: Browse, row: Row, installed: Option<String>, about: Option<Pr
         }
     };
     rsx! {
-        if row.at == Where::Available {
+        if row.at == Where::Available && row.not_here.is_none() {
             Button { on_click: { let install = install.clone(); move |_| install(false) }, "Install" }
             Button { variant: ButtonVariant::Outline, on_click: move |_| install(true), "Install and pin" }
         }

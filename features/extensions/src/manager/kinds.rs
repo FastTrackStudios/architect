@@ -79,9 +79,17 @@ impl ItemKind for ExtensionKind {
                     .iter()
                     .filter(|p| p.message.starts_with(&format!("{}:", r.id)))
                     .map(|p| p.message.clone())
+                    // Not for this platform is a state, not a problem.
+                    .filter(|m| r.not_here.as_ref().is_none_or(|n| !m.ends_with(n.as_str())))
                     .collect();
+                // Kept and listed, never started (#578): the row says why.
+                if let Some(why) = &r.not_here {
+                    i.source = format!("{} · {why}", i.source);
+                }
                 if r.at == Where::Available {
-                    i.ops.push(Op::new("install", "Install"));
+                    if r.not_here.is_none() {
+                        i.ops.push(Op::new("install", "Install"));
+                    }
                 } else {
                     i.ops.push(if r.disabled {
                         Op::new("enable", "Turn on")

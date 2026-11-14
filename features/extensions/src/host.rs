@@ -644,6 +644,12 @@ pub enum LoadError {
     /// It owns an app id (`reserved`) the app did not allow it
     /// (`Host::allow_reserved`), or an installed copy does.
     Reserved(String),
+    /// It does not run on this platform (its manifest's `platforms`,
+    /// #578): `why` is "Linux only". It is kept, listed, never started.
+    NotHere {
+        platform: String,
+        why: String,
+    },
     /// A service it requires (`[requires]`) has no loaded provider whose
     /// version meets it.
     Requires {
@@ -667,6 +673,9 @@ impl std::fmt::Display for LoadError {
                 f,
                 "{id} is the app's: this app does not let it own it (a built-in or its development copy may, when the app allows it)"
             ),
+            Self::NotHere { platform, why } => {
+                write!(f, "{why}: not on {}", crate::platform::name(platform))
+            }
             Self::Requires { service, req, why } => {
                 write!(f, "it requires the service {service} {req}: {why}")
             }
@@ -838,6 +847,13 @@ struct Inner {
     windows: crate::windows::Windows,
     /// The app's own ids (`APP_…`) an extension may own, by its id.
     reserved: Mutex<BTreeMap<String, BTreeSet<String>>>,
+    /// The platform it runs extensions on (`crate::platform`): this
+    /// build's, unless the app (or a test) says otherwise.
+    platform: Mutex<String>,
+    /// What tried to load and cannot run here, by id: its manifest and
+    /// why, so the extensions page lists it and a `[requires]` on what it
+    /// provides says why (#578).
+    not_here: Mutex<BTreeMap<String, (Manifest, String)>>,
     /// Each point's deliveries so far: an owner keeps the newest.
     delivered: std::sync::atomic::AtomicU64,
     /// The clock, app-defined events, hooks made at run time, schedules
@@ -914,6 +930,8 @@ impl Host {
                 points: crate::points::Points::default(),
                 windows: crate::windows::Windows::default(),
                 reserved: Mutex::new(BTreeMap::new()),
+                platform: Mutex::new(crate::platform::here().to_owned()),
+                not_here: Mutex::new(BTreeMap::new()),
                 delivered: std::sync::atomic::AtomicU64::new(0),
                 events: crate::host_events::EventState::default(),
             }),
@@ -1512,6 +1530,7 @@ impl Host {
         );
         let _entered = span.enter();
         let result = self.swap_in(package, origin, started);
+        self.note_not_here(manifest, result.as_ref().err());
         if result.is_ok() {
             let id = &manifest.id;
             let first = self
@@ -1556,6 +1575,12 @@ impl Host {
     ) -> Result<Change, LoadError> {
         let manifest = &package.manifest;
         manifest.check().map_err(|e| LoadError::Package(e.into()))?;
+        // Not for this platform (#578): never run, its `build` included;
+        // it stays listed and its data stays where it is.
+        let platform = self.platform();
+        if let Some(why) = crate::platform::not_here(&manifest.platforms, &platform) {
+            return Err(LoadError::NotHere { platform, why });
+        }
         // Its tours, read from its package and checked as it now: a broken
         // one fails the load, before anything is swapped.
         let tours = read_tours(package)?;
@@ -1573,7 +1598,7 @@ impl Host {
             .loaded
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        check_requires(manifest, &loaded)?;
+        check_requires(manifest, &loaded, &self.not_here())?;
         let old = loaded.get(&manifest.id);
         let reloaded = old.is_some();
         // 1–2: start the new one with the old one's state, and build
@@ -2086,6 +2111,93 @@ impl Host {
     }
 }
 
+/// The platform it runs extensions on (#578).
+impl Host {
+    /// The platform extensions are checked against
+    /// ([`crate::platform::here`] unless [`Self::set_platform`] said).
+    #[must_use]
+    pub fn platform(&self) -> String {
+        self.inner
+            .platform
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Checks extensions against `platform` from now on: a host that knows
+    /// better than its build (a browser's), or a test of another platform.
+    pub fn set_platform(&self, platform: impl Into<String>) {
+        *self
+            .inner
+            .platform
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = platform.into();
+    }
+}
+
+impl Host {
+    /// The extensions that tried to load and cannot run here: each
+    /// manifest and why ("Linux only: not on macOS"), by id.
+    #[must_use]
+    pub fn not_here(&self) -> Vec<(Manifest, String)> {
+        self.inner
+            .not_here
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    /// Why extension `id` cannot run here, when it tried and cannot.
+    #[must_use]
+    pub fn why_not_here(&self, id: &str) -> Option<String> {
+        self.inner
+            .not_here
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(id)
+            .map(|(_, why)| why.clone())
+    }
+
+    fn note_not_here(&self, manifest: &Manifest, error: Option<&LoadError>) {
+        let mut map = self
+            .inner
+            .not_here
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        match error {
+            Some(e) if e.is_not_here() => {
+                map.insert(manifest.id.clone(), (manifest.clone(), e.to_string()));
+            }
+            Some(_) => {}
+            None => {
+                map.remove(&manifest.id);
+            }
+        }
+    }
+
+    /// Forgets that `id` cannot run here: it was removed.
+    pub(crate) fn forget_not_here(&self, id: &str) {
+        self.inner
+            .not_here
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(id);
+    }
+}
+
+impl LoadError {
+    /// Whether it is this platform's doing, not the extension's: a
+    /// `platforms` that leaves this one out, or no runner for its kind (a
+    /// process on a phone or in a browser). Such an extension is shown as
+    /// "can't run here", not as broken.
+    #[must_use]
+    pub const fn is_not_here(&self) -> bool {
+        matches!(self, Self::NotHere { .. } | Self::NoRunner(_))
+    }
+}
+
 /// Windows, points and services (`crate::interop`).
 impl Host {
     /// Lets extension `id` (its built-in, or a development copy of it) own
@@ -2344,6 +2456,7 @@ fn read_tours(package: &Package) -> Result<Vec<contrib::TourDecl>, LoadError> {
 fn check_requires(
     manifest: &Manifest,
     loaded: &BTreeMap<String, Running>,
+    not_here: &[(Manifest, String)],
 ) -> Result<(), LoadError> {
     for (service, req) in &manifest.requires {
         let parsed = semver::VersionReq::parse(req).map_err(|e| LoadError::Requires {
@@ -2359,7 +2472,14 @@ fn check_requires(
                 .filter(|m| m.id != manifest.id),
         );
         if crate::interop::choose_provider(&providers, &parsed).is_none() {
-            let why = if providers.is_empty() {
+            let elsewhere: Vec<String> = not_here
+                .iter()
+                .filter(|(m, _)| m.provides.contains_key(service))
+                .map(|(m, why)| format!("{} is {why}", m.name))
+                .collect();
+            let why = if providers.is_empty() && !elsewhere.is_empty() {
+                format!("its provider cannot run here: {}", elsewhere.join("; "))
+            } else if providers.is_empty() {
                 "no loaded extension provides it".to_owned()
             } else {
                 format!(
