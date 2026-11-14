@@ -122,13 +122,23 @@ fn a_web_view_runs_as_its_extension_and_is_refused_past_its_capabilities() {
     let denied = call(&b, &seen, 2, &json!({"op": "list_documents"}));
     assert_eq!(denied["error"]["kind"], "refused", "{denied}");
     // Its own setting store needs nothing.
-    let set = call(&b, &seen, 3, &json!({"op": "set_data", "key": "cards", "value": [1, 2]}));
+    let set = call(
+        &b,
+        &seen,
+        3,
+        &json!({"op": "set_data", "key": "cards", "value": [1, 2]}),
+    );
     assert!(set.get("ok").is_some(), "{set}");
     let got = call(&b, &seen, 4, &json!({"op": "data", "key": "cards"}));
     assert_eq!(got["ok"], json!([1, 2]));
     // A malformed call is answered, not dropped.
     assert!(b.receive(r#"{"t":"call","id":5}"#).is_none());
-    assert!(seen.lock().unwrap().iter().any(|m| matches!(m, Outbound::Answer { id: 5, .. })));
+    assert!(
+        seen.lock()
+            .unwrap()
+            .iter()
+            .any(|m| matches!(m, Outbound::Answer { id: 5, .. }))
+    );
 }
 
 #[test]
@@ -136,12 +146,22 @@ fn a_secret_is_kept_and_never_read_back() {
     let host = host();
     load(&host, "");
     let (b, seen) = bridge(&host);
-    let kept = call(&b, &seen, 1, &json!({"op": "store_secret", "name": "token", "value": "s3cret"}));
+    let kept = call(
+        &b,
+        &seen,
+        1,
+        &json!({"op": "store_secret", "name": "token", "value": "s3cret"}),
+    );
     assert_eq!(kept["ok"], true, "{kept}");
     let state = call(&b, &seen, 2, &json!({"op": "secret", "name": "token"}));
     assert_eq!(state["ok"]["set"], true);
     assert!(!state.to_string().contains("s3cret"), "{state}");
-    let other = call(&b, &seen, 3, &json!({"op": "store_secret", "name": "other", "value": "x"}));
+    let other = call(
+        &b,
+        &seen,
+        3,
+        &json!({"op": "store_secret", "name": "other", "value": "x"}),
+    );
     assert_eq!(other["error"]["kind"], "refused", "{other}");
     // Its value is the host's: in a header to its own host only.
     assert!(host.secrets().is_set("demo.board", "token"));
@@ -153,16 +173,33 @@ fn a_web_view_hears_document_events_only_while_it_may_read_documents() {
     load(&blind, "");
     let (b, seen) = bridge(&blind);
     assert!(b.receive(r#"{"t":"listen","events":["doc.*"]}"#).is_none());
-    blind.raise_doc(&DocEvent::Saved { path: "a.md".into() });
-    assert!(!seen.lock().unwrap().iter().any(|m| matches!(m, Outbound::Event { .. })));
+    blind.raise_doc(&DocEvent::Saved {
+        path: "a.md".into(),
+    });
+    assert!(
+        !seen
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|m| matches!(m, Outbound::Event { .. }))
+    );
 
     let reader = host();
     load(&reader, r#""documents""#);
     let (b, seen) = bridge(&reader);
-    reader.raise_doc(&DocEvent::Saved { path: "before.md".into() });
-    assert!(b.receive(r#"{"t":"listen","events":["doc.saved"]}"#).is_none());
-    reader.raise_doc(&DocEvent::Saved { path: "a.md".into() });
-    reader.raise_doc(&DocEvent::Created { path: "b.md".into() });
+    reader.raise_doc(&DocEvent::Saved {
+        path: "before.md".into(),
+    });
+    assert!(
+        b.receive(r#"{"t":"listen","events":["doc.saved"]}"#)
+            .is_none()
+    );
+    reader.raise_doc(&DocEvent::Saved {
+        path: "a.md".into(),
+    });
+    reader.raise_doc(&DocEvent::Created {
+        path: "b.md".into(),
+    });
     let events: Vec<_> = seen
         .lock()
         .unwrap()
@@ -172,11 +209,23 @@ fn a_web_view_hears_document_events_only_while_it_may_read_documents() {
             _ => None,
         })
         .collect();
-    assert_eq!(events, vec![("doc.saved".to_owned(), json!({"path": "a.md"}))]);
+    assert_eq!(
+        events,
+        vec![("doc.saved".to_owned(), json!({"path": "a.md"}))]
+    );
     drop(b);
     // Dropped, it hears nothing more.
-    reader.raise_doc(&DocEvent::Saved { path: "c.md".into() });
-    assert_eq!(seen.lock().unwrap().iter().filter(|m| matches!(m, Outbound::Event { .. })).count(), 1);
+    reader.raise_doc(&DocEvent::Saved {
+        path: "c.md".into(),
+    });
+    assert_eq!(
+        seen.lock()
+            .unwrap()
+            .iter()
+            .filter(|m| matches!(m, Outbound::Event { .. }))
+            .count(),
+        1
+    );
 }
 
 #[test]

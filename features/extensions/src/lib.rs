@@ -64,8 +64,8 @@ pub mod vault_needs;
 /// `[[favourites]]`: a note type's tabs and primary action.
 pub use architect_favourites as favourites;
 pub mod toolbar;
-pub mod webview;
 pub mod toolbar_edit;
+pub mod webview;
 
 #[cfg(feature = "host")]
 pub mod actions;
