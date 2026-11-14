@@ -250,13 +250,13 @@ impl HostUi for FakeUi {
 }
 
 /// A pick's answer as the call gives it: a path, a list of them
-/// (`open_many`), or `null`.
+/// (`open_many`, `photos`), or `null`.
 #[must_use]
 pub fn pick_answer(kind: PickKind, paths: Option<Vec<String>>) -> Value {
-    match (kind, paths) {
-        (_, None) => Value::Null,
-        (PickKind::OpenMany, Some(ps)) => Value::from(ps),
-        (_, Some(ps)) => ps.into_iter().next().map_or(Value::Null, Value::String),
+    match paths {
+        None => Value::Null,
+        Some(ps) if kind.many() => Value::from(ps),
+        Some(ps) => ps.into_iter().next().map_or(Value::Null, Value::String),
     }
 }
 
@@ -547,6 +547,15 @@ mod tests {
         assert_eq!(
             pick_answer(PickKind::OpenMany, Some(vec!["a".to_owned()])),
             json!(["a"])
+        );
+        // A photo is one path; photos are a list, as `open_many`.
+        assert_eq!(
+            pick_answer(PickKind::Photo, Some(vec!["p.jpg".to_owned()])),
+            json!("p.jpg")
+        );
+        assert_eq!(
+            pick_answer(PickKind::Photos, Some(vec!["p.jpg".to_owned()])),
+            json!(["p.jpg"])
         );
     }
 

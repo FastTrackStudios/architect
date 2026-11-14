@@ -280,9 +280,9 @@ export interface Decoration { icon?: string; badge?: string; color?: string; too
  */
 export const ui: {
   notify(text: string, kind?: "info" | "success" | "warning" | "error", title?: string): Promise<void>;
-  /** A path (`open`, `folder`, `save`), paths (`open_many`), or `null`. */
+  /** A path (`open`, `folder`, `save`, `photo`), paths (`open_many`, `photos`), or `null`. */
   pick(options: {
-    kind: "open" | "open_many" | "folder" | "save";
+    kind: "open" | "open_many" | "folder" | "save" | "photo" | "photos";
     title?: string;
     filters?: FileFilter[];
     folder?: string;

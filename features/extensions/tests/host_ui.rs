@@ -256,6 +256,33 @@ fn a_page_asks_through_ext_host_call_as_its_extension() {
 }
 
 #[test]
+fn a_photo_picked_is_one_it_may_read_and_not_write() {
+    let tmp = tempfile::tempdir().unwrap();
+    // Where a platform's photo picker copies an image for it (iOS:
+    // `<tmp>/architect-picks/`), outside its folders.
+    let copy = tmp.path().join("architect-picks/meal.jpg");
+    std::fs::create_dir_all(copy.parent().unwrap()).unwrap();
+    std::fs::write(&copy, "jpeg").unwrap();
+    let ui = FakeUi::new().answer(json!([copy.display().to_string()]));
+    let (_list, ext) = app(tmp.path(), &ui, MANIFEST);
+    let api = ext.host().api("lab.ask");
+    let picked =
+        block_on(api.call(serde_json::from_str(r#"{"op":"pick","kind":"photos"}"#).unwrap()))
+            .unwrap();
+    // `photos` answers a list, as `open_many`.
+    assert_eq!(picked, json!([copy.display().to_string()]));
+    let read = block_on(api.call(HostRequest::ReadFile {
+        path: copy.display().to_string(),
+    }));
+    assert_eq!(read, Ok(json!("jpeg")));
+    let write = block_on(api.call(HostRequest::WriteFile {
+        path: copy.display().to_string(),
+        text: "x".to_owned(),
+    }));
+    assert!(matches!(write, Err(HostError::Refused { .. })), "{write:?}");
+}
+
+#[test]
 fn every_interface_call_is_refused_outside_its_capabilities() {
     let tmp = tempfile::tempdir().unwrap();
     let ui = FakeUi::new();
@@ -270,6 +297,9 @@ fn every_interface_call_is_refused_outside_its_capabilities() {
         (r#"{"op":"clipboard_read"}"#, "ui.clipboard"),
         (r#"{"op":"clipboard_write","text":"x"}"#, "ui.clipboard"),
         (r#"{"op":"pick","kind":"open"}"#, "ui.pickers"),
+        // A photo from the person's photos is a pick too (#708).
+        (r#"{"op":"pick","kind":"photo"}"#, "ui.pickers"),
+        (r#"{"op":"pick","kind":"photos"}"#, "ui.pickers"),
         (
             r#"{"op":"prompt","kind":"confirm","title":"?"}"#,
             "ui.prompts",
