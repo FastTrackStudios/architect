@@ -134,6 +134,20 @@ fn wide(key: &'static str, value: impl Into<String>) {
 #[cfg(not(feature = "wide-events"))]
 fn wide(_key: &'static str, _value: impl Into<String>) {}
 
+/// The documents service's client and the scope its server lives in.
+type DocsClient = (
+    architect_documents::DocumentsClient,
+    Arc<architect::resource::Scope>,
+);
+
+#[cfg(target_family = "wasm")]
+thread_local! {
+    /// A browser's hosts' documents clients, by host (`Host::client_key`):
+    /// not `Send` there, so never in the host itself.
+    static WEB_CLIENTS: std::cell::RefCell<BTreeMap<usize, DocsClient>> =
+        const { std::cell::RefCell::new(BTreeMap::new()) };
+}
+
 /// The host's side of the service: what it was given.
 pub(crate) struct Services {
     grants: Mutex<Option<Grants>>,
@@ -152,12 +166,8 @@ pub(crate) struct Services {
     /// The documents service's client and the scope its in-process server
     /// lives in (`crate::docs_service`): made when first needed, again
     /// after the documents or the data root change.
-    docs_client: Mutex<
-        Option<(
-            architect_documents::DocumentsClient,
-            Arc<architect::resource::Scope>,
-        )>,
-    >,
+    #[cfg(not(target_family = "wasm"))]
+    docs_client: Mutex<Option<DocsClient>>,
     /// The app's interface, for extensions (none given: [`NoUi`]).
     ui: Mutex<Option<Arc<dyn HostUi>>>,
     /// The window's own interface, kept for whoever draws it
@@ -229,6 +239,7 @@ impl Default for Services {
             data_root: Mutex::new(None),
             app_list: Mutex::new(None),
             data: Arc::new(Mutex::new(BTreeMap::new())),
+            #[cfg(not(target_family = "wasm"))]
             docs_client: Mutex::new(None),
             ui: Mutex::new(None),
             #[cfg(feature = "ui")]
@@ -306,14 +317,40 @@ impl Host {
     /// [`Self::with_documents`] on a host already shared.
     pub fn set_documents(&self, documents: Arc<dyn Documents>) {
         *lock(&self.services().documents) = Some(documents);
-        // The service is made again over them at its next call.
-        *lock(&self.services().docs_client) = None;
+        self.forget_documents_client();
+    }
+
+    /// Its key among a browser thread's clients: the host's services.
+    #[cfg(target_family = "wasm")]
+    fn client_key(&self) -> usize {
+        std::ptr::from_ref(self.services()) as usize
     }
 
     pub(crate) fn cached_documents_client(&self) -> Option<architect_documents::DocumentsClient> {
-        lock(&self.services().docs_client)
-            .as_ref()
-            .map(|(c, _)| c.clone())
+        #[cfg(not(target_family = "wasm"))]
+        {
+            lock(&self.services().docs_client)
+                .as_ref()
+                .map(|(c, _)| c.clone())
+        }
+        #[cfg(target_family = "wasm")]
+        {
+            let key = self.client_key();
+            WEB_CLIENTS.with(|m| m.borrow().get(&key).map(|(c, _)| c.clone()))
+        }
+    }
+
+    /// The service is made again over what changed at its next call.
+    fn forget_documents_client(&self) {
+        #[cfg(not(target_family = "wasm"))]
+        {
+            *lock(&self.services().docs_client) = None;
+        }
+        #[cfg(target_family = "wasm")]
+        {
+            let key = self.client_key();
+            WEB_CLIENTS.with(|m| m.borrow_mut().remove(&key));
+        }
     }
 
     pub(crate) fn keep_documents_client(
@@ -321,7 +358,15 @@ impl Host {
         client: architect_documents::DocumentsClient,
         scope: Arc<architect::resource::Scope>,
     ) {
-        *lock(&self.services().docs_client) = Some((client, scope));
+        #[cfg(not(target_family = "wasm"))]
+        {
+            *lock(&self.services().docs_client) = Some((client, scope));
+        }
+        #[cfg(target_family = "wasm")]
+        {
+            let key = self.client_key();
+            WEB_CLIENTS.with(|m| m.borrow_mut().insert(key, (client, scope)));
+        }
     }
 
     pub(crate) fn data_root(&self) -> Option<PathBuf> {
@@ -524,7 +569,7 @@ impl Host {
     #[must_use]
     pub fn with_data_root(self, root: impl Into<PathBuf>) -> Self {
         *lock(&self.services().data_root) = Some(root.into());
-        *lock(&self.services().docs_client) = None;
+        self.forget_documents_client();
         self
     }
 

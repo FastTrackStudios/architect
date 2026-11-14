@@ -322,7 +322,8 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 }
 
 /// The runtime the in-process service runs on: the server's sessions,
-/// whichever executor awaits the client.
+/// whichever executor awaits the client. Native only.
+#[cfg(not(target_family = "wasm"))]
 fn runtime() -> Result<&'static tokio::runtime::Runtime, String> {
     static RT: std::sync::OnceLock<Result<tokio::runtime::Runtime, String>> =
         std::sync::OnceLock::new();
@@ -338,7 +339,9 @@ fn runtime() -> Result<&'static tokio::runtime::Runtime, String> {
     .map_err(Clone::clone)
 }
 
-/// A client of `server`, served in-process for as long as `scope` lives.
+/// A client of `server`, served in-process for as long as `scope` lives:
+/// on the service's own runtime natively, with the browser's
+/// `spawn_local` in a browser.
 ///
 /// # Errors
 ///
@@ -347,12 +350,22 @@ pub(crate) async fn establish(
     server: svc::DocumentsServer,
     scope: &Arc<architect::resource::Scope>,
 ) -> Result<svc::DocumentsClient, String> {
-    let rt = runtime()?;
     let local = architect::serve_local(server, scope);
-    rt.spawn(async move { local.establish::<svc::DocumentsClient>().await })
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
+    #[cfg(not(target_family = "wasm"))]
+    {
+        runtime()?
+            .spawn(async move { local.establish::<svc::DocumentsClient>().await })
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(target_family = "wasm")]
+    {
+        local
+            .establish::<svc::DocumentsClient>()
+            .await
+            .map_err(|e| e.to_string())
+    }
 }
 
 impl Host {
