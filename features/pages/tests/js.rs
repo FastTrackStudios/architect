@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use architect::action::{ActionList, ActionMeta, Effect};
 use architect_extensions::remote::RemoteDocument;
-use architect_extensions::wire::{EventData, Pointer, ViewEvent};
+use architect_extensions::wire::{EventData, Pointer, PointerData, ViewEvent, WheelData};
 use architect_pages::files::{Origin, PageFile};
 use architect_pages::host::AppHost;
 use architect_pages::runner::{PageLimits, PageSession, Pages};
@@ -92,6 +92,11 @@ impl Pane {
 
     /// Clicks `selector` as the pane would.
     fn click(&mut self, selector: &str) {
+        self.send(selector, "click", EventData::Mouse(Pointer::default()));
+    }
+
+    /// Sends `selector` event `name` carrying `data`, as the pane would.
+    fn send(&mut self, selector: &str, name: &str, data: EventData) {
         let doc = self.view.document();
         let node = doc.query_selector(selector).unwrap().unwrap();
         let id: u64 = doc
@@ -103,13 +108,13 @@ impl Pane {
             .unwrap();
         self.session.event(ViewEvent {
             element: id,
-            name: "click".to_owned(),
+            name: name.to_owned(),
             bubbles: true,
-            data: EventData::Mouse(Pointer::default()),
+            data,
         });
         assert!(
             self.frame(Duration::from_secs(2)),
-            "a click is answered with a frame"
+            "{name} is answered with a frame"
         );
     }
 }
@@ -164,6 +169,58 @@ fn a_tsx_page_renders_and_its_handlers_run() {
         .unwrap()
         .to_owned();
     assert_eq!(style, "padding: 8px; color: var(--foreground)");
+}
+
+const INPUT: &str = r#"import { h, useState } from "architect";
+
+export default function Input() {
+  const [seen, setSeen] = useState<string>("");
+  const say = (s: string) => setSeen((was) => was + " " + s);
+  return (
+    <div id="pad" style={{ width: 200, height: 200 }}
+      onPointerDown={(e) => say(`down:${e.pointer_type}:${e.x}`)}
+      onPointerMove={(e) => say(`move:${e.buttons}`)}
+      onWheel={(e) => say(`wheel:${e.dy}`)}
+      onCompositionEnd={(e) => say(`composed:${e.value}`)}>
+      <span id="seen">{seen}</span>
+    </div>
+  );
+}
+"#;
+
+/// #176: a page's handlers get pointer, wheel and composition events.
+#[test]
+fn a_tsx_page_gets_pointer_wheel_and_composition_events() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write(dir.path(), "input.tsx", INPUT);
+    let mut pane = Pane::open(&pages(ActionList::new()), &path);
+    let at = Pointer {
+        element_x: 12.0,
+        buttons: 1,
+        ..Pointer::default()
+    };
+    let pen = PointerData {
+        at,
+        pointer_type: "pen".to_owned(),
+        ..PointerData::default()
+    };
+    pane.send("#pad", "pointerdown", EventData::Pointer(pen.clone()));
+    pane.send("#pad", "pointermove", EventData::Pointer(pen));
+    pane.send(
+        "#pad",
+        "wheel",
+        EventData::Wheel(WheelData {
+            at,
+            delta_y: 40.0,
+            ..WheelData::default()
+        }),
+    );
+    pane.send("#pad", "compositionend", EventData::Composition("日本".to_owned()));
+    pane.wait_for(
+        "#seen",
+        " down:pen:12 move:1 wheel:40 composed:日本",
+        Duration::from_secs(2),
+    );
 }
 
 #[test]

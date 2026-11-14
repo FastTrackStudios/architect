@@ -58,8 +58,10 @@ pub const ANSWERED_WIRE: u32 = 5;
 /// closed ones counted.
 pub const VIEWS_WIRE: u32 = 6;
 
-/// The first wire a process is sent rich input on: [`EventData::Pointer`],
-/// [`EventData::Touch`], [`EventData::Wheel`], [`EventData::Scroll`] and
+/// The first wire a process is sent rich input on.
+///
+/// That is [`EventData::Pointer`], [`EventData::Touch`],
+/// [`EventData::Wheel`], [`EventData::Scroll`] and
 /// [`EventData::Composition`]. An older process is sent none of them
 /// ([`EventData::since`]); it never had them, so nothing it does changes.
 pub const INPUT_WIRE: u32 = 7;
@@ -344,7 +346,7 @@ pub struct TouchData {
 }
 
 /// One finger, in CSS pixels.
-#[derive(Clone, Debug, Default, PartialEq, Facet)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Facet)]
 pub struct TouchPoint {
     pub id: i32,
     pub client_x: f64,
@@ -414,15 +416,17 @@ impl Coalescer {
     }
 
     /// `event` arrived: what to send now (empty while it waits).
+    // A wheel's deltas are summed as floats: no overflow to guard.
+    #[allow(clippy::arithmetic_side_effects)]
     pub fn push(&mut self, event: ViewEvent) -> Vec<ViewEvent> {
         if !coalesces(&event.name) {
             let mut out = std::mem::take(&mut self.waiting);
             out.push(event);
-            self.in_flight += out.len();
+            self.in_flight = self.in_flight.saturating_add(out.len());
             return out;
         }
         if self.in_flight == 0 && self.waiting.is_empty() {
-            self.in_flight += 1;
+            self.in_flight = self.in_flight.saturating_add(1);
             return vec![event];
         }
         match self.waiting.last_mut() {
@@ -439,7 +443,7 @@ impl Coalescer {
                 };
                 last.data = summed;
                 last.bubbles = event.bubbles;
-                self.merged += 1;
+                self.merged = self.merged.saturating_add(1);
             }
             _ => self.waiting.push(event),
         }
@@ -453,7 +457,7 @@ impl Coalescer {
             return Vec::new();
         }
         let out = std::mem::take(&mut self.waiting);
-        self.in_flight += out.len();
+        self.in_flight = self.in_flight.saturating_add(out.len());
         out
     }
 
@@ -465,7 +469,7 @@ impl Coalescer {
 }
 
 /// Where a pointer was, in CSS pixels, and its buttons.
-#[derive(Clone, Debug, Default, PartialEq, Facet)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Facet)]
 pub struct Pointer {
     pub client_x: f64,
     pub client_y: f64,
