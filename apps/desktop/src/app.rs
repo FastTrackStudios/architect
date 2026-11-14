@@ -286,6 +286,7 @@ fn Window() -> Element {
 /// the CLI and MCP never change. `WAYLAND_DISPLAY` is dropped for the
 /// event loop's creation alone and put back for the processes the app
 /// starts (`architect_workspace::native::RESTORE_WAYLAND_DISPLAY`).
+#[allow(clippy::missing_const_for_fn)]
 fn xwayland_for_web_views() {
     #[cfg(all(target_os = "linux", feature = "webview"))]
     if std::env::var_os("ARCHITECT_WEBVIEW_X11").is_some_and(|v| v != "0")
