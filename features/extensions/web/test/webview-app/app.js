@@ -12,6 +12,7 @@ await attempt('host fetch', () => architect.fetch('https://api.example.com/x').t
 await attempt('cookie', () => document.cookie);
 await attempt('storage', () => localStorage.getItem('x'));
 await attempt('parent dom', () => window.parent.document.title);
+report.webrtc = typeof window.RTCPeerConnection;
 await attempt('top navigation', () => { window.top.location.href = 'https://evil.example/'; return 'navigated'; });
 if (!document.getElementById('architect-theme')) await new Promise((ok) => architect.theme.onChange(ok));
 report.brand = getComputedStyle(document.documentElement).getPropertyValue('--brand').trim();

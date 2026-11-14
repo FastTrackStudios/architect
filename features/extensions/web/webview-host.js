@@ -13,7 +13,7 @@
 export const WEBVIEW_CSP =
   "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; " +
   "img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; " +
-  "worker-src 'self' blob:; connect-src 'none'; frame-src 'none'; child-src 'self' blob:; " +
+  "worker-src 'self' blob:; connect-src 'none'; frame-src 'none'; child-src 'none'; " +
   "object-src 'none'; manifest-src 'none'; base-uri 'none'; form-action 'none'";
 
 /** The largest message a view may send (as `webview::MAX_MESSAGE`). */
@@ -85,9 +85,32 @@ export function mountWebView(container, { src, call, theme, onEscape, title = 'E
     }
   }
 
-  // A fresh channel on every load: a document that navigated (its own
-  // reload) gets a port of its own; the old one is closed.
+  // The port is handed over on the first load, and on a reload the host
+  // started (`reload`), never on any other: `sandbox="allow-scripts"`
+  // still lets the frame navigate itself (`location = …`, past
+  // `connect-src 'none'`), and a document it navigated to must not be given
+  // the bridge. Such a load closes the port and stops the frame.
+  let loads = 0;
+  let reloading = false;
+  let stopped = false;
+  const stop = () => {
+    stopped = true;
+    port?.close();
+    port = null;
+    frame.removeEventListener('load', onLoad);
+    frame.src = 'about:blank';
+    frame.remove();
+    const note = document.createElement('div');
+    note.setAttribute('role', 'alert');
+    note.dataset.webviewStopped = '';
+    note.style.cssText = 'padding:24px;font:13px system-ui,sans-serif;opacity:.75;text-align:center';
+    note.textContent = 'This web view tried to leave its package, so it was stopped.';
+    container.append(note);
+  };
   const onLoad = () => {
+    loads += 1;
+    if (loads > 1 && !reloading) return stop();
+    reloading = false;
     port?.close();
     const channel = new MessageChannel();
     port = channel.port1;
@@ -98,12 +121,21 @@ export function mountWebView(container, { src, call, theme, onEscape, title = 'E
   container.append(frame);
   return {
     frame,
+    /** Whether it was stopped for leaving its package. */
+    get stopped() { return stopped; },
+    /** Loads its document again, with a fresh port. */
+    reload() {
+      if (stopped) return;
+      reloading = true;
+      frame.src = src;
+    },
     setTheme(next) { current = next; sendTheme(); },
     setShown(next) { shown = !!next; post({ t: 'shown', shown }); },
     emit(name, detail) {
       if (listening.some((p) => covers(p, name))) post({ t: 'event', name, detail });
     },
     unmount() {
+      stopped = true;
       frame.removeEventListener('load', onLoad);
       port?.close();
       frame.remove();

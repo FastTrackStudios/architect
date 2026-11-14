@@ -53,6 +53,58 @@ pub const MAX_MESSAGE: usize = 4 * 1024 * 1024;
 /// a call is answered `unsupported` at once.
 pub const MAX_IN_FLIGHT: usize = 64;
 
+/// How many of a view's messages a host keeps waiting for its next frame:
+/// past it, new ones are dropped (a host's inbox is bounded).
+pub const MAX_QUEUED: usize = 1024;
+
+/// How many of a view's messages a host handles in one frame; the rest
+/// wait for the next.
+pub const MAX_PER_FRAME: usize = 64;
+
+/// A view's sustained rate of messages per second, and its burst.
+pub const MESSAGES_PER_SECOND: f64 = 500.0;
+pub const MESSAGE_BURST: f64 = 1000.0;
+
+/// A view's sustained bytes per second over the bridge, and its burst.
+pub const BYTES_PER_SECOND: f64 = 16.0 * 1024.0 * 1024.0;
+pub const BYTE_BURST: f64 = 32.0 * 1024.0 * 1024.0;
+
+/// A token bucket: what a view may still send now.
+#[derive(Clone, Debug)]
+pub struct Budget {
+    messages: f64,
+    bytes: f64,
+    at: std::time::Instant,
+}
+
+impl Default for Budget {
+    fn default() -> Self {
+        Self {
+            messages: MESSAGE_BURST,
+            bytes: BYTE_BURST,
+            at: std::time::Instant::now(),
+        }
+    }
+}
+
+impl Budget {
+    /// Takes one message of `len` bytes at `now`: whether it was in budget.
+    pub fn take(&mut self, len: usize, now: std::time::Instant) -> bool {
+        let dt = now.saturating_duration_since(self.at).as_secs_f64();
+        self.at = now;
+        self.messages = (self.messages + dt * MESSAGES_PER_SECOND).min(MESSAGE_BURST);
+        self.bytes = (self.bytes + dt * BYTES_PER_SECOND).min(BYTE_BURST);
+        #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
+        let len = len as f64;
+        if self.messages < 1.0 || self.bytes < len {
+            return false;
+        }
+        self.messages -= 1.0;
+        self.bytes -= len;
+        true
+    }
+}
+
 /// The URL a desk's web view opens for `path` in extension `id`'s
 /// package.
 #[must_use]
@@ -74,7 +126,7 @@ pub fn url(id: &str, path: &str) -> String {
 pub const fn csp() -> &'static str {
     "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; \
      img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; \
-     worker-src 'self' blob:; connect-src 'none'; frame-src 'none'; child-src 'self' blob:; \
+     worker-src 'self' blob:; connect-src 'none'; frame-src 'none'; child-src 'none'; \
      object-src 'none'; manifest-src 'none'; base-uri 'none'; form-action 'none'"
 }
 
@@ -431,12 +483,12 @@ pub use desk::Bridge;
 
 #[cfg(feature = "host")]
 mod desk {
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex, PoisonError};
 
     use futures::future::BoxFuture;
 
-    use super::{Inbound, Listening, MAX_IN_FLIGHT, Outbound, parse, refusal};
+    use super::{Budget, Inbound, Listening, MAX_IN_FLIGHT, Outbound, parse, refusal};
     use crate::host::Host;
     use crate::hostapi::ExtensionApi;
 
@@ -458,6 +510,8 @@ mod desk {
         heard: u64,
         in_flight: Arc<AtomicUsize>,
         on_escape: Arc<dyn Fn() + Send + Sync>,
+        budget: Mutex<Budget>,
+        paused: Arc<AtomicBool>,
     }
 
     impl Bridge {
@@ -471,12 +525,17 @@ mod desk {
             on_escape: impl Fn() + Send + Sync + 'static,
         ) -> Self {
             let listening = Arc::new(Mutex::new(Listening::default()));
+            let paused = Arc::new(AtomicBool::new(false));
             let heard = {
                 let listening = Arc::clone(&listening);
                 let post = Arc::clone(&post);
+                let paused = Arc::clone(&paused);
                 host.hear(
                     id,
                     Arc::new(move |name, detail| {
+                        if paused.load(Ordering::Acquire) {
+                            return;
+                        }
                         let hears = listening
                             .lock()
                             .unwrap_or_else(PoisonError::into_inner)
@@ -498,7 +557,15 @@ mod desk {
                 heard,
                 in_flight: Arc::new(AtomicUsize::new(0)),
                 on_escape: Arc::new(on_escape),
+                budget: Mutex::new(Budget::default()),
+                paused,
             }
+        }
+
+        /// Pauses the events it passes on (a parked view's, its tab away):
+        /// what it would have heard meanwhile is not kept.
+        pub fn set_paused(&self, paused: bool) {
+            self.paused.store(paused, Ordering::Release);
         }
 
         /// The extension whose view it is.
@@ -511,6 +578,21 @@ mod desk {
         /// the returned work, run on the app's executor, is done; the
         /// rest are done at once (`None`).
         pub fn receive(&self, text: &str) -> Option<BoxFuture<'static, ()>> {
+            let in_budget = self
+                .budget
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take(text.len(), std::time::Instant::now());
+            if !in_budget {
+                // Over its rate: a call is answered at once, the rest dropped.
+                if let Ok(Inbound::Call { id, .. }) = parse(text) {
+                    (self.post)(refusal(
+                        id,
+                        "the view is sending faster than the bridge allows",
+                    ));
+                }
+                return None;
+            }
             let message = match parse(text) {
                 Ok(m) => m,
                 Err((id, why)) => {
@@ -703,6 +785,36 @@ mod tests {
     }
 
     #[test]
+    fn the_sdk_requests_parse_as_the_host_reads_them() {
+        // The same JSON tsc checks against webview.d.ts
+        // (features/extensions/web/test/webview-types.test.mjs).
+        let fixture = include_str!("../web/test/host-requests.ts");
+        let json = fixture
+            .split_once("/* BEGIN */")
+            .and_then(|(_, rest)| rest.split_once("/* END */"))
+            .map_or("[]", |(json, _)| json);
+        let all: Vec<serde_json::Value> = serde_json::from_str(json).expect("the fixture is JSON");
+        let mut ops = std::collections::BTreeSet::new();
+        for v in all {
+            let r: crate::hostcall::HostRequest =
+                serde_json::from_value(v.clone()).unwrap_or_else(|e| panic!("{v}: {e}"));
+            ops.insert(r.op());
+        }
+        let source = include_str!("hostcall.rs");
+        let body = source
+            .split_once("pub const fn op(&self) -> &'static str {")
+            .and_then(|(_, rest)| rest.split_once("\n    }\n"))
+            .map_or("", |(body, _)| body);
+        for op in body
+            .split("=> \"")
+            .skip(1)
+            .filter_map(|r| r.split_once('"').map(|(op, _)| op))
+        {
+            assert!(ops.contains(op), "test/host-requests.ts has no {op}");
+        }
+    }
+
+    #[test]
     fn the_sdk_names_every_host_call() {
         // features/extensions/web/webview.d.ts types every op the host has.
         let dts = include_str!("../web/webview.d.ts");
@@ -724,6 +836,36 @@ mod tests {
                 "webview.d.ts has no {op}"
             );
         }
+    }
+
+    #[test]
+    fn a_view_has_a_rate_and_a_burst() {
+        let start = std::time::Instant::now();
+        let mut b = Budget {
+            messages: MESSAGE_BURST,
+            bytes: BYTE_BURST,
+            at: start,
+        };
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::as_conversions
+        )]
+        let burst = MESSAGE_BURST as usize;
+        assert!((0..burst).all(|_| b.take(10, start)));
+        assert!(!b.take(10, start), "past its burst");
+        // A tenth of a second later, about fifty more.
+        let later = start + std::time::Duration::from_millis(100);
+        assert!((0..49).all(|_| b.take(10, later)));
+        // Bytes too: one message past the byte budget is refused.
+        let mut b = Budget::default();
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::as_conversions
+        )]
+        let big = BYTE_BURST as usize;
+        assert!(!b.take(big + 1, std::time::Instant::now()));
     }
 
     #[test]

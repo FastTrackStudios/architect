@@ -18,6 +18,17 @@
   var native = (window.ipc && window.ipc.postMessage) ||
     (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.architect);
   if (!native && window.parent === window) return;
+
+  // No WebRTC: a peer connection is network no CSP governs and no
+  // `capabilities.hosts` checks (WebView2 and WKWebView have it on). Its
+  // constructors are taken away for good; no frame can bring them back
+  // (the policy's `child-src` and `frame-src` are 'none').
+  ["RTCPeerConnection", "webkitRTCPeerConnection", "RTCDataChannel", "RTCRtpSender", "RTCRtpReceiver", "RTCIceCandidate", "RTCSessionDescription"].forEach(function (name) {
+    try { Object.defineProperty(window, name, { value: undefined, writable: false, configurable: false }); } catch (_) {}
+  });
+  try {
+    if (navigator.mediaDevices) Object.defineProperty(navigator, "mediaDevices", { value: undefined, configurable: false });
+  } catch (_) {}
   var next = 1;
   var waiting = new Map();
   var listeners = new Map();
@@ -122,10 +133,11 @@
   });
 
   // Typed keys stay here; an Escape nothing took gives the app the focus.
+  // Asked after every handler of the page has run (a listener it adds
+  // later than this one included), and never while an IME composes.
   window.addEventListener("keydown", function (ev) {
-    if (ev.key === "Escape" && !ev.defaultPrevented && !ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey) {
-      send({ t: "escape" });
-    }
+    if (ev.key !== "Escape" || ev.isComposing || ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
+    setTimeout(function () { if (!ev.defaultPrevented) send({ t: "escape" }); }, 0);
   });
 
   // The component sheet (`.arch-…`), first in the head so the view's own

@@ -50,7 +50,7 @@
 //! | `fetch {url, method?, headers?, body?, timeout_ms?, max_bytes?, stream?, binary?}` | an HTTP request ([`Fetch`]), redirects followed by the host: `{status, url, headers, body}` (`stream`: `{…, stream}`, its body read with `read_body`) | the URL's host, and every redirect's, in `capabilities.hosts` |
 //! | `read_body {stream, max?}` / `close_body {stream}` | the next part of a streamed response's body (`{chunk, done}`), or stops reading it | its own stream |
 //! | `secret {name}` / `ask_secret {name}` | whether the person has set one of its `[[secrets]]` (never its value), or asks them for it | declaring it |
-//! | `store_secret {name, value}` | keeps a value as one of its `[[secrets]]`, insert-only: nothing reads it back but the host's `{{secret:…}}` | declaring it |
+//! | `store_secret {name, value}` | keeps a value (at most 8 KiB) as one of its `[[secrets]]` that is not set yet, insert-only: the host never hands it back (only puts it in a `{{secret:…}}` header to its own hosts, which an endpoint there could echo); a set one is the person's to change (`ask_secret`) | declaring it |
 //! | `ports {kind?}` | the MIDI ports the app has (`[{kind, name, direction}]`; OSC endpoints are not listed) | any `capabilities.ports` |
 //! | `open_port {kind, name, listen?}` | opens a MIDI port by name, or an OSC endpoint (`host:port`, hearing on `listen`): `{port, kind, name}`; what it hears is a `port.message` event to it | `capabilities.ports` naming it (`midi:<name>`, `osc:<host>:<port>`, `osc:listen:<port>`) |
 //! | `port_send {port, message}` / `port_receive {port, max?}` / `close_port {port}` | sends a message (`crate::ports`' JSON), takes what it heard and has not taken, closes it | its own port |
@@ -301,10 +301,11 @@ pub enum HostRequest {
     AskSecret {
         name: String,
     },
-    /// Keeps `value` as its secret `name` (`[[secrets]]`), in place of
-    /// the one set before: insert-only, so a web view that got a token
-    /// (a bank link's) hands it to the host and never reads it back.
-    /// Whether it was kept.
+    /// Keeps `value` as its secret `name` (`[[secrets]]`) when it is not
+    /// set yet: insert-only, so a web view that got a token (a bank
+    /// link's) hands it to the host, which never hands it back. A secret
+    /// already set is refused (the person changes it, `ask_secret`), and so
+    /// is one over 8 KiB. Whether it was kept.
     StoreSecret {
         name: String,
         value: String,
