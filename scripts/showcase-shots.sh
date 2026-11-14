@@ -67,6 +67,9 @@ cleanup() {
     for p in "${pids[@]}"; do kill "$p" 2>/dev/null || true; done
     for s in "${started[@]}"; do
         (cd "$loft" && nix run .#dev -- --stop "$s" >/dev/null 2>&1) || true
+        # A stopped session leaves its folder (about 200 MB) on the
+        # runtime tmpfs: this script made it, so it goes too.
+        rm -rf "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/loft-dev-$s"
     done
 }
 trap cleanup EXIT
