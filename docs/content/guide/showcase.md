@@ -86,7 +86,7 @@ frames, nothing an extension author can target. Every web cell below is
 | H4 | Extension data and settings that persist | ⚠️ not shown | ❌ kept in memory (#495) | ⚠️ not shown | - | `features/extensions/tests/host_service.rs` |
 | H5 | Secrets | ⚠️ not shown | ❌ not in a browser yet (#495) | ⚠️ not shown | Secrets and fetch | `features/extensions/tests/net.rs` |
 | H6 | `fetch` limited to the manifest's hosts | ⚠️ not shown | ❌ #495; CORS applies | ⚠️ not shown | Secrets and fetch | `features/extensions/tests/net.rs` |
-| H7 | Notifications: in-app toasts; OS notifications | ⚠️ toasts only; OS notifications #709 | ❌ #495 | ⚠️ toasts only (#709) | Notify sampler | `features/extensions/tests/host_ui.rs` |
+| H7 | Notifications: in-app toasts; OS notifications | ⚠️ toasts only; OS notifications answer `unsupported` until the desk has a `Device` (#709) | ❌ #495 | ⚠️ toasts, and OS notifications (#709: `os_notify` now or scheduled, `cancel_os_notify`, a banner while the app is in front, `capabilities.device = ["notifications"]`) on the Simulator (iPhone 16e, iOS 27); not yet on TestFlight or in a showcase example | Notify sampler | `features/extensions/tests/host_ui.rs`, `features/extensions/tests/host_device.rs`; iOS screenshots on the `media` branch, `710-ios/ios-h7-*` |
 | H8 | The clipboard | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Notify sampler | `features/extensions/tests/host_ui.rs` |
 | H9 | Pickers for files, folders, photos | ⚠️ not shown (a photo pick is a file picker for images) | ❌ #495 | ⚠️ UIKit's document and photo pickers (#708): a file, a folder, a save and photos picked and read on the Simulator (iPhone 16e, iOS 27, 390 pt); not yet on TestFlight or in a showcase example; dark only, as the iOS app is | - | `features/extensions/tests/host_ui.rs` (`a_photo_picked_is_one_it_may_read_and_not_write`, `every_interface_call_is_refused_outside_its_capabilities`); iOS screenshots on the `media` branch, `710-ios/` |
 | H10 | Prompts, confirms, pick-one | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Templater-lite, Notify sampler | `features/extensions/tests/host_ui.rs` |
@@ -94,7 +94,7 @@ frames, nothing an extension author can target. Every web cell below is
 | H12 | Services between extensions (`[provides]` / `[requires]`) | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Services sampler | `features/extensions/tests/interop.rs` |
 | H13 | MIDI and OSC ports and control surfaces | ⚠️ not shown; a virtual MIDI port and UDP OSC, no system MIDI | ❌ #495 | ⚠️ not shown | Surface | `features/extensions/tests/ports.rs` |
 | H14 | Deep links into actions | ❌ #186 | ❌ #186 | ❌ #186 | - | - |
-| H15 | Device APIs: camera, photos, HealthKit, location | ❌ #709 | ❌ #709 | ❌ #709 | - | - |
+| H15 | Device APIs: camera, photos, HealthKit, location | ❌ `unsupported` until the desk has a `Device` (#709) | ❌ `unsupported` in the browser (#709) | ⚠️ #709: the photo library (`photos`, `photo_file`) works on the Simulator; the camera (`capture`) is built and answers `unsupported` on the Simulator, which has none; HealthKit (`health_read`, `health_write`) is built and reaches HealthKit, which refuses until the App ID has the HealthKit capability and the profile carries it (owner); location not started | Meal plan (device half) | `features/extensions/tests/host_device.rs`; iOS screenshots on the `media` branch, `710-ios/ios-h15-*` |
 | H16 | An extension's server-side code on the node | ❌ #583 | ❌ #583 | ❌ #583 | - | - |
 
 ## U: drawing and input

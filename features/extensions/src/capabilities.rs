@@ -65,7 +65,7 @@ pub const SERVERS: &str = "servers";
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Ask {
     /// `actions`, `effect`, `hosts`, `folders`, `reads`, `writes`, `ui`,
-    /// `events`, `ports` or `languages`.
+    /// `events`, `ports`, `languages` or `device`.
     pub kind: &'static str,
     /// What exactly (`TRANSPORT_`, `api.github.com`, `selection`).
     pub what: String,
@@ -100,6 +100,16 @@ pub fn reaches_host(of: &[String], host: &str, port: Option<u16>) -> bool {
     let lower: Vec<String> = of.iter().map(|h| h.to_ascii_lowercase()).collect();
     host_in(&host, &lower)
         || port.is_some_and(|p| lower.iter().any(|g| *g == format!("{host}:{p}")))
+}
+
+/// Whether `capabilities.device` entry `entry` is well formed: the reason
+/// it is not (`crate::device::check_entry`).
+///
+/// # Errors
+///
+/// What is wrong with it.
+pub fn check_device_entry(entry: &str) -> Result<(), String> {
+    crate::device::check_entry(entry)
 }
 
 /// Whether `ports` entry `entry` (`midi:<name>`, `osc:<host>:<port>`,
@@ -198,7 +208,7 @@ fn ui_words(u: &str) -> String {
     match u {
         NOTIFY => "Show you notifications".to_owned(),
         CLIPBOARD => "Read and change what you copied".to_owned(),
-        PICKERS => "Ask you to pick files and folders, and where to save".to_owned(),
+        PICKERS => "Ask you to pick files, folders and photos, and where to save".to_owned(),
         PROMPTS => "Ask you questions".to_owned(),
         MENUS => "Show menus of its own".to_owned(),
         BADGES => "Mark files and tabs with icons and badges".to_owned(),
@@ -239,6 +249,7 @@ impl Capabilities {
             && self.events.is_empty()
             && self.ports.is_empty()
             && self.languages.is_empty()
+            && self.device.is_empty()
     }
 
     /// Everything it asks for, one line a thing, in the order a prompt
@@ -328,6 +339,13 @@ impl Capabilities {
                 } else {
                     format!("Use its languages' {l}")
                 },
+            });
+        }
+        for d in self.device.iter().filter(|d| !granted.device.contains(d)) {
+            out.push(Ask {
+                kind: "device",
+                what: d.clone(),
+                says: crate::device::words(d),
             });
         }
         for f in self
@@ -440,6 +458,14 @@ impl Capabilities {
                 .filter(|l| granted.languages.contains(l))
                 .cloned()
                 .collect(),
+            // The device's services only as declared and granted, entry
+            // by entry (each health type apart).
+            device: self
+                .device
+                .iter()
+                .filter(|d| granted.device.contains(d))
+                .cloned()
+                .collect(),
         }
     }
 
@@ -492,6 +518,14 @@ impl Capabilities {
     #[must_use]
     pub fn may_use(&self, what: &str) -> bool {
         self.ui.iter().any(|u| u == what)
+    }
+
+    /// Whether it may use the device's `entry` (`capabilities.device`:
+    /// `notifications`, `camera`, `photos`, `health:read:<type>`,
+    /// `health:write:<type>`).
+    #[must_use]
+    pub fn may_use_device(&self, entry: &str) -> bool {
+        self.device.iter().any(|d| d == entry)
     }
 
     /// Whether it may hear app-defined event `name` (`app:<name>` hooks;

@@ -833,6 +833,11 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             *lock(&COMPONENTS) = Some(runner.components());
             host = host.with_runner(runner);
         }
+        // The device's services for extensions (#709): OS notifications,
+        // the camera, photos and HealthKit on a phone; unsupported on a
+        // desk until it has its own.
+        #[cfg(target_os = "ios")]
+        host.set_device(Arc::new(architect_extensions::device_ios::IosDevice::new()));
         // Hooks hear the lab's own events (workspace.changed, …); the host
         // service runs the lab's actions on its list.
         host.watch(&lab);

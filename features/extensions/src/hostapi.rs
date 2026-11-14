@@ -154,6 +154,9 @@ pub(crate) struct Services {
     window: Mutex<Option<Arc<dyn std::any::Any + Send + Sync>>>,
     /// What extensions set on rows and tabs.
     decorations: Decorations,
+    /// The device's services (`crate::device`): OS notifications, the
+    /// camera, photos, health data. None: every call unsupported.
+    device: Mutex<Option<Arc<dyn crate::device::Device>>>,
     /// The paths a person picked for each extension, for the run: each
     /// with whether it may write it (a save) and whether it is a folder.
     picked: Mutex<BTreeMap<String, Vec<Picked>>>,
@@ -210,6 +213,7 @@ impl Default for Services {
             #[cfg(feature = "ui")]
             window: Mutex::new(None),
             decorations: Decorations::default(),
+            device: Mutex::new(None),
             picked: Mutex::new(BTreeMap::new()),
             secrets: Mutex::new(Secrets::memory()),
             #[cfg(feature = "net")]
@@ -381,6 +385,28 @@ impl Host {
         let fresh = make();
         *slot = Some(Arc::new(fresh.clone()));
         fresh
+    }
+
+    /// Answers extensions' OS notifications, camera, photos and health
+    /// calls with `device` (`crate::device`: the platform's, or a
+    /// `FakeDevice`); without one each is unsupported.
+    #[must_use]
+    pub fn with_device(self, device: impl crate::device::Device + 'static) -> Self {
+        self.set_device(Arc::new(device));
+        self
+    }
+
+    /// [`Self::with_device`] on a host already shared.
+    pub fn set_device(&self, device: Arc<dyn crate::device::Device>) {
+        *lock(&self.services().device) = Some(device);
+    }
+
+    /// The device's services extensions are lent.
+    #[must_use]
+    pub fn device(&self) -> Arc<dyn crate::device::Device> {
+        lock(&self.services().device)
+            .clone()
+            .unwrap_or_else(|| Arc::new(crate::device::NoDevice))
     }
 
     /// The interface extensions are lent.
@@ -614,6 +640,21 @@ impl ExtensionApi {
         Asker {
             id: manifest.id.clone(),
             name: manifest.name.clone(),
+        }
+    }
+
+    /// A file the device made for it (a capture, a photo's copy): one it
+    /// may read for the run, as one a person picked.
+    fn lend_file(&self, host: &Host, path: Option<&str>) {
+        if let Some(p) = path {
+            lock(&host.services().picked)
+                .entry(self.id.clone())
+                .or_default()
+                .push(Picked {
+                    path: expand(p),
+                    write: false,
+                    folder: false,
+                });
         }
     }
 
@@ -891,6 +932,79 @@ impl ExtensionApi {
             }
             HostRequest::Decorate { target, decoration } => {
                 host.decorations().set(&self.id, &target, decoration);
+                Ok(Value::Null)
+            }
+            HostRequest::OsNotify(mut notification) => {
+                if notification.title.trim().is_empty() {
+                    return Err(HostError::Failed {
+                        message: "a notification needs a title".to_owned(),
+                    });
+                }
+                let id = notification
+                    .id
+                    .clone()
+                    .filter(|i| !i.is_empty())
+                    .unwrap_or_else(|| format!("n{}", crate::host::now_ms()));
+                notification.id = Some(id.clone());
+                host.device()
+                    .notify(&format!("{}/{id}", self.id), &notification)
+                    .await?;
+                Ok(serde_json::json!({ "id": id }))
+            }
+            HostRequest::CancelOsNotify { id } => Ok(Value::Bool(
+                host.device()
+                    .cancel_notification(&format!("{}/{id}", self.id))
+                    .await?,
+            )),
+            HostRequest::Capture(capture) => {
+                let path = host.device().capture(&capture).await?;
+                self.lend_file(&host, path.as_deref());
+                Ok(path.map_or(Value::Null, Value::String))
+            }
+            HostRequest::Photos(query) => Ok(serde_json::to_value(
+                host.device().photos(&query).await?,
+            )
+            .unwrap_or(Value::Null)),
+            HostRequest::PhotoFile { id } => {
+                let path = host.device().photo_file(&id).await?;
+                self.lend_file(&host, path.as_deref());
+                Ok(path.map_or(Value::Null, Value::String))
+            }
+            HostRequest::HealthRead(query) => {
+                let of =
+                    crate::device::health_type(&query.kind).ok_or_else(|| HostError::NotFound {
+                        what: format!("health type {}", query.kind),
+                    })?;
+                if query.to_ms < query.from_ms {
+                    return Err(HostError::Failed {
+                        message: "to_ms is before from_ms".to_owned(),
+                    });
+                }
+                let answer = host.device().health_read(of, &query).await?;
+                Ok(crate::device::health_answer(&answer))
+            }
+            HostRequest::HealthWrite(write) => {
+                let of =
+                    crate::device::health_type(&write.kind).ok_or_else(|| HostError::NotFound {
+                        what: format!("health type {}", write.kind),
+                    })?;
+                if !write.value.is_finite() || write.value < 0.0 {
+                    return Err(HostError::Failed {
+                        message: "a health value is a number, 0 or more".to_owned(),
+                    });
+                }
+                let start_ms = write.start_ms.unwrap_or_else(crate::host::now_ms);
+                let end_ms = write.end_ms.unwrap_or(start_ms).max(start_ms);
+                host.device()
+                    .health_write(
+                        of,
+                        &crate::device::HealthSample {
+                            value: write.value,
+                            start_ms,
+                            end_ms,
+                        },
+                    )
+                    .await?;
                 Ok(Value::Null)
             }
             HostRequest::Log { text, level } => {
