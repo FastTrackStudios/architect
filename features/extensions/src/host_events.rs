@@ -56,7 +56,15 @@ pub(crate) struct EventState {
     shown: AtomicBool,
     /// [`Host::run_clock`] runs.
     ticking: AtomicBool,
+    /// What hears events as they are raised, beside hooks
+    /// ([`Host::hear`]): a web view's bridge, by key, with its owner.
+    heard: Mutex<BTreeMap<u64, (String, Heard)>>,
+    next_heard: std::sync::atomic::AtomicU64,
 }
+
+/// What hears an extension's events as they are raised ([`Host::hear`]):
+/// the event's name and its detail.
+pub type Heard = Arc<dyn Fn(&str, &Value) + Send + Sync>;
 
 impl Default for EventState {
     fn default() -> Self {
@@ -68,6 +76,8 @@ impl Default for EventState {
             background: Mutex::default(),
             shown: AtomicBool::new(false),
             ticking: AtomicBool::new(false),
+            heard: Mutex::default(),
+            next_heard: std::sync::atomic::AtomicU64::new(1),
         }
     }
 }
@@ -227,6 +237,49 @@ impl Host {
     pub fn focus(&self, focused: bool, window: Option<&str>) -> usize {
         let on = if focused { APP_FOCUSED } else { APP_BLURRED };
         self.emit_value(on, &json!({ "window": window }))
+    }
+
+    // ── Listeners ───────────────────────────────────────────────────
+
+    /// Tells `heard` every event extension `owner` may hear as it is
+    /// raised, as a hook of its would be told (a document's events only
+    /// while it may read documents, an app event only while it may hear
+    /// it): a web view's bridge (`crate::webview`), which passes on what
+    /// its view asked for. Its key, for [`Self::unhear`].
+    #[must_use]
+    pub fn hear(&self, owner: &str, heard: Heard) -> u64 {
+        let state = self.event_state();
+        let key = state.next_heard.fetch_add(1, Ordering::Relaxed);
+        lock(&state.heard).insert(key, (owner.to_owned(), heard));
+        key
+    }
+
+    /// Stops listener `key` ([`Self::hear`]): whether it was there.
+    #[allow(clippy::must_use_candidate)]
+    pub fn unhear(&self, key: u64) -> bool {
+        lock(&self.event_state().heard).remove(&key).is_some()
+    }
+
+    /// Tells the listeners event `on`, each with the detail for its owner,
+    /// those of `only` alone when it names one.
+    pub(crate) fn tell_heard(&self, only: Option<&str>, on: &str, detail_for: &dyn Fn(&str) -> Value) {
+        let listeners: Vec<(String, Heard)> = lock(&self.event_state().heard)
+            .values()
+            .filter(|(owner, _)| only.is_none_or(|o| o == owner))
+            .cloned()
+            .collect();
+        for (owner, heard) in listeners {
+            let Some(may) = self.capabilities(&owner) else {
+                continue;
+            };
+            if crate::events::app_event(on).is_some_and(|name| !may.may_hear(name)) {
+                continue;
+            }
+            if crate::events::is_doc_event(on) && !may.may_read(crate::capabilities::DOCUMENTS) {
+                continue;
+            }
+            heard(on, &detail_for(&owner));
+        }
     }
 
     // ── Hooks made at run time ──────────────────────────────────────

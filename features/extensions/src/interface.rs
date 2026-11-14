@@ -22,7 +22,10 @@
 //! whose manifest says `on_unload = "close"` has its panes closed).
 //! An app that runs pages provides [`ViewPages`]: a view with a page file
 //! (its manifest's `page`, or an override in the app's folder) is drawn
-//! from that file instead (`architect-pages`).
+//! from that file instead (`architect-pages`). An app that hosts web views
+//! provides [`WebViews`]: a view of kind `web` (#222) is drawn by it, its
+//! package's `src` in a native web view or a sandboxed frame
+//! (`crate::webview`).
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -1031,6 +1034,26 @@ impl std::fmt::Debug for PageAsk {
 #[derive(Clone)]
 pub struct ViewPages(pub Rc<dyn Fn(&PageAsk) -> Option<Element>>);
 
+/// A `web` view, as [`WebViews`] is asked for it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WebAsk {
+    pub extension: String,
+    pub view: String,
+    /// Its manifest's `src`, inside `dir`.
+    pub src: String,
+    /// The extension's folder (its package).
+    pub dir: Option<std::path::PathBuf>,
+}
+
+/// Draws an extension's `web` views (#222).
+///
+/// A native web view clipped to
+/// the pane on a desk, a sandboxed frame in a browser
+/// (`crate::webview`). An app with no web view host provides none, and
+/// such a view says so in its pane.
+#[derive(Clone)]
+pub struct WebViews(pub Rc<dyn Fn(&WebAsk) -> Element>);
+
 /// Extension `extension`'s view `view`: its linked-in component, its
 /// process's remote view, or — when it is not loaded — a placeholder.
 /// It fills its parent (a pane); `fill: false` sizes it to its content
@@ -1061,6 +1084,34 @@ pub fn ExtensionView(
             }
         };
     };
+    if let Some(decl) = loaded
+        .manifest
+        .views
+        .iter()
+        .find(|v| v.id == view && v.kind == architect_workspace::WEB)
+    {
+        let ask = WebAsk {
+            extension: extension.clone(),
+            view: view.clone(),
+            src: decl.src.clone().unwrap_or_default(),
+            dir: loaded.dir.clone(),
+        };
+        let key = format!("{extension}/{view}");
+        let body = try_consume_context::<WebViews>().map_or_else(
+            || {
+                rsx! {
+                    div { style: "flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; \
+                                  font-size: 13px; color: var(--muted-foreground); text-align: center;",
+                        "This app has no web view host, so {extension}'s web view cannot be shown here."
+                    }
+                }
+            },
+            |web| (web.0)(&ask),
+        );
+        return rsx! {
+            div { key: "{key}", style: "{size} display: flex; flex-direction: column;", {body} }
+        };
+    }
     if let Some(pages) = try_consume_context::<ViewPages>() {
         let ask = PageAsk {
             page: loaded
