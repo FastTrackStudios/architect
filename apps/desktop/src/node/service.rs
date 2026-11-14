@@ -11,7 +11,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use vault::actions::{OpenVault, Watch};
+use architect_permissions::Principal;
+use vault::actions::query::DiskSource;
 
 use architect_devices::Admission;
 use vault_live::Backend;
@@ -184,43 +185,74 @@ pub struct NodeState {
     pub(crate) indexed: Indexed,
 }
 
+/// What a caller may read: the org lane's (`OrgLane::reads`,
+/// `OrgLane::read_key`), set when the node hosts an org.
+#[derive(Clone)]
+pub struct Access {
+    /// Whether `(who, vault, path)` may be read.
+    pub reads: Arc<dyn Fn(&Principal, &str, &str) -> bool + Send + Sync>,
+    /// A fingerprint of what `who` may read (their role): when it moves,
+    /// their next `since` answers a snapshot.
+    pub key: Arc<dyn Fn(&Principal) -> u64 + Send + Sync>,
+}
+
+/// How long a vault's index stays held with no one asking for it: past
+/// it, it is let go (a reader's next `since` is of another history, and
+/// it takes a snapshot).
+pub const INDEX_IDLE: std::time::Duration = std::time::Duration::from_mins(30);
+
+/// One vault's index, built once however many ask at once.
+type Slot = Arc<std::sync::OnceLock<Result<Arc<Built<DiskSource>>, String>>>;
+
 /// Each vault's index, by id, for clients that do not hold the vault
 /// ([`VaultIndexSync`]).
 ///
-/// The vault read once, kept current by its watcher,
-/// its index built a note at a time (`vault_query::index::Builder`). The
-/// node answers no queries: a client runs them over its own copy of the
-/// index (`vault_query::QueryEngine`).
+/// Each is built a note at a time (`vault_query::index::Builder`) from
+/// the vault's folder (`vault::actions::query::DiskSource`), which holds
+/// no note's text and reads only what changed. The node answers no
+/// queries: a client runs them over its own copy of the index
+/// (`vault_query::QueryEngine`). What a caller gets is what [`Access`]
+/// lets it read.
 #[derive(Clone, Default)]
-pub struct Indexed(Arc<Mutex<HashMap<String, Arc<(Built<OpenVault>, Option<Watch>)>>>>);
-
-impl Indexed {
-    /// Vault `id`'s index at `root`, the vault opened and watched the first
-    /// time it is asked for.
-    fn of(&self, id: &str, root: &std::path::Path) -> Result<Arc<(Built<OpenVault>, Option<Watch>)>, String> {
-        if let Some(held) = architect::lock(&self.0).get(id) {
-            return Ok(Arc::clone(held));
-        }
-        // Read outside the map's lock: a large vault takes a while.
-        let open = OpenVault::open(root).map_err(|e| e.to_string())?;
-        let watch = open
-            .watch(|_| {})
-            .map_err(|e| tracing::warn!(vault = %id, error = %e, "its index will not see outside edits"))
-            .ok();
-        let mut map = architect::lock(&self.0);
-        Ok(Arc::clone(
-            map.entry(id.to_owned())
-                .or_insert_with(|| Arc::new((Built::new(open), watch))),
-        ))
-    }
+pub struct Indexed {
+    held: Arc<Mutex<HashMap<String, (Slot, std::time::Instant)>>>,
+    access: Arc<Mutex<Option<Access>>>,
 }
 
-/// Whether the caller may read the note at `path`: what it may read is
-/// filtered here before a snapshot or a delta leaves the node. The lane's
-/// gate admits only its members (`read` on `vaults/**`, as `Notes`), who
-/// read every note today; per-note rules plug in here.
-const fn may_read(_path: &str) -> bool {
-    true
+impl Indexed {
+    /// Who may read what, from now on.
+    pub fn set_access(&self, access: Access) {
+        *architect::lock(&self.access) = Some(access);
+    }
+
+    fn access(&self) -> Option<Access> {
+        architect::lock(&self.access).clone()
+    }
+
+    /// Vault `id`'s index at `root`: built the first time it is asked for
+    /// (once, whoever else asks meanwhile); the vaults no one asked for
+    /// in [`INDEX_IDLE`] let go.
+    fn of(&self, id: &str, root: &std::path::Path) -> Result<Arc<Built<DiskSource>>, String> {
+        let slot = {
+            let mut held = architect::lock(&self.held);
+            let now = std::time::Instant::now();
+            held.retain(|v, (_, used)| v == id || now.duration_since(*used) < INDEX_IDLE);
+            let (slot, used) = held
+                .entry(id.to_owned())
+                .or_insert_with(|| (Slot::default(), now));
+            *used = now;
+            let slot = Arc::clone(slot);
+            drop(held);
+            slot
+        };
+        // Built outside the map's lock: a large vault takes a while.
+        slot.get_or_init(|| {
+            let built = Arc::new(Built::new(DiskSource::open(root)));
+            let _ = built.sync();
+            Ok(built)
+        })
+        .clone()
+    }
 }
 
 impl NodeState {
@@ -335,7 +367,7 @@ impl NodeState {
     async fn indexed<R: Send + 'static>(
         &self,
         vault: String,
-        f: impl FnOnce(&Built<OpenVault>) -> R + Send + 'static,
+        f: impl FnOnce(&Built<DiskSource>) -> R + Send + 'static,
     ) -> Result<R, IndexError> {
         let root = self
             .backend
@@ -343,8 +375,8 @@ impl NodeState {
             .map_err(|_| IndexError::NotFound(vault.clone()))?;
         let indexed = self.indexed.clone();
         tokio::task::spawn_blocking(move || {
-            let held = indexed.of(&vault, &root).map_err(IndexError::Refused)?;
-            Ok(f(&held.0))
+            let built = indexed.of(&vault, &root).map_err(IndexError::Refused)?;
+            Ok(f(&built))
         })
         .await
         .map_err(|e| IndexError::Refused(e.to_string()))?
@@ -353,27 +385,86 @@ impl NodeState {
 
 impl VaultIndexSync for NodeState {
     async fn snapshot(&self, vault: String) -> Result<IndexBytes, IndexError> {
-        self.indexed(vault, |built| {
-            let index = built.index().filtered(may_read);
-            IndexBytes {
-                revision: index.revision,
-                bytes: index.to_bytes(),
-            }
-        })
-        .await
+        let (reads, key) = self.reads(&vault)?;
+        self.indexed(vault, move |built| snapshot_for(built, &*reads, key)).await
     }
 
-    async fn since(&self, vault: String, from: u64) -> Result<Option<IndexBytes>, IndexError> {
-        self.indexed(vault, move |built| {
-            built.since(from).map(|d| {
-                let d = d.filtered(may_read);
-                IndexBytes {
-                    revision: d.to,
-                    bytes: d.to_bytes(),
-                }
-            })
-        })
-        .await
+    async fn since(
+        &self,
+        vault: String,
+        epoch: u64,
+        access: u64,
+        from: u64,
+    ) -> Result<Option<IndexBytes>, IndexError> {
+        let (reads, key) = self.reads(&vault)?;
+        self.indexed(vault, move |built| since_for(built, &*reads, key, epoch, access, from))
+            .await
+    }
+}
+
+/// The index of `built` as a reader that `reads` may read it, whose
+/// rights' fingerprint is `key`.
+pub fn snapshot_for<S: vault::query::NoteSource>(
+    built: &Built<S>,
+    reads: &dyn Fn(&str) -> bool,
+    key: u64,
+) -> IndexBytes {
+    let index = built.index();
+    IndexBytes {
+        epoch: index.epoch,
+        access: key,
+        revision: index.revision,
+        bytes: index.filtered(reads).to_bytes(),
+    }
+}
+
+/// What changed in `built`'s index for a reader that `reads` may read
+/// (its rights' fingerprint `key` now), since revision `from` of history
+/// `epoch` read with access `access`; `None`: take a snapshot.
+pub fn since_for<S: vault::query::NoteSource>(
+    built: &Built<S>,
+    reads: &dyn Fn(&str) -> bool,
+    key: u64,
+    epoch: u64,
+    access: u64,
+    from: u64,
+) -> Option<IndexBytes> {
+    // What it may read changed: it starts again from a snapshot.
+    if key != access {
+        return None;
+    }
+    let delta = built.since(epoch, from)?;
+    let now = key;
+    let mine = delta.filtered(reads);
+    // Nothing it may read changed: it stays where it was, so it cannot
+    // count the edits to notes it cannot read.
+    let mine = if mine.is_empty() {
+        vault::query::IndexDelta::none(epoch, from)
+    } else {
+        mine
+    };
+    Some(IndexBytes {
+        epoch,
+        access: now,
+        revision: mine.to,
+        bytes: mine.to_bytes(),
+    })
+}
+
+impl NodeState {
+    /// What the caller of this call may read in `vault`: a check of each
+    /// note's path, through the org lane's rules ([`Access`]).
+    #[allow(clippy::type_complexity)]
+    fn reads(&self, vault: &str) -> Result<(Arc<dyn Fn(&str) -> bool + Send + Sync>, u64), IndexError> {
+        let who = architect::permissions_gate::caller()
+            .ok_or_else(|| IndexError::Refused("no caller: the index is a member's".to_owned()))?;
+        let access = self
+            .indexed
+            .access()
+            .ok_or_else(|| IndexError::Refused("this node hosts no org".to_owned()))?;
+        let key = (access.key)(&who);
+        let vault = vault.to_owned();
+        Ok((Arc::new(move |path: &str| (access.reads)(&who, &vault, path)), key))
     }
 }
 
@@ -412,5 +503,72 @@ impl NodeState {
 impl architect::Services for NodeState {
     fn layers() -> impl architect::Layer<Self> {
         architect::layers![node::NodeService]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
+
+    use vault::query::{IndexDelta, VaultIndex};
+
+    use super::*;
+
+    fn write(dir: &std::path::Path, path: &str, text: &str) {
+        let abs = dir.join(path);
+        std::fs::create_dir_all(abs.parent().unwrap()).unwrap();
+        std::fs::write(abs, text).unwrap();
+    }
+
+    fn settled(built: &Built<DiskSource>, done: impl Fn(&VaultIndex) -> bool) {
+        for _ in 0..200 {
+            if done(&built.index()) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        panic!("the index did not catch up");
+    }
+
+    /// Two readers of one vault: one may read everything, one only
+    /// `Public/`. Each gets only its notes, never a hidden path's name, no
+    /// sign of edits it cannot see, and a snapshot when what it may read
+    /// changes.
+    #[test]
+    fn each_reader_gets_only_what_it_may_read() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "Public/A.md", "# A\n");
+        write(dir.path(), "Private/B.md", "# B\n");
+        let built = Built::new(DiskSource::open(dir.path()));
+        let everything = |_: &str| true;
+        let public = |p: &str| p.starts_with("Public/");
+
+        let all = snapshot_for(&built, &everything, 1);
+        let mine = snapshot_for(&built, &public, 2);
+        assert_eq!(VaultIndex::from_bytes(&all.bytes).unwrap().entries.len(), 2);
+        let mine_index = VaultIndex::from_bytes(&mine.bytes).unwrap();
+        assert_eq!(mine_index.entries.keys().map(|k| &**k).collect::<Vec<_>>(), ["Public/A.md"]);
+        assert!(!String::from_utf8_lossy(&mine.bytes).contains("Private"));
+
+        // A private edit: the public reader stays where it was.
+        write(dir.path(), "Private/B.md", "# B changed\n");
+        settled(&built, |i| i.entries["Private/B.md"].title() == "B changed");
+        let quiet = since_for(&built, &public, 2, mine.epoch, mine.access, mine.revision).unwrap();
+        assert_eq!(quiet.revision, mine.revision, "no count of hidden edits");
+        assert!(IndexDelta::from_bytes(&quiet.bytes).unwrap().is_empty());
+        let full = since_for(&built, &everything, 1, all.epoch, all.access, all.revision).unwrap();
+        assert_eq!(IndexDelta::from_bytes(&full.bytes).unwrap().put.len(), 1);
+        // A new note it may read reaches it as a delta, not a snapshot.
+        write(dir.path(), "Public/C.md", "# C\n");
+        settled(&built, |i| i.entries.contains_key("Public/C.md"));
+        let more = since_for(&built, &public, 2, mine.epoch, mine.access, mine.revision).unwrap();
+        let more = IndexDelta::from_bytes(&more.bytes).unwrap();
+        assert_eq!(more.put.iter().map(|e| &*e.path).collect::<Vec<_>>(), ["Public/C.md"]);
+
+        // What the public reader may read changes: it takes a snapshot.
+        assert!(since_for(&built, &public, 3, mine.epoch, mine.access, mine.revision).is_none());
+        // Another history (the node started again): a snapshot.
+        let again = Built::new(DiskSource::open(dir.path()));
+        assert!(since_for(&again, &public, 2, mine.epoch, mine.access, mine.revision).is_none());
     }
 }

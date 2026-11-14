@@ -639,6 +639,12 @@ pub async fn start_with_shell(
     if let (Some(lane), Some(_)) = (&lane, &config.host_org) {
         // The notes, and their index for a browser's queries (it runs them
         // itself, over its copy).
+        // Each note in the index only for whom the lane's rules let read it.
+        let (reads, key) = (lane.clone(), lane.clone());
+        state.indexed.set_access(service::Access {
+            reads: Arc::new(move |who, vault, path| reads.reads(who, vault, path)),
+            key: Arc::new(move |who| key.read_key(who)),
+        });
         let notes = architect::layers![service::notes::NotesService, service::index_sync::VaultIndexSyncService]
             .provide(state.clone());
         host = lane

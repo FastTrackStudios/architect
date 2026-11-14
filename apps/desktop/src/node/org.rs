@@ -285,6 +285,34 @@ impl OrgLane {
                 .allowed()
     }
 
+    /// Whether a person may read note `path` of vault `vault`: a member of
+    /// the org whose role may `read` it (the vault index's filter, as
+    /// [`Self::opens`] is the live note's). Share guests get no index here
+    /// (a guest's subset of it is later work, #710 G1).
+    #[must_use]
+    pub fn reads(&self, who: &Principal, vault: &str, path: &str) -> bool {
+        let doc_id = vault_proto::collab_doc_id(vault, path);
+        matches!(who, Principal::User { .. })
+            && self
+                .engine
+                .check(
+                    who,
+                    &Resource::new(format!("org/{}/docs/{doc_id}", self.org.id.0)),
+                    &Action::read(),
+                )
+                .allowed()
+    }
+
+    /// A fingerprint of what `who` may read in the org: their role, which
+    /// the lane's rules are per ([`engine`]). It moves when their role does.
+    #[must_use]
+    pub fn read_key(&self, who: &Principal) -> u64 {
+        use std::hash::{Hash as _, Hasher as _};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.members.role(who, &self.org.id).map(|r| r.label()).hash(&mut h);
+        h.finish()
+    }
+
     /// Serve the lane at `/org/{slug}/vox` on `host`; any other slug is
     /// not found.
     #[must_use]
