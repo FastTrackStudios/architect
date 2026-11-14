@@ -334,6 +334,7 @@ show it in a pane: the whole DOM, canvas, WebGL and any npm library, with
 real accessibility. On iOS it is the one way installed code runs at full
 speed, JIT-compiled in WKWebView.
 
+<!-- doc-check: off -->
 ```toml
 id = "demo.webview-board"
 kind = "data"            # its code runs only in its view
@@ -347,6 +348,7 @@ title = "Board"
 kind = "web"
 src = "dist/index.html"  # in the package; a web view needs one
 ```
+<!-- doc-check: on -->
 
 `examples/extension/webview-board` is one: Vite, TypeScript, uPlot and
 SortableJS (`just webview-example KEY=…` builds, packs and signs it).
