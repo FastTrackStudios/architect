@@ -389,8 +389,11 @@ pub fn NowPlayingBar(#[props(default)] art: Option<Callback<String, Option<Strin
                 "aria-label": "Source: {s.name}",
                 "aria-haspopup": if many { "menu" } else { "false" },
                 "aria-expanded": "{menu() && many}",
-                style: "border: 1px solid {t.rule}; background: transparent; color: {t.ink_3}; border-radius: 999px; \
-                        min-height: 44px; padding: 4px 12px; font: inherit; font-size: 12px; display: flex; align-items: center; gap: 4px; \
+                // The press is 44 points tall; the pill drawn in it is the
+                // name's own height (a 44-point outline round 12px text
+                // reads as a stretched oval on a phone).
+                style: "border: 0; background: transparent; color: {t.ink_3}; box-sizing: border-box; \
+                        min-height: 44px; padding: 0; font: inherit; font-size: 12px; display: flex; align-items: center; \
                         cursor: {pointer}; max-width: 160px;",
                 onclick: move |e: MouseEvent| {
                     e.stop_propagation();
@@ -399,9 +402,12 @@ pub fn NowPlayingBar(#[props(default)] art: Option<Callback<String, Option<Strin
                         menu.set(!o);
                     }
                 },
-                span { style: "white-space: nowrap; overflow: hidden; text-overflow: ellipsis;", "{s.name}" }
-                if many {
-                    ChevronsUpDown { size: 12, color: ink3 }
+                span { style: "display: flex; align-items: center; gap: 4px; min-width: 0; padding: 5px 12px; \
+                               border: 1px solid {t.rule}; border-radius: 999px;",
+                    span { style: "white-space: nowrap; overflow: hidden; text-overflow: ellipsis;", "{s.name}" }
+                    if many {
+                        ChevronsUpDown { size: 12, color: ink3 }
+                    }
                 }
             }
             if menu() && many {
