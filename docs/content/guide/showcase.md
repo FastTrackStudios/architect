@@ -40,9 +40,10 @@ under `710-showcase/<platform>/`, where the cells below link them.
 | ❌ | Does not run there. The cell gives the reason and the issue. |
 | n/a | The capability is not about that platform. |
 
-A cell that relies on the in-memory sample documents the app's host
-gives extensions today (`apps/ui/src/extensions.rs` `documents`), rather
-than the person's own vault, stays ⚠️ until #706 lands.
+Since #713 the app's host gives extensions the person's opened vault
+(`architect_navigator::documents::VaultDocuments`); the in-memory sample
+documents (`apps/ui/src/extensions.rs` `documents`) are the sandbox's
+only when it has no vault on disk.
 
 The seed is the parity re-run of 2026-11-14 against `0ec8b0a9` (every
 verdict read from code, nothing run) and the tests named in the evidence
@@ -97,10 +98,10 @@ frames, nothing an extension author can target. Every web cell below is
 
 | Id | Capability | Desktop | Web | iOS | Example | Evidence |
 |---|---|---|---|---|---|---|
-| H1 | The person's real vault through the document API | ⚠️ the API acts on an in-memory sample store (#706, #713); `VAULT_*` actions reach the vault, shown by Templater-lite: [390 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/standup-390-light.png), [390 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/standup-390-dark.png), [1280 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/standup-1280-light.png), [1280 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/standup-1280-dark.png) | ❌ #495 | ⚠️ same as desktop (#706) | Templater-lite | `features/extensions/tests/showcase.rs`, `features/extensions/tests/documents.rs` |
-| H2 | Document events for the person's own edits | ❌ the vault raises no `doc.*` events (#706); an extension's own edits do | ❌ #495 | ❌ #706 | Dataview-lite | `features/extensions/tests/events.rs` |
+| H1 | The person's real vault through the document API | ⚠️ the API acts on the opened vault (`VaultDocuments`, #713): list, read, create, edit (compare-and-swap, merged into an open note's typing), rename, move, delete; Templater-lite shown through `VAULT_*`: [390 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/standup-390-light.png), [390 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/standup-390-dark.png), [1280 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/standup-1280-light.png), [1280 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/standup-1280-dark.png); the document API on the real vault not captured yet | ❌ #495 | ⚠️ not shown: the same `apps/ui` host (#713) | Templater-lite | `features/navigator/tests/documents.rs`, `features/extensions/tests/showcase.rs`, `features/extensions/tests/documents.rs` |
+| H2 | Document events for the person's own edits | ⚠️ not shown: the person's saves, new notes, renames, deletes (a folder's per note) and outside edits are `doc.*` (#713), each heard once | ❌ #495 | ⚠️ not shown: the same `apps/ui` host (#713) | Dataview-lite | `features/navigator/tests/documents.rs`, `features/extensions/tests/events.rs` |
 | H3 | Vault queries (bases rows, links, tags, search); per-note parsed metadata | ⚠️ the queries run as actions; no per-note headings, list items or tasks (#706) | ❌ #495 | ⚠️ same as desktop | Dataview-lite | - |
-| H4 | Extension data and settings that persist | ⚠️ not shown | ❌ kept in memory (#495) | ⚠️ not shown | - | `features/extensions/tests/host_service.rs` |
+| H4 | Extension data and settings that persist | ⚠️ not shown: a file per extension (atomic, 0600, never wiped by a bad read), settings in the device values; kept across a restart (#713) | ❌ kept in memory (#495) | ⚠️ not shown: the same `apps/ui` host | - | `features/navigator/tests/documents.rs` `what_an_extension_keeps_survives_a_restart`, `features/extensions/tests/documents.rs` |
 | H5 | Secrets | ⚠️ not shown | ❌ not in a browser yet (#495) | ⚠️ not shown | Secrets and fetch | `features/extensions/tests/net.rs` |
 | H6 | `fetch` limited to the manifest's hosts | ⚠️ not shown | ❌ #495; CORS applies | ⚠️ not shown | Secrets and fetch | `features/extensions/tests/net.rs` |
 | H7 | Notifications: in-app toasts; OS notifications | ⚠️ an in-app toast: [390 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/showcase-notify-toast-390-light.png), [390 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/showcase-notify-toast-390-dark.png), [1280 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/showcase-notify-toast-1280-light.png), [1280 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/showcase-notify-toast-1280-dark.png); OS notifications #709 | ❌ #495 | ⚠️ toasts only (#709) | Notify sampler | `features/extensions/tests/showcase.rs`, `features/extensions/tests/host_ui.rs` |
