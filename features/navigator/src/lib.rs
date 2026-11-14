@@ -56,6 +56,8 @@ pub mod template;
 pub mod tree;
 pub mod virtualize;
 
+#[cfg(feature = "documents")]
+pub mod documents;
 #[cfg(feature = "ui")]
 pub mod ui;
 #[cfg(feature = "vault")]

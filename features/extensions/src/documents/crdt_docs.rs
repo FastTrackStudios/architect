@@ -8,7 +8,9 @@ use architect::action::Principal;
 use crdt::loro::{ID, LoroDoc, LoroText, UpdateOptions};
 use crdt::{CrdtDoc, History};
 
-use super::{DocEdit, DocError, DocInfo, Documents, is_under};
+use super::{DocEdit, DocError};
+#[cfg(not(target_family = "wasm"))]
+use super::{DocInfo, Documents, is_under};
 
 /// How many steps of each document's undo are kept.
 const KEEP: usize = 100;
@@ -232,6 +234,32 @@ fn apply(text: &LoroText, edits: &[DocEdit]) -> Result<(), String> {
     Ok(())
 }
 
+/// `edits` applied to `text` as one Loro transaction made as `by`.
+///
+/// The way [`CrdtDocuments`] applies them, for a document set kept as
+/// plain text (a vault on disk): a `replace` is diffed and positions
+/// count characters the same everywhere. Its text after.
+///
+/// # Errors
+///
+/// An edit outside the text ([`DocError::Invalid`]; nothing applied).
+pub fn apply_edits(text: &str, edits: &[DocEdit], by: &Principal) -> Result<String, DocError> {
+    let doc = LoroDoc::new();
+    let t = CrdtDocuments::text_of(&doc);
+    t.insert(0, text)
+        .map_err(|e| DocError::Failed(e.to_string()))?;
+    doc.commit();
+    check_edits(t.len_unicode(), edits)?;
+    doc.set_next_commit_message(&by.describe());
+    apply(&t, edits).map_err(DocError::Failed)?;
+    doc.commit();
+    Ok(t.to_string())
+}
+
+// Its store is not `Send` in a browser, where nothing is: there the
+// documents are the web app's own (`apps/web`), and `apply_edits` is what
+// it shares from here (#495).
+#[cfg(not(target_family = "wasm"))]
 impl Documents for CrdtDocuments {
     fn list(&self, under: Option<&str>) -> Result<Vec<DocInfo>, DocError> {
         Ok(self

@@ -482,6 +482,15 @@ app-linked-extensions-test:
     devenv shell -- bash scripts/web-bundle.sh target/web-bundle
     ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-linked-extensions.test.mjs
 
+# The document API, document events and kept data in the web app (#495
+# H1, H2, H4): the demo's probe extension (`/app/?demo&probe`) lists,
+# reads, creates, edits, renames and deletes the demo vault's notes, hears
+# the person's typing, and finds its setting and data after a reload.
+# Firefox headless over BiDi; `SHOTS=<dir>` keeps screenshots.
+app-documents-test:
+    devenv shell -- bash scripts/web-bundle.sh target/web-bundle
+    ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-documents.test.mjs
+
 # The web app's bottom slots as favourites (#607) at 390 px: the default
 # set, a note type's declared set from the node's `/_ext/favourites.json`,
 # a tab opening its island view; `ARCHITECT_SHOTS=<dir>` keeps screenshots.
