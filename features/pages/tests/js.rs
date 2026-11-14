@@ -215,7 +215,11 @@ fn a_tsx_page_gets_pointer_wheel_and_composition_events() {
             ..WheelData::default()
         }),
     );
-    pane.send("#pad", "compositionend", EventData::Composition("日本".to_owned()));
+    pane.send(
+        "#pad",
+        "compositionend",
+        EventData::Composition("日本".to_owned()),
+    );
     pane.wait_for(
         "#seen",
         " down:pen:12 move:1 wheel:40 composed:日本",

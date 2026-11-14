@@ -730,13 +730,25 @@ mod rich {
             assert_eq!(p.pointer_id(), 11);
             assert_eq!(p.pointer_type(), "touch");
             let t = touch(&TouchData {
-                touches: vec![TouchPoint { id: 1, ..TouchPoint::default() }],
-                changed: vec![TouchPoint { id: 1, ..TouchPoint::default() }],
+                touches: vec![TouchPoint {
+                    id: 1,
+                    ..TouchPoint::default()
+                }],
+                changed: vec![TouchPoint {
+                    id: 1,
+                    ..TouchPoint::default()
+                }],
                 ..TouchData::default()
             });
             assert_eq!(t.touches().len(), 1);
-            let w = wheel(&WheelData { at, delta_y: 120.0, ..WheelData::default() });
-            assert!(matches!(w.delta(), dioxus::html::geometry::WheelDelta::Pixels(v) if (v.y - 120.0).abs() < f64::EPSILON));
+            let w = wheel(&WheelData {
+                at,
+                delta_y: 120.0,
+                ..WheelData::default()
+            });
+            assert!(
+                matches!(w.delta(), dioxus::html::geometry::WheelDelta::Pixels(v) if (v.y - 120.0).abs() < f64::EPSILON)
+            );
             let _ = composition("日本");
         }
     }
