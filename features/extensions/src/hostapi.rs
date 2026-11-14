@@ -937,6 +937,11 @@ impl ExtensionApi {
                 .ask_secret(&host, manifest, &name)
                 .await
                 .map(Value::Bool),
+            HostRequest::StoreSecret { name, value } => host
+                .secrets()
+                .set(&self.id, &name, &value)
+                .map(|()| Value::Bool(true))
+                .map_err(|message| HostError::Failed { message }),
             HostRequest::Ports { kind } => host.list_ports(kind.as_deref()),
             HostRequest::OpenPort { kind, name, listen } => {
                 host.open_port(&self.id, &kind, &name, listen)

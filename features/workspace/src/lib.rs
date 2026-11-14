@@ -129,7 +129,7 @@ pub use host::{PaneRoom, use_pane_room, use_pane_space, use_pane_subject};
 pub use host::{TabKindsUi, TabRender, TabRenderCtx, try_use_tab_kinds, use_tab_kinds};
 pub use kinds::{
     Capabilities, Capability, DIOXUS, Hosts, KindError, KindId, KindSpec, PAINT, Part, Placement,
-    Placements, ViewHost, ViewKinds,
+    Placements, ViewHost, ViewKinds, WEB,
 };
 pub use layout::{Direction, Placed, Slide, area_rects, neighbour, scroll_to, slides};
 pub use meter::{FRAME_BUDGET, Meters, ViewHealth, ViewMeter, ViewReport, ViewSummary};

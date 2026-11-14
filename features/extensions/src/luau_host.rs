@@ -377,6 +377,10 @@ impl Module for HostModule {
         op!("ask_secret", String, |lua, a| Ok(HostRequest::AskSecret {
             name: a
         }));
+        op!("store_secret", (String, String), |lua, a| {
+            let (name, value) = a;
+            Ok(HostRequest::StoreSecret { name, value })
+        });
         op!("decorate", (LuaValue, Option<LuaValue>), |lua, a| {
             let (target, decoration) = a;
             json_of(&lua, target).and_then(|target| {
