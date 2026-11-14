@@ -1354,6 +1354,18 @@ fn embed_input(event: &wit::ViewEvent) -> Option<Embed> {
     })
 }
 
+/// A dioxus-html serialised kind, from its serde shape (its fields are
+/// private); an event whose shape is wrong carries nothing.
+macro_rules! serialised {
+    ($kind:ty, $value:expr) => {{
+        let data: Rc<dyn std::any::Any> = match serde_json::from_value::<$kind>($value) {
+            Ok(data) => Rc::new(PlatformEventData::new(Box::new(data))),
+            Err(_) => Rc::new(()),
+        };
+        data
+    }};
+}
+
 fn dispatch(vdom: &VirtualDom, event: wit::ViewEvent) {
     let Ok(element) = usize::try_from(event.element) else {
         return;
@@ -1367,12 +1379,78 @@ fn dispatch(vdom: &VirtualDom, event: wit::ViewEvent) {
         wit::EventData::Focus => Rc::new(PlatformEventData::new(Box::new(
             SerializedFocusData::default(),
         ))),
+        wit::EventData::Pointer(p) => serialised!(dioxus::html::SerializedPointerData, merged(
+            point(&p.at),
+            serde_json::json!({
+                "pointer_id": p.pointer_id, "width": 1.0, "height": 1.0,
+                "pressure": p.pressure, "tangential_pressure": 0.0,
+                "tilt_x": p.tilt_x, "tilt_y": p.tilt_y, "twist": p.twist,
+                "pointer_type": p.pointer_type, "is_primary": p.is_primary,
+            }),
+        )),
+        wit::EventData::Touch(t) => {
+            let all: Vec<Json> = t.touches.iter().map(touch_point).collect();
+            let changed: Vec<Json> = t.changed.iter().map(touch_point).collect();
+            serialised!(dioxus::html::SerializedTouchData, serde_json::json!({
+                "alt_key": t.mods.alt, "ctrl_key": t.mods.ctrl,
+                "meta_key": t.mods.meta, "shift_key": t.mods.shift,
+                "touches": all.clone(), "changed_touches": changed, "target_touches": all,
+            }))
+        }
+        wit::EventData::Wheel(w) => serialised!(dioxus::html::SerializedWheelData, merged(
+            point(&w.at),
+            serde_json::json!({
+                "delta_mode": w.delta_mode, "delta_x": w.delta_x,
+                "delta_y": w.delta_y, "delta_z": 0.0,
+            }),
+        )),
+        wit::EventData::Scroll(s) => Rc::new(PlatformEventData::new(Box::new(
+            dioxus::html::SerializedScrollData {
+                scroll_top: s.top,
+                scroll_left: s.left,
+                scroll_width: s.width,
+                scroll_height: s.height,
+                client_width: s.client_width,
+                client_height: s.client_height,
+            },
+        ))),
+        wit::EventData::Composition(text) => serialised!(dioxus::html::SerializedCompositionData, serde_json::json!({ "data": text })),
     };
     vdom.runtime().handle_event(
         &event.name,
         Event::new(data, event.bubbles),
         ElementId::from_raw(element),
     );
+}
+
+
+fn point(p: &wit::Pointer) -> Json {
+    serde_json::json!({
+        "alt_key": p.mods.alt, "ctrl_key": p.mods.ctrl,
+        "meta_key": p.mods.meta, "shift_key": p.mods.shift,
+        "button": p.button, "buttons": p.buttons,
+        "client_x": p.client_x, "client_y": p.client_y,
+        "offset_x": p.element_x, "offset_y": p.element_y,
+        "page_x": p.page_x, "page_y": p.page_y,
+        "screen_x": p.screen_x, "screen_y": p.screen_y,
+    })
+}
+
+fn merged(mut base: Json, more: Json) -> Json {
+    if let (Some(b), Json::Object(m)) = (base.as_object_mut(), more) {
+        b.extend(m);
+    }
+    base
+}
+
+fn touch_point(t: &wit::TouchPoint) -> Json {
+    serde_json::json!({
+        "identifier": t.id,
+        "client_x": t.client_x, "client_y": t.client_y,
+        "page_x": t.page_x, "page_y": t.page_y,
+        "screen_x": t.screen_x, "screen_y": t.screen_y,
+        "force": t.force, "radius_x": 1.0, "radius_y": 1.0, "rotation_angle": 0.0,
+    })
 }
 
 fn modifiers(m: wit::Mods) -> Modifiers {

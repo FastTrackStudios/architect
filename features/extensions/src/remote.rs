@@ -32,9 +32,20 @@
 //! sub-document scrolls. The embed's input reaches the view as
 //! [`crate::wire::EMBED_EVENT`], again whenever it changes.
 //!
-//! Not yet: pointer, touch, wheel and scroll events (Blitz scrolls the
-//! sub-document itself), IME, `mounted` measurements, the shell's
-//! components as named elements, the allowlist of elements and CSS.
+//! Input (#176): pointer, touch, wheel and scroll events, an input
+//! method's composition, keys and focus all reach the view's handlers
+//! ([`crate::wire::INPUT_WIRE`] on). A press holds the pointer: the
+//! moves and the release that follow go to the element pressed, over it
+//! or not ([`RemoteDocument`]'s implicit capture, as a touch is captured
+//! on the web). Fast events are coalesced while the view is still
+//! answering one ([`crate::wire::Coalescer`]). The view's document is
+//! given the window's input method and clipboard, its caret area moved
+//! to where the pane is ([`HostShell`]).
+//!
+//! Not yet: `mounted` measurements, the shell's components as named
+//! elements, the allowlist of elements and CSS; a release outside the
+//! pane reaches the view as a `pointercancel` when the pointer comes
+//! back (Blitz's own capture holds only custom widgets).
 
 // Dioxus is single-threaded: its tasks are not `Send`.
 #![allow(clippy::future_not_send)]
@@ -43,6 +54,7 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use architect_workspace::{Meters, ViewMeter};
@@ -52,9 +64,11 @@ use blitz_dom::{
     LocalName, Namespace, Node, NodeId, QualName, UserAgentStylesheet,
 };
 use blitz_traits::events::{
-    BlitzKeyEvent, BlitzPointerEvent, DomEvent, DomEventData, EventState, Location, Modifiers,
-    MouseEventButton, UiEvent,
+    BlitzImeEvent, BlitzKeyEvent, BlitzPointerEvent, BlitzPointerId, BlitzWheelDelta,
+    BlitzWheelEvent, DomEvent, DomEventData, EventState, Location, Modifiers, MouseEventButton,
+    UiEvent,
 };
+use blitz_traits::shell::{ClipboardError, ShellProvider};
 use dioxus::prelude::*;
 use dioxus_native_dom::NodeHandle;
 use futures::channel::mpsc;
@@ -62,7 +76,8 @@ use futures::{FutureExt as _, StreamExt as _};
 
 use crate::process::{Process, Processes, State};
 use crate::wire::{
-    ANSWERED_WIRE, Edit, EventData, Frame, KeyData, Mods, Pointer, Value, ViewEvent,
+    ANSWERED_WIRE, Coalescer, Edit, EventData, Frame, KeyData, Mods, Pointer, PointerData,
+    ScrollData, TouchData, TouchPoint, Value, ViewEvent, WheelData,
 };
 
 /// A process view's frame budget, from the event to its frame: two
@@ -103,6 +118,11 @@ pub struct RemoteDocument {
     theme: NodeId,
     /// Whether it is sized to its content ([`Self::fit_content`]).
     fitted: bool,
+    /// The element a press is holding the pointer on, until its release.
+    held: Option<u64>,
+    /// Whether an input method is composing (a `compositionstart` was
+    /// sent and its end not yet).
+    composing: bool,
 }
 
 impl std::fmt::Debug for RemoteDocument {
@@ -155,7 +175,21 @@ impl RemoteDocument {
             events,
             theme,
             fitted: false,
+            held: None,
+            composing: false,
         }
+    }
+
+    /// Gives the view the host window's input method, clipboard and
+    /// redraws ([`HostShell`]): a field in it can be composed into.
+    pub fn set_host_shell(&mut self, shell: HostShell) {
+        self.doc.set_shell_provider(Arc::new(shell));
+    }
+
+    /// The element a press holds the pointer on now, if any.
+    #[must_use]
+    pub const fn held(&self) -> Option<u64> {
+        self.held
     }
 
     /// Sizes it to its content, as an inline embed: the page as tall as
@@ -506,11 +540,32 @@ impl Document for RemoteDocument {
     }
 
     fn handle_ui_event(&mut self, event: UiEvent) {
+        // A pointer that comes back with no button held lost its release
+        // outside the pane: what it held is cancelled.
+        if let (Some(held), UiEvent::PointerMove(p)) = (self.held, &event)
+            && p.buttons.is_empty()
+        {
+            self.held = None;
+            if self.listeners.get("pointercancel").copied().unwrap_or(0) > 0 {
+                let _ = self.events.unbounded_send(ViewEvent {
+                    element: held,
+                    name: "pointercancel".to_owned(),
+                    bubbles: true,
+                    data: EventData::Pointer(pointer_data(p)),
+                });
+            }
+        }
+        let releases = matches!(event, UiEvent::PointerUp(_) | UiEvent::PointerCancel(_));
         let forward = Forward {
             listeners: &self.listeners,
             events: &self.events,
+            held: &mut self.held,
+            composing: &mut self.composing,
         };
         EventDriver::new(&mut self.doc, forward).handle_ui_event(event);
+        if releases {
+            self.held = None;
+        }
     }
 }
 
@@ -518,6 +573,37 @@ impl Document for RemoteDocument {
 struct Forward<'a> {
     listeners: &'a HashMap<String, u32>,
     events: &'a mpsc::UnboundedSender<ViewEvent>,
+    held: &'a mut Option<u64>,
+    composing: &'a mut bool,
+}
+
+impl Forward<'_> {
+    fn listens(&self, name: &str) -> bool {
+        self.listeners.get(name).copied().unwrap_or(0) > 0
+    }
+
+    fn send(&self, element: u64, name: &str, bubbles: bool, data: EventData) {
+        if !self.listens(name) {
+            return;
+        }
+        // The extension bubbles it through its own tree.
+        let _ = self.events.unbounded_send(ViewEvent {
+            element,
+            name: name.to_owned(),
+            bubbles,
+            data,
+        });
+    }
+}
+
+/// Whether events named `name` go to the element a press holds while it
+/// is held, over it or not.
+fn captured(name: &str) -> bool {
+    matches!(
+        name,
+        "pointermove" | "pointerup" | "pointercancel" | "mousemove" | "mouseup" | "touchmove"
+            | "touchend" | "touchcancel"
+    )
 }
 
 impl EventHandler for Forward<'_> {
@@ -529,26 +615,135 @@ impl EventHandler for Forward<'_> {
         _: &mut EventState,
     ) {
         let name = event.name();
-        if self.listeners.get(name).copied().unwrap_or(0) == 0 {
+        let target = {
+            let doc = doc.inner();
+            chain
+                .iter()
+                .find_map(|n| doc.get_node(*n).and_then(dioxus_id))
+        };
+        // A press holds the pointer on the element it landed on.
+        if name == "pointerdown" {
+            *self.held = target;
+        }
+        let target = match *self.held {
+            Some(held) if captured(name) => Some(held),
+            _ => target,
+        };
+        let Some(element) = target else {
+            return;
+        };
+        if let DomEventData::Ime(ime) = &event.data {
+            self.composition(element, ime);
+            return;
+        }
+        if !self.listens(name) {
             return;
         }
         let Some(data) = event_data(&event.data) else {
             return;
         };
-        let doc = doc.inner();
-        let Some(element) = chain
-            .iter()
-            .find_map(|n| doc.get_node(*n).and_then(dioxus_id))
-        else {
-            return;
-        };
-        // The extension bubbles it through its own tree.
-        let _ = self.events.unbounded_send(ViewEvent {
-            element,
-            name: name.to_owned(),
-            bubbles: event.bubbles,
-            data,
-        });
+        self.send(element, name, event.bubbles, data);
+    }
+}
+
+impl Forward<'_> {
+    /// An input method's event, as the web's composition events.
+    fn composition(&mut self, element: u64, ime: &BlitzImeEvent) {
+        match ime {
+            BlitzImeEvent::Preedit(text, _) if !text.is_empty() => {
+                if !*self.composing {
+                    *self.composing = true;
+                    self.send(
+                        element,
+                        "compositionstart",
+                        true,
+                        EventData::Composition(String::new()),
+                    );
+                }
+                self.send(
+                    element,
+                    "compositionupdate",
+                    true,
+                    EventData::Composition(text.clone()),
+                );
+            }
+            BlitzImeEvent::Commit(text) => {
+                if !*self.composing {
+                    self.send(
+                        element,
+                        "compositionstart",
+                        true,
+                        EventData::Composition(String::new()),
+                    );
+                }
+                *self.composing = false;
+                self.send(
+                    element,
+                    "compositionend",
+                    true,
+                    EventData::Composition(text.clone()),
+                );
+            }
+            BlitzImeEvent::Disabled if *self.composing => {
+                *self.composing = false;
+                self.send(
+                    element,
+                    "compositionend",
+                    true,
+                    EventData::Composition(String::new()),
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The host window's shell, as a view's document sees it: its input
+/// method, clipboard and redraws, the caret area moved from the view's
+/// coordinates to the window's by where the pane is.
+#[derive(Clone)]
+pub struct HostShell {
+    window: Arc<dyn ShellProvider>,
+    /// Where the pane's top left is in the window, CSS pixels.
+    at: Arc<Mutex<(f32, f32)>>,
+}
+
+impl HostShell {
+    /// The window's `shell`, for a pane at `x`, `y`.
+    #[must_use]
+    pub fn new(window: Arc<dyn ShellProvider>, x: f32, y: f32) -> Self {
+        Self {
+            window,
+            at: Arc::new(Mutex::new((x, y))),
+        }
+    }
+
+    /// The pane moved.
+    pub fn moved(&self, x: f32, y: f32) {
+        *self.at.lock().unwrap_or_else(PoisonError::into_inner) = (x, y);
+    }
+}
+
+impl ShellProvider for HostShell {
+    fn request_redraw(&self) {
+        self.window.request_redraw();
+    }
+
+    fn set_ime_enabled(&self, is_enabled: bool) {
+        self.window.set_ime_enabled(is_enabled);
+    }
+
+    fn set_ime_cursor_area(&self, x: f32, y: f32, width: f32, height: f32) {
+        let (dx, dy) = *self.at.lock().unwrap_or_else(PoisonError::into_inner);
+        self.window.set_ime_cursor_area(x + dx, y + dy, width, height);
+    }
+
+    fn request_clipboard_text(&self) -> Result<(), ClipboardError> {
+        self.window.request_clipboard_text()
+    }
+
+    fn set_clipboard_text(&self, text: String) -> Result<(), ClipboardError> {
+        self.window.set_clipboard_text(text)
     }
 }
 
@@ -604,6 +799,90 @@ fn key(k: &BlitzKeyEvent) -> KeyData {
     }
 }
 
+fn pointer_data(p: &BlitzPointerEvent) -> PointerData {
+    let (pointer_id, pointer_type) = match p.id {
+        BlitzPointerId::Mouse => (1, "mouse"),
+        BlitzPointerId::Pen => (2, "pen"),
+        BlitzPointerId::Finger(n) => (
+            i32::try_from(n).unwrap_or(i32::MAX - 10).saturating_add(10),
+            "touch",
+        ),
+    };
+    PointerData {
+        at: pointer(p),
+        pointer_id,
+        pointer_type: pointer_type.to_owned(),
+        is_primary: p.is_primary,
+        #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+        pressure: p.details.pressure as f32,
+        tilt_x: p.details.tilt_x.into(),
+        tilt_y: p.details.tilt_y.into(),
+        twist: p.details.twist.into(),
+    }
+}
+
+fn touch_point(p: &BlitzPointerEvent) -> TouchPoint {
+    let id = match p.id {
+        BlitzPointerId::Finger(n) => i32::try_from(n).unwrap_or(i32::MAX),
+        BlitzPointerId::Mouse | BlitzPointerId::Pen => 0,
+    };
+    TouchPoint {
+        id,
+        client_x: p.coords.client_x.into(),
+        client_y: p.coords.client_y.into(),
+        page_x: p.coords.page_x.into(),
+        page_y: p.coords.page_y.into(),
+        screen_x: p.coords.screen_x.into(),
+        screen_y: p.coords.screen_y.into(),
+        force: p.details.pressure,
+    }
+}
+
+fn touch_data(p: &BlitzPointerEvent, ended: bool) -> TouchData {
+    let mut touches: Vec<TouchPoint> = p
+        .active_pointers
+        .borrow()
+        .iter()
+        .filter(|a| a.is_finger() && (!ended || a.id != p.id))
+        .map(touch_point)
+        .collect();
+    if !ended && !touches.iter().any(|t| t.id == touch_point(p).id) {
+        touches.push(touch_point(p));
+    }
+    TouchData {
+        touches,
+        changed: vec![touch_point(p)],
+        mods: mods(p.mods),
+    }
+}
+
+fn wheel_data(w: &BlitzWheelEvent) -> WheelData {
+    // Blitz carries winit's sign (positive scrolls up); the wire, the
+    // web's (positive scrolls down), as a browser sends it.
+    let (delta_x, delta_y, delta_mode) = match w.delta {
+        BlitzWheelDelta::Pixels(x, y) => (-x, -y, 0),
+        BlitzWheelDelta::Lines(x, y) => (-x, -y, 1),
+    };
+    WheelData {
+        at: Pointer {
+            client_x: w.coords.client_x.into(),
+            client_y: w.coords.client_y.into(),
+            page_x: w.coords.page_x.into(),
+            page_y: w.coords.page_y.into(),
+            screen_x: w.coords.screen_x.into(),
+            screen_y: w.coords.screen_y.into(),
+            element_x: w.element.x.into(),
+            element_y: w.element.y.into(),
+            button: 0,
+            buttons: w.buttons.bits().into(),
+            mods: mods(w.mods),
+        },
+        delta_x,
+        delta_y,
+        delta_mode,
+    }
+}
+
 fn event_data(data: &DomEventData) -> Option<EventData> {
     match data {
         DomEventData::Click(p)
@@ -616,6 +895,29 @@ fn event_data(data: &DomEventData) -> Option<EventData> {
         | DomEventData::MouseLeave(p)
         | DomEventData::MouseOver(p)
         | DomEventData::MouseOut(p) => Some(EventData::Mouse(pointer(p))),
+        DomEventData::PointerMove(p)
+        | DomEventData::PointerDown(p)
+        | DomEventData::PointerUp(p)
+        | DomEventData::PointerCancel(p)
+        | DomEventData::PointerEnter(p)
+        | DomEventData::PointerLeave(p)
+        | DomEventData::PointerOver(p)
+        | DomEventData::PointerOut(p) => Some(EventData::Pointer(pointer_data(p))),
+        DomEventData::TouchStart(p) | DomEventData::TouchMove(p) => {
+            Some(EventData::Touch(touch_data(p, false)))
+        }
+        DomEventData::TouchEnd(p) | DomEventData::TouchCancel(p) => {
+            Some(EventData::Touch(touch_data(p, true)))
+        }
+        DomEventData::Wheel(w) => Some(EventData::Wheel(wheel_data(w))),
+        DomEventData::Scroll(s) => Some(EventData::Scroll(ScrollData {
+            top: s.scroll_top,
+            left: s.scroll_left,
+            width: s.scroll_width,
+            height: s.scroll_height,
+            client_width: s.client_width,
+            client_height: s.client_height,
+        })),
         DomEventData::KeyPress(k) | DomEventData::KeyDown(k) | DomEventData::KeyUp(k) => {
             Some(EventData::Key(key(k)))
         }
@@ -624,7 +926,7 @@ fn event_data(data: &DomEventData) -> Option<EventData> {
         | DomEventData::Blur(_)
         | DomEventData::FocusIn(_)
         | DomEventData::FocusOut(_) => Some(EventData::Focus),
-        _ => None,
+        DomEventData::Ime(_) | DomEventData::AppleStandardKeybinding(_) => None,
     }
 }
 
@@ -650,6 +952,14 @@ async fn with_doc<R>(node: &NodeHandle, f: impl FnOnce(&mut BaseDocument, NodeId
         }
         futures_timer::Delay::new(Duration::from_millis(8)).await;
     }
+}
+
+/// Where `node` is in its window, CSS pixels.
+fn pane_at(doc: &BaseDocument, node: NodeId) -> (f32, f32) {
+    doc.get_node(node).map_or((0.0, 0.0), |n| {
+        let p = n.absolute_position(0.0, 0.0);
+        (p.x, p.y)
+    })
 }
 
 /// The view's document in `node`, to apply a frame to.
@@ -747,27 +1057,44 @@ async fn follow(
         };
         // The pane's events go through here, each one's time kept until
         // the frame that answers it.
-        let answered = process.hello().is_some_and(|h| h.wire >= ANSWERED_WIRE);
+        let wire = process.hello().map_or(0, |h| h.wire);
+        let answered = wire >= ANSWERED_WIRE;
         let asked: Rc<RefCell<VecDeque<Instant>>> = Rc::default();
         let (events, mut proxied) = mpsc::unbounded::<ViewEvent>();
         // Each event asked, to the frame loop's watch for an overdue one.
         let (asking, mut was_asked) = mpsc::unbounded::<()>();
+        // Each frame, to the coalescer: the view answered one.
+        let (answer, mut answers) = mpsc::unbounded::<()>();
         let forwarding = {
             let (to, asked) = (session.events.clone(), Rc::clone(&asked));
             spawn(async move {
-                while let Some(event) = proxied.next().await {
-                    if answered {
-                        asked.borrow_mut().push_back(Instant::now());
-                        let _ = asking.unbounded_send(());
-                    }
-                    if to.unbounded_send(event).is_err() {
-                        return;
+                let mut coalescer = Coalescer::new();
+                loop {
+                    let ready = futures::select! {
+                        event = proxied.next() => match event {
+                            // What its wire can't carry, it never had.
+                            Some(event) if event.data.since() > wire => continue,
+                            // A view that answers nothing is sent all.
+                            Some(event) if !answered => vec![event],
+                            Some(event) => coalescer.push(event),
+                            None => return,
+                        },
+                        _ = answers.next() => coalescer.answered(),
+                    };
+                    for event in ready {
+                        if answered {
+                            asked.borrow_mut().push_back(Instant::now());
+                            let _ = asking.unbounded_send(());
+                        }
+                        if to.unbounded_send(event).is_err() {
+                            return;
+                        }
                     }
                 }
             })
         };
         let to_view = events.clone();
-        with_doc(&node, |doc, at| {
+        let shell = with_doc(&node, |doc, at| {
             let mut remote = RemoteDocument::new(events);
             if let Some(css) = theme {
                 remote.set_theme_css(&css.peek());
@@ -775,7 +1102,11 @@ async fn follow(
             if fit.is_some() {
                 remote.fit_content();
             }
+            let (x, y) = pane_at(doc, at);
+            let shell = HostShell::new(doc.shell_provider.clone(), x, y);
+            remote.set_host_shell(shell.clone());
             doc.set_sub_document(at, Box::new(remote));
+            shell
         })
         .await;
         // An embed's input: now, and whenever it changes.
@@ -789,7 +1120,10 @@ async fn follow(
         {
             let from = asked.borrow_mut().pop_front();
             let applying = Instant::now();
+            let _ = answer.unbounded_send(());
             let applied = with_doc(&node, |doc, at| {
+                let (x, y) = pane_at(doc, at);
+                shell.moved(x, y);
                 let applied = remote(doc, at).map_or_else(
                     || Err("the view was unmounted".to_owned()),
                     |r| r.apply(frame),

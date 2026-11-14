@@ -677,7 +677,7 @@ function dispatch(target, event) {
 // `input`.
 const SENT = { change: "input", focusin: "focus", focusout: "blur", dblclick: "dblclick" };
 const sentAs = (type) => SENT[type] || type;
-const BUBBLES = new Set(["click", "dblclick", "contextmenu", "mousedown", "mouseup", "input", "change", "keydown", "keyup", "focusin", "focusout", "pointerdown", "pointerup"]);
+const BUBBLES = new Set(["click", "dblclick", "contextmenu", "mousedown", "mouseup", "input", "change", "keydown", "keyup", "focusin", "focusout", "pointerdown", "pointerup", "pointermove", "pointercancel", "touchstart", "touchmove", "touchend", "wheel", "compositionstart", "compositionupdate", "compositionend"]);
 
 /// The page event the window sent for `node` (the nearest element with a
 /// listener for it), as the DOM events its listeners expect.
@@ -692,6 +692,13 @@ function deliver(node, pe) {
     e.offsetX = e.clientX = e.pageX = e.x = pe.x || 0;
     e.offsetY = e.clientY = e.pageY = e.y = pe.y || 0;
     e.button = 0;
+    e.buttons = pe.buttons || 0;
+    e.pointerId = pe.pointer_id || 0;
+    e.pointerType = pe.pointer_type || "";
+    e.deltaX = pe.dx || 0;
+    e.deltaY = pe.dy || 0;
+    e.deltaMode = 0;
+    if (type.startsWith("composition")) e.data = pe.value || "";
     e.detail = type === "dblclick" ? 2 : 1;
     if (pe.key != null) {
       e.key = pe.key;
@@ -712,6 +719,11 @@ function deliver(node, pe) {
     case "blur":
       dispatch(node, make("blur"));
       dispatch(node, make("focusout"));
+      break;
+    case "scroll":
+      node.scrollTop = pe.scroll_top || 0;
+      node.scrollLeft = pe.scroll_left || 0;
+      dispatch(node, make("scroll"));
       break;
     default:
       dispatch(node, make(pe.event));
