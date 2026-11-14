@@ -157,6 +157,42 @@ p99 of a key's and a held move's round trip under it
 the view answered any reach it as a handful
 (`moves_while_the_view_is_busy_are_coalesced_to_the_latest`).
 
+## Holding another extension's view
+
+A remote view can hold another extension's view (`features/extensions/src/embedded.rs`).
+A development copy of Bases uses it to draw a third party's base view type
+inside its own view. The view renders a placeholder that names
+`<extension>/<view>` and carries the input that view is given, an
+`EmbedInput` (a base view's is `linked::BASE_VIEW_CLAIM` with its rows):
+
+```rust
+use architect_extensions::embedded::EmbeddedView;
+
+rsx! {
+    EmbeddedView {
+        extension: "lab.kanban",
+        view: "base.board",
+        input: EmbedInput { claim: BASE_VIEW_CLAIM.into(), source: String::new(), props: rows },
+        style: "height: 320px;",
+    }
+}
+```
+
+The host draws the named view over the placeholder's box, sized by it,
+clipped to it and to the pane, and in front of the holding view so it takes
+its own input. A linked view is drawn in the app's document; a process's or
+a WASI component's is a remote view of its own (`remote::RemoteDocument::embedded`
+lists the placeholders and their boxes, looked at after each frame and every
+`PLACE_EVERY`, so a held view follows a view that scrolls). The input
+reaches it as its `use_embed()`, again whenever the holder changes it. A
+held view runs as its own extension, with its own capabilities; the holder
+reaches nothing of it but its place and its input. At most 64 held views
+(`MAX_EMBEDDED`), each input at most 1 MB; a placeholder that names no view
+fails the holder, not the app. Test:
+`features/extensions/tests/remote_embedded.rs`. Not yet: a page view (TSX,
+Luau) held this way, and a held view inside a held view's own document
+(each is drawn by the host, one level deep is what's tested).
+
 ## Scenes: painting in a remote view
 
 A view can draw an element as an anyrender scene instead of DOM (#175):
@@ -266,6 +302,10 @@ arrangement_budget -- --ignored --nocapture`; debug build, THEBATTLESHIP;
   composes into a field, the window's IME on and its caret area in window
   coordinates. `features/pages/tests/js.rs`
   `a_tsx_page_gets_pointer_wheel_and_composition_events`.
+- `features/extensions/tests/remote_embedded.rs`: a process view holds
+  another extension's view, drawn by that extension's own process at the
+  placeholder's place, taking its own clicks and redrawn with the
+  holder's new input; a placeholder naming no view fails the holder.
 - `features/extensions/web/test/rust-pane.test.mjs` (`just ext-pane-browser`):
   `web::Pane` in headless Firefox gets a `click` and a `contextmenu` sent
   as `PointerEvent`s and passes them on as mouse data

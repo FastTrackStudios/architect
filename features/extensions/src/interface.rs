@@ -1247,9 +1247,11 @@ fn OverlayLayer(
     rsx! {}
 }
 
-/// A linked view drawn as an overlay: its `use_embed` is the view's spaces.
+/// A linked view drawn with an input of the host's: as an overlay (its
+/// `use_embed` is the view's spaces) or held in a remote view
+/// (`crate::embedded`).
 #[component]
-fn LinkedOverlay(root: fn() -> Element, input: crate::contrib::EmbedInput) -> Element {
+pub(crate) fn LinkedOverlay(root: fn() -> Element, input: crate::contrib::EmbedInput) -> Element {
     let mut signal = use_signal(|| input.clone());
     if *signal.peek() != input {
         signal.set(input);
