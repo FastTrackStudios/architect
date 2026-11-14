@@ -121,9 +121,15 @@ mkdir -p "$app"
 cp "${INFO_PLIST:-$here/Info.plist}" "$app/Info.plist"
 cp "$target_dir/$triple/$profile/$bin" "$app/architect-mobile"
 if [[ " ${cargo_args[*]-} " == *" wasi "* || " ${cargo_args[*]-} " == *"--features=wasi"* || " ${cargo_args[*]-} " == *",wasi"* ]]; then
+    # The sandbox's WASI Counter, when it was built (or named): a
+    # release's app (`cargo xtask dist ios`, #707) has `wasi` for what the
+    # person installs, and no example of its own.
     wasm="${ARCHITECT_LAB_WASI_COUNTER:-$target_dir/wasi-guest/wasm32-wasip2/debug/architect_sandbox_wasi_counter.wasm}"
-    [[ -f "$wasm" ]] || die "no WASI Counter component at $wasm (build it in devenv --profile wasi shell)"
-    cp "$wasm" "$app/"
+    if [[ -f "$wasm" && -z "$manifest" ]]; then
+        cp "$wasm" "$app/"
+    elif [[ -n "${ARCHITECT_LAB_WASI_COUNTER:-}" ]]; then
+        die "no WASI Counter component at $wasm"
+    fi
 fi
 
 # The app icon and the launch screen's colour (Info.plist's UILaunchScreen
