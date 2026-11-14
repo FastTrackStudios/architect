@@ -33,7 +33,7 @@
 //! handle to detach. Caller is expected to start one watcher per
 //! registered vault; the backend itself doesn't auto-spawn.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -63,6 +63,18 @@ const WATCHER_DEBOUNCE: Duration = Duration::from_millis(500);
 /// disk events.
 pub struct WatcherHandle {
     _guard: watcher::WatcherGuard,
+    /// The plain-file sets this watcher keeps, by vault and generation:
+    /// dropped with it ([`PlainFiles::end`]).
+    sets: Vec<(String, u64)>,
+    plain: PlainFiles,
+}
+
+impl Drop for WatcherHandle {
+    fn drop(&mut self) {
+        for (vault_id, generation) in &self.sets {
+            self.plain.end(vault_id, *generation);
+        }
+    }
 }
 
 /// How the backend resolves `vault_id` → on-disk path.
@@ -157,15 +169,40 @@ pub struct Backend {
 /// no peer was ever sent it.
 ///
 /// Filled by the walk when a watcher starts, by every event that finds
-/// a plain file, and by every `Put` the backend emits; a path leaves on
-/// its `Delete`, or when it turns out to be a symlink. Only vaults with
-/// a running watcher have a set, so a backend that watches nothing
-/// keeps nothing. It holds about what the manifest does.
+/// a plain file, by the walk of every folder an event finds (a folder
+/// made, moved in or checked out: inotify watches a new folder only
+/// once its own event is handled, so the files written into it before
+/// then make no event of their own), and by every `Put` the backend
+/// emits. A path leaves on its `Delete` (its own, or its folder's going),
+/// or when it, or a folder above it, turns out to be a symlink. Only
+/// vaults with a running watcher have a set, and a set goes when that
+/// watcher's handle drops, so a backend that watches nothing keeps
+/// nothing. It holds about what the manifest does.
 #[derive(Clone, Default)]
-struct PlainFiles(Arc<std::sync::Mutex<HashMap<String, HashSet<String>>>>);
+struct PlainFiles(Arc<std::sync::Mutex<PlainState>>);
+
+#[derive(Default)]
+struct PlainState {
+    /// Bumped by every [`PlainFiles::start`]: which watcher a set
+    /// belongs to, so an old watcher's walk or handle never touches the
+    /// set of the one that replaced it.
+    generation: u64,
+    vaults: HashMap<String, WatchedSet>,
+}
+
+#[derive(Default)]
+struct WatchedSet {
+    generation: u64,
+    /// Ordered, so a folder's files are a range.
+    files: BTreeSet<String>,
+    /// While the start walk runs: the paths removed since it began. The
+    /// walk may have listed one before it went, and adding it back would
+    /// send its `Delete` a second time.
+    removed_while_walking: Option<HashSet<String>>,
+}
 
 impl PlainFiles {
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, HashSet<String>>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, PlainState> {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -174,15 +211,46 @@ impl PlainFiles {
     /// Start (or restart) `vault_id`'s set: empty, and from then on
     /// recording every `Put`, so one emitted while the walk runs is
     /// kept. What an earlier watcher recorded is dropped; only the walk
-    /// knows what the disk holds now.
-    fn start(&self, vault_id: &str) {
-        self.lock().insert(vault_id.to_owned(), HashSet::new());
+    /// knows what the disk holds now. Returns this watcher's generation.
+    fn start(&self, vault_id: &str) -> u64 {
+        let mut state = self.lock();
+        state.generation = state.generation.wrapping_add(1);
+        let generation = state.generation;
+        state.vaults.insert(
+            vault_id.to_owned(),
+            WatchedSet {
+                generation,
+                files: BTreeSet::new(),
+                removed_while_walking: Some(HashSet::new()),
+            },
+        );
+        generation
     }
 
-    /// Add what the start walk found.
-    fn extend(&self, vault_id: &str, found: HashSet<String>) {
-        if let Some(set) = self.lock().get_mut(vault_id) {
-            set.extend(found);
+    /// Add what the start walk found, less what went while it ran.
+    fn extend(&self, vault_id: &str, generation: u64, found: HashSet<String>) {
+        let mut state = self.lock();
+        let Some(set) = state.vaults.get_mut(vault_id) else {
+            return;
+        };
+        if set.generation != generation {
+            return;
+        }
+        let removed = set.removed_while_walking.take().unwrap_or_default();
+        set.files
+            .extend(found.into_iter().filter(|rel| !removed.contains(rel)));
+    }
+
+    /// The watcher of `generation` stopped: drop its set, unless a
+    /// newer watcher of the vault has started since.
+    fn end(&self, vault_id: &str, generation: u64) {
+        let mut state = self.lock();
+        if state
+            .vaults
+            .get(vault_id)
+            .is_some_and(|set| set.generation == generation)
+        {
+            state.vaults.remove(vault_id);
         }
     }
 
@@ -192,18 +260,53 @@ impl PlainFiles {
         if !watcher::is_markdown(Path::new(rel)) {
             return;
         }
-        if let Some(set) = self.lock().get_mut(vault_id)
-            && !set.contains(rel)
-        {
-            set.insert(rel.to_owned());
+        let mut state = self.lock();
+        let Some(set) = state.vaults.get_mut(vault_id) else {
+            return;
+        };
+        if let Some(removed) = set.removed_while_walking.as_mut() {
+            removed.remove(rel);
+        }
+        if !set.files.contains(rel) {
+            set.files.insert(rel.to_owned());
         }
     }
 
     /// `rel` is not (or no longer) a plain file; whether it was one.
     fn remove(&self, vault_id: &str, rel: &str) -> bool {
+        let mut state = self.lock();
+        let Some(set) = state.vaults.get_mut(vault_id) else {
+            return false;
+        };
+        if let Some(removed) = set.removed_while_walking.as_mut() {
+            removed.insert(rel.to_owned());
+        }
+        set.files.remove(rel)
+    }
+
+    /// The recorded files below the folder `rel` (not `rel` itself).
+    fn under(&self, vault_id: &str, rel: &str) -> Vec<String> {
+        let prefix = format!("{rel}/");
         self.lock()
-            .get_mut(vault_id)
-            .is_some_and(|set| set.remove(rel))
+            .vaults
+            .get(vault_id)
+            .map_or_else(Vec::new, |set| {
+                set.files
+                    .range(prefix.clone()..)
+                    .take_while(|p| p.starts_with(&prefix))
+                    .cloned()
+                    .collect()
+            })
+    }
+
+    /// `rel` and everything recorded below it is no plain file of the
+    /// vault (it is, or is behind, a symlink): forgotten, with no
+    /// `Delete`, since hiding a link deletes nothing.
+    fn forget(&self, vault_id: &str, rel: &str) {
+        for below in self.under(vault_id, rel) {
+            self.remove(vault_id, &below);
+        }
+        self.remove(vault_id, rel);
     }
 }
 
@@ -634,7 +737,7 @@ impl Backend {
         std::thread::Builder::new()
             .name(format!("vault-watch-start:{vault_id}"))
             .spawn(move || {
-                let _ = done.send(watcher::watch(watched, WATCHER_DEBOUNCE));
+                let _ = done.send(watcher::watch_tree(watched, WATCHER_DEBOUNCE));
             })
             .map_err(|e| WatchError::Notify(format!("spawn watch thread: {e}")))?;
         let (rx, guard) = started
@@ -645,12 +748,18 @@ impl Backend {
         let hub = self.changes.clone();
         let plain = self.plain_files.clone();
         let id = vault_id.to_string();
+        let generation = plain.start(&id);
+        let handle = WatcherHandle {
+            _guard: guard,
+            sets: vec![(id.clone(), generation)],
+            plain: plain.clone(),
+        };
         std::thread::Builder::new()
             .name(thread_name)
-            .spawn(move || forward_watcher_events(root, rx, tx, hub, plain, id))
+            .spawn(move || forward_watcher_events(root, rx, tx, hub, plain, id, generation))
             .map_err(|e| WatchError::Notify(format!("spawn watcher thread: {e}")))?;
 
-        Ok(WatcherHandle { _guard: guard })
+        Ok(handle)
     }
 
     /// [`Self::start_watcher`] for several vaults at once, over **one**
@@ -676,25 +785,32 @@ impl Backend {
         std::thread::Builder::new()
             .name("vault-watch-start".into())
             .spawn(move || {
-                let _ = done.send(watcher::watch_many(roots, WATCHER_DEBOUNCE));
+                let _ = done.send(watcher::watch_trees(roots, WATCHER_DEBOUNCE));
             })
             .map_err(|e| WatchError::Notify(format!("spawn watch thread: {e}")))?;
         let (receivers, guard) = started
             .await
             .map_err(|e| WatchError::Notify(format!("watch thread: {e}")))??;
 
+        let mut handle = WatcherHandle {
+            _guard: guard,
+            sets: Vec::with_capacity(receivers.len()),
+            plain: self.plain_files.clone(),
+        };
         for (root, rx) in receivers {
             let Some((id, tx)) = channels.remove(&root) else {
                 continue;
             };
             let hub = self.changes.clone();
             let plain = self.plain_files.clone();
+            let generation = plain.start(&id);
+            handle.sets.push((id.clone(), generation));
             std::thread::Builder::new()
                 .name(format!("vault-sync-watcher:{id}"))
-                .spawn(move || forward_watcher_events(root, rx, tx, hub, plain, id))
+                .spawn(move || forward_watcher_events(root, rx, tx, hub, plain, id, generation))
                 .map_err(|e| WatchError::Notify(format!("spawn watcher thread: {e}")))?;
         }
-        Ok(WatcherHandle { _guard: guard })
+        Ok(handle)
     }
 
     /// Sync sibling of [`Self::channel`] for use inside the
@@ -1675,6 +1791,18 @@ fn is_fresh(seen: &mut HashMap<String, Seen>, rel: &str, now: Seen) -> bool {
 /// external edit is indistinguishable from a PUT downstream. Runs
 /// on a dedicated OS thread spawned by [`Backend::start_watcher`];
 /// exits when the watcher guard drops (closing the sender).
+///
+/// Folders count as well as notes ([`watcher::watch_tree`]). A folder
+/// that appears (made, moved in, checked out, written by a sync client)
+/// is walked, and each plain note in it gets its `Put` and joins the
+/// plain-file set: the native watcher attaches to a new folder only once
+/// its event is handled, so a note written into it before then makes no
+/// event of its own, and without the walk its later deletion would send
+/// nothing. A folder that goes (deleted, or moved out of the vault)
+/// sends a `Delete` for each note recorded below it that is gone from
+/// disk. A folder renamed inside the vault is both — a `Delete` for each
+/// note under the old name and a `Put` under the new — so peers end up
+/// with every note, under its new path.
 fn forward_watcher_events(
     root: PathBuf,
     rx: std::sync::mpsc::Receiver<watcher::VaultEvent>,
@@ -1682,13 +1810,17 @@ fn forward_watcher_events(
     hub: architect::PubSub<VaultChange>,
     plain: PlainFiles,
     vault_id: String,
+    generation: u64,
 ) {
     let mut seen: HashMap<String, Seen> = HashMap::new();
     // Every plain markdown file there now: a later event that finds one
     // of these gone is a real deletion (see `PlainFiles`). After a
     // restart this walk is what rebuilds the record from disk.
-    plain.start(&vault_id);
-    plain.extend(&vault_id, plain_markdown_under(&root));
+    plain.extend(
+        &vault_id,
+        generation,
+        plain_markdown_under(&root, &root).into_iter().collect(),
+    );
     // The watcher reports canonical paths (macOS's FSEvents: `/private/var`
     // for a root given as `/var`, a symlink), so an event is matched
     // against the root as given and as the filesystem names it — else
@@ -1717,102 +1849,165 @@ fn forward_watcher_events(
         // no `Put` for it, and never a `Delete` either. A file swapped
         // for a link, or a dangling one, is hidden, not deleted — a
         // `Delete` would tombstone the note's document and remove it on
-        // every peer (`crate::own`). It leaves the plain-file set, so
-        // removing the link later sends nothing either.
+        // every peer (`crate::own`). It, and whatever was recorded below
+        // it, leaves the plain-file set, so removing the link later sends
+        // nothing either.
         if crate::own::through_symlink(&root, &rel) {
             tracing::debug!(path = %rel, "watcher: a symlink in the vault; ignored");
-            plain.remove(&vault_id, &rel);
+            plain.forget(&vault_id, &rel);
             continue;
         }
         // `Changed` events from the debouncer cover both create+modify
         // AND delete. Classified by what is on disk now, never
         // following a link — cheaper than disambiguating the raw
         // `notify::EventKind`, which the debouncer has folded anyway.
-        let payload = match std::fs::symlink_metadata(&abs) {
+        let payloads = match std::fs::symlink_metadata(&abs) {
             Ok(meta) if meta.is_file() => {
-                // A plain file: its later disappearance is a deletion.
-                plain.insert(&vault_id, &rel);
-                // Hashed by streaming, through `open_own` (no link
-                // followed, even one swapped in since the check above):
-                // the event needs the digest and the size, never the
-                // bytes.
-                match crate::own::open_own(&root, &rel).and_then(sha256_reader) {
-                    Ok((sha256, size)) => {
-                        let mtime_ms = mtime_ms(&abs);
-                        let now = Seen {
-                            mtime_ms,
-                            sha256: sha256.clone(),
-                        };
-                        if !is_fresh(&mut seen, &rel, now) {
-                            continue;
-                        }
-                        VaultEvent::Put {
-                            path: rel,
-                            sha256,
-                            mtime_ms,
-                            size,
-                        }
-                    }
-                    Err(e) if crate::own::is_not_own(&e) => {
-                        // A link swapped in since the check.
-                        tracing::debug!(path = %rel, ?e, "watcher: not a plain file now; ignored");
-                        plain.remove(&vault_id, &rel);
-                        continue;
-                    }
-                    Err(e) => {
-                        tracing::warn!(?abs, ?e, "watcher: failed to read changed file");
-                        continue;
-                    }
+                if !watcher::is_markdown(&abs) {
+                    continue;
+                }
+                match plain_file_put(&root, &rel, &mut seen, &plain, &vault_id) {
+                    Some(put) => vec![put],
+                    None => continue,
                 }
             }
-            Ok(_) => {
-                // A folder named like a note, or a link swapped in since
-                // the check: not a plain file of the vault.
-                tracing::debug!(path = %rel, "watcher: not a plain file; ignored");
+            Ok(meta) if meta.is_dir() => {
+                // A folder named like a note is no note.
                 plain.remove(&vault_id, &rel);
+                if !is_synced_folder(&root, &rel) {
+                    continue;
+                }
+                plain_markdown_under(&root, &abs)
+                    .into_iter()
+                    .filter_map(|file| {
+                        crate::snapshot::invalidate_path(&root.join(&file));
+                        plain_file_put(&root, &file, &mut seen, &plain, &vault_id)
+                    })
+                    .collect()
+            }
+            Ok(_) => {
+                // A link swapped in since the check, or a socket or a
+                // FIFO: not a plain file of the vault.
+                tracing::debug!(path = %rel, "watcher: not a plain file; ignored");
+                plain.forget(&vault_id, &rel);
                 continue;
             }
             Err(_) => {
-                seen.remove(&rel);
                 // Gone. A deletion only if this path was last seen as a
                 // plain file; otherwise it was a symlink (perhaps made
                 // and removed inside one debounce window), or a file
                 // made and removed before anything saw it — no peer was
-                // sent either, so there is nothing to delete.
-                if !plain.remove(&vault_id, &rel) {
-                    tracing::debug!(path = %rel, "watcher: a path never seen as a plain file is gone; ignored");
-                    continue;
+                // sent either, so there is nothing to delete. A gone
+                // folder deletes the notes recorded below it that are
+                // gone too.
+                let mut gone = Vec::new();
+                for path in std::iter::once(rel.clone()).chain(plain.under(&vault_id, &rel)) {
+                    if path != rel && std::fs::symlink_metadata(root.join(&path)).is_ok() {
+                        continue;
+                    }
+                    seen.remove(&path);
+                    if plain.remove(&vault_id, &path) {
+                        gone.push(VaultEvent::Delete { path });
+                    }
                 }
-                VaultEvent::Delete { path: rel }
+                if gone.is_empty() {
+                    tracing::debug!(path = %rel, "watcher: a path never seen as a plain file is gone; ignored");
+                }
+                gone
             }
         };
-        hub.publish(VaultChange {
-            vault_id: vault_id.clone(),
-            event: payload.clone(),
-        });
-        if tx.send(payload).is_err() {
-            // No active subscribers — keep pumping; new
+        for payload in payloads {
+            hub.publish(VaultChange {
+                vault_id: vault_id.clone(),
+                event: payload.clone(),
+            });
+            // An error is no active subscribers — keep pumping; new
             // subscribers attach later via the same channel.
-            continue;
+            let _ = tx.send(payload);
         }
     }
 }
 
-/// Every plain markdown file below `root`, root-relative and
-/// `/`-separated: the files the manifest walk ([`walk_files`]) covers,
-/// so it skips what that skips (symlinks, node-private folders, nested
-/// shelves) and reads no file. Only markdown, since the watcher reports
-/// nothing else. An unreadable vault gives what was walked so far.
-fn plain_markdown_under(root: &Path) -> HashSet<String> {
-    let mut out = HashSet::new();
-    let walked = walk_files(root, root, &mut |path, rel| {
+/// The `Put` for the plain note at `rel`, recorded as a plain file, or
+/// `None` when it brings nothing new (a read, not a write), is a link
+/// swapped in since it was checked, or cannot be read.
+fn plain_file_put(
+    root: &Path,
+    rel: &str,
+    seen: &mut HashMap<String, Seen>,
+    plain: &PlainFiles,
+    vault_id: &str,
+) -> Option<VaultEvent> {
+    // Hashed by streaming, through `open_own` (no link followed, even
+    // one swapped in since the check): the event needs the digest and
+    // the size, never the bytes.
+    match crate::own::open_own(root, rel).and_then(sha256_reader) {
+        Ok((sha256, size)) => {
+            // A plain file: its later disappearance is a deletion.
+            plain.insert(vault_id, rel);
+            let mtime_ms = mtime_ms(&root.join(rel));
+            let now = Seen {
+                mtime_ms,
+                sha256: sha256.clone(),
+            };
+            is_fresh(seen, rel, now).then(|| VaultEvent::Put {
+                path: rel.to_owned(),
+                sha256,
+                mtime_ms,
+                size,
+            })
+        }
+        Err(e) if crate::own::is_not_own(&e) => {
+            // A link swapped in since the check: no plain file now. But
+            // a file deleted since (a folder walked as its notes are
+            // removed) keeps its record, so the event of its removal
+            // still sends the `Delete`.
+            tracing::debug!(path = %rel, ?e, "watcher: not a plain file now; ignored");
+            if std::fs::symlink_metadata(root.join(rel)).is_ok() {
+                plain.remove(vault_id, rel);
+            }
+            None
+        }
+        Err(e) => {
+            tracing::warn!(path = %rel, ?e, "watcher: failed to read changed file");
+            None
+        }
+    }
+}
+
+/// Whether the folder at `rel` is one the manifest walks into: neither
+/// it nor a folder above it is node-private, a nested shelf or the
+/// server's own store. (Its symlinks are the caller's to have checked.)
+fn is_synced_folder(root: &Path, rel: &str) -> bool {
+    let mut at = root.to_path_buf();
+    for part in Path::new(rel).components() {
+        at.push(part);
+        if is_root_internal(root, &at)
+            || crate::private::is_private_dir(&at)
+            || crate::shelf_boundary::is_nested_shelf(root, &at)
+        {
+            return false;
+        }
+    }
+    true
+}
+
+/// Every plain markdown file below `dir` (in the vault at `root`),
+/// root-relative and `/`-separated: the files the manifest walk
+/// ([`walk_files`]) covers, so it skips what that skips (symlinks,
+/// node-private folders, nested shelves) and reads no file. Only
+/// markdown, since the watcher reports nothing else. An unreadable
+/// folder gives what was walked so far.
+fn plain_markdown_under(root: &Path, dir: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    let walked = walk_files(root, dir, &mut |path, rel| {
         if watcher::is_markdown(path) {
-            out.insert(rel);
+            out.push(rel);
         }
         Ok(())
     });
     if let Err(e) = walked {
-        tracing::warn!(root = %root.display(), ?e, "watcher: the vault walk stopped early");
+        tracing::warn!(dir = %dir.display(), ?e, "watcher: a vault walk stopped early");
     }
     out
 }
@@ -1966,6 +2161,69 @@ mod tests {
     }
 
     use super::*;
+
+    /// A path removed while the start walk runs is not added back by
+    /// the walk (whose listing may predate the removal), so its `Delete`
+    /// is never sent twice; one put back since is kept.
+    #[test]
+    fn the_start_walk_adds_back_nothing_removed_while_it_ran() {
+        let plain = PlainFiles::default();
+        let generation = plain.start("v");
+        plain.insert("v", "Gone.md");
+        assert!(plain.remove("v", "Gone.md"));
+        assert!(!plain.remove("v", "Back.md"));
+        plain.insert("v", "Back.md");
+        let walked: HashSet<String> = ["Gone.md", "Back.md", "Kept.md"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        plain.extend("v", generation, walked);
+        assert!(!plain.remove("v", "Gone.md"), "added back by the walk");
+        assert!(plain.remove("v", "Back.md"));
+        assert!(plain.remove("v", "Kept.md"));
+    }
+
+    /// A set goes with its watcher's handle, but never the set of a
+    /// watcher started since; an old walk never fills a new set.
+    #[test]
+    fn a_set_ends_with_its_own_watcher_only() {
+        let plain = PlainFiles::default();
+        let old = plain.start("v");
+        let new = plain.start("v");
+        plain.extend("v", old, HashSet::from(["Old.md".to_owned()]));
+        plain.extend("v", new, HashSet::from(["New.md".to_owned()]));
+        plain.end("v", old);
+        assert!(!plain.remove("v", "Old.md"));
+        assert!(plain.remove("v", "New.md"), "a newer watcher's set dropped");
+        plain.end("v", new);
+        assert!(
+            plain.lock().vaults.is_empty(),
+            "the set outlived its watcher"
+        );
+    }
+
+    /// The files under a folder are its own, not a sibling's that shares
+    /// the prefix (`A b/` is not under `A`).
+    #[test]
+    fn under_a_folder_is_only_that_folder() {
+        let plain = PlainFiles::default();
+        let generation = plain.start("v");
+        plain.extend(
+            "v",
+            generation,
+            ["A/x.md", "A/In/y.md", "A b/z.md", "A.md", "B/A/w.md"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+        );
+        let mut under = plain.under("v", "A");
+        under.sort();
+        assert_eq!(under, ["A/In/y.md", "A/x.md"]);
+        plain.forget("v", "A");
+        assert!(plain.under("v", "A").is_empty());
+        assert!(plain.remove("v", "A b/z.md"));
+        assert!(plain.remove("v", "A.md"));
+    }
 
     fn make_backend() -> (tempfile::TempDir, Backend) {
         let tmp = tempfile::tempdir().unwrap();

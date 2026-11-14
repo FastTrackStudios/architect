@@ -86,6 +86,43 @@ pub fn watch_many(
     roots: Vec<PathBuf>,
     delay: Duration,
 ) -> Result<(Vec<(PathBuf, mpsc::Receiver<VaultEvent>)>, WatcherGuard), WatchError> {
+    watch_roots(roots, delay, false)
+}
+
+/// [`watch`], also reporting every path under the root that is not a
+/// regular file: a folder (made, moved in, or one named like a note), a
+/// symlink, or a path gone (a folder deleted or moved out among them,
+/// since a gone path's kind is unknowable). The sync backend's watcher
+/// walks a new folder for the notes written into it before the native
+/// watcher attached to it — inotify watches a new folder only once its
+/// own event is handled, so those notes make no event of their own —
+/// and sends a `Delete` for each note under a folder that went.
+pub(crate) fn watch_tree(
+    root: PathBuf,
+    delay: Duration,
+) -> Result<(mpsc::Receiver<VaultEvent>, WatcherGuard), WatchError> {
+    let (mut receivers, guard) = watch_roots(vec![root], delay, true)?;
+    let (_, rx) = receivers
+        .pop()
+        .ok_or_else(|| WatchError::Notify("vault root not watched".into()))?;
+    Ok((rx, guard))
+}
+
+/// [`watch_many`] with folders, as [`watch_tree`].
+pub(crate) fn watch_trees(
+    roots: Vec<PathBuf>,
+    delay: Duration,
+) -> Result<(Vec<(PathBuf, mpsc::Receiver<VaultEvent>)>, WatcherGuard), WatchError> {
+    watch_roots(roots, delay, true)
+}
+
+/// Markdown events under each root, and with `folders` every event for
+/// a path that is not a regular file ([`watch_tree`]).
+fn watch_roots(
+    roots: Vec<PathBuf>,
+    delay: Duration,
+    folders: bool,
+) -> Result<(Vec<(PathBuf, mpsc::Receiver<VaultEvent>)>, WatcherGuard), WatchError> {
     let mut routes: Vec<(Vec<PathBuf>, mpsc::Sender<VaultEvent>)> = Vec::new();
     let mut receivers = Vec::new();
     for root in &roots {
@@ -97,7 +134,14 @@ pub fn watch_many(
     let handler = move |res: DebounceEventResult| match res {
         Ok(events) => {
             for event in events {
-                if !is_markdown(&event.path) {
+                // One `lstat` for a non-markdown path, and only with
+                // `folders`: an edit to any other regular file is still
+                // dropped here.
+                if !is_markdown(&event.path)
+                    && !(folders
+                        && std::fs::symlink_metadata(&event.path)
+                            .map_or(true, |meta| !meta.is_file()))
+                {
                     continue;
                 }
                 if !matches!(

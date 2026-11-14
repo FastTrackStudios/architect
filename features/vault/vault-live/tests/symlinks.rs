@@ -422,10 +422,8 @@ async fn a_symlinked_folder_unfolded_into_a_real_one_deletes_for_real() {
     // Unfold: the link goes, a real folder takes its place.
     fs::remove_file(vault.join("Pkg")).unwrap();
     fs::create_dir(vault.join("Pkg")).unwrap();
-    // inotify watches a new folder only once its own event is handled:
-    // a file written into it before then is missed, as for any new
-    // folder (not this PR's to fix).
-    tokio::time::sleep(Duration::from_millis(1200)).await;
+    // Written at once: the folder's walk finds it even before the
+    // native watcher has attached to the new folder (`tests/folders.rs`).
     fs::write(vault.join("Pkg/Mine.md"), "mine").unwrap();
     let seen = events_before_marker(&mut rx, &vault, "Marker2.md").await;
     assert!(
@@ -488,7 +486,10 @@ async fn a_real_file_deleted_or_renamed_still_deletes() {
 /// with the removal) still sends the `Delete` peers need, since they
 /// were sent its `Put`. Native watcher only: the poller can miss a
 /// file there for less than one poll, which then makes no event at all
-/// (as on main).
+/// (as on main). What it guards is `Backend::emit` recording the path:
+/// the folded event finds the file gone, so with that record removed
+/// this fails every time. (It passed on the previous head too, whose
+/// rule sent a `Delete` for any gone path not known as a link.)
 #[tokio::test(flavor = "multi_thread")]
 async fn a_file_put_through_the_backend_and_removed_at_once_deletes() {
     if vault_live::watcher::polling() {
