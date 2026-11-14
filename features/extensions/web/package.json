@@ -21,7 +21,9 @@
   "engines": {
     "node": ">=24"
   },
-  "sideEffects": false,
+  "sideEffects": [
+    "./webview-runtime.js"
+  ],
   "exports": {
     ".": {
       "types": "./index.d.ts",
@@ -34,6 +36,14 @@
     "./node": {
       "types": "./node.d.ts",
       "default": "./node.js"
+    },
+    "./webview": {
+      "types": "./webview.d.ts",
+      "default": "./webview.js"
+    },
+    "./webview-host": {
+      "types": "./webview-host.d.ts",
+      "default": "./webview-host.js"
     },
     "./package.json": "./package.json"
   },
@@ -54,6 +64,11 @@
     "sanitize.js",
     "view.js",
     "world.js",
+    "webview.js",
+    "webview.d.ts",
+    "webview-runtime.js",
+    "webview-host.js",
+    "webview-host.d.ts",
     "README.md",
     "LICENSE-MIT",
     "LICENSE-APACHE"
@@ -64,7 +79,7 @@
     "test": "npm run build && node --test --test-concurrency=1 test/web.test.mjs test/package.test.mjs test/publish-components.test.mjs",
     "test:unit": "npm run build && node --test --test-concurrency=1 test/check.test.mjs test/sanitize.test.mjs test/sandbox.test.mjs test/limits.test.mjs test/publish.test.mjs test/surface.test.mjs test/pack.test.mjs cli/test/typegen.test.mjs cli/test/pack.test.mjs",
     "test:package": "npm run build && node --test --test-concurrency=1 test/package.test.mjs test/publish-components.test.mjs",
-    "test:browser": "npm run build && node --test --test-concurrency=1 test/view.test.mjs test/sheet-oracle.test.mjs test/glue.test.mjs test/rust-host.test.mjs"
+    "test:browser": "npm run build && node --test --test-concurrency=1 test/view.test.mjs test/sheet-oracle.test.mjs test/glue.test.mjs test/rust-host.test.mjs test/webview.test.mjs"
   },
   "peerDependencies": {
     "react": ">=18 <20"

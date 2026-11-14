@@ -548,7 +548,9 @@ impl WebHost {
                 what: format!("{request_op} is not in the browser"),
             }),
             // Secrets are kept by the native host (`crate::net::Secrets`).
-            HostRequest::Secret { .. } | HostRequest::AskSecret { .. } => {
+            HostRequest::Secret { .. }
+            | HostRequest::AskSecret { .. }
+            | HostRequest::StoreSecret { .. } => {
                 Err(HostError::Unsupported {
                     what: "secrets are not kept in the browser yet".to_owned(),
                 })
