@@ -210,6 +210,10 @@ enum Command {
         /// `--manifest-path`), e.g. `node-wasi` for its node.
         #[arg(long, value_delimiter = ',')]
         features: Vec<String>,
+        /// Leave WASI component extensions (Wasmtime) out of the desktop
+        /// and iOS apps, which have them by default (#707).
+        #[arg(long)]
+        no_wasi: bool,
     },
     /// Architect's core extensions (`extensions/core-extensions.toml`,
     /// #631) and the standard distribution built from them
@@ -345,6 +349,7 @@ fn main() -> ExitCode {
             target_dir,
             version,
             features,
+            no_wasi,
         } => dist::run_cli(&dist::Options {
             targets,
             manifest_path,
@@ -354,6 +359,7 @@ fn main() -> ExitCode {
             target_dir,
             version,
             features,
+            wasi: !no_wasi,
         }),
         Command::Core { action } => core_list::run_cli(&action),
         Command::Builtins => {

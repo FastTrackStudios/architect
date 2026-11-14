@@ -290,6 +290,10 @@ rendered by the app.
 > runner, workers too, on Wasmtime's Pulley interpreter. **The web
 > (2026-11-04, the rest of part 3)** behind the `web` feature: the same
 > components, transpiled by jco, in Web Workers ("On the web" below).
+> **In the release builds (#707):** `cargo xtask dist desktop` and
+> `dist ios` build the app with `wasi` (Cranelift on the desk, Pulley
+> on iOS), so an installed component runs in the shipped app;
+> `--no-wasi` leaves Wasmtime out.
 
 A `kind = "wasm"` extension is a WebAssembly component against the
 `architect:extension` world (`features/extensions/wit/extension.wit`),
@@ -548,9 +552,18 @@ serves its Action List on a control socket as the desk lab does
 (`FTS_CONTROL_DIR` puts it in a folder on the Mac), so
 `scripts/mac-live-check.sh` drives it ([A live check on a Mac](@/guide/live-check-mac.md)).
 
-**Size.** Wasmtime and Cranelift add about 19 MB to a stripped
-`architect-desktop` built with the dev profile (opt-level 1): behind the
-feature, off by default.
+**Size and memory.** Wasmtime and Cranelift add about 19 MB to a
+stripped `architect-desktop` built with the dev profile (opt-level 1).
+In a stripped release build (#707, measured 2026-11-14 on x86-64 Linux
+with a probe that links Wasmtime 50.0.1 with this crate's features, an
+engine, WASI p2 on a linker and a component compile) they add 15.9 MB;
+with Pulley as the target, as on iOS, 16.0 MB. Making the engine and
+the linker costs about 6 MB resident either way. Each running
+instance's linear memory then reserves address space: 4 GiB and a guard
+under Cranelift (virtual, not resident), `PULLEY_RESERVATION` (64 MiB)
+under Pulley; what it touches is what it uses, up to its limit. The
+release builds have the feature on (`cargo xtask dist`); the crate
+keeps it off by default.
 
 ### On the web
 
@@ -4232,19 +4245,48 @@ overlay, a panel).
 |---|---|---|---|---|
 | macOS, Linux, Windows | yes | compiled | yes | yes |
 | Android | yes | compiled (Play allows code in a VM) | yes | no |
-| iOS | yes | interpreted (Pulley) | yes | no |
+| iOS | yes | interpreted (Pulley), in the release build (#707) | yes | no |
 | Web | yes | the browser's WebAssembly (components transpiled) | yes | no |
 
 On iOS, a catalogue of third-party features is the App Store's §4.7
 case (an index, moderation, consent); themes, keymaps, frame views and a
 person's own scripts are not.
 
+**Installed WASM extensions on iOS (decided 2026-11-14, #716).** The
+App Store build ships `wasi`, so a person can install WASM component
+extensions in the iPhone and iPad app, positioned under guideline 2.5.2
+the way Obsidian's community plugins are:
+
+- **The person installs them.** Nothing is downloaded or turned on by
+  the app itself; an extension comes from a registry or a file the
+  person chose, after a consent prompt that lists its capabilities.
+- **Sandboxed add-ons.** A component runs in Wasmtime with no ambient
+  access: no files, network, or app state but what its manifest asks for
+  and the person granted (`hostcall::check`), each instance under a
+  memory, fuel and time limit.
+- **Interpreted, not compiled to native code.** Pulley interprets each
+  component's bytecode: no JIT, no executable memory, no W^X exception
+  (`wasi::PULLEY`).
+- **They cannot change the app's core features.** An extension adds
+  views, actions and handlers through the host's contribution points;
+  it cannot replace the app's code, its sign-in, its purchases or its
+  review-relevant behaviour, and it can be turned off or removed at any
+  time with its data kept.
+
 ## Risks
 
 - The component tooling is young: WASI 0.3 (async components) needs
   Wasmtime 46+, and the newest needs Rust 1.95 — past the fleet's 1.94.
-- Pulley on iOS is a lower-tested tier, and Wasmtime's default memory
-  reservation has to come down for App Store builds.
+- Pulley on iOS is a lower-tested tier (Wasmtime's memory reservation
+  is down to `PULLEY_RESERVATION`, 64 MiB, with no guard, for App Store
+  builds).
+- App Review: installed WASM extensions on iOS rest on guideline 2.5.2's
+  reading for user-installed, sandboxed, interpreted add-ons that cannot
+  change the app's core features (Obsidian's community plugins are the
+  precedent; "On each platform" above). A reviewer who reads it
+  otherwise would have the iOS build ship without `wasi`
+  (`cargo xtask dist ios --no-wasi`) until it is settled; linked
+  extensions, Luau and pages are unaffected.
 - Frame documents have to be expressive enough for real views without
   growing into a second Dioxus.
 - Old WIT versions are kept forever.
