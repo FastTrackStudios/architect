@@ -1,0 +1,70 @@
+# The showcase's Templater-lite (#710: R2, R3, C1, C4, C7, C11, H1, H2,
+# H10): templates in the vault's Templates folder, filled in from prompts.
+# Luau actions do the work through the vault's own actions (VAULT_LIST,
+# VAULT_READ, VAULT_CREATE) and the live editor's calls; a TSX page lists
+# the templates in a tab.
+id = "showcase.templater"
+name = "Templater-lite"
+version = "0.1.0"
+kind = "luau"
+api = "0.1"
+description = "Notes from templates in Templates/: {{title}}, {{date}} and any {{name}} asked for in a prompt; today's date at the cursor; a page listing the templates. Stands in for Templater and QuickAdd."
+authors = ["FastTrackStudios"]
+
+[capabilities]
+# The vault's notes, through the app's own actions; it never deletes.
+actions = ["VAULT_LIST", "VAULT_READ", "VAULT_CREATE", "EXT_VIEW_OPEN"]
+effect = "mutating"
+# The note being typed in.
+writes = ["editor"]
+ui = ["prompts", "notify"]
+
+[[actions]]
+id = "SHOWCASE_TEMPLATER_LIST"
+name = "Templater-lite: list templates"
+description = "The templates: every note in `folder` (Templates when left out), with the {{fields}} each asks for."
+group = "Showcase"
+params = '{"type":"object","properties":{"folder":{"type":"string"}}}'
+script = "list.luau"
+
+[[actions]]
+id = "SHOWCASE_TEMPLATER_NEW"
+name = "Templater-lite: new from template"
+description = "Makes a note from template `template` (asked when left out) in `folder` (Inbox when left out): `title` and every other {{field}} asked in a prompt unless given in `fields`, {{date}} today. Answers the new note's path."
+group = "Showcase"
+effect = "mutating"
+params = '{"type":"object","properties":{"template":{"type":"string"},"title":{"type":"string"},"folder":{"type":"string"},"fields":{"type":"object"},"date":{"type":"string"}}}'
+script = "new.luau"
+
+[[actions]]
+id = "SHOWCASE_TEMPLATER_DATE"
+name = "Templater-lite: insert date"
+description = "Inserts today's date (YYYY-MM-DD, or `date`) at the cursor of the note being typed in, as one undo step."
+group = "Showcase"
+effect = "mutating"
+params = '{"type":"object","properties":{"date":{"type":"string"}}}'
+script = "date.luau"
+shortcut = "Mod-Alt-D"
+
+# The templates, as a tab (a TSX page on QuickJS; a Web Worker in a
+# browser).
+[[views]]
+id = "templates"
+title = "Templates"
+icon = "file-text"
+page = "pages/templates.tsx"
+
+[[actions]]
+id = "SHOWCASE_TEMPLATER_OPEN"
+name = "Templater-lite: templates"
+description = "Opens the Templates tab."
+group = "Showcase"
+script = "open.luau"
+
+# A row of the editor's slash menu.
+[[slash]]
+label = "Today's date"
+action = "SHOWCASE_TEMPLATER_DATE"
+group = "Templater-lite"
+desc = "Inserts YYYY-MM-DD"
+icon = "calendar"
