@@ -1597,7 +1597,9 @@ dependencies = [
 name = "architect-navigator"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "architect-commands",
+ "architect-extensions",
  "architect-navigator",
  "architect-navigator-api",
  "architect-settings",
@@ -1610,6 +1612,7 @@ dependencies = [
  "dioxus",
  "dioxus-native",
  "facet",
+ "futures",
  "futures-channel",
  "futures-timer",
  "futures-util",
@@ -1619,6 +1622,7 @@ dependencies = [
  "tempfile",
  "unicode-normalization",
  "vault",
+ "vault-doc",
  "vault-proto",
 ]
 
