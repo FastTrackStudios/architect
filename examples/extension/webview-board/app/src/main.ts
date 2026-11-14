@@ -75,7 +75,7 @@ function drawChart() {
     cursor: { show: false },
     scales: { x: { time: false } },
     axes: [
-      { stroke: token('--arch-muted', '#888'), grid: { stroke: token('--arch-line', '#8884') } },
+      { stroke: token('--arch-muted', '#888'), grid: { stroke: token('--arch-line', '#8884') }, incrs: [1, 2, 5, 10] },
       { stroke: token('--arch-muted', '#888'), grid: { stroke: token('--arch-line', '#8884') } },
     ],
     series: [
@@ -99,6 +99,9 @@ async function save() {
 Sortable.create(list, {
   animation: 150,
   handle: '.handle',
+  // Pointer events, not the HTML5 drag-and-drop API: the same on a mouse,
+  // a pen and a finger, in every engine a web view is.
+  forceFallback: true,
   onEnd() {
     const order = [...list.children].map((li) => (li as HTMLElement).dataset.id);
     cards = order.map((id) => cards.find((c) => c.id === id)!).filter(Boolean);

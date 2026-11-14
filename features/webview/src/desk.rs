@@ -24,6 +24,7 @@
 //! - **Its life.** A view whose tab is switched away is kept, hidden, for
 //!   [`PARKED`], so its state survives a tab switch; a pane's preview (a
 //!   phone's switcher) draws a still placeholder, never a second view.
+//!   When its `src` file changes (a development copy rebuilt), it reloads.
 //!
 //! Linux: WebKitGTK embeds a child only in an X11 window. Under Wayland
 //! (the spike in `docs/content/architecture/embedded-views.md`, "Web
@@ -57,6 +58,9 @@ pub const FRAME: Duration = Duration::from_millis(16);
 /// How long a view whose pane went away is kept, hidden, for its pane to
 /// come back (a tab switch).
 pub const PARKED: Duration = Duration::from_secs(60);
+
+/// How far inside its pane's edges a view's overlap probes are, points.
+const INSET: f64 = 24.0;
 
 /// The attribute a pane's holder carries, its value the view's key.
 const HOLDER: &str = "data-webview";
@@ -99,6 +103,15 @@ struct Native {
     theme: String,
     escape: Arc<AtomicBool>,
     parked: Option<Instant>,
+    /// Its `src` file and when it last changed: a rebuild of a
+    /// development copy reloads the view.
+    src: Option<std::path::PathBuf>,
+    changed: Option<std::time::SystemTime>,
+    checked: Instant,
+}
+
+fn modified(path: Option<&std::path::Path>) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path?).and_then(|m| m.modified()).ok()
 }
 
 thread_local! {
@@ -211,7 +224,11 @@ fn create(
         .with_bounds(rect)
         .build_as_child(&window)
         .map_err(|e| why_not(&e))?;
+    let src = ask.dir.as_ref().map(|d| d.join(&ask.src));
     Ok(Native {
+        changed: modified(src.as_deref()),
+        src,
+        checked: Instant::now(),
         view,
         bridge,
         inbox,
@@ -264,7 +281,7 @@ fn theme_now() -> (String, String) {
 #[component]
 pub fn DeskWebPane(ask: WebAsk, host: HostRef) -> Element {
     let pane = use_pane();
-    let key = format!("{}/{}#{}", ask.extension, ask.view, pane.id);
+    let key = format!("{}/{}#{}", ask.extension, ask.view, pane.id.0);
     let preview = pane.is_preview();
     let (scheme, css) = theme_now();
     let mut theme = use_signal(|| (scheme.clone(), css.clone()));
@@ -303,14 +320,18 @@ pub fn DeskWebPane(ask: WebAsk, host: HostRef) -> Element {
                 };
                 let (x, y, w, h) = (r.origin.x, r.origin.y, r.size.width, r.size.height);
                 let sized = w >= 1.0 && h >= 1.0;
-                // Points just inside its rect: the corners, the edges'
-                // middles and its centre.
+                // Nine points inside its rect: near the corners (clear of
+                // a float's rounded ones), the edges' middles and its
+                // centre.
+                let inset = |len: f64| INSET.min(len / 2.0);
+                let xs = [x + inset(w), x + w / 2.0, x + w - inset(w)];
+                let ys = [y + inset(h), y + h / 2.0, y + h - inset(h)];
                 let covered = live.as_ref().is_some_and(|doc| {
                     sized
-                        && [0.02, 0.5, 0.98].iter().any(|fx| {
-                            [0.02, 0.5, 0.98].iter().any(|fy| {
+                        && xs.iter().any(|px| {
+                            ys.iter().any(|py| {
                                 #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
-                                let (px, py) = ((x + w * fx) as f32, (y + h * fy) as f32);
+                                let (px, py) = (*px as f32, *py as f32);
                                 doc.covered_at(px, py, HOLDER, &key) == Some(true)
                             })
                         })
@@ -339,14 +360,17 @@ pub fn DeskWebPane(ask: WebAsk, host: HostRef) -> Element {
                     n.parked = None;
                     #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
                     let bounds = Some((x as i64, y as i64, w as i64, h as i64));
-                    if n.bounds != bounds && sized {
-                        let _ = n.view.set_bounds(rect_of(x, y, w, h));
-                        n.bounds = bounds;
-                    }
                     if n.visible != shown.shown() {
                         n.visible = shown.shown();
                         let _ = n.view.set_visible(n.visible);
                         n.bridge.send(Outbound::Shown { shown: n.visible });
+                        // Shown again, a child is put back where it was
+                        // made (WebKitGTK's on X11): place it afresh.
+                        n.bounds = None;
+                    }
+                    if n.bounds != bounds && sized && n.visible {
+                        let _ = n.view.set_bounds(rect_of(x, y, w, h));
+                        n.bounds = bounds;
                     }
                     let (scheme, css) = theme.peek().clone();
                     if n.theme != css {
@@ -369,6 +393,14 @@ pub fn DeskWebPane(ask: WebAsk, host: HostRef) -> Element {
                         let _ = n.view.evaluate_script(&format!(
                             "window.__architectReceive&&window.__architectReceive({text})"
                         ));
+                    }
+                    if n.checked.elapsed() >= Duration::from_secs(1) {
+                        n.checked = Instant::now();
+                        let now = modified(n.src.as_deref());
+                        if now != n.changed {
+                            n.changed = now;
+                            let _ = n.view.reload();
+                        }
                     }
                     if n.escape.swap(false, Ordering::SeqCst) {
                         let _ = n.view.focus_parent();
@@ -399,6 +431,8 @@ pub fn DeskWebPane(ask: WebAsk, host: HostRef) -> Element {
             }
         });
         reap();
+        // Its loop is gone with it: hide it now (GTK acts on its next turn).
+        pump();
     });
 
     if preview {

@@ -21,7 +21,9 @@
   "engines": {
     "node": ">=24"
   },
-  "sideEffects": false,
+  "sideEffects": [
+    "./webview-runtime.js"
+  ],
   "exports": {
     ".": {
       "types": "./index.d.ts",

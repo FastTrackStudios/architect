@@ -1,7 +1,8 @@
-//! The `web` view kind (#222): an extension's own HTML, CSS and JS in a
-//! pane — a native web view on a desk (wry; WKWebView on iOS), a sandboxed
-//! `<iframe>` in a browser — and the bridge that is its only way into the
-//! app (`docs/content/architecture/embedded-views.md`, "Web views").
+//! The `web` view kind (#222): an extension's own HTML, CSS and JS in a pane.
+//!
+//! A native web view on a desk (wry; `WKWebView` on iOS), a sandboxed
+//! `<iframe>` in a browser, and the bridge that is its only way into the
+//! app (`docs/content/architecture/embedded-views.md`, "Web views")
 //!
 //! This module is what every host of the kind shares, with no web view
 //! in it, so it builds for wasm and is tested without a window:
@@ -22,7 +23,7 @@
 //!   theme ([`theme_css`]) and whether it is shown.
 //! - **The view's runtime** ([`RUNTIME_JS`]): the script every host puts
 //!   in the view before its own, `window.architect`, whichever transport
-//!   it is in (wry's `ipc`, WKWebView's message handler, a frame's port).
+//!   it is in (wry's `ipc`, `WKWebView`'s message handler, a frame's port).
 //!   The typed SDK (`@fasttrackstudio/architect/webview`) is a thin layer
 //!   over it.
 //! - **Keys and overlays** ([`hands_back`], [`Shown`]): typed keys stay in
@@ -70,7 +71,7 @@ pub fn url(id: &str, path: &str) -> String {
 /// navigation away. In a browser the frame is
 /// `sandbox="allow-scripts"` as well, an opaque origin.
 #[must_use]
-pub fn csp() -> &'static str {
+pub const fn csp() -> &'static str {
     "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; \
      img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; \
      worker-src 'self' blob:; connect-src 'none'; frame-src 'none'; child-src 'self' blob:; \
@@ -175,11 +176,11 @@ pub fn headers(mime: &'static str) -> Vec<(&'static str, String)> {
 pub fn resolve(dir: &Path, path: &str) -> Result<PathBuf, AssetError> {
     let clean = path.split(['?', '#']).next().unwrap_or("");
     let decoded = percent_decode(clean).ok_or_else(|| AssetError::Outside(path.to_owned()))?;
-    let rel = decoded.trim_start_matches('/');
-    let rel = if rel.is_empty() || rel.ends_with('/') {
-        format!("{rel}index.html")
+    let asked = decoded.trim_start_matches('/');
+    let rel = if asked.is_empty() || asked.ends_with('/') {
+        format!("{asked}index.html")
     } else {
-        rel.to_owned()
+        asked.to_owned()
     };
     if rel.contains('\\')
         || !Path::new(&rel)
@@ -191,8 +192,8 @@ pub fn resolve(dir: &Path, path: &str) -> Result<PathBuf, AssetError> {
     let file = dir.join(&rel);
     // A link inside the package that points out of it is outside too.
     match (file.canonicalize(), dir.canonicalize()) {
-        (Ok(real), Ok(root)) if real.starts_with(&root) && real.is_file() => Ok(real),
-        (Ok(real), Ok(root)) if !real.starts_with(&root) => Err(AssetError::Outside(rel)),
+        (Ok(found), Ok(top)) if found.starts_with(&top) && found.is_file() => Ok(found),
+        (Ok(found), Ok(top)) if !found.starts_with(&top) => Err(AssetError::Outside(rel)),
         _ => Err(AssetError::Missing(rel)),
     }
 }
@@ -229,17 +230,15 @@ pub fn serve(own: &str, dir: &Path, url: &str) -> Result<Asset, AssetError> {
 }
 
 fn percent_decode(s: &str) -> Option<String> {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' {
-            let hex = s.get(i + 1..i + 3)?;
-            out.push(u8::from_str_radix(hex, 16).ok()?);
-            i += 3;
+    let mut out = Vec::with_capacity(s.len());
+    let mut bytes = s.bytes();
+    while let Some(b) = bytes.next() {
+        if b == b'%' {
+            let hi = char::from(bytes.next()?).to_digit(16)?;
+            let lo = char::from(bytes.next()?).to_digit(16)?;
+            out.push(u8::try_from(hi.checked_mul(16)?.checked_add(lo)?).ok()?);
         } else {
-            out.push(bytes[i]);
-            i += 1;
+            out.push(b);
         }
     }
     String::from_utf8(out).ok()
@@ -248,7 +247,7 @@ fn percent_decode(s: &str) -> Option<String> {
 // ── The bridge's messages ───────────────────────────────────────────
 
 /// What a view says to its host.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum Inbound {
     /// A host-service call (`crate::hostcall::HostRequest`'s JSON),
@@ -265,7 +264,7 @@ pub enum Inbound {
 }
 
 /// What a host says to its view.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum Outbound {
     /// The answer to call `id`: `crate::hostcall::HostAnswer`'s JSON
@@ -329,7 +328,7 @@ pub struct Listening(Vec<String>);
 
 impl Listening {
     #[must_use]
-    pub fn new(events: Vec<String>) -> Self {
+    pub const fn new(events: Vec<String>) -> Self {
         Self(events)
     }
 
@@ -343,7 +342,9 @@ impl Listening {
 
 // ── Theme ───────────────────────────────────────────────────────────
 
-/// The app's theme as a style sheet for a view: each token a custom
+/// The app's theme as a style sheet for a view.
+///
+/// Each token is a custom
 /// property on `:root` (`--brand: #6c5ce7`; an app's dotted token
 /// `studio.accent` is `--studio-accent`), and its `color-scheme`, so form
 /// controls and scroll bars follow light and dark. A token whose name is
@@ -373,8 +374,10 @@ pub fn theme_css<'a>(scheme: &str, tokens: impl IntoIterator<Item = (&'a str, &'
     css
 }
 
-/// The view's runtime: `window.architect`, put in every native web view
-/// before its own scripts (wry's initialisation script; WKWebView's user
+/// The view's runtime: `window.architect`.
+///
+/// Put in every native web view
+/// before its own scripts (wry's initialisation script; `WKWebView`'s user
 /// script), and in a sandboxed frame by the app's own bundle (the npm
 /// package's `webview-runtime.js`, the same file). It installs the small
 /// component sheet every view gets (`.arch-button`, `.arch-input`,
@@ -398,7 +401,9 @@ pub fn hands_back(key: &str, modifiers: bool) -> bool {
     key == "Escape" && !modifiers
 }
 
-/// Whether a native web view is shown: its tab in front, its pane on
+/// Whether a native web view is shown.
+///
+/// Its tab in front, its pane on
 /// screen, and none of the app's overlays open (⌘K, a menu, a popover,
 /// a dialog), which the app draws in its own document and a native view
 /// would cover.
@@ -436,10 +441,12 @@ mod desk {
     use crate::hostapi::ExtensionApi;
 
     /// What sends a message into the view (wry's `evaluate_script`,
-    /// WKWebView's): called from any thread.
+    /// `WKWebView`'s): called from any thread.
     pub type Post = Arc<dyn Fn(Outbound) + Send + Sync>;
 
-    /// One web view's bridge on a native host: its messages in, answered
+    /// One web view's bridge on a native host.
+    ///
+    /// Its messages in, answered
     /// as its extension through [`ExtensionApi`] (every call checked by
     /// `crate::hostcall::check` against what it was granted), and the
     /// events it listens for out, heard through [`Host::hear`].

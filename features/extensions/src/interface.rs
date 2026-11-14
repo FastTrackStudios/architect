@@ -1045,7 +1045,9 @@ pub struct WebAsk {
     pub dir: Option<std::path::PathBuf>,
 }
 
-/// Draws an extension's `web` views (#222): a native web view clipped to
+/// Draws an extension's `web` views (#222).
+///
+/// A native web view clipped to
 /// the pane on a desk, a sandboxed frame in a browser
 /// (`crate::webview`). An app with no web view host provides none, and
 /// such a view says so in its pane.

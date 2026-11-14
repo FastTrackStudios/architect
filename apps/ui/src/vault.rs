@@ -668,6 +668,14 @@ pub fn VaultPage() -> Element {
     let workspace = use_signal(first_workspace);
     let sets = use_signal(screensets);
     let pane_status = use_signal(Vec::new);
+    // What an extension's view in a pop-out draws with: its page, its web
+    // view (#222), its frame times.
+    let bridge = use_hook(|| {
+        architect_workspace::Bridge::new()
+            .context::<architect_extensions::interface::ViewPages>()
+            .context::<architect_extensions::interface::WebViews>()
+            .context::<architect_workspace::Meters>()
+    });
     // The vault the navigator shows (the ribbon's "New note" adds to it).
     let lab = use_lab_vault();
     // The Vault's panes are its sidebar: on a vault on disk, two columns
@@ -876,6 +884,7 @@ pub fn VaultPage() -> Element {
                 status: pane_status,
                 form: screen_class(&screen),
                 actions,
+                bridge,
             }
         }
     }

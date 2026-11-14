@@ -246,6 +246,7 @@ impl Host {
     /// while it may read documents, an app event only while it may hear
     /// it): a web view's bridge (`crate::webview`), which passes on what
     /// its view asked for. Its key, for [`Self::unhear`].
+    #[must_use]
     pub fn hear(&self, owner: &str, heard: Heard) -> u64 {
         let state = self.event_state();
         let key = state.next_heard.fetch_add(1, Ordering::Relaxed);
@@ -254,6 +255,7 @@ impl Host {
     }
 
     /// Stops listener `key` ([`Self::hear`]): whether it was there.
+    #[allow(clippy::must_use_candidate)]
     pub fn unhear(&self, key: u64) -> bool {
         lock(&self.event_state().heard).remove(&key).is_some()
     }

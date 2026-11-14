@@ -9,14 +9,14 @@ kind = "data"
 description = "A Vite + TypeScript app in a pane: a uPlot chart and a SortableJS board, saved as the extension's data, themed by the app."
 
 [capabilities]
-actions = ["WORKSPACE_OPEN"]
+actions = ["EXT_VIEW_OPEN"]
 effect = "mutating"
 ui = ["notify"]
 
 [[actions]]
 id = "DEMO_WEBVIEW_BOARD_OPEN"
 name = "Open the web view board"
-preset = { action = "WORKSPACE_OPEN", args = { view = "demo.webview-board/board", id = "demo.webview-board/board", title = "Board (web view)" } }
+preset = { action = "EXT_VIEW_OPEN", args = '{"extension": "demo.webview-board", "view": "board"}' }
 
 [[views]]
 id = "board"
