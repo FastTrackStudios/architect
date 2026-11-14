@@ -8,6 +8,7 @@
 //! | `VAULT_STATUS` | the folder, how many notes, bases and attachments it holds, the bases that failed to parse and the links that resolve to nothing |
 //! | `VAULT_LIST {folder?}` | its notes (path, title, folder), in path order, under `folder` when given |
 //! | `VAULT_READ {path}` | one note: its properties (frontmatter), body, tags, the links out of it (and where each resolves) and the notes that link to it |
+//! | `VAULT_METADATA {path} \| {folder, limit?, cursor?}` | a note's parsed metadata, by line: headings, list items (nesting, the heading each is under), tasks (indices into the list items), block ids (`^id`) and inline fields (`key:: value`); or a page of the notes' under `folder` (`""`: the whole vault), at most `limit` (100, up to 1000) after `cursor`, with the `next` cursor (what Dataview and Tasks read). Parsed outside the vault's lock, kept by each note's modified time |
 //! | `VAULT_SEARCH {query, limit?}` | the notes whose title or text holds `query` (any case), each with its first matching line |
 //! | `VAULT_QUERY_BASE {path, view?}` | runs a `.base` (one view or all): each view's columns and rows |
 //! | `VAULT_CREATE {path, body, properties?}` | writes a new note (refused when the path is taken) |
@@ -42,6 +43,7 @@ pub mod ids {
     pub const STATUS: &str = "VAULT_STATUS";
     pub const LIST: &str = "VAULT_LIST";
     pub const READ: &str = "VAULT_READ";
+    pub const METADATA: &str = "VAULT_METADATA";
     pub const SEARCH: &str = "VAULT_SEARCH";
     pub const QUERY_BASE: &str = "VAULT_QUERY_BASE";
     pub const CREATE: &str = "VAULT_CREATE";
@@ -188,6 +190,17 @@ static READ: ActionMeta = meta(
      (frontmatter and inline #tags), the links out of it with the note each resolves to, and \
      the notes that link to it.",
 );
+static METADATA: ActionMeta = meta(
+    ids::METADATA,
+    "Read a note's metadata",
+    "A note's parsed metadata by line (1-based): its headings {level, text, line}, list items \
+     {line, text, depth, parent, ordered, task, done, block, section}, tasks (indices into the \
+     list items), block ids {id, line} and inline fields {key, value, line} (`key:: value`, \
+     `[key:: value]`, `(key:: value)`). Give `path` for one note, or `folder` (\"\" for the \
+     whole vault) for a page of them in path order: at most `limit` (default 100, up to 1000) \
+     after `cursor` (a path), answered as {notes, next} where `next` is the cursor of the next \
+     page (null at the end).",
+);
 static SEARCH: ActionMeta = meta(
     ids::SEARCH,
     "Search notes",
@@ -241,6 +254,22 @@ struct ListArgs {
     /// Only notes under this folder (a vault path).
     #[facet(default)]
     folder: Option<String>,
+}
+
+#[derive(Facet)]
+struct MetadataArgs {
+    /// One note's vault path.
+    #[facet(default)]
+    path: Option<String>,
+    /// Without `path`: the notes under this folder (`""`: every note).
+    #[facet(default)]
+    folder: Option<String>,
+    /// How many notes a page holds (default 100, at most 1000).
+    #[facet(default)]
+    limit: Option<u32>,
+    /// The last path of the page before (its answer's `next`).
+    #[facet(default)]
+    cursor: Option<String>,
 }
 
 #[derive(Facet)]
@@ -430,6 +459,114 @@ pub fn read_note(vault: &Vault, path: &str) -> Result<Value, String> {
     }))
 }
 
+/// How many notes a `VAULT_METADATA` page holds, by default and at most.
+const META_PAGE: usize = 100;
+const META_PAGE_MAX: usize = 1000;
+
+/// Each note's parsed metadata as `VAULT_METADATA` answers it, kept by
+/// its modified time and length: a note parsed once until it changes.
+#[derive(Default)]
+pub struct MetadataCache {
+    notes: std::sync::Mutex<std::collections::HashMap<String, (std::time::SystemTime, usize, Arc<Value>)>>,
+}
+
+impl MetadataCache {
+    fn get(&self, path: &str, mtime: std::time::SystemTime, len: usize) -> Option<Arc<Value>> {
+        let notes = self.notes.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        notes
+            .get(path)
+            .filter(|(m, l, _)| *m == mtime && *l == len)
+            .map(|(_, _, v)| Arc::clone(v))
+    }
+
+    fn put(&self, path: &str, mtime: std::time::SystemTime, len: usize, v: Arc<Value>) {
+        self.notes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(path.to_owned(), (mtime, len, v));
+    }
+}
+
+/// One note's metadata: its tasks as indices into its list items.
+fn note_metadata(path: &str, raw: &str) -> Value {
+    let m = vault_obsidian::metadata(raw);
+    let tasks: Vec<usize> = m
+        .list_items
+        .iter()
+        .enumerate()
+        .filter(|(_, i)| i.task.is_some())
+        .map(|(n, _)| n)
+        .collect();
+    json!({
+        "path": path,
+        "headings": m.headings,
+        "list_items": m.list_items,
+        "tasks": tasks,
+        "blocks": m.blocks,
+        "fields": m.fields,
+    })
+}
+
+/// `VAULT_METADATA`: one note's, or a page of the notes' under `folder`.
+/// What it needs from the vault is taken under its lock (each note's
+/// text only when the cache does not have it); the parsing is outside.
+///
+/// # Errors
+///
+/// No note at `path`, or neither `path` nor `folder` given.
+pub fn metadata_of(
+    vault: &OpenVault,
+    cache: &MetadataCache,
+    path: Option<&str>,
+    folder: Option<&str>,
+    limit: Option<u32>,
+    cursor: Option<&str>,
+) -> Result<Value, String> {
+    // (path, mtime, length, the cached answer or the text to parse)
+    type Want = (String, std::time::SystemTime, usize, Result<Arc<Value>, String>);
+    let want = |p: &VaultPage| -> Want {
+        let len = p.raw.len();
+        let got = cache
+            .get(&p.rel_path, p.mtime, len)
+            .ok_or_else(|| p.raw.clone());
+        (p.rel_path.clone(), p.mtime, len, got)
+    };
+    let parse = |(path, mtime, len, got): Want| -> Arc<Value> {
+        got.unwrap_or_else(|raw| {
+            let v = Arc::new(note_metadata(&path, &raw));
+            cache.put(&path, mtime, len, Arc::clone(&v));
+            v
+        })
+    };
+    if let Some(path) = path {
+        let one = vault
+            .with(|v| v.page(path).map(want))
+            .ok_or_else(|| format!("{path}: no such note"))?;
+        return Ok(parse(one).as_ref().clone());
+    }
+    let folder = folder.ok_or("give `path` (one note) or `folder` (\"\" for the whole vault)")?;
+    let under = folder.trim_end_matches('/');
+    let limit = limit
+        .map_or(META_PAGE, |n| usize::try_from(n).unwrap_or(META_PAGE_MAX))
+        .clamp(1, META_PAGE_MAX);
+    let (page, more) = vault.with(|v| {
+        let mut pages: Vec<&VaultPage> = v
+            .pages
+            .iter()
+            .filter(|p| under.is_empty() || p.rel_path.starts_with(&format!("{under}/")))
+            .filter(|p| cursor.is_none_or(|c| p.rel_path.as_str() > c))
+            .collect();
+        pages.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
+        let more = pages.len() > limit;
+        (pages.into_iter().take(limit).map(want).collect::<Vec<_>>(), more)
+    });
+    let notes: Vec<Arc<Value>> = page.into_iter().map(parse).collect();
+    let next = more
+        .then(|| notes.last().and_then(|n| n["path"].as_str().map(str::to_owned)))
+        .flatten();
+    Ok(json!({ "notes": notes.iter().map(|n| n.as_ref().clone()).collect::<Vec<_>>(), "next": next }))
+}
+
 fn search(vault: &Vault, query: &str, limit: usize) -> Value {
     let needle = query.to_lowercase();
     let mut hits: Vec<Value> = Vec::new();
@@ -508,6 +645,22 @@ pub fn register(list: &ActionList, vault: &OpenVault) -> Result<(), ActionError>
         Effect::ReadOnly,
         move |_: &ActionCaller, a: PathArgs| {
             v.with(|vault| read_note(vault, &a.path)).map(|j| raw(&j))
+        },
+    )?;
+    let (v, cache) = (vault.clone(), MetadataCache::default());
+    list.register_with(
+        &METADATA,
+        Effect::ReadOnly,
+        move |_: &ActionCaller, a: MetadataArgs| {
+            metadata_of(
+                &v,
+                &cache,
+                a.path.as_deref(),
+                a.folder.as_deref(),
+                a.limit,
+                a.cursor.as_deref(),
+            )
+            .map(|j| raw(&j))
         },
     )?;
     let v = vault.clone();
