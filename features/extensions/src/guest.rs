@@ -597,7 +597,7 @@ fn dispatch(vdom: &VirtualDom, event: ViewEvent) {
         EventData::Wheel(w) => Rc::new(PlatformEventData::new(Box::new(rich::wheel(&w)))),
         EventData::Scroll(s) => Rc::new(PlatformEventData::new(Box::new(rich::scroll(&s)))),
         EventData::Composition(text) => {
-            Rc::new(PlatformEventData::new(Box::new(rich::composition(text))))
+            Rc::new(PlatformEventData::new(Box::new(rich::composition(&text))))
         }
     };
     vdom.runtime().handle_event(
@@ -672,7 +672,7 @@ mod rich {
         serde_json::from_value(json!({
             "alt_key": t.mods.alt, "ctrl_key": t.mods.ctrl,
             "meta_key": t.mods.meta, "shift_key": t.mods.shift,
-            "touches": all.clone(), "changed_touches": changed, "target_touches": all,
+            "touches": &all, "changed_touches": changed, "target_touches": &all,
         }))
         .expect("dioxus-html's touch shape")
     }
@@ -701,7 +701,7 @@ mod rich {
     }
 
     #[allow(clippy::expect_used)]
-    pub(super) fn composition(data: String) -> SerializedCompositionData {
+    pub(super) fn composition(data: &str) -> SerializedCompositionData {
         serde_json::from_value(json!({ "data": data })).expect("dioxus-html's composition shape")
     }
 
@@ -720,7 +720,7 @@ mod rich {
                 ..Pointer::default()
             };
             let p = pointer(&PointerData {
-                at: at.clone(),
+                at,
                 pointer_id: 11,
                 pointer_type: "touch".to_owned(),
                 is_primary: true,
@@ -737,7 +737,7 @@ mod rich {
             assert_eq!(t.touches().len(), 1);
             let w = wheel(&WheelData { at, delta_y: 120.0, ..WheelData::default() });
             assert!(matches!(w.delta(), dioxus::html::geometry::WheelDelta::Pixels(v) if (v.y - 120.0).abs() < f64::EPSILON));
-            let _ = composition("日本".to_owned());
+            let _ = composition("日本");
         }
     }
 }
