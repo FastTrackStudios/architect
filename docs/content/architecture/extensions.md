@@ -3433,11 +3433,41 @@ whose documents are `crdt` documents uses
 `History`, in named spaces (`with_space`), its text the root text
 `CrdtDocuments::TEXT`, its document there for the app's editor and sync
 (`CrdtDocuments::doc`), its undo (`undo`, `redo`, `steps`) and who
-changed it (`authors`). Task's vault implements `Documents` over its
-notes; the sandbox gives its spaces, `notes` and `archive`
-(`apps/ui/src/extensions.rs` `documents`). With no documents given,
-the calls answer `unsupported`; `read_document` falls back to
-`AppContext::document`. In a browser they are not there yet.
+changed it (`authors`). With no documents given, the calls answer
+`unsupported`; `read_document` falls back to `AppContext::document`.
+
+**The person's vault** (#706). The Architect app, on the desk and on
+iOS, gives extensions the vault it opened:
+`architect_navigator::documents::VaultDocuments` (feature `documents`)
+over the one `VaultSource` its navigator and editors use
+(`apps/ui/src/notes.rs` `source`, set on the host by `on_source` once a
+vault is open, the first run's choice too). Its documents are the
+vault's notes (`.md`) by their vault paths; a create, an edit, a rename
+(the links that named it follow) and a delete (to the vault's `.trash`)
+go through that source, so an open note hears an extension's edit and
+merges it into its typing (`vault_doc::merge3`, two forks of one Loro
+document, property by key and the body character by character). An
+edit's `DocEdit`s apply as one Loro commit made as the extension
+(`documents::apply_edits`) and are one write; if the person saved in
+between, the two are merged the same way. A file keeps no undo of its
+own: the open note takes the change as one edit.
+`VaultDocuments::raise_on(&app_list)` raises the person's own changes
+as `doc.*` on the app's list, which the host hears (`Host::watch`):
+typing as it is saved, a new note, a rename, move or delete in the
+navigator, an edit made outside the app; the extension's own are left
+out there, so each is heard once. An org's other vaults (`@org/…`) are
+not documents yet. The sandbox with no vault on disk keeps its
+in-memory spaces, `notes` and `archive` (`apps/ui/src/extensions.rs`
+`documents`). The web app's host is #495's; it gives the same shape
+(a `Documents` over its vault and the person's edits raised as `doc.*`
+on the list).
+
+**Extension data and settings persist.** `host.data`/`set_data` are a
+file per extension under the host's data root (the app's
+`<app dir>/extension-data`); settings are the settings page's, kept in
+the app's device values. Both survive a restart
+(`features/navigator/tests/documents.rs`
+`what_an_extension_keeps_survives_a_restart`).
 
 The sandbox's `lab.tidy` (`apps/sandbox/extensions/tidy`, beside its registry; the
 lab runs it as a development copy with `ARCHITECT_LAB_TIDY=1`) makes,
@@ -3445,7 +3475,11 @@ tidies, renames, files away and watches notes: `LAB_TIDY_NEW`,
 `LAB_TIDY_TIDY` (one transaction), `LAB_TIDY_RENAME`, `LAB_TIDY_FILE`,
 `LAB_TIDY_WATCH`, `LAB_TIDY_LIST`.
 
-Tests: `features/extensions/tests/documents.rs` (`lab.tidy` in the
+Tests: `features/navigator/tests/documents.rs` (`lab.tidy` in a vault
+on disk: lists, creates, tidies, renames and files notes; the person's
+save, new note, rename and delete heard once each; an edit merged into
+an open note's typing; its data after a restart),
+`features/extensions/tests/documents.rs` (`lab.tidy` in the
 sandbox's spaces: creates, tidies as one undo step, renames, files and
 hears each; the person's concurrent typing merges with its transaction;
 refused without `reads` / `writes`), `features/pages/tests/documents.rs`
