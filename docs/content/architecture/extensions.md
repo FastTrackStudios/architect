@@ -3669,26 +3669,45 @@ wasm-clean).
 
 **The index** (`vault_query::index`). One compact `Entry` per note: its
 title, frontmatter properties, inline tags, body links, headings and task
-lines, never its prose; and one per `.base` file, its YAML.
+lines, never its prose; and one per `.base` file, its YAML. An entry is
+capped (`MAX_PROPS`, `MAX_LIST`, `MAX_TEXT`, `MAX_VALUE`, `MAX_BASE`) and
+says when it was (`truncated`). Property keys, tags and link targets are
+shared strings, one per distinct text (`Interner`).
+
 `index::Builder` keeps it from a vault that changes (`NoteSource`), a
-note at a time: a note whose stamp moved and whose text changed gets a
+note at a time. A note whose stamp moved and whose text changed gets a
 new entry, and each sync is an `IndexDelta` (entries put, paths gone).
-It reads a vault on disk `index::CHUNK` notes at a time under its read
-lock, so an editor's save never waits on a large vault's index.
+It reads `index::CHUNK` notes per hold of the vault's lock. When a write
+lands between two chunks, it reads again, waiting a little longer each
+time (`index::TRIES`), and never holds the lock for more than a chunk.
 
 - **Where it runs:** wherever the vault lives. A desk and a phone build
-  it over their own copy (`vault::actions::OpenVault` is a `NoteSource`;
-  `vault_query::Built` keeps one). The node builds it for the web.
+  it over their own copy (`vault::actions::OpenVault` is a `NoteSource`,
+  its stamps hashes of each note's text; `vault_query::Built` keeps one).
+- **On the node:** the index is built from the vault's folder
+  (`vault::actions::query::DiskSource`). It holds no note's text, reads
+  only the files whose time or size moved, and is moved on by a watcher.
+  Each vault is built once, however many ask at once, and let go after
+  `INDEX_IDLE` with no one asking.
 - **In a browser:** a browser holds no vault, only the notes it opens and
   a copy of the index. It gets the copy from the node's
-  `vault_proto::index_sync::VaultIndexSync` on the org lane, permitted as
-  a `read` of `vaults/**` like `Notes`' `read`: a `snapshot`, then
-  everything `since` a revision as one delta.
-- **What each reader gets:** only what the caller may read
-  (`VaultIndex::filtered`, `IndexDelta::filtered`). A delta never names a
-  path the caller may not read.
-- **On the wire:** JSON with short keys (`VaultIndex::to_bytes`,
-  `IndexDelta::to_bytes`).
+  `vault_proto::index_sync::VaultIndexSync` on the org lane: a
+  `snapshot`, then everything `since` a revision as one delta.
+- **What each reader gets:** the node filters every answer per caller
+  (`OrgLane::reads`: a `read` of `org/<id>/docs/<note>`, as
+  `OrgLane::opens` checks a write). A delta never names a path the caller
+  may not read. When nothing the caller may read changed, the answer
+  stays at its revision, so it cannot count edits to notes it cannot
+  read. Its `access` is a fingerprint of its rights (`OrgLane::read_key`,
+  its role); when that moves, `since` answers "take a snapshot".
+- **Histories:** each builder has a random `epoch`. A node started again
+  is another history, and `since` from an old one answers "take a
+  snapshot", as does a revision further back than the deltas kept
+  (`index::KEPT`). The first full build is no delta.
+- **On the wire:** JSON with a version (`v`, `index::WIRE`), the epoch,
+  short keys and empty fields left out (`VaultIndex::to_bytes`,
+  `IndexDelta::to_bytes`), at most `index::MAX_WIRE` bytes.
+- **Share guests** get no index yet; a guest's subset of it is #710 G1.
 
 The query engine over it, and how extensions ask it, is the next layer
 of #710's stack.

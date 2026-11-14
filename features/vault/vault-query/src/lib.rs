@@ -57,4 +57,4 @@ pub use moved::{bases, obsidian_parse, refs, rows};
 pub mod base_json;
 pub mod index;
 
-pub use index::{Builder, Built, Entry, IndexDelta, Note, NoteSource, VaultIndex};
+pub use index::{Builder, Built, Entry, IndexDelta, Note, NoteSource, Text, VaultIndex};

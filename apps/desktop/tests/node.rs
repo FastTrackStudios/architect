@@ -853,6 +853,7 @@ async fn a_signed_in_web_client_edits_a_note_live_on_the_org_lane() {
     let index: VaultIndexSyncClient = web(&host, Some(alan.clone())).await;
     let snap = index.snapshot("notes".to_owned()).await.unwrap();
     let mut replica = vault::query::VaultIndex::from_bytes(&snap.bytes).unwrap();
+    assert_eq!(replica.epoch, snap.epoch);
     assert!(replica.entries.contains_key("hello.md"), "{replica:?}");
     notes
         .create("notes".to_owned(), "second.md".to_owned(), "---\nstatus: new\n---\n# Second\n".to_owned())
@@ -860,10 +861,15 @@ async fn a_signed_in_web_client_edits_a_note_live_on_the_org_lane() {
         .unwrap();
     let mut caught_up = false;
     for _ in 0..100 {
-        if let Some(delta) = index.since("notes".to_owned(), replica.revision).await.unwrap() {
-            replica
-                .apply(&vault::query::IndexDelta::from_bytes(&delta.bytes).unwrap())
-                .unwrap();
+        match index
+            .since("notes".to_owned(), snap.epoch, snap.access, replica.revision)
+            .await
+            .unwrap()
+        {
+            Some(delta) => replica
+                .apply_interned(vault::query::IndexDelta::from_bytes(&delta.bytes).unwrap())
+                .unwrap(),
+            None => panic!("the same history and access: a delta, not a snapshot"),
         }
         if replica.entries.get("second.md").is_some_and(|e| e.props["status"] == "new") {
             caught_up = true;

@@ -13,7 +13,7 @@ base as a workspace view, as Obsidian does, and lets extensions add view
 types to it, as Obsidian plugins add Bases views (#346). Use it wherever
 an app shows notes as rows: a project's tasks, a set list, a reading list.
 
-The parser and the evaluator are the vault's (`features/vault/vault-live/src/bases.rs`,
+The parser and the evaluator are the vault's (`features/vault/vault-query/src/moved/bases.rs`,
 moved from Task with the vault in #333; `skills/architect/references/vault.md`); this crate is
 the model over them, the actions and the views. The design of the view-type
 contribution point is in [Extensions](@/architecture/extensions.md), "Base
@@ -75,7 +75,7 @@ fn build(&self, ext: &mut Builder) {
 - Grouping: `features/vault/vault-proto/src/grouping.rs` `group_by` (with
   `label` and `Order`) is what a view's `groupBy` runs on, and what the
   navigator's list pane (`features/navigator`, #335) groups notes with.
-- Filters as text: `features/vault/vault-live/src/bases.rs`
+- Filters as text: `features/vault/vault-query/src/moved/bases.rs`
   `filter_clauses`, `filter_of_clauses`, `Conjunction`.
 
 | action | does |
