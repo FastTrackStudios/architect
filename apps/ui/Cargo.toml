@@ -111,7 +111,8 @@ tag = { workspace = true, features = ["actions"] }
 # Bases: a .base as a workspace view, a note's ```base fence, the
 # BASES_* actions (src/notes.rs, src/vault.rs).
 architect-bases = { workspace = true, features = ["ui"] }
-architect = { workspace = true, features = ["action-list", "settings", "http-client"] }
+# `connect`: an extension's node actions on the org's node (`src/accounts.rs` `OrgNode`).
+architect = { workspace = true, features = ["action-list", "settings", "http-client", "connect"] }
 dioxus = { workspace = true }
 facet = { workspace = true }
 dioxus-native = { workspace = true }

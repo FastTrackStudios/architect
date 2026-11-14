@@ -131,6 +131,8 @@ pub struct OrgLane {
     /// session watches that connection's bearer ([`VaultSync`]).
     vaults: Option<(crdt::DocRegistry, super::VaultCatalog)>,
     shares: bool,
+    /// Whether installed extensions' node actions are served (#583).
+    node_actions: bool,
     recheck: Duration,
     issuer_grace: Duration,
     /// Browser origins besides the node's own that may open the lane.
@@ -151,7 +153,9 @@ impl OrgLane {
             DeviceEnrolmentDispatcher::new(EnrolmentHost::new(admission.clone(), members.clone())),
         );
         let sessions = Arc::new(IssuerSessions::new(issuer.clone()).with_ttl(RECHECK));
-        let gate = gate(&engine, &members, &issuer, &sessions, false, false, RECHECK);
+        let gate = gate(
+            &engine, &members, &issuer, &sessions, false, false, false, RECHECK,
+        );
         Self {
             org,
             members,
@@ -162,6 +166,7 @@ impl OrgLane {
             issuer,
             vaults: None,
             shares: false,
+            node_actions: false,
             recheck: RECHECK,
             issuer_grace: ISSUER_GRACE,
             origins: Arc::from(Vec::new()),
@@ -181,6 +186,7 @@ impl OrgLane {
             &self.sessions,
             self.vaults.is_some(),
             self.shares,
+            self.node_actions,
             self.recheck,
         );
     }
@@ -215,6 +221,21 @@ impl OrgLane {
             architect_spaces::ShareLinksDispatcher::new(super::shares::SharesLane(shares)),
         );
         self.shares = true;
+        self.rebuild_gate();
+        self
+    }
+
+    /// Serve installed extensions' node actions on the lane too (#583,
+    /// `architect_extensions::node::NodeActions`): any member lists them, a
+    /// member runs one, an admin sees and sets their secrets
+    /// (`architect_extensions::node::PERMITS`).
+    #[must_use]
+    pub fn with_node_actions(mut self, node: architect_extensions::node::NodeHost) -> Self {
+        self.router = self.router.with(
+            architect_extensions::node::node_actions_service_descriptor(),
+            architect_extensions::node::NodeActionsDispatcher::new(node),
+        );
+        self.node_actions = true;
         self.rebuild_gate();
         self
     }
@@ -334,7 +355,8 @@ pub fn origin_allowed(headers: &architect::http::axum::http::HeaderMap, extra: &
 
 /// The lane's gate: the org's engine, callers resolved by the issuer;
 /// with `vaults`, `Notes` and `DocSync` permitted too, with `shares`
-/// `ShareLinks`.
+/// `ShareLinks`, with `node_actions` `NodeActions`.
+#[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
 fn gate(
     engine: &Arc<ConfinedEngine>,
     members: &Members,
@@ -342,6 +364,7 @@ fn gate(
     sessions: &Arc<IssuerSessions>,
     vaults: bool,
     shares: bool,
+    node_actions: bool,
     recheck: Duration,
 ) -> Arc<PermissionsGate> {
     let identity = MembersResolver::new(
@@ -365,6 +388,12 @@ fn gate(
         gate = gate.permit(
             architect_spaces::share_links_rpc_service_descriptor(),
             &architect_spaces::SHARE_PERMITS,
+        );
+    }
+    if node_actions {
+        gate = gate.permit(
+            architect_extensions::node::node_actions_service_descriptor(),
+            &architect_extensions::node::PERMITS,
         );
     }
     Arc::new(gate)
