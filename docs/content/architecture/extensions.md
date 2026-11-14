@@ -3661,6 +3661,38 @@ refused without `reads` / `writes`), `features/pages/tests/documents.rs`
 `features/extensions/tests/wasi_wit.rs` (the typed imports are the
 calls).
 
+## The vault's query service
+
+The vault keeps an index of its notes, as Obsidian's metadata cache is
+what Dataview, Tasks and Bases read (`features/vault/vault-query`,
+wasm-clean).
+
+**The index** (`vault_query::index`). One compact `Entry` per note: its
+title, frontmatter properties, inline tags, body links, headings and task
+lines, never its prose; and one per `.base` file, its YAML.
+`index::Builder` keeps it from a vault that changes (`NoteSource`), a
+note at a time: a note whose stamp moved and whose text changed gets a
+new entry, and each sync is an `IndexDelta` (entries put, paths gone).
+It reads a vault on disk `index::CHUNK` notes at a time under its read
+lock, so an editor's save never waits on a large vault's index.
+
+- **Where it runs:** wherever the vault lives. A desk and a phone build
+  it over their own copy (`vault::actions::OpenVault` is a `NoteSource`;
+  `vault_query::Built` keeps one). The node builds it for the web.
+- **In a browser:** a browser holds no vault, only the notes it opens and
+  a copy of the index. It gets the copy from the node's
+  `vault_proto::index_sync::VaultIndexSync` on the org lane, permitted as
+  a `read` of `vaults/**` like `Notes`' `read`: a `snapshot`, then
+  everything `since` a revision as one delta.
+- **What each reader gets:** only what the caller may read
+  (`VaultIndex::filtered`, `IndexDelta::filtered`). A delta never names a
+  path the caller may not read.
+- **On the wire:** JSON with short keys (`VaultIndex::to_bytes`,
+  `IndexDelta::to_bytes`).
+
+The query engine over it, and how extensions ask it, is the next layer
+of #710's stack.
+
 ## The editor: commands, keys, decorations, slash rows
 
 What Advanced Tables, Outliner and Editing Toolbar need (#312, gap

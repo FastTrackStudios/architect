@@ -102,6 +102,16 @@ const NOTES_PERMITS: ServicePermits = ServicePermits {
     ],
 };
 
+/// `VaultIndexSync` on the org lane: the index is a read, as `Notes`'
+/// `read` is.
+const INDEX_PERMITS: ServicePermits = ServicePermits {
+    service: "VaultIndexSync",
+    methods: &[
+        MethodPermit::new("snapshot", "read", "vaults/**"),
+        MethodPermit::new("since", "read", "vaults/**"),
+    ],
+};
+
 /// `DocSync` on the org lane; which note is [`OrgLane::opens`]' call.
 const SYNC_PERMITS: ServicePermits = ServicePermits {
     service: "DocSync",
@@ -381,6 +391,10 @@ fn gate(
             .permit(
                 super::service::notes::notes_service_descriptor(),
                 &NOTES_PERMITS,
+            )
+            .permit(
+                super::service::index_sync::vault_index_sync_service_descriptor(),
+                &INDEX_PERMITS,
             )
             .permit(crdt::sync::doc_sync_service_descriptor(), &SYNC_PERMITS);
     }
