@@ -103,6 +103,22 @@ Where it draws:
   (`features/sites/src/listing.rs`), and its `cover` is its art when it has
   no `art` (`features/sites/src/art.rs` `art_link`). The list plays as the
   link's source `app:share`.
+- **Layers.** A recording or cover a note names only by `media:`,
+  `recording:` or `cover:` (linked in no note's body) is the Reference
+  layer's unless a `[[share_layers]]` rule places it
+  (`features/sites/src/listing.rs` `Entry` `listening`,
+  `apps/desktop/src/node/share_layers.rs` `LayerRules::place`): Reference is
+  where a link serves what an engine plays a song's mix from, so a Page link
+  serves no recording or cover it did not serve before, and a Reference link
+  (the default) or a Full one serves them. An `art:` image and a file linked
+  in a body stay the page's.
+- **The words a guest reads.** What the node hands a guest of a note
+  (`ShareGuest::read`: its blocks, and its text for a view that reads the
+  note) has every listing fence cut to the link
+  (`features/media/src/fence.rs` `within`; `apps/desktop/src/node/shares.rs`
+  `within_listing`): a row naming no note the link lists is gone, title and
+  all, and a file the link does not serve is emptied from a row kept. A
+  block an extension drew from such a fence at the build is left out whole.
 
 ## Tests to read
 
@@ -110,8 +126,15 @@ Where it draws:
   `/app/?demo`, Merry & Bright draws as both sets with nine rows, four
   greyed, each cover; no `sets`/`songs` rows; the fence folded; a row pressed
   plays on the card and is marked; the end of a song moves on. The same as a
-  guest of a share link, whose node never lists a song outside the share. At
-  390 px and 1280 px, light and dark.
+  guest of a share link, whose node never lists a song outside the share, nor
+  names it in the setlist's words (`_guest/read`). The text area keeps what
+  was typed when the extension listing arrives late. At 390 px and 1280 px,
+  light and dark.
+- `apps/desktop/tests/shares.rs`
+  `a_guest_never_reads_a_listing_fences_row_for_a_note_outside_the_link`,
+  `a_recording_named_only_by_a_property_is_the_references_never_the_pages`.
+- `features/media/src/fence.rs`: a row of a note outside is gone, a file
+  held back is emptied, a field is a file by its path.
 - `apps/web/test/app-ext-host.test.mjs`: an island that claims the setlist
   draws instead of the core list.
 - `apps/web/src/guest_view.rs` `collection_rows`: a guest's rows from the
