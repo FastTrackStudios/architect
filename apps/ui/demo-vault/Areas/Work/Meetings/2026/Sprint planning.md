@@ -8,8 +8,6 @@ attendees:
   - Sam Okafor
   - Cody
 ---
-# Sprint planning
-
 Scope for the sprint, tied to [[Architecture overview]].
 
 - [x] Estimate stories

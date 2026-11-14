@@ -127,6 +127,11 @@ pub struct Editor {
     /// A new note's title
     #[setting(placeholder = "Untitled")]
     pub new_title: String,
+    /// Show inline title
+    /// The note's name again above its text, as Obsidian draws it. Off, it
+    /// is in the bar at the top alone.
+    #[setting(aliases = ["title", "heading"])]
+    pub inline_title: bool,
 }
 
 impl Default for Editor {
@@ -135,6 +140,7 @@ impl Default for Editor {
             vim: false,
             width: 72.0,
             new_title: "Untitled".to_owned(),
+            inline_title: false,
         }
     }
 }

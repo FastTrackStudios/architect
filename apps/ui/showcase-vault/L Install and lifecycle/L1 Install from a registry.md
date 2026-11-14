@@ -4,8 +4,6 @@ tags: [showcase, showcase/L]
 capability: L1
 example: "- (install and lifecycle workstream)"
 ---
-# L1 Install from a registry
-
 A signed archive from a registry, with a consent prompt that lists what the extension asks for.
 
 **Stands in for:** Obsidian's community plugin browser, BRAT, ReaPack.

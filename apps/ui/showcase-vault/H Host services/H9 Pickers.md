@@ -4,8 +4,6 @@ tags: [showcase, showcase/H]
 capability: H9
 example: "Notify sampler"
 ---
-# H9 Pickers
-
 Pick files, folders and photos.
 
 **Stands in for:** Importer, Image toolkit.

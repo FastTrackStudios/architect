@@ -4,8 +4,6 @@ tags: [showcase, showcase/U]
 capability: U5
 example: "-"
 ---
-# U5 Accessibility
-
 Names and roles for VoiceOver.
 
 **Stands in for:** OSARA.

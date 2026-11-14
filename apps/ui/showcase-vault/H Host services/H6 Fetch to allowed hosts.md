@@ -4,8 +4,6 @@ tags: [showcase, showcase/H]
 capability: H6
 example: "Secrets and fetch"
 ---
-# H6 Fetch to allowed hosts
-
 `fetch` limited to the hosts in the manifest.
 
 **Stands in for:** Copilot, Remotely Save, any API plugin.

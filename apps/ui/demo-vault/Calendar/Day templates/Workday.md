@@ -18,6 +18,4 @@ blocks:
   - {id: wind-down, start: "21:00", end: "22:00", label: Wind-down, category: wind_down}
   - {id: sleep, start: "22:00", end: "06:30", label: Sleep, category: sleep}
 ---
-# Workday
-
 Three allocatable blocks around meal prep, resets and sleep.

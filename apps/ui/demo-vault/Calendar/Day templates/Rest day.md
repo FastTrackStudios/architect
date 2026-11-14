@@ -12,6 +12,4 @@ blocks:
   - {id: wind-down, start: "21:30", end: "22:30", label: Wind-down, category: wind_down}
   - {id: sleep, start: "22:30", end: "08:00", label: Sleep, category: sleep}
 ---
-# Rest day
-
 Slow morning, a meal prep for the week, free time.

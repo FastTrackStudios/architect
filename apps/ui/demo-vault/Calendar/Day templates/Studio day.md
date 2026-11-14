@@ -13,6 +13,4 @@ blocks:
   - {id: wind-down, start: "21:30", end: "22:30", label: Wind-down, category: wind_down}
   - {id: sleep, start: "22:30", end: "07:00", label: Sleep, category: sleep}
 ---
-# Studio day
-
 One long session, meals prepped ahead.

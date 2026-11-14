@@ -4,8 +4,6 @@ tags: [showcase, showcase/R]
 capability: R2
 example: "Templater-lite"
 ---
-# R2 A Luau script installed at run time
-
 A Luau extension loaded from a folder: its scripts are actions, reloaded when saved.
 
 **Stands in for:** Templater user scripts, QuickAdd macros.

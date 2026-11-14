@@ -33,6 +33,7 @@ mod keyflow;
 pub mod links;
 mod note;
 mod note_editor;
+mod note_head;
 mod notes;
 mod pages;
 mod paint;

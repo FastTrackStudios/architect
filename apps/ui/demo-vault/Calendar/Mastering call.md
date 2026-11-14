@@ -7,4 +7,3 @@ end: 2026-11-12T15:45:00
 all_day: false
 color: success
 ---
-# Mastering call

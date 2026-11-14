@@ -9,8 +9,6 @@ accounts:
   - savings
   - brokerage
 ---
-# Budget 2026
-
 ![[wave.svg]]
 
 | Category | Monthly |

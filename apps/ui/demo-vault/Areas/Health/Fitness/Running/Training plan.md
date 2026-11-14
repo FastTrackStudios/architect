@@ -9,8 +9,6 @@ days:
   - Thu tempo
   - Sun long
 ---
-# Training plan
-
 Target: [[Half Marathon]] on 2026-12-06.
 
 - [x] Week 1 base miles

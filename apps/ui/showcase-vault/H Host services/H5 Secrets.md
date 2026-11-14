@@ -4,8 +4,6 @@ tags: [showcase, showcase/H]
 capability: H5
 example: "Secrets and fetch"
 ---
-# H5 Secrets
-
 A secret entered once and inserted by the host into a request header, never readable.
 
 **Stands in for:** Copilot's API key, Remotely Save tokens.

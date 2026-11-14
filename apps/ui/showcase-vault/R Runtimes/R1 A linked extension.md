@@ -4,8 +4,6 @@ tags: [showcase, showcase/R]
 capability: R1
 example: "Setlist viewer, Tasks, Calendar (the standard distribution)"
 ---
-# R1 A linked extension
-
 An extension compiled into the distribution: its crate implements one trait and runs in the app's process.
 
 **Stands in for:** Every Obsidian core plugin; Studio's setlists.

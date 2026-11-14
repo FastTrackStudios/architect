@@ -4,8 +4,6 @@ tags: [showcase, showcase/H]
 capability: H4
 example: "Settings and theme"
 ---
-# H4 Data and settings that persist
-
 An extension's own data and settings, kept across restarts.
 
 **Stands in for:** Every plugin's data.json.

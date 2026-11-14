@@ -4,8 +4,6 @@ tags: [showcase, showcase/H]
 capability: H3
 example: "Dataview-lite"
 ---
-# H3 Vault queries
-
 Bases rows, links, backlinks, tags and search; per-note headings, list items and tasks.
 
 **Stands in for:** Dataview, Tasks, Bases.

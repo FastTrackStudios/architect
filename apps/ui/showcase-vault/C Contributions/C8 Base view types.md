@@ -4,8 +4,6 @@ tags: [showcase, showcase/C]
 capability: C8
 example: "Openers sampler"
 ---
-# C8 Base view types
-
 A view type for Bases.
 
 **Stands in for:** Kanban and Calendar base views, Bases view plugins.

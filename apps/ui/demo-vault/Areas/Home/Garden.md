@@ -6,8 +6,6 @@ feature: "[[Attachments/swirl.jpg]]"
 plants: [tomato, basil, sage]
 planted: 2026-04-25
 ---
-# Garden
-
 ![[swirl.jpg]]
 
 - [x] Winterize the beds

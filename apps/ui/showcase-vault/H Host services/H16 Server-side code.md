@@ -4,8 +4,6 @@ tags: [showcase, showcase/H]
 capability: H16
 example: "-"
 ---
-# H16 Server-side code
-
 An extension's code on the node, for example a token exchange.
 
 **Stands in for:** Plaid sync.

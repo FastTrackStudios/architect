@@ -9,4 +9,3 @@ projects:
   - "[[Projects/Album/project|Album]]"
 color: info
 ---
-# Mix review

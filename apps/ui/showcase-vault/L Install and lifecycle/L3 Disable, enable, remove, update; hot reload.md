@@ -4,8 +4,6 @@ tags: [showcase, showcase/L]
 capability: L3
 example: "Every showcase extension (they run as development copies)"
 ---
-# L3 Disable, enable, remove, update; hot reload
-
 An extension's lifecycle, and a development copy reloaded on save.
 
 **Stands in for:** Obsidian's plugin toggles, Hot-Reload.

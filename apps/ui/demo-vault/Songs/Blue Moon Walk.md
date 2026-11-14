@@ -12,8 +12,6 @@ sort_index: 1
 created: 2026-09-30T22:10:00
 modified: 2026-11-03T23:40:00
 ---
-# Blue Moon Walk
-
 ![[gradient-dusk.jpg]]
 
 ## Chords

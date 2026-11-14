@@ -4,8 +4,6 @@ tags: [showcase, showcase/U]
 capability: U2
 example: "Kanban-lite (waits on #176)"
 ---
-# U2 Rich input
-
 Drag, pointer capture, touch, scroll, IME and focus in remote views.
 
 **Stands in for:** Kanban, Excalidraw.

@@ -8,8 +8,6 @@ reviewed: 2026-10-15
 created: 2026-04-18T12:00:00
 modified: 2026-10-15T08:45:00
 ---
-# Modes
-
 ![[plasma-a.jpg]]
 
 Seven modes of the major scale. Start from [[Circle of fifths]].

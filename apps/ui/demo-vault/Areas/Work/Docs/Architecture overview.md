@@ -7,8 +7,6 @@ owner: "[[Alex Rivera]]"
 created: 2026-03-10T10:00:00
 modified: 2026-10-29T16:30:00
 ---
-# Architecture overview
-
 ![[diagram.svg]]
 
 Three layers: client, sync and store.

@@ -103,7 +103,10 @@ root, with the page as its children; a page adds status items with
    where a dragged tab lands; stacked tabs sliding.
 6. `features/workspace/src/host/mod.rs` `WorkspaceView`, `View`, `Views`,
    `use_pane`, `use_pane_status`, `TitleRow`; `features/workspace/src/host/commands.rs`
-   registers the `WORKSPACE_*` commands.
+   registers the `WORKSPACE_*` commands. A pane's header (back, forward, its
+   title, `…`) takes a view's own title and buttons from `HeaderParts`
+   (`ViewHeader`): a vault note is renamed there and opens its Properties
+   from it (`apps/ui/src/note_head.rs`), so its name is said once, at the top.
 7. `features/workspace/src/host/windows.rs` `WindowSystem`, `Popout`, `Bridge`
    and `features/workspace/src/native.rs` `launch`, `launch_with_fonts`.
 8. `features/shell/src/shell/mod.rs` `AppShell`, `Tab`, `Action`, `Account`,

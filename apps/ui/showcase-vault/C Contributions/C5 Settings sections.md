@@ -4,8 +4,6 @@ tags: [showcase, showcase/C]
 capability: C5
 example: "Settings and theme"
 ---
-# C5 Settings sections
-
 An extension's own section on the settings page.
 
 **Stands in for:** Every plugin's settings tab, Style Settings.

@@ -4,8 +4,6 @@ tags: [showcase, showcase/C]
 capability: C12
 example: "-"
 ---
-# C12 Favourites and phone tabs
-
 An extension's view as a favourite and as a tab on the phone.
 
 **Stands in for:** Obsidian mobile's ribbon.

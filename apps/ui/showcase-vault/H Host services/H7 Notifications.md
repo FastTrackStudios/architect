@@ -4,8 +4,6 @@ tags: [showcase, showcase/H]
 capability: H7
 example: "Notify sampler"
 ---
-# H7 Notifications
-
 In-app toasts; OS notifications on desktop and iOS (#709).
 
 **Stands in for:** Obsidian's Notice, Reminder.

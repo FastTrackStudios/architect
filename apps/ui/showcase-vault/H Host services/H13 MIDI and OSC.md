@@ -4,8 +4,6 @@ tags: [showcase, showcase/H]
 capability: H13
 example: "Surface (`examples/showcase/surface`)"
 ---
-# H13 MIDI and OSC
-
 Ports by capability, and control surfaces with banks and feedback.
 
 **Stands in for:** CSI, ReaLearn, OSC.

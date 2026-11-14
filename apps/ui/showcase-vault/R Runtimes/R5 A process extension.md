@@ -4,8 +4,6 @@ tags: [showcase, showcase/R]
 capability: R5
 example: "Clicker (`apps/sandbox/clicker`)"
 ---
-# R5 A process extension
-
 A native program the app starts, drawing views over a socket; desk only.
 
 **Stands in for:** Claudian, Git (desktop).

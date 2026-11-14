@@ -483,6 +483,15 @@ fn ToolButton(tool: Tool, size: ToolSize, side: f64, framed: bool) -> Element {
                     } else {
                         span { class: "tip", style: "right: 0; top: {side + 6.0}px;", "{action.label}" }
                     }
+                    if let Some(badge) = action.badge.as_ref().filter(|b| !b.is_empty()) {
+                        span {
+                            style: "position: absolute; top: -3px; right: -3px; min-width: 16px; height: 16px; padding: 0 4px; \
+                                    box-sizing: border-box; border-radius: 8px; display: flex; align-items: center; \
+                                    justify-content: center; background: {t.accent}; color: {t.accent_ink}; \
+                                    font-size: 11px; font-weight: 700;",
+                            "{badge}"
+                        }
+                    }
                 }
             }
         }

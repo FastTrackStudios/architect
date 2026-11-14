@@ -4,8 +4,6 @@ tags: [showcase, showcase/R]
 capability: R7
 example: "-"
 ---
-# R7 TypeScript actions
-
 Actions written in TypeScript, with no Rust and no page.
 
 **Stands in for:** Templater's JS user scripts.

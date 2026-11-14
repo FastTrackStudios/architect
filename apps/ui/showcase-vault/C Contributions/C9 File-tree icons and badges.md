@@ -4,8 +4,6 @@ tags: [showcase, showcase/C]
 capability: C9
 example: "Iconize-lite"
 ---
-# C9 File-tree icons and badges
-
 Navigator providers, icons and colours on files and folders, badges.
 
 **Stands in for:** Iconize, File Color.

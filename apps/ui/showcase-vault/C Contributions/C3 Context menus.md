@@ -4,8 +4,6 @@ tags: [showcase, showcase/C]
 capability: C3
 example: "Toolbar sampler"
 ---
-# C3 Context menus
-
 Rows in the file, editor and row menus, and a menu at a point.
 
 **Stands in for:** File-menu plugins, Commander.

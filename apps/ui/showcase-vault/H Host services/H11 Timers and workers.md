@@ -4,8 +4,6 @@ tags: [showcase, showcase/H]
 capability: H11
 example: "Timers sampler"
 ---
-# H11 Timers and workers
-
 `every`/`at`/cron hooks, timers in views, background workers.
 
 **Stands in for:** TaskNotes' pomodoro, Recent Files, Omnisearch's indexer.

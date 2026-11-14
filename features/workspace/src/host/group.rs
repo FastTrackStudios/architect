@@ -435,6 +435,11 @@ fn PaneHeader(pane: PaneId) -> Element {
     drop(workspace);
     // What others put in it (an extension's toolbars), before its menu.
     let tools = try_consume_context::<super::HeaderTools>().and_then(|t| (t.0)(&view, &pane));
+    // What the view draws itself: its title (renamed there), its buttons.
+    let own = try_consume_context::<super::HeaderParts>()
+        .and_then(|p| (p.0)(&view, &pane))
+        .unwrap_or_default();
+    let (own_title, own_tools) = (own.title, own.tools);
     let (nav_on, nav_off) = (t.ink_2.clone(), t.rule.clone());
     let nav = move |on: bool| {
         format!(
@@ -467,7 +472,14 @@ fn PaneHeader(pane: PaneId) -> Element {
                 },
                 ArrowRight { size: 16, color: if forward { &*t.ink_2 } else { &*t.rule } }
             }
-            div { style: "flex:1 1 0; min-width:0; overflow:hidden; white-space:nowrap; text-align:center;", "{title}" }
+            if let Some(own) = own_title {
+                div { style: "flex:1 1 0; min-width:0; display:flex; justify-content:center;", {own} }
+            } else {
+                div { style: "flex:1 1 0; min-width:0; overflow:hidden; white-space:nowrap; text-align:center;", "{title}" }
+            }
+            if let Some(own) = own_tools {
+                {own}
+            }
             if let Some(tools) = tools {
                 {tools}
             }

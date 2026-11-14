@@ -4,8 +4,6 @@ tags: [showcase, showcase/C]
 capability: C10
 example: "Dataview-lite"
 ---
-# C10 Embeds
-
 Fence renderers and inline embeds in notes.
 
 **Stands in for:** Dataview, Tasks queries, Charts.

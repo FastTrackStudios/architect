@@ -4,8 +4,6 @@ tags: [showcase, showcase/H]
 capability: H12
 example: "Services sampler"
 ---
-# H12 Services between extensions
-
 `[provides]` and `[requires]`: an extension calls Calendar, Day Plans and Tasks.
 
 **Stands in for:** Day Planner, Calendar, Tasks integrations.

@@ -7,8 +7,6 @@ cost: 349.5
 owned: true
 aliases: [Board, Pedals]
 ---
-# Pedalboard
-
 ![[shapes-grid.png]]
 
 Order: tuner, compressor, overdrive, delay, reverb.

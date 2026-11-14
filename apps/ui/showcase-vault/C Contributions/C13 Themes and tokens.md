@@ -4,8 +4,6 @@ tags: [showcase, showcase/C]
 capability: C13
 example: "Settings and theme"
 ---
-# C13 Themes and tokens
-
 A theme and design tokens an extension contributes.
 
 **Stands in for:** Style Settings, Minimal Theme Settings.

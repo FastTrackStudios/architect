@@ -4,8 +4,6 @@ tags: [showcase, showcase/H]
 capability: H14
 example: "-"
 ---
-# H14 Deep links
-
 `architect://` links that run an action.
 
 **Stands in for:** Obsidian URI, Advanced URI.
