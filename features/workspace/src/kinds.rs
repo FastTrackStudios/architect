@@ -34,9 +34,10 @@ pub const DIOXUS: &str = "dioxus";
 /// surface or a chart draws through it.
 pub const PAINT: &str = "paint";
 
-/// The web view kind (#222): an extension's own HTML, CSS and JS from its
-/// package, in a native web view clipped to the pane on a desk (wry;
-/// WKWebView on iOS) and a sandboxed `<iframe>` in a browser. Its code is
+/// The web view kind (#222): an extension's own HTML, CSS and JS in a pane.
+///
+/// Its package's files, in a native web view clipped to the pane on a desk
+/// (wry; `WKWebView` on iOS) and a sandboxed `<iframe>` in a browser. Its code is
 /// untrusted: it reaches the app only through the host bridge, every call
 /// checked against the extension's capabilities
 /// (`architect-extensions`' `webview`). The app registers it
