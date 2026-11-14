@@ -27,7 +27,9 @@ use wasm_bindgen::JsCast as _;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 
-use super::{App, Limits, PageFolder, Prepared, from_js, millis, out_of_time, prepare, set_shared, to_js};
+use super::{
+    App, Limits, PageFolder, Prepared, from_js, millis, out_of_time, prepare, set_shared, to_js,
+};
 use crate::api::Notice;
 use crate::tsx;
 
@@ -62,8 +64,11 @@ impl Running {
             return;
         };
         let id = web_sys::window().and_then(|w| {
-            w.set_timeout_with_callback_and_timeout_and_arguments_0(f.unchecked_ref(), millis(limit))
-                .ok()
+            w.set_timeout_with_callback_and_timeout_and_arguments_0(
+                f.unchecked_ref(),
+                millis(limit),
+            )
+            .ok()
         });
         self.timer.set(id);
     }
@@ -90,7 +95,12 @@ impl Running {
     }
 
     fn message(self: &Rc<Self>, m: &Json) {
-        let text = |k: &str| m.get(k).and_then(Json::as_str).unwrap_or_default().to_owned();
+        let text = |k: &str| {
+            m.get(k)
+                .and_then(Json::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        };
         match m.get("t").and_then(Json::as_str).unwrap_or_default() {
             "loaded" => {
                 self.loaded.set(true);
@@ -216,16 +226,27 @@ impl super::WebPages {
         let weak = Rc::downgrade(&running);
         *running.on_time.borrow_mut() = Some(Closure::new(move || {
             if let Some(r) = weak.upgrade() {
-                let limit = if r.loaded.get() { r.limits.frame } else { r.limits.load };
+                let limit = if r.loaded.get() {
+                    r.limits.frame
+                } else {
+                    r.limits.load
+                };
                 r.host.log("error", "script", out_of_time(limit));
                 r.end(Err(out_of_time(limit)));
             }
         }));
         if let Some(f) = running.on_message.borrow().as_ref() {
-            running.worker.set_onmessage(Some(f.as_ref().unchecked_ref()));
+            running
+                .worker
+                .set_onmessage(Some(f.as_ref().unchecked_ref()));
         }
         let mut start = running.prepared.start.clone();
-        let shared: Vec<Json> = app.shared.borrow().iter().map(|(k, v)| json!([k, v])).collect();
+        let shared: Vec<Json> = app
+            .shared
+            .borrow()
+            .iter()
+            .map(|(k, v)| json!([k, v]))
+            .collect();
         if let Some(fields) = start.as_object_mut() {
             fields.insert("shared".to_owned(), Json::Array(shared));
             fields.insert("embed".to_owned(), json!("null"));
@@ -233,7 +254,10 @@ impl super::WebPages {
                 "theme".to_owned(),
                 json!(serde_json::to_string(&*app.theme.borrow()).unwrap_or_default()),
             );
-            fields.insert("workerTime".to_owned(), json!(limits.worker_time.as_millis()));
+            fields.insert(
+                "workerTime".to_owned(),
+                json!(limits.worker_time.as_millis()),
+            );
             fields.insert(
                 "action".to_owned(),
                 json!({ "export": export, "args": args.to_string(), "ctx": ctx.to_string() }),
@@ -284,7 +308,9 @@ impl super::WebPages {
                             Json::String(host.manifest().id.clone()),
                         );
                     }
-                    let out = pages.run_action(&folder, "default", &run.args, &ctx, host).await;
+                    let out = pages
+                        .run_action(&folder, "default", &run.args, &ctx, host)
+                        .await;
                     let _ = run.reply.send(out);
                 });
             }

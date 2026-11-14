@@ -19,7 +19,8 @@ use architect_pages::web::{PageFolder, WebPages};
 use serde_json::{Value as Json, json};
 
 /// Its manifest.
-pub const MANIFEST: &str = include_str!("../../../../examples/showcase/recipe-scaler/extension.toml");
+pub const MANIFEST: &str =
+    include_str!("../../../../examples/showcase/recipe-scaler/extension.toml");
 
 /// Its files, as text, by their paths in its folder.
 pub const FILES: &[(&str, &str)] = &[
@@ -149,14 +150,22 @@ pub fn vault(list: &ActionList) -> Result<(), ActionError> {
                 .get(path)
                 .cloned()
                 .ok_or_else(|| format!("{path}: no such note"))?;
-            let title = path.rsplit('/').next().unwrap_or(path).trim_end_matches(".md");
+            let title = path
+                .rsplit('/')
+                .next()
+                .unwrap_or(path)
+                .trim_end_matches(".md");
             Ok(json!({ "path": path, "title": title, "properties": p, "body": b }))
         }),
     )?;
     list.register_forwarded(
         &info("VAULT_CREATE", Effect::Mutating),
         answer("VAULT_CREATE", |n, a| {
-            let path = a.get("path").and_then(Json::as_str).unwrap_or_default().to_owned();
+            let path = a
+                .get("path")
+                .and_then(Json::as_str)
+                .unwrap_or_default()
+                .to_owned();
             if n.borrow().contains_key(&path) {
                 return Err(format!("already exists: {path}"));
             }
@@ -165,7 +174,11 @@ pub fn vault(list: &ActionList) -> Result<(), ActionError> {
                 .and_then(Json::as_str)
                 .and_then(|t| serde_json::from_str(t).ok())
                 .unwrap_or(Json::Null);
-            let body = a.get("body").and_then(Json::as_str).unwrap_or_default().to_owned();
+            let body = a
+                .get("body")
+                .and_then(Json::as_str)
+                .unwrap_or_default()
+                .to_owned();
             n.borrow_mut().insert(path.clone(), (properties, body));
             Ok(json!({ "path": path }))
         }),
