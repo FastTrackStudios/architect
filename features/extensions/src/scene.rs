@@ -287,13 +287,167 @@ pub fn parse_transform(value: &str) -> Affine {
     }
 }
 
-/// The last [`CACHED`] scenes one side has sent or received, by hash.
-/// Both sides insert only full scenes and evict the oldest first, so the
-/// sender knows what the receiver still holds.
+/// The most bytes one [`SCENE_ATTR`] value may hold: past it the view
+/// fails, not the app (a host decodes what it is sent).
+pub const MAX_SCENE_BYTES: usize = 4 * 1024 * 1024;
+
+/// The most commands one scene may hold.
+pub const MAX_COMMANDS: usize = 100_000;
+
+/// The most path elements (moves, lines, curves) one scene may hold.
+pub const MAX_PATH_ELEMENTS: usize = 1_000_000;
+
+/// The most layers and clips a scene may have open at once.
+pub const MAX_DEPTH: usize = 64;
+
+/// The largest coordinate, transform term or size a scene may use: past
+/// it (or not finite) a renderer can stall or overflow.
+pub const MAX_COORDINATE: f64 = 1.0e7;
+
+/// The most bytes of scenes each side keeps ([`SceneCache`]), counted as
+/// their JSON's length on both sides.
+pub const CACHE_BYTES: usize = 32 * 1024 * 1024;
+
+/// Splits a [`SCENE_ATTR`] value into its hash and its content (empty
+/// when it names a scene sent before).
+///
+/// # Errors
+///
+/// It has no hash, or its content is past [`MAX_SCENE_BYTES`].
+pub fn split(value: &str) -> Result<(u64, &str), String> {
+    if value.len() > MAX_SCENE_BYTES {
+        return Err(format!(
+            "a scene of {} bytes: past its limit of {MAX_SCENE_BYTES}",
+            value.len()
+        ));
+    }
+    let (hash, json) = value.split_once('\n').unwrap_or((value, ""));
+    let hash =
+        u64::from_str_radix(hash.trim(), 16).map_err(|_| "a scene with no hash".to_owned())?;
+    Ok((hash, json))
+}
+
+fn finite(v: f64) -> bool {
+    v.is_finite() && v.abs() <= MAX_COORDINATE
+}
+
+fn affine_ok(t: &[f64; 6]) -> bool {
+    t.iter().all(|v| finite(*v))
+}
+
+/// A scene's content, decoded and checked.
+///
+/// Within the limits above, its layers balanced (a pop with none open is refused; layers left open
+/// are closed), every number finite and in range. Pure, so a host can run
+/// it off its UI thread.
+///
+/// # Errors
+///
+/// What is wrong with it; the view that sent it fails.
+pub fn decode(json: &str) -> Result<Commands, String> {
+    if json.len() > MAX_SCENE_BYTES {
+        return Err(format!(
+            "a scene of {} bytes: past its limit of {MAX_SCENE_BYTES}",
+            json.len()
+        ));
+    }
+    let wire: Vec<Wire> =
+        serde_json::from_str(json).map_err(|e| format!("a scene that isn't one: {e}"))?;
+    if wire.len() > MAX_COMMANDS {
+        return Err(format!(
+            "a scene of {} commands: past its limit of {MAX_COMMANDS}",
+            wire.len()
+        ));
+    }
+    let mut depth = 0_usize;
+    let mut elements = 0_usize;
+    let mut out = Vec::with_capacity(wire.len());
+    for w in wire {
+        let t = match &w {
+            Wire::Fill { t, .. }
+            | Wire::Stroke { t, .. }
+            | Wire::Clip { t, .. }
+            | Wire::Layer { t, .. } => Some(t),
+            Wire::Shadow {
+                t, r, radius, sd, ..
+            } => {
+                if !r.iter().chain([radius, sd]).all(|v| finite(*v)) {
+                    return Err("a box shadow out of range".to_owned());
+                }
+                Some(t)
+            }
+            Wire::Pop => None,
+        };
+        if t.is_some_and(|t| !affine_ok(t)) {
+            return Err("a transform out of range".to_owned());
+        }
+        if let Wire::Stroke { w, .. } = &w
+            && !finite(*w)
+        {
+            return Err("a stroke width out of range".to_owned());
+        }
+        match &w {
+            Wire::Clip { .. } | Wire::Layer { .. } => {
+                depth = depth.saturating_add(1);
+                if depth > MAX_DEPTH {
+                    return Err(format!("layers nested past {MAX_DEPTH}"));
+                }
+            }
+            Wire::Pop => {
+                depth = depth
+                    .checked_sub(1)
+                    .ok_or("a layer popped that it never pushed")?;
+            }
+            _ => {}
+        }
+        let command = from_wire(w);
+        let shape = match &command {
+            RenderCommand::Fill(f) => Some(&f.shape),
+            RenderCommand::Stroke(s) => Some(&s.shape),
+            RenderCommand::PushClipLayer(c) => Some(&c.clip),
+            RenderCommand::PushLayer(l) => Some(&l.clip),
+            _ => None,
+        };
+        if let Some(shape) = shape {
+            use peniko::kurbo::{PathEl, Point};
+            elements = elements.saturating_add(shape.elements().len());
+            if elements > MAX_PATH_ELEMENTS {
+                return Err(format!(
+                    "a scene of more than {MAX_PATH_ELEMENTS} path elements"
+                ));
+            }
+            let at = |p: &Point| finite(p.x) && finite(p.y);
+            let in_range = shape.elements().iter().all(|e| match e {
+                PathEl::MoveTo(p) | PathEl::LineTo(p) => at(p),
+                PathEl::QuadTo(a, b) => at(a) && at(b),
+                PathEl::CurveTo(a, b, c) => at(a) && at(b) && at(c),
+                PathEl::ClosePath => true,
+            });
+            if !in_range {
+                return Err("a path out of range".to_owned());
+            }
+        }
+        out.push(command);
+    }
+    // Layers left open are closed: nothing it sends reaches the host's.
+    out.extend(std::iter::repeat_n(RenderCommand::PopLayer, depth));
+    Ok(Arc::new(out))
+}
+
+/// The last scenes one side has sent or received, by hash.
+///
+/// At most [`CACHED`] of them and [`CACHE_BYTES`] of their JSON. Both sides insert
+/// only full scenes, count each by its JSON's length and evict the oldest
+/// first, so the sender knows what the receiver still holds.
+///
+/// The guest's side is per view thread (`scene_attr`), as a view's
+/// document on the host is per view: a view that opens again starts both
+/// afresh, together.
 #[derive(Debug, Default)]
 pub struct SceneCache {
-    order: VecDeque<u64>,
+    order: VecDeque<(u64, usize)>,
     held: HashMap<u64, Commands>,
+    bytes: usize,
 }
 
 impl SceneCache {
@@ -308,14 +462,24 @@ impl SceneCache {
         self.held.contains_key(&hash)
     }
 
-    fn insert(&mut self, hash: u64, commands: Commands) {
-        if self.held.insert(hash, commands).is_none() {
-            self.order.push_back(hash);
-            if self.order.len() > CACHED
-                && let Some(old) = self.order.pop_front()
-            {
-                self.held.remove(&old);
-            }
+    /// How many bytes of scenes it holds, as counted.
+    #[must_use]
+    pub const fn bytes(&self) -> usize {
+        self.bytes
+    }
+
+    fn insert(&mut self, hash: u64, commands: Commands, size: usize) {
+        if self.held.insert(hash, commands).is_some() {
+            return;
+        }
+        self.order.push_back((hash, size));
+        self.bytes = self.bytes.saturating_add(size);
+        while self.order.len() > CACHED || (self.bytes > CACHE_BYTES && self.order.len() > 1) {
+            let Some((old, size)) = self.order.pop_front() else {
+                break;
+            };
+            self.held.remove(&old);
+            self.bytes = self.bytes.saturating_sub(size);
         }
     }
 
@@ -326,32 +490,64 @@ impl SceneCache {
         if self.holds(hash) {
             return format!("{hash:x}");
         }
-        self.insert(hash, Arc::new(Vec::new()));
+        self.insert(hash, Arc::new(Vec::new()), json.len());
         format!("{hash:x}\n{json}")
     }
 
-    /// The receiver's side: the scene a [`SCENE_ATTR`] value names.
+    /// The receiver's side: the scene a [`SCENE_ATTR`] value names,
+    /// decoded here ([`decode`]).
     ///
     /// # Errors
     ///
-    /// It names a scene not held, or its content is not a scene.
+    /// It names a scene not held, or its content is not a scene within
+    /// the limits.
     pub fn receive(&mut self, value: &str) -> Result<Commands, String> {
-        let (hash, json) = value.split_once('\n').unwrap_or((value, ""));
-        let hash =
-            u64::from_str_radix(hash.trim(), 16).map_err(|_| "a scene with no hash".to_owned())?;
+        self.receive_with(value, decode)
+    }
+
+    /// [`Self::receive`], its content decoded by `decoded` (a host's that
+    /// decoded it already, off its UI thread).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::receive`].
+    pub fn receive_with(
+        &mut self,
+        value: &str,
+        decoded: impl FnOnce(&str) -> Result<Commands, String>,
+    ) -> Result<Commands, String> {
+        let (hash, json) = split(value)?;
         if json.is_empty() {
             return self
                 .held
                 .get(&hash)
                 .cloned()
-                .ok_or_else(|| format!("a scene {hash:x} it was never sent"));
+                .ok_or_else(|| format!("a scene {hash:x} it was never sent, or no longer holds"));
         }
-        let wire: Vec<Wire> =
-            serde_json::from_str(json).map_err(|e| format!("a scene that isn't one: {e}"))?;
-        let commands = Arc::new(wire.into_iter().map(from_wire).collect::<Vec<_>>());
-        self.insert(hash, Arc::clone(&commands));
+        let commands = decoded(json)?;
+        self.insert(hash, Arc::clone(&commands), json.len());
         Ok(commands)
     }
+}
+
+/// Every scene with content in `edits`, decoded ([`decode`]): what a host
+/// does off its UI thread before it applies them.
+#[must_use]
+pub fn predecode(edits: &[crate::wire::Edit]) -> Vec<(u64, Result<Commands, String>)> {
+    edits
+        .iter()
+        .filter_map(|e| match e {
+            crate::wire::Edit::SetAttribute {
+                name,
+                value: crate::wire::Value::Text(v),
+                ..
+            } if name == SCENE_ATTR => split(v)
+                .ok()
+                .filter(|(_, json)| !json.is_empty())
+                .map(|(hash, json)| (hash, decode(json))),
+            _ => None,
+        })
+        .collect()
 }
 
 /// `commands` drawn at `transform` into a scene.
@@ -370,24 +566,180 @@ pub fn scene_of(commands: &[RenderCommand], transform: Affine) -> Scene {
     scene
 }
 
-/// The host's widget: a scene's content at its transform, scaled to the
-/// display, telling the view when its size changes.
+/// What an element's widget draws.
+///
+/// `commands` at `transform`, scaled by `scale`, in a box `width` × `height` (device pixels). Clipped to the
+/// box unless the extension may draw over the whole app (`overlay`,
+/// `capabilities.ui`), so a view can't smear over the app by mistake.
+// kurbo's transforms compose with `*`: no overflow to guard.
+#[allow(clippy::arithmetic_side_effects)]
+#[must_use]
+pub fn framed(
+    commands: &[RenderCommand],
+    transform: Affine,
+    scale: f64,
+    (width, height): (u32, u32),
+    overlay: bool,
+) -> Scene {
+    if overlay {
+        return scene_of(commands, Affine::scale(scale) * transform);
+    }
+    let mut scene = Scene::new();
+    scene.push_clip_layer(
+        peniko::Fill::NonZero,
+        Affine::IDENTITY,
+        &peniko::kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height)),
+    );
+    scene.append_scene(
+        Scene {
+            commands: commands.to_vec(),
+            ..Scene::new()
+        },
+        Affine::scale(scale) * transform,
+    );
+    scene.pop_layer();
+    scene
+}
+
+/// An element's scene as its widget and its document share it: updated
+/// in place, so a new transform keeps the size the widget last told.
 #[cfg(feature = "remote")]
-pub(crate) struct SceneWidget {
+#[derive(Debug)]
+pub(crate) struct Painted {
     pub(crate) commands: Commands,
     pub(crate) transform: Affine,
     pub(crate) element: u64,
-    pub(crate) events: futures::channel::mpsc::UnboundedSender<crate::wire::ViewEvent>,
-    pub(crate) size: Option<(u32, u32)>,
     pub(crate) dirty: bool,
+    /// Where its element's top left is in the window, CSS pixels: where
+    /// an [`OverlayLayer`] draws it.
+    pub(crate) origin: (f64, f64),
+}
+
+/// What draws a view's scenes over the whole app.
+///
+/// For an extension granted `overlay`: every scene of the view, at its element's place in the
+/// window, unclipped. Its widget ([`OverlayWidget`]) fills the window in
+/// the host's own document, above the panes, and takes no input; the
+/// scene's element in the pane still has its size and its input.
+#[cfg(feature = "remote")]
+#[derive(Clone, Default)]
+pub struct OverlayLayer {
+    pub(crate) scenes: Arc<std::sync::Mutex<Vec<Arc<std::sync::Mutex<Painted>>>>>,
+    pub(crate) version: Arc<std::sync::atomic::AtomicU64>,
+}
+
+#[cfg(feature = "remote")]
+impl OverlayLayer {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Something it draws changed.
+    pub(crate) fn touch(&self) {
+        self.version
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub(crate) fn add(&self, painted: Arc<std::sync::Mutex<Painted>>) {
+        self.scenes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(painted);
+        self.touch();
+    }
+
+    pub(crate) fn remove(&self, painted: &Arc<std::sync::Mutex<Painted>>) {
+        self.scenes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|p| !Arc::ptr_eq(p, painted));
+        self.touch();
+    }
+
+    /// Its widget, for an element filling the window.
+    #[must_use]
+    pub fn widget(&self) -> OverlayWidget {
+        OverlayWidget {
+            layer: self.clone(),
+            drawn: u64::MAX,
+        }
+    }
+}
+
+/// An [`OverlayLayer`] as a Blitz widget over the whole window.
+#[cfg(feature = "remote")]
+pub struct OverlayWidget {
+    layer: OverlayLayer,
+    drawn: u64,
 }
 
 #[cfg(feature = "remote")]
 // kurbo's transforms compose with `*`: no overflow to guard.
 #[allow(clippy::arithmetic_side_effects)]
+impl blitz_dom::Widget for OverlayWidget {
+    fn needs_redraw(&self) -> bool {
+        self.layer
+            .version
+            .load(std::sync::atomic::Ordering::Relaxed)
+            != self.drawn
+    }
+
+    fn paint(
+        &mut self,
+        _: &mut dyn anyrender::RenderContext,
+        _: &blitz_dom::node::ComputedStyles,
+        _: u32,
+        _: u32,
+        scale: f64,
+    ) -> Scene {
+        self.drawn = self
+            .layer
+            .version
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let scale = if scale > 0.0 { scale } else { 1.0 };
+        let mut scene = Scene::new();
+        let scenes = self
+            .layer
+            .scenes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        for painted in scenes {
+            let p = painted
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let at = Affine::scale(scale) * Affine::translate(p.origin) * p.transform;
+            scene.append_scene(
+                Scene {
+                    commands: p.commands.to_vec(),
+                    ..Scene::new()
+                },
+                at,
+            );
+        }
+        scene
+    }
+}
+
+/// The host's widget: a scene's content at its transform, scaled to the
+/// display, telling the view when its size changes.
+#[cfg(feature = "remote")]
+pub(crate) struct SceneWidget {
+    pub(crate) painted: Arc<std::sync::Mutex<Painted>>,
+    pub(crate) overlay: bool,
+    pub(crate) events: futures::channel::mpsc::UnboundedSender<crate::wire::ViewEvent>,
+    pub(crate) resizes: Arc<std::sync::atomic::AtomicU64>,
+    pub(crate) size: Option<(u32, u32)>,
+}
+
+#[cfg(feature = "remote")]
 impl blitz_dom::Widget for SceneWidget {
     fn needs_redraw(&self) -> bool {
-        self.dirty
+        self.painted
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .dirty
     }
 
     fn paint(
@@ -398,23 +750,36 @@ impl blitz_dom::Widget for SceneWidget {
         height: u32,
         scale: f64,
     ) -> Scene {
-        self.dirty = false;
         let scale = if scale > 0.0 { scale } else { 1.0 };
+        let (commands, transform, element) = {
+            let mut p = self
+                .painted
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            p.dirty = false;
+            (Arc::clone(&p.commands), p.transform, p.element)
+        };
         if self.size != Some((width, height)) {
             self.size = Some((width, height));
+            self.resizes
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let size = serde_json::json!({
                 "width": f64::from(width) / scale,
                 "height": f64::from(height) / scale,
                 "scale": scale,
             });
             let _ = self.events.unbounded_send(crate::wire::ViewEvent {
-                element: self.element,
+                element,
                 name: RESIZE_EVENT.to_owned(),
                 bubbles: false,
                 data: crate::wire::EventData::Form(size.to_string()),
             });
         }
-        scene_of(&self.commands, Affine::scale(scale) * self.transform)
+        if self.overlay {
+            // Drawn over the whole app by its view's `OverlayLayer`.
+            return Scene::new();
+        }
+        framed(&commands, transform, scale, (width, height), false)
     }
 }
 
@@ -477,6 +842,10 @@ mod guest {
         pub onpointermove: Option<EventHandler<PointerEvent>>,
         #[props(default)]
         pub onpointerup: Option<EventHandler<PointerEvent>>,
+        /// The press ended where the view couldn't see it (outside the
+        /// pane, the window or the focus lost): let go of what it held.
+        #[props(default)]
+        pub onpointercancel: Option<EventHandler<PointerEvent>>,
         #[props(default)]
         pub onwheel: Option<EventHandler<WheelEvent>>,
         #[props(default)]
@@ -507,6 +876,7 @@ mod guest {
             onpointerdown,
             onpointermove,
             onpointerup,
+            onpointercancel,
             onwheel,
             onkeydown,
             style,
@@ -527,6 +897,7 @@ mod guest {
                 onpointerdown: move |e| if let Some(h) = onpointerdown { h.call(e) },
                 onpointermove: move |e| if let Some(h) = onpointermove { h.call(e) },
                 onpointerup: move |e| if let Some(h) = onpointerup { h.call(e) },
+                onpointercancel: move |e| if let Some(h) = onpointercancel { h.call(e) },
                 onwheel: move |e| if let Some(h) = onwheel { h.call(e) },
                 onkeydown: move |e| if let Some(h) = onkeydown { h.call(e) },
             }
@@ -645,8 +1016,14 @@ where
             }
         }
     };
-    let (mut down, mut moved, mut up, mut wheel, mut key) =
-        (on.clone(), on.clone(), on.clone(), on.clone(), on);
+    let (mut down, mut moved, mut up, mut cancel, mut wheel, mut key) = (
+        on.clone(),
+        on.clone(),
+        on.clone(),
+        on.clone(),
+        on.clone(),
+        on,
+    );
     rsx! {
         RemoteScene {
             content,
@@ -677,6 +1054,11 @@ where
                 let (x, y) = at(e.element_coordinates());
                 up(ViewInput::PointerUp { x, y, button: button(&e) });
             },
+            // A press it won't see the end of: the view hears a release.
+            onpointercancel: move |e: PointerEvent| {
+                let (x, y) = at(e.element_coordinates());
+                cancel(ViewInput::PointerUp { x, y, button: button(&e) });
+            },
             onwheel: move |e: WheelEvent| {
                 let (x, y) = at(e.element_coordinates());
                 let d = e.delta().strip_units();
@@ -699,7 +1081,7 @@ async fn futures_timer_delay(d: std::time::Duration) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use peniko::kurbo::Rect;
+    use peniko::kurbo::{Rect, Shape as _};
     use peniko::{Color, Fill};
 
     fn square(x: f64) -> Vec<RenderCommand> {
@@ -746,5 +1128,93 @@ mod tests {
         assert_eq!(parse_transform(&transform_attr(t)), t);
         assert_eq!(parse_transform("1 2 x"), Affine::IDENTITY);
         assert_eq!(parse_transform("1 0 0 1 NaN 0"), Affine::IDENTITY);
+    }
+
+    fn json(wire: &str) -> String {
+        format!("[{wire}]")
+    }
+
+    const SQUARE: &str = r#"{"k":"f","t":[1,0,0,1,0,0],"c":[1,2,3,255],"p":"M0 0L10 0L10 10Z"}"#;
+    const CLIP: &str = r#"{"k":"c","t":[1,0,0,1,0,0],"p":"M0 0L5 0L5 5Z"}"#;
+    const POP: &str = r#"{"k":"o"}"#;
+
+    #[test]
+    fn a_pop_with_no_layer_open_is_refused_and_open_layers_are_closed() {
+        let stray = decode(&json(&format!("{SQUARE},{POP}"))).unwrap_err();
+        assert!(stray.contains("popped"), "{stray}");
+        let open = decode(&json(&format!("{CLIP},{CLIP},{SQUARE}"))).unwrap();
+        let pops = open
+            .iter()
+            .filter(|c| matches!(c, RenderCommand::PopLayer))
+            .count();
+        assert_eq!(pops, 2, "two layers left open are closed");
+        let deep: Vec<&str> = std::iter::repeat_n(CLIP, MAX_DEPTH + 1).collect();
+        let too_deep = decode(&json(&deep.join(","))).unwrap_err();
+        assert!(too_deep.contains("nested"), "{too_deep}");
+    }
+
+    #[test]
+    fn a_scene_past_its_limits_or_out_of_range_is_refused() {
+        let huge = format!("ab\n{}", " ".repeat(MAX_SCENE_BYTES + 1));
+        assert!(split(&huge).unwrap_err().contains("past its limit"));
+        let many: Vec<&str> = std::iter::repeat_n(POP, MAX_COMMANDS + 1).collect();
+        assert!(
+            decode(&json(&many.join(",")))
+                .unwrap_err()
+                .contains("commands")
+        );
+        let far = r#"{"k":"f","t":[1,0,0,1,0,0],"c":[1,2,3,255],"p":"M0 0L99999999999 0L0 10Z"}"#;
+        assert!(decode(&json(far)).unwrap_err().contains("path"));
+        let shifted = r#"{"k":"f","t":[1,0,0,1,-1e300,0],"c":[1,2,3,255],"p":"M0 0L1 0Z"}"#;
+        assert!(decode(&json(shifted)).unwrap_err().contains("transform"));
+    }
+
+    #[test]
+    fn both_sides_forget_by_bytes_alike() {
+        let (mut sent, mut got) = (SceneCache::new(), SceneCache::new());
+        // Ten scenes of about 3.5 MB: past the byte budget, under the
+        // count.
+        let big = |n: u32| -> Vec<RenderCommand> {
+            let mut s = Scene::new();
+            let mut path = peniko::kurbo::BezPath::new();
+            path.move_to((f64::from(n), 0.0));
+            for i in 0..200_000_u32 {
+                path.line_to((f64::from(i) * 1.000_1, 1.5));
+            }
+            s.fill(Fill::NonZero, Affine::IDENTITY, Color::BLACK, None, &path);
+            s.commands
+        };
+        for n in 0..10 {
+            let v = sent.send(&big(n));
+            assert!(v.len() <= MAX_SCENE_BYTES, "{}", v.len());
+            let (_, j) = split(&v).unwrap();
+            // Decoding isn't the point here; the receiver keeps its size.
+            got.receive_with(&v, |_| Ok(Arc::new(Vec::new()))).unwrap();
+            assert!(!j.is_empty());
+        }
+        assert!(sent.bytes() <= CACHE_BYTES && got.bytes() <= CACHE_BYTES);
+        assert_eq!(sent.bytes(), got.bytes());
+        // The first went on both sides: it is sent whole again.
+        assert!(sent.send(&big(0)).contains('\n'));
+    }
+
+    #[test]
+    fn a_scene_is_clipped_to_its_box_unless_it_may_draw_over_the_app() {
+        let clipped = framed(&square(0.0), Affine::IDENTITY, 2.0, (40, 30), false);
+        assert!(matches!(
+            clipped.commands.first(),
+            Some(RenderCommand::PushClipLayer(c)) if c.clip.bounding_box() == Rect::new(0.0, 0.0, 40.0, 30.0)
+        ));
+        assert!(matches!(
+            clipped.commands.last(),
+            Some(RenderCommand::PopLayer)
+        ));
+        let over = framed(&square(0.0), Affine::IDENTITY, 2.0, (40, 30), true);
+        assert!(
+            !over
+                .commands
+                .iter()
+                .any(|c| matches!(c, RenderCommand::PushClipLayer(_)))
+        );
     }
 }

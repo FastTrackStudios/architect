@@ -170,6 +170,7 @@ pub fn SketchView() -> Element {
                 }
             },
             onpointerup: move |_| gesture.set(Gesture::Idle),
+            onpointercancel: move |_| gesture.set(Gesture::Idle),
             onwheel: move |e: WheelEvent| {
                 let p = e.element_coordinates();
                 camera.set(camera().zoomed(zoom_of(&e), p.x, p.y));
@@ -225,6 +226,7 @@ pub fn ArrangementView() -> Element {
                 }
             },
             onpointerup: move |_| grab.set(None),
+            onpointercancel: move |_| grab.set(None),
             onwheel: move |e: WheelEvent| {
                 let p = e.element_coordinates();
                 if e.modifiers().ctrl() {

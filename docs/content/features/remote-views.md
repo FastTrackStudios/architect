@@ -194,6 +194,24 @@ rsx! {
   serves the same `PaintView` from a process copy: each frame it records
   is a `RemoteScene`'s content, and the element's input comes back to it
   as `ViewInput`s (`scene::remote_paint_root`).
+- **Within its pane, unless it may draw over the app.** A scene is
+  clipped to its element's box (`scene::framed`). An extension granted
+  `overlay` (`capabilities.ui`) has its scenes drawn over the whole
+  window instead, by a layer above the panes (`scene::OverlayLayer`;
+  [Extensions](@/architecture/extensions.md), "The app's interface").
+- **What the host accepts.** At most 4 MB per scene attribute
+  (`MAX_SCENE_BYTES`), 100,000 commands (`MAX_COMMANDS`), 1,000,000 path
+  elements, and finite numbers within ±10⁷. Layers are balanced: a pop
+  with nothing open is refused, nesting stops at 64 (`MAX_DEPTH`), and
+  layers left open are closed. Each side keeps at most 64 scenes and
+  32 MB of them (`SceneCache`, evicting by count and by bytes, by the
+  same rule on both sides). A scene past any of these fails the view,
+  not the app. The host decodes a frame's scenes on a thread of its own
+  before it applies the frame (`scene::predecode`), so a large one
+  doesn't stall the window.
+- **Pans don't resize.** A new transform or scene updates the element's
+  widget in place; only a new box tells the view its size, and the
+  resizes of a dragged window are coalesced like moves.
 - **Limits.** Glyph runs don't cross, because a font's bytes would have
   to go with them, so draw text as paths. Images and a backend's own
   paints don't cross either, and a gradient crosses as its first stop's
@@ -216,10 +234,10 @@ arrangement_budget -- --ignored --nocapture`; debug build, THEBATTLESHIP;
 | the first scene | 236,124 bytes (JSON) |
 | a frame of panning | 12 bytes |
 | a frame of the sketch's Shift-drag pan and wheel zoom | 30 bytes |
-| host: the scene decoded | 3.35 ms, once |
-| host: the scene built at its transform (p50 / p99) | 0.47 / 0.56 ms |
-| the window's scene recorded (p50 / p99) | 0.62 / 0.86 ms |
-| a pan's round trip, pointer to new frame (p50 / p99) | 1.10 / 3.19 ms |
+| host: the scene decoded and checked, off the UI thread | 3.63 ms, once |
+| host: the scene built at its transform (p50 / p99) | 0.45 / 0.72 ms |
+| the window's scene recorded (p50 / p99) | 0.30 / 1.31 ms |
+| a pan's round trip, pointer to new frame (p50 / p99) | 1.53 / 4.97 ms |
 
 ## Tests to read
 
@@ -254,9 +272,15 @@ arrangement_budget -- --ignored --nocapture`; debug build, THEBATTLESHIP;
   (`apps/sandbox/pane-events`).
 - `apps/sandbox/sketch/tests/sketch.rs`: a stroke drawn in the process is
   in the window's scene; panning and zooming send the transform, not the
-  scene; a graph node drags in a paint view served by its process.
+  scene, and tell the view no new size; a graph node drags in a paint
+  view served by its process; a scene is clipped to its pane unless the
+  extension may draw over the app, where it lands at its window place;
+  an oversized, unbalanced or unknown scene fails the view, not the app;
+  a pan's round trip stays inside `REMOTE_BUDGET`.
   `features/extensions/src/scene.rs` tests: a scene crosses once and then
-  by its hash, both sides forget the same scenes, transforms round-trip.
+  by its hash; both sides forget the same scenes, by count and by bytes;
+  transforms round-trip; a stray pop, a scene too deep, too large or out
+  of range is refused; framing clips unless overlay.
 
 ## Status
 

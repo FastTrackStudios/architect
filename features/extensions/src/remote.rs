@@ -136,8 +136,16 @@ pub struct RemoteDocument {
     composing: bool,
     /// The scenes the view sent, by hash (#175).
     scenes: crate::scene::SceneCache,
+    /// Scenes decoded off the UI thread before their frame is applied
+    /// (`scene::predecode`), by hash.
+    predecoded: HashMap<u64, Result<crate::scene::Commands, String>>,
+    /// Where its scenes draw over the whole app (`overlay` in
+    /// `capabilities.ui`, granted); clipped to their boxes when none.
+    overlay: Option<crate::scene::OverlayLayer>,
+    /// How many times its scenes told the view a new size.
+    resizes: Arc<std::sync::atomic::AtomicU64>,
     /// The elements it paints: their scene and transform now.
-    painted: HashMap<NodeId, (crate::scene::Commands, crate::scene::Affine)>,
+    painted: HashMap<NodeId, Arc<Mutex<crate::scene::Painted>>>,
     /// How many bytes of scenes and transforms it sent (for a benchmark).
     scene_bytes: u64,
 }
@@ -200,6 +208,9 @@ impl RemoteDocument {
             held: None,
             composing: false,
             scenes: crate::scene::SceneCache::new(),
+            predecoded: HashMap::new(),
+            overlay: None,
+            resizes: Arc::default(),
             painted: HashMap::new(),
             scene_bytes: 0,
         }
@@ -256,52 +267,118 @@ impl RemoteDocument {
         self.scene_bytes
     }
 
+    /// Lets its scenes draw over the whole app (an extension granted
+    /// `overlay`), through `layer`, whose widget fills the window; with
+    /// none they are clipped to their boxes.
+    pub fn set_overlay(&mut self, layer: Option<crate::scene::OverlayLayer>) {
+        self.overlay = layer;
+    }
+
+    /// Puts its scenes where their elements are in the window, the pane
+    /// being at `pane` (CSS pixels): where an overlay draws them.
+    pub fn place_scenes(&mut self, pane: (f32, f32)) {
+        let Some(layer) = &self.overlay else { return };
+        let mut moved = false;
+        for (node, painted) in &self.painted {
+            let Some(n) = self.doc.get_node(*node) else {
+                continue;
+            };
+            let at = n.absolute_position(0.0, 0.0);
+            let origin = (f64::from(pane.0 + at.x), f64::from(pane.1 + at.y));
+            let mut p = painted.lock().unwrap_or_else(PoisonError::into_inner);
+            if p.origin != origin {
+                p.origin = origin;
+                moved = true;
+            }
+            drop(p);
+        }
+        if moved {
+            layer.touch();
+        }
+    }
+
+    /// How many times its scenes have told the view a new size.
+    #[must_use]
+    pub fn scene_resizes(&self) -> u64 {
+        self.resizes.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Scenes of the next frame, decoded already (off the UI thread,
+    /// `scene::predecode`).
+    pub fn predecoded(&mut self, decoded: Vec<(u64, Result<crate::scene::Commands, String>)>) {
+        self.predecoded.extend(decoded);
+    }
+
     /// An element's scene (`scene::SCENE_ATTR`) or transform
-    /// (`scene::TRANSFORM_ATTR`) changed: it is drawn as a widget.
+    /// (`scene::TRANSFORM_ATTR`) changed: it is drawn as a widget, its
+    /// state updated in place.
     fn paint_attr(&mut self, node: NodeId, name: &str, value: Option<&str>) -> Result<(), String> {
         use crate::scene::{Affine, SCENE_ATTR, parse_transform};
         let len = value.map_or(0, str::len);
         self.scene_bytes = self
             .scene_bytes
             .saturating_add(u64::try_from(len).unwrap_or(u64::MAX));
-        let (mut commands, mut transform) = self
-            .painted
-            .get(&node)
-            .cloned()
-            .unwrap_or_else(|| (std::sync::Arc::default(), Affine::IDENTITY));
-        if name == SCENE_ATTR {
-            let Some(v) = value else {
-                self.painted.remove(&node);
+        if name == SCENE_ATTR && value.is_none() {
+            if let Some(painted) = self.painted.remove(&node) {
+                if let Some(layer) = &self.overlay {
+                    layer.remove(&painted);
+                }
                 self.doc.remove_custom_widget(node);
-                return Ok(());
-            };
-            commands = self.scenes.receive(v)?;
-        } else {
-            transform = value.map_or(Affine::IDENTITY, parse_transform);
+            }
+            return Ok(());
         }
-        self.painted
-            .insert(node, (std::sync::Arc::clone(&commands), transform));
-        self.install(node);
-        Ok(())
-    }
-
-    /// Draws `node` as its scene, at its transform.
-    fn install(&mut self, node: NodeId) {
-        let Some((commands, transform)) = self.painted.get(&node).cloned() else {
-            return;
+        let commands = match (name == SCENE_ATTR, value) {
+            (true, Some(v)) => {
+                let predecoded = &mut self.predecoded;
+                Some(self.scenes.receive_with(v, |json| {
+                    let hash = crate::scene::split(v).map_or(0, |(h, _)| h);
+                    predecoded
+                        .remove(&hash)
+                        .unwrap_or_else(|| crate::scene::decode(json))
+                })?)
+            }
+            _ => None,
         };
+        let transform =
+            (name != SCENE_ATTR).then(|| value.map_or(Affine::IDENTITY, parse_transform));
+        if let Some(painted) = self.painted.get(&node) {
+            let mut p = painted.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some(c) = commands {
+                p.commands = c;
+            }
+            if let Some(t) = transform {
+                p.transform = t;
+            }
+            p.dirty = true;
+            drop(p);
+            if let Some(layer) = &self.overlay {
+                layer.touch();
+            }
+            return Ok(());
+        }
         let element = self.elements.get(&node).copied().unwrap_or(0);
+        let painted = Arc::new(Mutex::new(crate::scene::Painted {
+            commands: commands.unwrap_or_default(),
+            transform: transform.unwrap_or(Affine::IDENTITY),
+            element,
+            dirty: true,
+            origin: (0.0, 0.0),
+        }));
+        self.painted.insert(node, Arc::clone(&painted));
+        if let Some(layer) = &self.overlay {
+            layer.add(Arc::clone(&painted));
+        }
         self.doc.set_custom_widget(
             node,
             Box::new(crate::scene::SceneWidget {
-                commands,
-                transform,
-                element,
+                painted,
+                overlay: self.overlay.is_some(),
                 events: self.events.clone(),
+                resizes: Arc::clone(&self.resizes),
                 size: None,
-                dirty: true,
             }),
         );
+        Ok(())
     }
 
     /// Gives the view the host window's input method, clipboard and
@@ -483,8 +560,11 @@ impl RemoteDocument {
             self.ids.remove(&old);
         }
         // A scene set before its element had an id: its size goes there now.
-        if self.painted.contains_key(&node) {
-            self.install(node);
+        if let Some(painted) = self.painted.get(&node) {
+            painted
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .element = id;
         }
     }
 
@@ -498,7 +578,9 @@ impl RemoteDocument {
             if let Some(id) = self.elements.remove(&n) {
                 self.ids.remove(&id);
             }
-            self.painted.remove(&n);
+            if let (Some(painted), Some(layer)) = (self.painted.remove(&n), &self.overlay) {
+                layer.remove(&painted);
+            }
         }
     }
 
@@ -1232,6 +1314,7 @@ async fn follow(
     theme: Option<Signal<String>>,
     mut timing: Timing,
     fit: Option<Fit>,
+    overlay: Option<crate::scene::OverlayLayer>,
 ) {
     loop {
         let Some(process) = processes.get(&extension) else {
@@ -1316,6 +1399,7 @@ async fn follow(
         let to_view = events.clone();
         let shell = with_doc(&node, |doc, at| {
             let mut remote = RemoteDocument::new(events);
+            remote.set_overlay(overlay.clone());
             if let Some(css) = theme {
                 remote.set_theme_css(&css.peek());
             }
@@ -1336,7 +1420,14 @@ async fn follow(
             spawn(async move {
                 loop {
                     futures_timer::Delay::new(PLACE_EVERY).await;
-                    let (x, y) = with_doc(&node, |doc, at| pane_at(doc, at)).await;
+                    let (x, y) = with_doc(&node, |doc, at| {
+                        let pane = pane_at(doc, at);
+                        if let Some(r) = remote(doc, at) {
+                            r.place_scenes(pane);
+                        }
+                        pane
+                    })
+                    .await;
                     shell.moved(x, y);
                 }
             })
@@ -1353,12 +1444,19 @@ async fn follow(
             let from = asked.borrow_mut().pop_front();
             let applying = Instant::now();
             let _ = answer.unbounded_send(());
+            // Its scenes decoded off the UI thread first.
+            let (frame, decoded) = decode_scenes(frame).await;
             let applied = with_doc(&node, |doc, at| {
                 let (x, y) = pane_at(doc, at);
                 shell.moved(x, y);
                 let applied = remote(doc, at).map_or_else(
                     || Err("the view was unmounted".to_owned()),
-                    |r| r.apply(frame),
+                    |r| {
+                        r.predecoded(decoded);
+                        let applied = r.apply(frame);
+                        r.place_scenes((x, y));
+                        applied
+                    },
                 );
                 // A frame no input asked for (a save, live data, a worker's
                 // news) still shows: the window is asked to draw again.
@@ -1431,6 +1529,44 @@ async fn follow(
     }
 }
 
+/// `frame`'s scenes decoded (`crate::scene::predecode`) on a thread of
+/// their own, so a large one can't stall the window; a frame with none
+/// is passed straight on.
+async fn decode_scenes(
+    frame: Frame,
+) -> (Frame, Vec<(u64, Result<crate::scene::Commands, String>)>) {
+    let has = matches!(&frame, Frame::Edits { edits } if edits.iter().any(|e| matches!(
+        e,
+        Edit::SetAttribute { name, value: Value::Text(v), .. }
+            if name == crate::scene::SCENE_ATTR && v.contains('\n')
+    )));
+    if !has {
+        return (frame, Vec::new());
+    }
+    let (to, from) = futures::channel::oneshot::channel();
+    let spawned = std::thread::Builder::new()
+        .name("scene decode".to_owned())
+        .spawn(move || {
+            let decoded = match &frame {
+                Frame::Edits { edits } => crate::scene::predecode(edits),
+                Frame::Failed(_) => Vec::new(),
+            };
+            let _ = to.send((frame, decoded));
+        });
+    if spawned.is_err() {
+        return (
+            Frame::Failed("its scenes could not be decoded".to_owned()),
+            Vec::new(),
+        );
+    }
+    from.await.unwrap_or_else(|_| {
+        (
+            Frame::Failed("its scenes could not be decoded".to_owned()),
+            Vec::new(),
+        )
+    })
+}
+
 /// Whether another process of `extension` has taken `process`'s place (a
 /// reload starts the new one before the old one stops): follow it now,
 /// as the change it made was before anything here listened.
@@ -1481,8 +1617,17 @@ async fn next_frame(
 /// `architect_workspace::Meters` in context (when there are); while one
 /// runs past [`REMOTE_BUDGET`] the pane keeps its last frame, marked
 /// busy.
+///
+/// Its scenes (`crate::scene`) are clipped to their boxes unless
+/// `overlay`: the extension was granted `overlay` (`capabilities.ui`) and
+/// may draw over the whole app.
 #[component]
-pub fn RemoteView(processes: Processes, extension: String, view: String) -> Element {
+pub fn RemoteView(
+    processes: Processes,
+    extension: String,
+    view: String,
+    #[props(default)] overlay: bool,
+) -> Element {
     // Keyed by what it shows (a one-item list: a key on a lone node does
     // not remount it): a pane that goes on to another process view (one
     // tab replaced by the next in the same group) mounts that view, not
@@ -1490,7 +1635,7 @@ pub fn RemoteView(processes: Processes, extension: String, view: String) -> Elem
     let key = format!("{extension}/{view}");
     rsx! {
         for key in [key] {
-            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: None, max_height: None }
+            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: None, max_height: None, overlay }
         }
     }
 }
@@ -1510,7 +1655,7 @@ pub fn RemoteEmbed(
     let key = format!("{extension}/{view}");
     rsx! {
         for key in [key] {
-            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: Some(input), max_height: Some(max_height) }
+            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: Some(input), max_height: Some(max_height), overlay: false }
         }
     }
 }
@@ -1565,6 +1710,7 @@ fn Mount(
     view: String,
     input: Option<Signal<crate::contrib::EmbedInput>>,
     max_height: Option<u32>,
+    overlay: bool,
 ) -> Element {
     let shown = use_signal(|| Shown::Waiting("Starting…".to_owned()));
     let busy = use_signal(|| false);
@@ -1630,6 +1776,14 @@ fn Mount(
             .await;
         });
     });
+    // A view that may draw over the whole app: its scenes' layer, drawn by
+    // a widget filling the window (`scene::OverlayLayer`).
+    let layer = use_hook(|| overlay.then(crate::scene::OverlayLayer::new));
+    let over = use_hook(|| {
+        layer
+            .as_ref()
+            .map(|l| dioxus_native_dom::CustomWidgetAttr::new(l.widget()))
+    });
     let follow_with = {
         let (processes, extension) = (processes.clone(), extension.clone());
         move |node: NodeHandle| {
@@ -1647,6 +1801,7 @@ fn Mount(
                         busy,
                     },
                     fit.clone(),
+                    layer.clone(),
                 ));
                 if fit.is_some() {
                     spawn(measure(node, height));
@@ -1682,8 +1837,10 @@ fn Mount(
         (Some(_), Some(_)) => "72px".to_owned(),
         (Some(max), None) => format!("{}px", embed_height(height(), max)),
     };
+    // A view that may draw over the whole app is not clipped by its pane.
+    let clip = if overlay { "visible" } else { "hidden" };
     rsx! {
-        div { style: "position: relative; width: 100%; height: {tall}; overflow: hidden;",
+        div { style: "position: relative; width: 100%; height: {tall}; overflow: {clip};",
             div {
                 style: "position: absolute; top: 0; left: 0; right: 0; bottom: 0;",
                 // The pane lost the focus (another pane, the window):
@@ -1707,6 +1864,15 @@ fn Mount(
                         follow_with(node.clone());
                     }
                 },
+            }
+            if let Some(over) = over {
+                // Over the whole window, above the panes; no input.
+                object {
+                    class: "remote-view-overlay",
+                    style: "position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; \
+                            pointer-events: none; z-index: 2147483647;",
+                    data: over,
+                }
             }
             if busy() && placeholder.is_none() {
                 architect_shell::BusyBadge {}

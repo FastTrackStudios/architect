@@ -154,7 +154,8 @@ pub struct Capabilities {
     /// (read and write it), `pickers` (file and folder pickers, save
     /// dialogs), `prompts` (ask for text, a yes or no, one of a list),
     /// `menus` (a context menu of its own at a point), `badges` (icons
-    /// and badges on file-tree rows and tabs).
+    /// and badges on file-tree rows and tabs), `overlay` (its views'
+    /// scenes draw over the whole app, not clipped to their panes).
     pub ui: Vec<String>,
     /// The app-defined events it may hear (`app:<name>` hooks;
     /// `crate::events`): names, or `<prefix>.*`.

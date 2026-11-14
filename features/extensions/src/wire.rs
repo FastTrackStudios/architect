@@ -422,7 +422,15 @@ pub struct ScrollData {
 pub fn coalesces(name: &str) -> bool {
     matches!(
         name,
-        "pointermove" | "mousemove" | "touchmove" | "wheel" | "scroll" | "compositionupdate"
+        "pointermove"
+            | "mousemove"
+            | "touchmove"
+            | "wheel"
+            | "scroll"
+            | "compositionupdate"
+            // A scene's new size (`scene::RESIZE_EVENT`): a window dragged
+            // larger sends one each frame; only the last matters.
+            | "architect-resize"
     )
 }
 

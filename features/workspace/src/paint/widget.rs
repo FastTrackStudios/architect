@@ -25,9 +25,11 @@ use blitz_traits::shell::ShellProvider;
 use dioxus::prelude::*;
 use dioxus_native_dom::CustomWidgetAttr;
 
-use super::{FrameStats, PaintView, Painter, Scene};
+use super::{FrameStats, PaintScene as _, PaintView, Painter, Scene};
 use crate::ctx::{Button, Extras, FrameClock, Geometry, ThemeTokens, ViewCtx, ViewInput};
 use crate::kinds::{KindId, Placement, ViewHost};
+use peniko::Fill;
+use peniko::kurbo::{Affine, Rect};
 
 /// Logical pixels a wheel's line is.
 const LINE: f64 = 20.0;
@@ -98,11 +100,22 @@ impl Widget for PaintWidget {
         scale: f64,
     ) -> Scene {
         let scale = if scale > 0.0 { scale } else { 1.0 };
-        self.frame(Geometry {
+        let frame = self.frame(Geometry {
             width: (f64::from(width) / scale) as f32,
             height: (f64::from(height) / scale) as f32,
             scale: scale as f32,
-        })
+        });
+        // Clipped to its box: Blitz doesn't clip a widget's scene, and a
+        // view that draws past its pane would paint over the app.
+        let mut clipped = Scene::new();
+        clipped.push_clip_layer(
+            Fill::NonZero,
+            Affine::IDENTITY,
+            &Rect::new(0.0, 0.0, f64::from(width), f64::from(height)),
+        );
+        clipped.append_scene(frame, Affine::IDENTITY);
+        clipped.pop_layer();
+        clipped
     }
 }
 

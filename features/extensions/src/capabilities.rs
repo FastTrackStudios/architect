@@ -46,7 +46,7 @@ pub const WRITES: [&str; 2] = [DOCUMENTS, EDITOR];
 
 /// What of the app's interface an extension may use
 /// ([`Capabilities::ui`]).
-pub const UI: [&str; 6] = [NOTIFY, CLIPBOARD, PICKERS, PROMPTS, MENUS, BADGES];
+pub const UI: [&str; 7] = [NOTIFY, CLIPBOARD, PICKERS, PROMPTS, MENUS, BADGES, OVERLAY];
 /// Notifications (toasts).
 pub const NOTIFY: &str = "notify";
 /// The clipboard: read it and write it.
@@ -60,6 +60,12 @@ pub const PROMPTS: &str = "prompts";
 pub const MENUS: &str = "menus";
 /// Icons and badges on file-tree rows and tabs.
 pub const BADGES: &str = "badges";
+/// Drawing over the whole app.
+///
+/// Its views' scenes (`crate::scene`) are not clipped to their panes.
+/// Without it they are, so a view can't paint
+/// over the toolbar, a dialog or a prompt, by mistake or to fake one.
+pub const OVERLAY: &str = "overlay";
 
 /// What the host may do with an extension's languages past highlighting
 /// them ([`Capabilities::languages`]).
@@ -219,6 +225,7 @@ fn ui_words(u: &str) -> String {
         PROMPTS => "Ask you questions".to_owned(),
         MENUS => "Show menus of its own".to_owned(),
         BADGES => "Mark files and tabs with icons and badges".to_owned(),
+        OVERLAY => "Draw over the whole app, outside its own panes".to_owned(),
         other => format!("Use {other}"),
     }
 }
@@ -637,6 +644,37 @@ mod tests {
         assert!(was.grows_from(&now).is_empty(), "less is covered");
         assert!(Capabilities::default().asks_nothing());
         assert!(!was.asks_nothing());
+    }
+
+    /// The owner's rule for #729: drawing over the whole app is a declared
+    /// capability, said in words, and only what was granted.
+    #[test]
+    fn drawing_over_the_app_is_asked_for_in_words_and_only_granted() {
+        let asks = Capabilities {
+            ui: vec![super::OVERLAY.to_owned()],
+            ..Capabilities::default()
+        };
+        let says: Vec<String> = asks.asks().into_iter().map(|a| a.says).collect();
+        assert_eq!(says, ["Draw over the whole app, outside its own panes"]);
+        assert!(
+            !asks
+                .within(&Capabilities::default())
+                .may_use(super::OVERLAY)
+        );
+        assert!(asks.within(&asks).may_use(super::OVERLAY));
+        let manifest = crate::manifest::Manifest::parse(
+            r#"id = "t.o"
+name = "O"
+version = "1.0.0"
+kind = "process"
+[entry]
+path = "o"
+[capabilities]
+ui = ["overlay"]
+"#,
+        )
+        .unwrap();
+        assert!(manifest.capabilities.may_use(super::OVERLAY));
     }
 
     #[test]
