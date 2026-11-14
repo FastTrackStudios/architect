@@ -15,7 +15,7 @@ wasi = ["architect-app/wasi"]
 architect-app = { workspace = true }
 # `Distribution`, re-exported: what `run` is handed (#640).
 architect-distribution = { workspace = true }
-# Its Action List on its control socket (src/main.rs `serve_control`).
+# Its Action List on its control socket (src/lib.rs `serve_control`).
 architect = { workspace = true, features = ["action-list"] }
 architect-control = { workspace = true, features = ["server"] }
 architect-shell = { workspace = true, features = ["ui"] }
