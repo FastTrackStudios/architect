@@ -826,12 +826,35 @@ pub fn title_of(page: &VaultPage, meta: &Meta) -> String {
         .unwrap_or_else(|| deslug(&page.basename))
 }
 
-/// A note's first `# heading`, as its title when it names none.
+/// A note's first `# heading`, as its title when it names none. A line
+/// inside fenced code is no heading: a listing fence's `# ` row (a private
+/// set's name, cut from the page) must not become the page's title.
 fn first_h1(body: &str) -> Option<String> {
-    body.lines()
-        .find_map(|line| line.strip_prefix("# "))
-        .map(|t| t.trim().to_owned())
-        .filter(|t| !t.is_empty())
+    // The open fence's character and length, while inside one.
+    let mut fence: Option<(char, usize)> = None;
+    for line in body.lines() {
+        let trimmed = line.trim_start_matches(' ');
+        let marker = (line.len().saturating_sub(trimmed.len()) <= 3)
+            .then(|| trimmed.chars().next())
+            .flatten()
+            .filter(|c| *c == '`' || *c == '~')
+            .map(|c| (c, trimmed.chars().take_while(|x| *x == c).count()))
+            .filter(|(_, n)| *n >= 3);
+        match (fence, marker) {
+            (None, Some(open)) => fence = Some(open),
+            (Some((c, n)), Some((m, k))) if c == m && k >= n => fence = None,
+            (Some(_), _) => {}
+            (None, None) => {
+                if let Some(t) = line.strip_prefix("# ") {
+                    let t = t.trim();
+                    if !t.is_empty() {
+                        return Some(t.to_owned());
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// A file or folder name as a title: `getting-started` → `Getting started`.
@@ -851,5 +874,14 @@ mod tests {
     fn titles_from_names() {
         assert_eq!(deslug("getting-started"), "Getting started");
         assert_eq!(first_h1("Intro\n# The UI\n"), Some("The UI".to_owned()));
+        // A heading inside fenced code is not the title.
+        assert_eq!(
+            first_h1("```studio-setlist\n# Secret Encore\n1 | x\n```\n"),
+            None
+        );
+        assert_eq!(
+            first_h1("~~~~\n# Hidden\n~~~\n# Not yet\n~~~~\n# Shown\n"),
+            Some("Shown".to_owned())
+        );
     }
 }
