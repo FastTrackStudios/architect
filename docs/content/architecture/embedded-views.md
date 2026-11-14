@@ -363,45 +363,67 @@ Each call is a host-service request (`features/extensions/src/hostcall.rs`
 `HostRequest`, the JSON every runtime sends): actions, documents, its
 data and settings, `fetch` within `capabilities.hosts`, notifications,
 prompts, pickers, menus, the clipboard, and its secrets. A secret is
-insert-only: `store_secret` keeps one that nothing can read back but a
-`{{secret:…}}` in a request to its own hosts. The host answers as the
+insert-only: `store_secret` keeps one that is not set yet (at most 8 KiB;
+one already set is the person's to change, `ask_secret`), and the host never
+hands it back. It only puts it in a `{{secret:…}}` header of a request to
+the secret's own hosts, so an endpoint there that echoes its headers can
+return it; that is the extension's own service. Luau scripts have
+`store_secret` too. The host answers as the
 extension, after `hostcall::check` against what the person granted
 (`features/extensions/src/webview.rs` `Bridge`, through `ExtensionApi`; in
 a browser, `WebHost::call_json`). The events it listens for
 (`architect.on("doc.*", …)`) are pushed to it through `Host::hear`, under
 the same rule as hooks: document events only while it may read documents.
-`features/extensions/tests/webview_bridge.rs` checks the refusals, the
-secret and the events.
+Each view has a budget (`webview::Budget`: 500 messages and 16 MiB a
+second, bursts of 1000 and 32 MiB); past it a call is answered at once and
+the rest dropped. A host keeps at most `MAX_QUEUED` of a view's messages
+and handles `MAX_PER_FRAME` a frame, so a flood costs the view, never the
+window's thread. `features/extensions/tests/webview_bridge.rs` checks the
+refusals, the secret, the budget, a parked view's silence and the events.
 
 Its files come only from its package (`webview::serve`: nothing outside
-the package, a link out of it included) under `webview::csp`:
+the package, a link out of it included, nothing for another extension's
+origin) under `webview::csp`:
 `default-src 'none'`, its own scripts, styles, images, fonts, media and
 workers, and `connect-src 'none'`. Its own `fetch`, XHR and WebSocket fail,
-and its network is the host's `fetch`. A navigation away from its package
-and every new window are refused.
+and its network is the host's `fetch`. A navigation away from its own
+origin and every new window are refused. Its origin is
+`architect-ext://<extension id>` (so an extension with web views has a host
+name for an id: `a-z 0-9 - .`), and on a desk each view has storage of its
+own (an ephemeral WebKit context): no view reads another's local storage.
+WebRTC is off: the runtime takes its constructors away for good, and the
+policy's `frame-src` and `child-src` are `'none'`, so no frame brings them
+back (WebKitGTK ships it off; WebView2 and WKWebView have it on, which is
+why the runtime does it everywhere).
 
 ### Where it is drawn
 
 | Host | How | Status |
 |---|---|---|
-| Desk (Blitz) | a wry child web view of the pane's OS window (`features/webview/src/desk.rs` `use_desk_web_views`, `architect-app` feature `webview`), its files over the `architect-ext://<id>/` protocol, `window.architect` put in by its initialisation script | macOS (WKWebView), Windows (WebView2, from the code), Linux under X11 or XWayland |
-| Web | `<iframe sandbox="allow-scripts">` with no same-origin: an opaque origin with no cookies, storage or parent; a `MessagePort` handed over on load (`features/extensions/web/webview-host.js` `mountWebView`); the app's bundle installs the runtime itself (`webview-runtime.js`, the same file) | built and tested in Firefox (`features/extensions/web/test/webview.test.mjs`); the web app mounts it once it hosts extensions (#495) |
-| iOS | a WKWebView as a subview of the pane's `UIView`, the same runtime as a `WKUserScript`, messages through a `WKScriptMessageHandler` named `architect` | the iOS host's, on the same `Bridge` |
+| Desk (Blitz) | a wry child web view of the pane's OS window (`features/webview/src/desk.rs` `use_desk_web_views`, `architect-app` feature `webview`), its files over the `architect-ext://<id>/` protocol, `window.architect` put in by its initialisation script | run on Linux under X11 and XWayland; macOS (WKWebView) and Windows (WebView2) are written against wry's API and untested |
+| Web | `<iframe sandbox="allow-scripts">` with no same-origin: an opaque origin with no cookies, storage or parent; a `MessagePort` handed over on its first load only (`features/extensions/web/webview-host.js` `mountWebView`; a frame that navigates itself is stopped); the app's bundle installs the runtime itself (`webview-runtime.js`, the same file) | tested in headless Firefox (`features/extensions/web/test/webview.test.mjs`, in `browser.yml` after a merge and nightly); the web app mounts it once it hosts extensions (#495) |
+| iOS | to be built: a WKWebView as a subview of the pane's `UIView`, the same runtime as a `WKUserScript`, messages through a `WKScriptMessageHandler` named `architect` | not built (the iOS host's work, on the same `Bridge`) |
 
 On a desk, a loop on the window's thread reads the pane's holder element
 every frame (16 ms) and moves the native view there (`set_bounds` takes
 about 0.15 ms), so it follows splits, docks, floats, window resizes and
 pop-outs (a pop-out's pane uses that pop-out's own window). A native view
 cannot be under anything the app draws. So the loop hit-tests nine points
-of the pane's rect in the window's document
+of the pane's rect (a 5 × 5 grid) in the window's document
 (`features/workspace/src/shot.rs` `LiveDocument::covered_at`) and hides the
-view while ⌘K, a menu, a popover or a dialog covers any of them. A view
-whose tab is switched away is kept hidden for a minute, so its state
-survives. A phone switcher's preview draws a still placeholder.
+view while ⌘K, a menu, a tooltip, a popover or a dialog covers any of them,
+or the document is too busy to say; it shows again after two clear frames.
+A pane moved to another window (a pop-out) gets a view of that window. A
+view whose tab is switched away is kept hidden for a minute, so its state
+survives; while parked it hears no events and its messages are dropped, and
+parked views are reaped every five seconds. A phone switcher's preview draws a still placeholder.
 
 Typed keys stay in the web view: a native view has the keyboard while it
 is focused, so the app's chords do not fire. An Escape the view did not
-take (`webview::hands_back`) gives the focus back to the app.
+take, after all its handlers and never mid-composition
+(`webview::hands_back`), gives the focus back to the app's document
+(`focus_parent`), only while the window has the keyboard, at most once a
+quarter second.
 
 The theme reaches it as CSS custom properties on `:root` (every resolved
 token, `--brand`, `--ink`, an app's dotted `studio.accent` as
@@ -423,9 +445,15 @@ program (its code is in #222's pull request):
 | WebKitGTK in a `GtkOffscreenWindow`, its pixels copied into the pane each frame | works natively under Wayland, but a 1280 × 800 copy takes 7.5 ms (22 ms at worst), and every input event would have to be forwarded by hand |
 | A separate top-level window kept over the pane | not possible: a Wayland client cannot place its own top-level window |
 
-So on Linux under Wayland the app runs under XWayland while web views are
-wanted: `ARCHITECT_WEBVIEW_X11=1` drops `WAYLAND_DISPLAY` before the window
-opens (`apps/desktop/src/lib.rs`). Without it the pane says so. The
+So on Linux under Wayland the app can run under XWayland while web views
+are wanted: in a build with `webview`, `ARCHITECT_WEBVIEW_X11=1` drops
+`WAYLAND_DISPLAY` for the window's event loop only, when the run opens the
+window (never for `serve`, the CLI or MCP), and puts it back for the
+processes the app starts (`apps/desktop/src/app.rs`,
+`architect_workspace::native::RESTORE_WAYLAND_DISPLAY`). Without it the
+pane says so. What XWayland costs: no fractional scaling (blurry at 1.25×
+and 1.5×), XIM instead of text-input-v3 for fcitx5 and IBus, and the
+clipboard going through xwayland-satellite. The
 Wayland-native path is a texture: WPE WebKit's `wpe-platform` renders to
 dmabufs that the window's renderer could draw as an image, with input
 forwarded through `ViewInput`. That is the follow-up, and the offscreen

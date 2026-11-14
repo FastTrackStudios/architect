@@ -2408,6 +2408,7 @@ dependencies = [
  "futures-timer",
  "gtk",
  "serde_json",
+ "tempfile",
  "tracing",
  "wry",
 ]
