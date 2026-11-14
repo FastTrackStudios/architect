@@ -194,6 +194,11 @@ features = ["vox"]
 layer = "L0"
 
 [[row]]
+package = "architect-documents"
+layer = "L0"
+note = "the documents service (#706): the rpc trait, its gated implementation, a memory store; wasm-clean"
+
+[[row]]
 package = "architect-canvas"
 layer = "L0"
 
