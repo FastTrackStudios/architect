@@ -3224,8 +3224,12 @@ other entry does not load.
 Every runtime reaches them through its generic call (Luau `host.call`,
 WIT `call`, a page's `EXT_PAGE_CALL`, `EXT_HOST_CALL`). A notification is
 kept under the extension's id (`<extension>/<id>`), so one extension never
-replaces or cancels another's. A capture or a photo's copy is a file the
-extension may read for the run, as one a person picked.
+replaces or cancels another's; its name is the banner's subtitle; and
+every one it scheduled or showed is taken back when it unloads, is
+removed, or loses `notifications` (`Device::forget`,
+`Host::grants_changed`). A capture or a photo's copy is a file the
+extension may read for the run, as one a person picked, and a plain JPEG
+drawn again from the pixels: no EXIF camera data, no GPS.
 
 The host answers them with its `Device`
 (`features/extensions/src/device.rs` `Device`; `Host::set_device`). On iOS
@@ -3242,7 +3246,11 @@ usage strings (`NSCameraUsageDescription`, `NSPhotoLibraryUsageDescription`,
 compiled into the distribution (the Health bundle, #371) may read or
 write it; an installed or development copy is refused (`device.health`,
 `features/extensions/src/device.rs` `HEALTH_LINKED_ONLY`) even with the
-entry in its manifest. It stays on the device unless the person saves it
+entry in its manifest, and so is a development copy of a built-in's id.
+Nor is it read or written on anyone else's behalf: a built-in's health
+call made for an outside caller (an agent over MCP, a peer) or relayed
+for an extension that is not built in (a service call) is refused
+(`HEALTH_NOT_RELAYED`). It stays on the device unless the person saves it
 to a note.
 
 **Signing.** A phone's build is signed with the app's own entitlements

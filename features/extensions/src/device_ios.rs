@@ -364,18 +364,21 @@ fn photo_copy(id: &str, reply: Arc<Once<Option<String>>>) {
         options.setNetworkAccessAllowed(true);
         options.setDeliveryMode(PHImageRequestOptionsDeliveryMode::HighQualityFormat);
         let block = RcBlock::new(
-            move |data: *mut NSData, uti: *mut NSString, _orientation, _info: *mut NSDictionary| {
-                let uti = uti.as_ref().map(ToString::to_string).unwrap_or_default();
-                let ext = match uti.as_str() {
-                    "public.heic" => "heic",
-                    "public.png" => "png",
-                    _ => "jpg",
-                };
-                let saved = data.as_ref().and_then(|d| {
-                    let path = tmp_file("architect-picks", ext);
-                    std::fs::write(&path, d.to_vec()).ok()?;
-                    Some(path.display().to_string())
-                });
+            move |data: *mut NSData,
+                  _uti: *mut NSString,
+                  _orientation,
+                  _info: *mut NSDictionary| {
+                // The pixels alone, drawn again as a JPEG: no EXIF camera data,
+                // no GPS goes to the extension.
+                let saved = data
+                    .as_ref()
+                    .and_then(|d| UIImage::imageWithData(d))
+                    .and_then(|image| image.jpeg_representation(0.9))
+                    .and_then(|jpeg| {
+                        let path = tmp_file("architect-picks", "jpg");
+                        std::fs::write(&path, jpeg.to_vec()).ok()?;
+                        Some(path.display().to_string())
+                    });
                 reply.send(saved.map_or_else(
                     || {
                         Err(failed(
@@ -569,8 +572,9 @@ fn write_health(
 }
 
 impl Device for IosDevice {
-    fn notify(&self, key: &str, notification: &OsNotification) -> Asked<()> {
+    fn notify(&self, key: &str, from: &str, notification: &OsNotification) -> Asked<()> {
         let key = key.to_owned();
+        let from = from.to_owned();
         let n = notification.clone();
         asked(move |reply| {
             let center = center();
@@ -579,6 +583,9 @@ impl Device for IosDevice {
             authorized(&center, reply, move || {
                 let content = UNMutableNotificationContent::new();
                 content.setTitle(&NSString::from_str(&n.title));
+                // Which extension sent it, so a banner is never just the
+                // app's.
+                content.setSubtitle(&NSString::from_str(&from));
                 if let Some(body) = &n.body {
                     content.setBody(&NSString::from_str(body));
                 }
@@ -602,6 +609,46 @@ impl Device for IosDevice {
                 adding.addNotificationRequest_withCompletionHandler(&request, Some(&added));
             });
         })
+    }
+
+    fn forget(&self, owner: &str) {
+        let prefix = format!("{owner}/");
+        let center = center();
+        let pending_center = center.clone();
+        let pending_prefix = prefix.clone();
+        let pending = RcBlock::new(
+            move |requests: std::ptr::NonNull<NSArray<UNNotificationRequest>>| {
+                // SAFETY: the handler's array is live for the call.
+                let requests = unsafe { requests.as_ref() };
+                let ids: Vec<Retained<NSString>> = requests
+                    .iter()
+                    .map(|r| r.identifier())
+                    .filter(|i| i.to_string().starts_with(&pending_prefix))
+                    .collect();
+                if !ids.is_empty() {
+                    pending_center.removePendingNotificationRequestsWithIdentifiers(
+                        &NSArray::from_retained_slice(&ids),
+                    );
+                }
+            },
+        );
+        center.getPendingNotificationRequestsWithCompletionHandler(&pending);
+        let delivered_center = center.clone();
+        let delivered = RcBlock::new(move |shown: std::ptr::NonNull<NSArray<UNNotification>>| {
+            // SAFETY: the handler's array is live for the call.
+            let shown = unsafe { shown.as_ref() };
+            let ids: Vec<Retained<NSString>> = shown
+                .iter()
+                .map(|n| n.request().identifier())
+                .filter(|i| i.to_string().starts_with(&prefix))
+                .collect();
+            if !ids.is_empty() {
+                delivered_center.removeDeliveredNotificationsWithIdentifiers(
+                    &NSArray::from_retained_slice(&ids),
+                );
+            }
+        });
+        center.getDeliveredNotificationsWithCompletionHandler(&delivered);
     }
 
     fn cancel_notification(&self, key: &str) -> Asked<bool> {

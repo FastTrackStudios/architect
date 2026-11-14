@@ -16,7 +16,7 @@
 
 use std::path::Path;
 
-use architect::action::{ActionCaller, ActionList};
+use architect::action::{ActionCaller, ActionList, Principal};
 use architect_extensions::device::{DeviceCall, FakeDevice, PhotoAsset};
 use architect_extensions::extensions::Extensions;
 use architect_extensions::host::{Host, SharedSections};
@@ -153,6 +153,114 @@ fn a_luau_extension_takes_a_photo_writes_calories_reminds_and_reads_steps() {
         Ok(json!(false))
     );
     assert!(device.asked().contains(&DeviceCall::Capture));
+    // A banner says which extension sent it (its subtitle).
+    assert!(
+        device
+            .asked()
+            .iter()
+            .any(|c| matches!(c, DeviceCall::Notify(k, from, _) if k == "lab.meals/dinner" && from == "Meals")),
+        "{:?}",
+        device.asked()
+    );
+}
+
+#[test]
+fn an_extensions_notifications_go_when_it_unloads_or_loses_them() {
+    let tmp = tempfile::tempdir().unwrap();
+    let device = FakeDevice::new();
+    let (_list, ext) = app(tmp.path(), Some(&device), MANIFEST);
+    call(
+        &ext,
+        r#"{"op":"os_notify","id":"lunch","title":"Lunch","after_s":600}"#,
+    )
+    .unwrap();
+    call(
+        &ext,
+        r#"{"op":"os_notify","id":"dinner","title":"Dinner","after_s":6000}"#,
+    )
+    .unwrap();
+    assert_eq!(device.scheduled().len(), 2);
+    // Unloaded (disabled, removed): none of its notifications is left.
+    assert!(ext.host().unload("lab.meals"));
+    assert!(device.scheduled().is_empty(), "{:?}", device.scheduled());
+    assert!(
+        device
+            .asked()
+            .contains(&DeviceCall::Forget("lab.meals".to_owned()))
+    );
+    // A grant taken back from one that may no longer notify: the same.
+    ext.host().grants_changed("gone.ext");
+    assert!(
+        device
+            .asked()
+            .contains(&DeviceCall::Forget("gone.ext".to_owned()))
+    );
+}
+
+#[test]
+fn health_is_never_relayed_to_an_outside_caller_or_another_extension() {
+    let tmp = tempfile::tempdir().unwrap();
+    let device = FakeDevice::new();
+    let (_list, ext) = app(tmp.path(), Some(&device), MANIFEST);
+    let read: HostRequest =
+        serde_json::from_str(r#"{"op":"health_read","type":"steps","from_ms":0,"to_ms":1}"#)
+            .unwrap();
+    let as_for = |who: Option<Principal>| {
+        block_on(
+            ext.host()
+                .api("lab.meals")
+                .acting_for(who)
+                .call(read.clone()),
+        )
+    };
+    // For the person using the app (none), or its own run: read.
+    assert!(as_for(None).is_ok());
+    assert!(as_for(Some(Principal::extension("lab.meals", None))).is_ok());
+    // For an agent over MCP, or a peer: refused.
+    for who in [
+        Principal::Service {
+            name: "mcp".to_owned(),
+        },
+        Principal::extension(
+            "lab.meals",
+            Some(Principal::Service {
+                name: "mcp".to_owned(),
+            }),
+        ),
+    ] {
+        match as_for(Some(who.clone())) {
+            Err(HostError::Refused { capability, why }) => {
+                assert_eq!(capability, "device.health");
+                assert!(why.contains("outside caller"), "{why}");
+            }
+            other => panic!("{who:?}: {other:?}"),
+        }
+    }
+    // A service call from an extension that is not built in: refused.
+    assert!(matches!(
+        as_for(Some(Principal::extension("someone.else", None))),
+        Err(HostError::Refused { .. })
+    ));
+}
+
+#[test]
+fn a_development_copy_of_a_built_ins_id_gets_no_health_data() {
+    let tmp = tempfile::tempdir().unwrap();
+    let device = FakeDevice::new();
+    // The meal plan compiled in, then a development copy of the same id
+    // (it overrides the built-in, as EXT_CLONE's does).
+    let (_list, ext) = app(tmp.path(), Some(&device), MANIFEST);
+    let _ = ext.dev(&package(tmp.path(), MANIFEST));
+    match call(
+        &ext,
+        r#"{"op":"health_read","type":"steps","from_ms":0,"to_ms":1}"#,
+    ) {
+        Err(HostError::Refused { capability, why }) => {
+            assert_eq!(capability, "device.health");
+            assert!(why.contains("compiled-in"), "{why}");
+        }
+        other => panic!("{other:?}"),
+    }
 }
 
 #[test]

@@ -48,9 +48,9 @@
 	<key>NSCameraUsageDescription</key>
 	<string>An extension you installed asks to take a photo, for example of a meal; you choose whether to take one.</string>
 	<key>NSHealthShareUsageDescription</key>
-	<string>Extensions you allowed read the health data they named when you installed them, such as today's steps.</string>
+	<string>Architect's built-in Health features read the health data you allow, such as today's steps, and keep it on this device unless you save it to a note.</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>Extensions you allowed add the health data they named when you installed them, such as a meal's calories.</string>
+	<string>Architect's built-in Health features add the health data you allow, such as a meal's calories you logged.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Architect connects to an Architect node on your local network when you sign in to one there.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

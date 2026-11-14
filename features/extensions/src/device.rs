@@ -90,6 +90,13 @@ const fn ht(
 /// stays on the device unless the person saves it to a note.
 pub const HEALTH_LINKED_ONLY: &str = "health data is for the app's own compiled-in extensions (the Health bundle): an installed or development extension may not read or write it";
 
+/// Why a built-in extension's health call is refused when it is made for
+/// someone else.
+///
+/// An outside caller (an agent over MCP, a peer) or an extension that is
+/// not built in asked: health data is for the person using the app.
+pub const HEALTH_NOT_RELAYED: &str = "health data is not read or written for an outside caller (an agent, a peer) or for an extension that is not built in";
+
 /// The health data an extension may ask for.
 pub const HEALTH_TYPES: [HealthType; 10] = [
     ht(
@@ -398,10 +405,19 @@ mod service {
     /// A notification's `key` is the extension's id and its own id
     /// (`<ext>/<id>`), so one extension never replaces another's.
     pub trait Device: Send + Sync {
-        /// Shows or schedules `notification` under `key`.
-        fn notify(&self, key: &str, notification: &OsNotification) -> Asked<()> {
-            let _ = (key, notification);
+        /// Shows or schedules `notification` under `key`, saying it is
+        /// from extension `from` (its name: the banner's subtitle, so a
+        /// notification is never the app's alone).
+        fn notify(&self, key: &str, from: &str, notification: &OsNotification) -> Asked<()> {
+            let _ = (key, from, notification);
             no("OS notifications")
+        }
+
+        /// Takes back every notification extension `owner` scheduled or
+        /// showed (`<owner>/…`): it unloaded, was removed, or lost
+        /// `notifications`. Nothing where there are none.
+        fn forget(&self, owner: &str) {
+            let _ = owner;
         }
 
         /// Cancels `key`'s notification: whether there was one.
@@ -455,7 +471,8 @@ mod service {
     /// What a [`FakeDevice`] was asked.
     #[derive(Clone, Debug, PartialEq)]
     pub enum DeviceCall {
-        Notify(String, OsNotification),
+        Notify(String, String, OsNotification),
+        Forget(String),
         Cancel(String),
         Capture,
         Photos(PhotoQuery),
@@ -529,14 +546,24 @@ mod service {
     }
 
     impl Device for FakeDevice {
-        fn notify(&self, key: &str, notification: &OsNotification) -> Asked<()> {
+        fn notify(&self, key: &str, from: &str, notification: &OsNotification) -> Asked<()> {
             {
                 let mut s = self.state();
-                s.asked
-                    .push(DeviceCall::Notify(key.to_owned(), notification.clone()));
+                s.asked.push(DeviceCall::Notify(
+                    key.to_owned(),
+                    from.to_owned(),
+                    notification.clone(),
+                ));
                 s.scheduled.insert(key.to_owned(), notification.clone());
             }
             ready(())
+        }
+
+        fn forget(&self, owner: &str) {
+            let mut s = self.state();
+            s.asked.push(DeviceCall::Forget(owner.to_owned()));
+            let prefix = format!("{owner}/");
+            s.scheduled.retain(|k, _| !k.starts_with(&prefix));
         }
 
         fn cancel_notification(&self, key: &str) -> Asked<bool> {

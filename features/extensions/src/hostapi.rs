@@ -187,6 +187,11 @@ impl Services {
             editors.withdraw(id);
         }
         lock(&self.picked).remove(id);
+        // Its OS notifications, scheduled or shown, go with it.
+        let device = lock(&self.device).clone();
+        if let Some(device) = device {
+            device.forget(id);
+        }
         // The folders it was given on iOS are closed again.
         #[cfg(all(feature = "pickers", target_os = "ios"))]
         crate::pickers_ios::stop_scopes(id);
@@ -404,6 +409,17 @@ impl Host {
         *lock(&self.services().device) = Some(device);
     }
 
+    /// What a grant taken back from extension `id` takes with it at once:
+    /// its OS notifications, when it may no longer send them.
+    pub fn grants_changed(&self, id: &str) {
+        let may_notify = self
+            .capabilities(id)
+            .is_some_and(|c| c.may_use_device(crate::device::NOTIFICATIONS));
+        if !may_notify {
+            self.device().forget(id);
+        }
+    }
+
     /// The device's services extensions are lent.
     #[must_use]
     pub fn device(&self) -> Arc<dyn crate::device::Device> {
@@ -501,6 +517,7 @@ impl Host {
             id: id.to_owned(),
             host: self.downgrade(),
             on_behalf_of: None,
+            via: None,
         }
     }
 
@@ -531,6 +548,10 @@ pub struct ExtensionApi {
     id: String,
     host: WeakHost,
     on_behalf_of: Option<Principal>,
+    /// The extension whose call this run is part of (a service call, a
+    /// page's), when another extension asked: what it reads may go back
+    /// to that one.
+    via: Option<String>,
 }
 
 impl std::fmt::Debug for ExtensionApi {
@@ -538,6 +559,7 @@ impl std::fmt::Debug for ExtensionApi {
         f.debug_struct("ExtensionApi")
             .field("id", &self.id)
             .field("on_behalf_of", &self.on_behalf_of)
+            .field("via", &self.via)
             .finish_non_exhaustive()
     }
 }
@@ -558,11 +580,35 @@ impl ExtensionApi {
     pub fn acting_for(mut self, who: Option<Principal>) -> Self {
         // An extension acting for an extension acts for whoever that one
         // acted for.
+        self.via = match &who {
+            Some(Principal::Extension { id, .. }) if *id != self.id => Some(id.clone()),
+            _ => None,
+        };
         self.on_behalf_of = who.and_then(|w| match w {
             Principal::Extension { on_behalf_of, .. } => on_behalf_of.map(|b| *b),
             other => Some(other),
         });
         self
+    }
+
+    /// Why a health call is refused, when it is: health data is the app's
+    /// own compiled-in extensions' alone, for the person using the app
+    /// (the Health bundle, #371). Not from an installed or development
+    /// copy (one shadowing a built-in's id too), nor on an outside
+    /// caller's behalf (an agent over MCP, a peer), nor for another
+    /// extension that is not built in (a service call relaying it).
+    fn health_refused(&self, host: &Host, origin: Origin) -> Option<&'static str> {
+        if origin != Origin::Builtin {
+            return Some(crate::device::HEALTH_LINKED_ONLY);
+        }
+        if self.on_behalf_of.is_some() {
+            return Some(crate::device::HEALTH_NOT_RELAYED);
+        }
+        let relayed_by_other = self
+            .via
+            .as_ref()
+            .is_some_and(|v| host.get(v).is_none_or(|l| l.origin != Origin::Builtin));
+        relayed_by_other.then_some(crate::device::HEALTH_NOT_RELAYED)
     }
 
     /// Who its calls are made as.
@@ -725,16 +771,10 @@ impl ExtensionApi {
         if matches!(
             request,
             HostRequest::HealthRead(_) | HostRequest::HealthWrite(_)
-        ) && loaded.origin != Origin::Builtin
+        ) && let Some(why) = self.health_refused(&host, loaded.origin)
         {
-            return Self::decide(
-                "device",
-                Err((
-                    "device.health".to_owned(),
-                    crate::device::HEALTH_LINKED_ONLY.to_owned(),
-                )),
-            )
-            .map(|()| Value::Null);
+            return Self::decide("device", Err(("device.health".to_owned(), why.to_owned())))
+                .map(|()| Value::Null);
         }
         match request {
             HostRequest::Run {
@@ -967,7 +1007,7 @@ impl ExtensionApi {
                     .unwrap_or_else(|| format!("n{}", crate::host::now_ms()));
                 notification.id = Some(id.clone());
                 host.device()
-                    .notify(&format!("{}/{id}", self.id), &notification)
+                    .notify(&format!("{}/{id}", self.id), &manifest.name, &notification)
                     .await?;
                 Ok(serde_json::json!({ "id": id }))
             }
