@@ -923,13 +923,15 @@ impl LabVault {
 
 /// How the Now Playing card shows an item's art (a vault path): the
 /// app's vault's image as a `data:` URL (`crate::collection::art_url`).
+///
+/// The vault is asked for at each call, not held: the card is at the
+/// app's root, mounted before the first run's card opens a vault, and
+/// holding [`LabVault`] there would make the Vault's (a root context)
+/// before it, without the vault (every note "No vault is open" until
+/// the app was opened again).
 pub fn use_now_playing_art() -> Callback<String, Option<String>> {
-    let lab = use_lab_vault();
     use_callback(move |p: String| {
-        lab.disk
-            .peek()
-            .as_ref()
-            .and_then(|d| crate::collection::art_url(&d.vault().root(), &p))
+        crate::notes::open_vault().and_then(|v| crate::collection::art_url(&v.root(), &p))
     })
 }
 
