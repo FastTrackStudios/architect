@@ -409,6 +409,16 @@ settles.
   the audio path (#528): those are Rust, called from TypeScript as
   actions.
 
+**Tooling** (`@fasttrackstudio/architect-cli`,
+`features/extensions/web/cli/ts.mjs`): `architect-ext new --typescript
+<id>` writes a manifest, one action and one page that work on save;
+`architect-ext types` writes `types/architect.d.ts` and
+`types/actions.d.ts` (each action's `Args` from its `params`, as
+`ActionArgs`); `architect-ext check` checks the manifest and its files
+and runs `tsc --noEmit`; `architect-ext pack --key <minisign key>` writes
+the signed `.archext` the app installs, in the archive's format
+(`features/extensions/archive/tests/npm_pack.rs` opens one).
+
 Tests: `features/pages/tests/ts_actions.rs` (typed answers through an
 import, line and column, capabilities, prompts and notices, `fetch`
 within its hosts, the limits, a hook, a broken module, `EXT_CHECK`).
