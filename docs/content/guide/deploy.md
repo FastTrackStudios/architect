@@ -349,7 +349,10 @@ to read.
   its type's island claims, handed what the node gives a guest, then its
   page's words and images; the link's recordings on the Now Playing bar
   (streamed from the link's own file URLs); its files and "Download all";
-  a rebuild or a revoke read again through `_live`. The page path and
+  a rebuild or a revoke read again through `_live`. Each note or the files
+  the guest opens is a step in the browser's history, so Back (a phone's
+  swipe) returns through the link and never leaves it by surprise
+  (`apps/web/src/guest_view.rs` `rest_of`). The page path and
   the link are checked as before (`Shares::open`, `admit`): expired,
   revoked, unknown, a page another audience holds or one that is nowhere
   is the same plain `404`; a link for signed-in people answers the app's
