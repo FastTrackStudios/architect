@@ -6,11 +6,12 @@ import { actions, defineAction, notify, ui } from "architect";
 import { formatIngredient, recipeOf, scale, shoppingList } from "../pages/lib/recipe";
 import { recipes } from "./list";
 
-type Args = { path?: string; servings?: number; folder?: string } | null;
 type Answer = { path: string; servings: number; items: string[] } | null;
 type Note = { path: string; title?: string; properties?: Record<string, unknown> };
 
-export default defineAction<Args, Answer>(async (args, ctx) => {
+// Its arguments are its manifest's `params` (types/actions.d.ts), and a
+// run as any other action fails.
+export default defineAction("SHOWCASE_RECIPES_SCALE", async (args, ctx): Promise<Answer> => {
   let path = args?.path;
   if (!path) {
     const { recipes: found } = await recipes(args?.folder ?? "Recipes");
@@ -32,6 +33,8 @@ export default defineAction<Args, Answer>(async (args, ctx) => {
     if (said == null) return null;
     servings = Number(said);
   }
+  if (!Number.isInteger(servings) || servings < 1 || servings > 1000)
+    throw new Error(`servings must be a whole number from 1 to 1000, not ${JSON.stringify(servings)}`);
   const items = scale(recipe, servings).map(formatIngredient);
   const properties = JSON.stringify({
     recipe: `[[${recipe.title}]]`,

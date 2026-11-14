@@ -324,6 +324,23 @@ fn run_from_the_palette_it_asks_which_recipe_and_how_many() {
 }
 
 #[test]
+fn servings_that_are_no_whole_number_are_refused_and_nothing_is_written() {
+    for said in ["0", "abc", "2.5", "-3"] {
+        let lab = lab_with(
+            FakeUi::new()
+                .answer(json!("Recipes/Chili.md"))
+                .answer(json!(said)),
+        );
+        let why = match run(&lab, "SHOWCASE_RECIPES_SCALE", &json!({})) {
+            Err(ActionError::Failed { message, .. }) => message,
+            other => panic!("{said}: scaled: {other:?}"),
+        };
+        assert!(why.contains("whole number from 1 to 1000"), "{said}: {why}");
+        assert!(lab.notes.shopping().is_empty(), "{said}");
+    }
+}
+
+#[test]
 fn a_note_that_is_no_recipe_is_refused_at_its_line() {
     let lab = lab_with(FakeUi::new());
     let why = match run(
