@@ -1260,6 +1260,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-documents"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-workspace-hack",
+ "facet",
+ "thiserror 2.0.20",
+ "tokio",
+ "vox",
+]
+
+[[package]]
 name = "architect-editor"
 version = "0.1.0"
 dependencies = [

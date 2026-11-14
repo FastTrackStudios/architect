@@ -1,0 +1,32 @@
+[package]
+name = "architect-documents"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The documents service extensions reach the app's documents through: one #[architect::rpc] trait, one implementation with the reads/writes gate in it, served in-process (serve_local) or over vox on the org lane. Wasm-clean."
+
+[dependencies]
+architect.workspace = true
+facet.workspace = true
+thiserror.workspace = true
+vox = { workspace = true, optional = true }
+
+[features]
+default = ["vox"]
+vox = ["dep:vox", "architect/vox"]
+
+[dev-dependencies]
+architect = { workspace = true, features = ["vox", "local"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+vox = { workspace = true }
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../../workspace-hack" }
