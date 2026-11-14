@@ -35,7 +35,8 @@ songs:                   # or `items`: a flat list
 `sections`/`items` are the generic names. When a note has both sections and
 a flat list, links from the flat list that no section names come after the
 sections, unnamed: a flat link to a note a section already lists is left out
-by the note it resolves to, however it is written. A list is read up to
+by the note it resolves to, however it is written. A named section with
+nothing in it yet (an "Encore" to fill) stays, with its heading. A list is read up to
 `collection::MAX_ROWS` (1,000) links, and `Collection::resolve` resolves them
 against an index of the paths (`link::Index`), not a walk per link.
 
