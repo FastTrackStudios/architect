@@ -24,6 +24,7 @@
 //! | `ARCHITECT_ENROL_AT` | `enrol_at` | none | another node's HTTP origin: this node enrols itself in `enrol_org` there, once |
 //! | `ARCHITECT_ENROL_ORG` | `enrol_org` | none | the issuer org (slug) to enrol in there; its vaults are that org's |
 //! | `ARCHITECT_ENROL_ROLE` | `enrol_role` | `member` | the role it asks for: at most the session's own in the org |
+//! | `ARCHITECT_WEB_APP` | `web_app` | none | whether the web app is served beside the node, on its origin: `beside` (a proxy serves the same release's web bundle at `/app/`, as the chart's web front end does), or the folder of that bundle (checked at start for `app/index.html` and `app/start.js`). A share link's page (`/s/<code>/`) is the web app's page, which loads it from there; none: it says the link opens in the web app, which this server does not serve (#646) |
 //! | `ARCHITECT_APPLE_APP_IDS` | `apple_app_ids` | none | `<team id>.<bundle id>,…` (`28C2G63DA7.app.fasttrackstudio.architect`): the iOS apps that open this node's share links (`/s/*`) as universal links, named in `/.well-known/apple-app-site-association`; none: that file is not served (#629) |
 //! | `ARCHITECT_PEERS` | `peers` | none | `endpoint@host:port,…`: nodes dialled directly (no lookup) |
 //! | `ARCHITECT_IROH` | `iroh` | `n0` | `n0` (relays and lookup) or `local` (loopback, no relay: tests) |
@@ -97,6 +98,7 @@ pub struct Config {
     pub enrol_role: String,
     pub peers: Vec<String>,
     pub apple_app_ids: Vec<String>,
+    pub web_app: Option<String>,
     pub iroh: IrohMode,
     pub iroh_bind: Option<String>,
     pub mcp_token_file: Option<PathBuf>,
@@ -241,6 +243,7 @@ impl Default for Config {
             enrol_role: "member".to_owned(),
             peers: Vec::new(),
             apple_app_ids: Vec::new(),
+            web_app: None,
             iroh: IrohMode::N0,
             iroh_bind: None,
             mcp_token_file: None,
@@ -396,6 +399,9 @@ impl Config {
         }
         if let Some(v) = get("ARCHITECT_APPLE_APP_IDS") {
             self.apple_app_ids = list(&v);
+        }
+        if let Some(v) = get("ARCHITECT_WEB_APP") {
+            self.web_app = Some(v.trim().to_owned()).filter(|v| !v.is_empty());
         }
         if let Some(v) = get("ARCHITECT_IROH") {
             self.iroh = match v.trim() {

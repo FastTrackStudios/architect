@@ -19,20 +19,20 @@ Keyflow (`scripts/run-it.sh` here):
 | Recipe | What it runs |
 | --- | --- |
 | `just dev` | Everything, rebuilt on save. With a Studio checkout beside this one (`../studio`, or `LOCAL_STACK_STUDIO_PATH`), **Studio's stack** with this checkout as its Architect: Studio's node with Studio's extensions linked in, on a copy of a real setlist vault and its share link, the issuer, the web app and the site (`studio:docs/local-stack.md`). Arguments go to Studio's (`keyflow=local`, `desktop=on`, `watch=off`). `just dev plain`: this repo's own stack below, all of it at once (`devenv up mock-oauth auth node app web site`): the desktop app's window and the web app, both under `dx serve` and rebuilt on a save, and the site with hot reload. |
-| `just demo` | The quickest look, nothing watched: the issuer and a node with a share link (Studio's when it is beside this one, else the demo seed's, `/s/ksqx75iaaaaaaaae/`). Sign in as `ada@local.test`, password `development-password`. |
+| `just demo` | The quickest look: the issuer, a node with a share link (Studio's when it is beside this one, else the demo seed's) and the web app in front of it, since a share link opens the web app as its guest (#646): `http://127.0.0.1:7413/s/ksqx75iaaaaaaaae/`. The node's own port answers the app's page too, but the app's script is the web app server's. Sign in as `ada@local.test`, password `development-password`. |
 | `just website` | The public site alone (`apps/site`: landing, download, changelog, extensions, docs) with hot reload, on 7414. `just docs-serve` still serves `docs/content` alone. |
 | `just phone` | Studio's running stack's node on this tailnet over HTTPS (`tailscale serve`, never funnel), for a phone. |
 
 `devenv up` with no arguments is unchanged: this repo's own stack.
 
-### A share page's assets without relinking
+### A Site's assets without relinking
 
 A debug build of the node reads `site.css`, `site.js` and `player.js`
 from the folder `ARCHITECT_SITES_ASSETS_DIR` names, at every build of a
 site's pages, instead of the copies compiled in
 (`features/sites/src/assets.rs` `DEV_ASSETS_VAR`); a release build
 ignores it. Studio's stack sets it to a local Architect's
-`features/sites/assets` and rebuilds the share pages on a save, so an
+`features/sites/assets` and rebuilds the Sites' pages on a save, so an
 edit to the player shows on reload in about three seconds, with no
 build. A linked extension's renderer has no such copy on a node yet:
 #626.
@@ -148,8 +148,12 @@ the top of its log:
    | `/s/ksqx75iaaaaaaaaf/` | its `violin` audience | the violin parts only |
    | `/s/ksqx75iaaaaaaaag/` | its `cello` audience | the cello parts only |
 
-   `apps/desktop/tests/dev_seed.rs` keeps the share notes equal to what
-   the node writes.
+   Open each on the web app's port (`http://127.0.0.1:7413/s/…`): the
+   web app's dev server sends `/s` to the node, which answers a link's
+   pages with the app's page, and the app opens as the link's guest
+   (#646; the dev server writes the `/app/start.js` that page loads,
+   `xtask/src/dev/mod.rs` `DEV_START`). `apps/desktop/tests/dev_seed.rs`
+   keeps the share notes equal to what the node writes.
 
 If the mirror fails (no network, an expired token, production down), the
 banner says why and the stack uses the last snapshot on the machine, or

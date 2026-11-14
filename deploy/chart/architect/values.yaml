@@ -52,6 +52,13 @@ node:
   hostOrg: ""                        # ARCHITECT_HOST_ORG: serves /org/<slug>/vox
   vaults: ""                         # ARCHITECT_VAULTS: id=path,…
   sites: ""                          # ARCHITECT_SITES: /mount=vault,… (add each mount to node.extraPaths)
+  # ARCHITECT_WEB_APP: whether a share link's page (/s/<code>/) is the web
+  # app's. With web.enabled it is always "beside" (the web front end
+  # serves /app/ on this host); without, set "beside" only when something
+  # else serves the same release's web bundle at /app/ on this host. Empty:
+  # a link's page says it opens in the web app, which this server does not
+  # serve.
+  webApp: ""
   # Plain env, name -> value (RUST_LOG, ARCHITECT_SWEEP_SECS, …).
   env: {}
 
@@ -142,7 +149,13 @@ node:
   #   /org            /org/<slug>/vox: the org lane (vaults, share links)
   #   /mcp            MCP (only with node.mcp)
   #   /health         liveness and readiness
-  #   /s              share links /s/<code>/ and their sign-in /s/_signin
+  #   /s              share links /s/<code>/ and their sign-in /s/_signin. A
+  #                   link's page is the node's copy of the web app's page
+  #                   (#646), which loads /app/start.js and assets/app-*/
+  #                   from the web front end on this host: keep web.enabled
+  #                   (or serve the same release's web bundle beside it
+  #                   and set node.webApp); otherwise a link's page says it
+  #                   needs the web app
   #   /node           the node's HTTP face (POST /node/status)
   #   /blobs          reserved for the node (files' bytes over HTTP)
   #   /.well-known    reserved for the node

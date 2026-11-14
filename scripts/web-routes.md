@@ -57,7 +57,14 @@ image).
 What the server adds around them, as before this bundle carried the site:
 
 - the node's paths (`/s/`, `/_ext`, `/mcp`, the node's other prefixes) go
-  to the node, before the static files;
+  to the node, before the static files. A share link's page
+  (`/s/<code>/`, every page path below it and `<link>_files/`) is the
+  node's answer: its copy of this bundle's `app/index.html` with a
+  `<head>` for the link and the policy below as a header (#646). That
+  page loads `/app/start.js`, `/app/style.css` and `assets/app-<sha12>/`
+  from this bundle on the same origin, so the bundle and the node must
+  be one release and one origin. The bundle has no `/s/` of its own: a
+  request for one here is a 404, the sign the proxy did not send it on;
 - `/auth/callback` (and `/auth/callback/`) is served `app/index.html`, the
   sign-in's way back;
 - `app/config.json` is the server's own;
@@ -79,7 +86,10 @@ What the server adds around them, as before this bundle carried the site:
 The web app's page (`/app/`, `/app/index.html` and `/auth/callback`)
 carries a Content-Security-Policy `<meta>`, and a server sends this one
 as a header too (`frame-ancestors` holds only as a header), with its own
-issuer's origin (`app/config.json`'s `issuer`):
+issuer's origin (`app/config.json`'s `issuer`); the node sends the same
+one on a share link's page, with its issuer
+(`apps/desktop/src/node/share_shell.rs` `policy`, kept equal to
+`apps/web/sws.toml`'s by a test):
 
 ```
 Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; media-src 'self'; connect-src 'self' https://<issuer>; base-uri 'none'; form-action 'self'; object-src 'none'; frame-src 'self'; frame-ancestors 'none'
@@ -123,6 +133,8 @@ is what a static server does not get from the files alone:
 - a trailing slash after a page (`/download/`) is a 404, as it was on
   Vercel; only folders (`/`, `/docs/…/`, `/app/`) take one.
 - `/app` and `/s/*` were 307 redirects to another host. Gone: same origin.
+- `/s/<code>/` was a page the node rendered. Gone (#646): the node answers
+  it with the web app's page, which loads the app from this bundle.
 
 ## Caching
 

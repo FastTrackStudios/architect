@@ -12,7 +12,9 @@ yq() { if type -P yq >/dev/null && command yq --version 2>&1 | grep -q mikefarah
 # Every prefix the node serves (apps/desktop/src/node: /vox and /health from
 # EngineHost, /org/<slug>/vox the org lane, /mcp, /s share links, /node the
 # HTTP face) and the two it reserves. A prefix taken out of values.yaml
-# fails here.
+# fails here. `/s` stays the node's whole: a share link's page is the
+# node's answer (the web app's page, #646), its script the web front end's
+# `/app/` (routed to web below).
 want=(/vox /org /mcp /health /s /node /blobs /.well-known)
 
 out="$(helm template t "$chart" --set ingress.enabled=true --set host=a.test \
@@ -28,6 +30,8 @@ check() { # <host> <path> <want>
 }
 for p in "${want[@]}" /notes; do check a.test "$p" t-architect-node:http; done
 check a.test / t-architect-web:http
+# A share link's page loads the app from /app/ on the web front end.
+[ -z "$(backend a.test /app)" ] || { echo "FAIL  /app routed on its own, not by /"; fail=1; }
 check s3.a.test / t-architect-node:s3
 
 # Nothing else goes to the node, and nothing is listed twice.
@@ -44,6 +48,16 @@ fi
 if helm template t "$chart" --set node.s3.enabled=true --set node.s3.bucket=b >/dev/null 2>&1; then
     echo "FAIL  S3 without a credentials Secret was accepted"; fail=1
 fi
+# A share link's page is the web app's only when the web app is served on
+# this host (ARCHITECT_WEB_APP, #646): with the web front end, or when
+# node.webApp says something else serves it; otherwise none, and a link's
+# page says it needs the web app.
+webapp() { helm template t "$chart" "$@" | yq 'select(.kind == "Deployment" and .metadata.name == "t-architect-node") | .spec.template.spec.containers[0].env[] | select(.name == "ARCHITECT_WEB_APP") | .value'; }
+for case in "beside|" "|--set web.enabled=false" "beside|--set web.enabled=false --set node.webApp=beside"; do
+    want_web="${case%%|*}"; read -r -a args <<<"${case#*|}"
+    got_web="$(webapp "${args[@]}")"
+    if [ "$got_web" = "$want_web" ]; then echo "ok    ARCHITECT_WEB_APP '${got_web}' (${args[*]:-defaults})"; else echo "FAIL  ARCHITECT_WEB_APP '${got_web}', want '${want_web}' (${args[*]:-defaults})"; fail=1; fi
+done
 # Images: a bare repository gets image.registry; a full one (what
 # argocd-image-updater writes) is used as is.
 images="$(helm template t "$chart" --set node.image.repository=ghcr.io/x/architect --set node.image.tag=1.2.3 | yq 'select(.kind == "Deployment") | .spec.template.spec.containers[0].image' | grep -v '^---$' | sort | tr '\n' ' ')"

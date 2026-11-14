@@ -47,11 +47,13 @@ case "$what" in
     # Architect's stack: mock-oauth, auth, the node (demo seed and its
     # share links), the app under dx serve, the web app and the site.
     dev) exec devenv up mock-oauth auth node app web site ;;
-    # The issuer and the node only: the demo seed's share links, a signed-in
-    # dev user (ada@local.test / development-password), nothing watched.
+    # The issuer, the node and the web app: the demo seed's share links
+    # (each opens the web app as its guest, #646, so the web app's server
+    # is in front of the node), a signed-in dev user (ada@local.test /
+    # development-password).
     demo)
-        echo "run-it: the share links are listed in docs/content/guide/local-stack.md (e.g. http://127.0.0.1:7412/s/ksqx75iaaaaaaaae/)" >&2
-        exec devenv up mock-oauth auth node
+        echo "run-it: the share links are listed in docs/content/guide/local-stack.md (e.g. http://127.0.0.1:7413/s/ksqx75iaaaaaaaae/)" >&2
+        exec devenv up mock-oauth auth node web
         ;;
     phone) echo "run-it: \`just phone\` serves Studio's stack; Architect's own has none" >&2; exit 1 ;;
     *) echo "run-it: dev, demo or phone" >&2; exit 64 ;;

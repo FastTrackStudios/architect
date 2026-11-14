@@ -201,15 +201,14 @@ async fn run() -> Result<(), String> {
         crate::app::mount(crate::app::Mode::Demo);
         return Ok(());
     }
-    // A share link's guest (#669, internal until #646): the code in the
-    // fragment, never sent to a server; nothing asked of the issuer.
-    if let Some(code) = location
-        .hash()
-        .ok()
-        .and_then(|h| h.strip_prefix("#share=").map(str::to_owned))
-        .filter(|c| architect_spaces::share::is_code(c))
-    {
-        crate::app::mount(crate::app::Mode::Guest { code });
+    // A share link (`/s/<code>/…`, #646): the app as the link's guest,
+    // nothing asked of the issuer. Its code stays in this page: the app
+    // sends it only to this origin's node.
+    if let Route::Share { code, rest } = &route {
+        crate::app::mount(crate::app::Mode::Guest {
+            code: code.clone(),
+            rest: rest.clone(),
+        });
         return Ok(());
     }
     draw(&Screen::Loading);
@@ -221,7 +220,7 @@ async fn run() -> Result<(), String> {
     CONFIG.with(|c| *c.borrow_mut() = Some((*config).clone()));
     wire(Rc::clone(&config))?;
     let problem = match route {
-        Route::App | Route::Demo => None,
+        Route::App | Route::Demo | Route::Share { .. } => None,
         Route::Callback { code, state } => redeem(&config, &code, &state).await.err(),
         Route::Refused(why) => Some(why),
     };
@@ -534,4 +533,16 @@ async fn node_status() -> Result<NodeStatus, String> {
         return Err(format!("{NODE_STATUS} answered {status}"));
     }
     serde_json::from_str(&text).map_err(|e| e.to_string())
+}
+
+/// The signed-in session's token in this browser, if there is one and it
+/// has not run out: what a share link's guest calls carry on this origin
+/// (#646), so a link for signed-in people opens for its member. Sent only
+/// to this origin's node, the app's own.
+pub fn stored_token() -> Option<String> {
+    let session = LocalStore.load().ok().flatten()?;
+    session
+        .expires_at_unix
+        .is_none_or(|at| at > now())
+        .then_some(session.token)
 }

@@ -43,6 +43,7 @@
     clippy::future_not_send
 )]
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -226,6 +227,8 @@ async fn world_full(
         host_org: Some("indie".to_owned()),
         iroh: IrohMode::Local,
         sweep_secs: 3600,
+        // The web app beside it, as production's chart serves it.
+        web_app: Some("beside".to_owned()),
         ..Config::default()
     };
     let host = node::start_with_islands(config, blocks, Vec::new(), islands)
@@ -290,15 +293,143 @@ async fn get(url: &str, auth: Option<&str>) -> (StatusCode, reqwest::header::Hea
     (status, headers, res.text().await.unwrap())
 }
 
-/// Wait until `url` answers 200 with `want` in it; its body.
-async fn page_with(url: &str, auth: Option<&str>, want: &str) -> String {
+/// What a link's guest reads at page `url` (#646: the page itself is the
+/// web app's): the note at that page through the link's guest service,
+/// as its title, then each block's words, list items and media `src`, a
+/// line each. None when no note of the link is at `url`, or the call is
+/// refused.
+async fn words_at(url: &str, auth: Option<&str>) -> Option<String> {
+    let parsed = reqwest::Url::parse(url).ok()?;
+    let origin = parsed.origin().ascii_serialization();
+    let path = parsed.path().to_owned();
+    let code = path.strip_prefix("/s/")?.split('/').next()?.to_owned();
+    let token = auth
+        .map(|a| a.trim_start_matches("cookie:").to_owned())
+        .unwrap_or_default();
+    let c = architect_spaces::guest::ShareGuestHttpClient::at(origin);
+    let link = c.link(code.clone(), token.clone()).await.ok()?;
+    let want = reqwest::Url::parse(url)
+        .ok()
+        .map(|u| percent_decoded(u.path()))?;
+    // The link's root opens its root note (the app's `guest_view::open`):
+    // the one at the root, else the first with a page.
+    let at = |n: &&architect_spaces::ListedNote| {
+        n.page
+            .as_deref()
+            .is_some_and(|p| p.trim_end_matches('/') == want.trim_end_matches('/'))
+    };
+    let root = want.trim_end_matches('/') == link.link.trim_end_matches('/');
+    let note = link.notes.iter().find(at).or_else(|| {
+        root.then(|| link.notes.iter().find(|n| n.page.is_some()))
+            .flatten()
+    })?;
+    let read = c.read(code, token, note.path.clone()).await.ok()?;
+    let mut out = format!("{}\n", read.title);
+    for b in &read.blocks {
+        out.push_str(&b.text);
+        out.push('\n');
+        for item in &b.items {
+            out.push_str(item);
+            out.push('\n');
+        }
+        if let Some(src) = &b.src {
+            out.push_str(src);
+            out.push('\n');
+        }
+        if let Some(info) = &b.info {
+            out.push_str(info);
+            out.push('\n');
+        }
+    }
+    Some(out)
+}
+
+fn percent_decoded(path: &str) -> String {
+    let mut out = Vec::new();
+    let mut rest = path.as_bytes();
+    while let Some((&b, tail)) = rest.split_first() {
+        let hex = tail
+            .get(..2)
+            .and_then(|h| std::str::from_utf8(h).ok())
+            .and_then(|h| u8::from_str_radix(h, 16).ok());
+        match hex {
+            Some(byte) if b == b'%' => {
+                out.push(byte);
+                rest = tail.get(2..).unwrap_or_default();
+            }
+            _ => {
+                out.push(b);
+                rest = tail;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// The page the share's build wrote at `page` (below the link, `joy/`)
+/// for link `code` (the share's own, or `audience`'s), once it has
+/// `want`: never served on the link (#646), the source of its guests'
+/// blocks.
+async fn built_page(
+    w: &World,
+    code: &str,
+    audience: Option<&str>,
+    page: &str,
+    want: &str,
+) -> String {
+    let shares = w.tmp.path().join("host/data/shares").join(code);
+    let site = audience.map_or_else(
+        || shares.join("site"),
+        |a| shares.join("audiences").join(a).join("site"),
+    );
+    let file = site.join(page).join("index.html");
     let mut last = String::new();
     for _ in 0..200 {
+        if let Ok(html) = std::fs::read_to_string(&file) {
+            if html.contains(want) {
+                return html;
+            }
+            last = html;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("{} never had `{want}`: {last}", file.display());
+}
+
+/// Whether a link's answer is the web app's page, as the node hands it
+/// out for every page path (#646).
+fn is_app_page(body: &str) -> bool {
+    body.contains("<script type=\"module\" src=\"/app/start.js\"></script>")
+}
+
+/// Wait until page `url` answers 200 with the web app's page, and its
+/// note, as the link's guest reads it ([`words_at`]), has `want` in it;
+/// those words.
+async fn page_with(url: &str, auth: Option<&str>, want: &str) -> String {
+    let mut last = String::new();
+    // A file of the link, not a page: its bytes.
+    let file = !url.split(['?', '#']).next().unwrap_or(url).ends_with('/');
+    for _ in 0..200 {
         let (status, _, body) = get(url, auth).await;
-        if status == StatusCode::OK && body.contains(want) {
+        if file && status == StatusCode::OK && body.contains(want) {
             return body;
         }
-        last = format!("{status}: {body}");
+        if status == StatusCode::OK && is_app_page(&body) {
+            // Only that the link answers the app's page.
+            if want == "<!DOCTYPE html>" {
+                return body;
+            }
+            if let Some(words) = words_at(url, auth).await {
+                if words.contains(want) {
+                    return words;
+                }
+                last = format!("{status}: words {words}");
+            } else {
+                last = format!("{status}: no note at the page");
+            }
+        } else {
+            last = format!("{status}: {body}");
+        }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     panic!("{url} never had `{want}`; last {last}");
@@ -323,7 +454,10 @@ async fn a_folder_share_serves_the_folder_live_and_a_revoke_takes_it_down() {
     // share, `/s/<code>` without its slash is sent to the link, and an
     // unknown code under `/s/` is 404 from the share layer.
     let (status, _, body) = get(&w.url(&format!("/{}/", share.code)), None).await;
-    assert!(!body.contains("The album"), "{status}: {body}");
+    assert!(
+        !body.contains("The album") && !is_app_page(&body),
+        "{status}: {body}"
+    );
     let bare = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
@@ -337,18 +471,23 @@ async fn a_folder_share_serves_the_folder_live_and_a_revoke_takes_it_down() {
     let (status, _, _) = get(&w.url("/s/abcdefghjkmnpqrs/"), None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     let track = page_with(&w.url(&format!("{link}track/")), None, "Mix notes.").await;
-    assert!(home.contains(&format!("href=\"{link}track/\"")), "{home}");
+    assert!(home.contains("track"), "{home}");
     assert!(track.contains("Track"));
 
-    // Out of scope: the private note's link is plain text, its embed and
+    // Out of scope: the private note's link is plain words, its embed and
     // its attachment are gone, nothing names it, and asking is 404.
-    assert!(
-        home.contains("<span class=\"site-outside\">the plan</span>"),
-        "{home}"
-    );
+    assert!(home.contains("the plan"), "{home}");
     for leak in ["secret", "Private", "cover.png", "plan/"] {
-        assert!(!home.contains(leak), "`{leak}` on the shared page: {home}");
+        assert!(!home.contains(leak), "`{leak}` in the shared note: {home}");
     }
+    // The page is the web app's, and says nothing of the note but its
+    // title: no note is drawn by the node.
+    let (_, _, shell) = get(&w.url(&link), None).await;
+    assert!(is_app_page(&shell), "{shell}");
+    for word in ["Read", "Mix notes", "site-outside", "art.png"] {
+        assert!(!shell.contains(word), "`{word}` in the app's page: {shell}");
+    }
+    assert!(shell.contains("og:title"), "{shell}");
     for path in [
         "Private/plan/",
         "Private/cover.png",
@@ -365,39 +504,47 @@ async fn a_folder_share_serves_the_folder_live_and_a_revoke_takes_it_down() {
     // The link's answers keep the code to themselves.
     let (_, headers, body) = get(&w.url(&link), None).await;
     assert_eq!(headers["referrer-policy"], "no-referrer");
-    // A Content-Security-Policy behind the sanitiser (#520's review): the
-    // page's one inline script by its hash, nothing loaded off the node
-    // but images, forms posted only to it. On every answer of the link,
-    // its sign-in and its 404s.
-    let policy = format!(
+    // The web app's own Content-Security-Policy on its page (#646): no
+    // inline script, nothing loaded or framed off the node, never framed.
+    let policy = node::share_shell::policy(Some(w.issuer.trim_end_matches('/')));
+    assert_eq!(headers["content-security-policy"], policy.as_str());
+    assert_eq!(headers["x-content-type-options"], "nosniff");
+    assert_eq!(body.matches("<script").count(), 1, "{body}");
+    assert!(body.contains("<script type=\"module\" src=\"/app/start.js\"></script>"));
+    let (_, headers, files) = get(&w.url(&format!("{link}_files/")), None).await;
+    assert!(is_app_page(&files), "{files}");
+    assert_eq!(headers["content-security-policy"], policy.as_str());
+    // A file and a 404 keep the node's own policy.
+    let share_policy = format!(
         "default-src 'self'; script-src 'self' {}; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'; img-src 'self' data: https:; media-src 'self'; style-src 'self' 'unsafe-inline'",
         architect_sites::ui::THEME_BOOT_HASH
     );
-    assert_eq!(headers["content-security-policy"], policy.as_str());
-    assert_eq!(headers["x-content-type-options"], "nosniff");
-    for (at, _) in body.match_indices("<script") {
-        let tag = body.get(at..).unwrap_or_default();
-        assert!(
-            tag.starts_with(&format!(
-                "<script>{}</script>",
-                architect_sites::ui::THEME_BOOT
-            )) || tag.starts_with("<script src=")
-                || tag.starts_with("<script type=\"application/json\" id=\"site-queue\">")
-                // The phone shell's tabs (data, never run: not a script the
-                // policy governs).
-                || tag.starts_with("<script type=\"application/json\" id=\"site-shell\">"),
-            "an inline script the policy would block: {}",
-            tag.get(..80).unwrap_or(tag)
-        );
-    }
-    for path in ["/s/abcdefghjkmnpqrs/".to_owned(), format!("{link}_files/")] {
+    for path in [
+        "/s/abcdefghjkmnpqrs/".to_owned(),
+        format!("{link}Shared/art.png"),
+    ] {
         let (_, headers, _) = get(&w.url(&path), None).await;
         assert_eq!(
             headers["content-security-policy"],
-            policy.as_str(),
+            share_policy.as_str(),
             "{path}"
         );
     }
+    // No page the build wrote is ever served: not by its name, not as a
+    // folder without its slash.
+    for path in [
+        "index.html",
+        "track/index.html",
+        "404.html",
+        "track/INDEX.HTML",
+    ] {
+        let (status, _, body) = get(&w.url(&format!("{link}{path}")), None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}: {body}");
+        assert!(!body.contains("Mix notes"), "{path}");
+    }
+    let (status, _, body) = get(&w.url(&format!("{link}track")), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(is_app_page(&body), "{body}");
     assert!(
         headers["x-robots-tag"]
             .to_str()
@@ -505,11 +652,36 @@ async fn each_audience_lets_in_its_people_and_no_one_else() {
     page_with(&link, Some(&w.alan), "Mix notes.").await;
     page_with(&link, Some(&alan_cookie), "Mix notes.").await;
     page_with(&link, Some(&w.grace), "Mix notes.").await;
+    // Nobody: the app's page (it offers the sign-in), naming nothing of
+    // the link, not even its title.
     let (status, headers, body) = get(&link, None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-    assert!(body.contains("/s/_signin?to="), "{body}");
+    assert!(is_app_page(&body), "{body}");
+    assert!(
+        body.contains("<title>Shared link · Architect</title>"),
+        "{body}"
+    );
     assert!(!body.contains("Mix notes."));
-    assert_eq!(headers["cache-control"], "no-store");
+    assert_eq!(headers["cache-control"], "private, no-store");
+    // The guest service takes the node's sign-in cookie in place of a
+    // token, from a page on this origin (the app after `/s/_signin`).
+    let call = |cookie: Option<String>| {
+        let mut req = reqwest::Client::new()
+            .post(w.url(&format!("/s/{}/_guest/link", org.code)))
+            .json(&serde_json::json!({ "code": org.code, "token": "" }));
+        if let Some(c) = cookie {
+            req = req.header("cookie", format!("architect_session={c}"));
+        }
+        req.send()
+    };
+    let res = call(Some(w.alan.clone())).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(res.text().await.unwrap().contains("Track"));
+    assert_eq!(call(None).await.unwrap().status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        call(Some(w.ada.clone())).await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
     let (status, _, body) = get(&link, Some(&w.ada)).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert!(!body.contains("Mix notes."));
@@ -566,7 +738,9 @@ async fn a_share_expires_takes_comments_when_asked_and_has_its_own_domain() {
     let w = world().await;
     let links: ShareLinksClient = w.lane(&w.grace).await;
 
-    // Comments: on a share that takes them, under the page.
+    // Comments: the node-rendered page's form is gone with the page
+    // (#646); a link that takes comments takes none from a form, and its
+    // owner's list stays (the guest service gains them later).
     let talk = w
         .share(
             ShareScope::Folder("Shared".to_owned()),
@@ -580,25 +754,15 @@ async fn a_share_expires_takes_comments_when_asked_and_has_its_own_domain() {
         .post(w.url(&format!("{link}_comment")))
         .form(&[
             ("page", "/track/"),
-            ("text", "Love the <b>bridge</b>."),
+            ("text", "Love the bridge."),
             ("name", "Sam"),
         ])
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::OK, "followed to the page");
-    let track = page_with(
-        &w.url(&format!("{link}track/")),
-        None,
-        "Love the &lt;b&gt;bridge&lt;/b&gt;.",
-    )
-    .await;
-    assert!(track.contains("Sam (not signed in)"), "{track}");
-    let comments = links.comments(talk.code.clone()).await.unwrap();
-    assert_eq!(comments.len(), 1);
-    assert_eq!(comments[0].page, "/track/");
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    assert!(links.comments(talk.code.clone()).await.unwrap().is_empty());
 
-    // Read only: no comments.
     let read = w
         .share(
             ShareScope::Folder("Shared".to_owned()),
@@ -607,15 +771,9 @@ async fn a_share_expires_takes_comments_when_asked_and_has_its_own_domain() {
         )
         .await;
     page_with(&w.url(&format!("/s/{}/", read.code)), None, "The album").await;
-    let res = reqwest::Client::new()
-        .post(w.url(&format!("/s/{}/_comment", read.code)))
-        .form(&[("page", "/"), ("text", "hi")])
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), StatusCode::FORBIDDEN);
 
-    // A domain of its own: the share at that host's root.
+    // A domain of its own: the share at that host's root, as a Site (its
+    // built pages; no web app is on that host).
     links
         .update(
             read.code.clone(),
@@ -826,9 +984,11 @@ async fn two_audiences_are_each_served_only_their_own_notes_and_files() {
         let (_, theirs_pages, theirs_files) = &mine[1 - i];
         let mut seen = String::new();
         for page in pages {
-            let (code, _, body) = get(&w.url(&format!("{link}{page}/")), None).await;
+            let url = w.url(&format!("{link}{page}/"));
+            let (code, _, body) = get(&url, None).await;
             assert_eq!(code, StatusCode::OK, "{link}{page}");
-            seen.push_str(&body);
+            assert!(is_app_page(&body));
+            seen.push_str(&words_at(&url, None).await.unwrap());
         }
         for file in files {
             let url = w.url(&format!("{link}Set/charts/{file}.pdf"));
@@ -859,19 +1019,20 @@ async fn two_audiences_are_each_served_only_their_own_notes_and_files() {
                 assert_eq!(status(url.clone()).await, StatusCode::NOT_FOUND, "{url}");
             }
         }
-        // Nothing of the other audience is listed: not in a page, its
-        // nav, the tags or the search index.
-        let (code, _, tags) = get(&w.url(&format!("{link}tags/")), None).await;
-        assert_eq!(code, StatusCode::OK);
-        seen.push_str(&tags);
-        let asset = seen
-            .split('"')
-            .find(|s| s.contains("_site/search."))
-            .expect("a search index")
+        // Nothing of the other audience is listed: not in a note's words,
+        // the link's listing or its files.
+        let code = link
+            .trim_matches('/')
+            .rsplit('/')
+            .next()
+            .unwrap()
             .to_owned();
-        let (code, _, index) = get(&w.url(&asset), None).await;
-        assert_eq!(code, StatusCode::OK, "{asset}");
-        seen.push_str(&index);
+        let listed = guest(&w).link(code.clone(), String::new()).await.unwrap();
+        let _ = write!(seen, "{listed:?}");
+        let files = guest(&w).files(code, String::new(), None).await.unwrap();
+        let _ = write!(seen, "{files:?}");
+        let (_, _, json) = get(&w.url(&format!("{link}_files.json")), None).await;
+        seen.push_str(&json);
         let other = if i == 0 { "cello" } else { "violin" };
         assert!(
             !seen.to_lowercase().contains(other),
@@ -995,73 +1156,28 @@ async fn a_links_files_page_switches_views_and_its_zip_holds_exactly_its_files_i
     .await;
     page_with(&w.url(&format!("{cello}04-noel-cello/")), None, "part of").await;
 
-    // A page of the link points at its files page and its archive.
-    let (_, _, chart) = get(&w.url(&format!("{violin}01-joy-violin/")), None).await;
-    assert!(
-        chart.contains(&format!("href=\"{violin}_files/\"")),
-        "{chart}"
-    );
-    assert!(
-        chart.contains(&format!("href=\"{violin}_archive.zip?by=note\"")),
-        "{chart}"
-    );
-
-    // The files page, in list order: the violins' charts and no others,
-    // each linked to its page and its file; the other views a click away.
+    // The files page is the web app's Files view of the link (#646);
+    // what it lists is the link's `_files.json` and the guest service's
+    // `files`: the violins' charts and no others, in list order.
     let files = format!("{violin}_files/");
-    let (status, _, order) = get(&w.url(&files), None).await;
+    let (status, _, page) = get(&w.url(&files), None).await;
     assert_eq!(status, StatusCode::OK);
-    assert!(order.contains("data-view=\"order\""), "{order}");
-    for view in ["order", "note", "property%3Ainstrument", "property%3Asong"] {
-        assert!(
-            order.contains(&format!("href=\"{files}?by={view}\"")),
-            "{view}: {order}"
-        );
-    }
-    assert!(order.contains(&format!("href=\"{files}?by=order\" aria-current=\"page\"")));
-    let at = |html: &str, what: &str| {
-        html.find(what)
-            .unwrap_or_else(|| panic!("nothing says {what} in {html}"))
-    };
-    assert!(at(&order, "Joy to the World (violin)") < at(&order, "Silent Night (violin)"));
-    assert!(
-        order.contains(&format!("href=\"{violin}01-joy-violin/\"")),
-        "{order}"
+    assert!(is_app_page(&page), "{page}");
+    let listed = json_at(&w.url(&format!("{violin}_files.json"))).await;
+    let paths: Vec<&str> = listed["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        paths,
+        ["Set/charts/joy-violin.pdf", "Set/charts/silent-violin.pdf"]
     );
-    assert!(
-        order.contains(&format!("href=\"{violin}Set/charts/joy-violin.pdf\"")),
-        "{order}"
-    );
-    assert!(order.contains("Download all (2 files)"), "{order}");
-    assert!(!order.to_lowercase().contains("cello"), "{order}");
-
-    // By note: a group per chart, each with its own download.
-    let (_, _, by_note) = get(&w.url(&format!("{files}?by=note")), None).await;
-    assert!(by_note.contains("data-view=\"note\""));
-    assert!(
-        by_note.contains("<h2>Silent Night (violin)</h2>"),
-        "{by_note}"
-    );
-    assert!(
-        by_note.contains("_archive.zip?by=note&amp;group=Silent%20Night%20%28violin%29"),
-        "{by_note}"
-    );
-    // By a property: a group per value, of this audience's notes only.
-    let (_, _, by_song) = get(&w.url(&format!("{files}?by=property:song")), None).await;
-    assert!(by_song.contains("data-view=\"property:song\""));
-    assert!(
-        by_song.contains("<h2>Joy to the World</h2>") && by_song.contains("<h2>Silent Night</h2>")
-    );
-    assert!(!by_song.contains("<h2>Noel</h2>") && !by_song.to_lowercase().contains("cello"));
-    // The share's own link groups everyone.
-    let (_, _, everyone) = get(
-        &w.url(&format!("{whole}_files/?by=property:instrument")),
-        None,
-    )
-    .await;
-    assert!(everyone.contains("<h2>violin</h2>") && everyone.contains("<h2>cello</h2>"));
-    assert!(everyone.contains("Download all (4 files)"), "{everyone}");
-    let (status, _, _) = get(&w.url(&format!("{files}?by=shuffle")), None).await;
+    let everyone = json_at(&w.url(&format!("{whole}_files.json"))).await;
+    assert_eq!(everyone["files"].as_array().unwrap().len(), 4);
+    // A view that is none: refused.
+    let (status, _, _) = get(&w.url(&format!("{violin}_archive.zip?by=shuffle")), None).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
     // The violins' zip: exactly their files, a numbered folder per chart
@@ -1350,68 +1466,48 @@ async fn media_streams_with_ranges_lyrics_follow_and_the_queue_is_the_links_orde
     let whole = share.path();
     let band = share.audience_named("band").unwrap().path();
 
-    // The song's page: a native player, its lyrics as timed lines, and
-    // the link's queue, in list order.
-    let joy = page_with(&w.url(&format!("{whole}01-joy/")), None, "site-queue").await;
-    assert!(
-        joy.contains(&format!(
-            "<audio class=\"site-media\" controls preload=\"metadata\" data-site-media=\"audio\" src=\"{whole}Gig/media/joy.mp3\">"
-        )),
-        "{joy}"
-    );
-    assert!(
-        joy.contains("<ol class=\"site-lyrics\" data-follow-playhead>"),
-        "{joy}"
-    );
-    assert!(
-        joy.contains("<li data-at=\"1.500\"><button type=\"button\" class=\"site-lyric\">Joy to the world</button></li>"),
-        "{joy}"
-    );
-    assert!(joy.contains("<li data-at=\"3.250\">"), "{joy}");
-    let queue = |html: &str| -> serde_json::Value {
-        let json = html
-            .split("id=\"site-queue\">")
-            .nth(1)
-            .and_then(|rest| rest.split("</script>").next())
-            .expect("a queue");
-        serde_json::from_str(json).unwrap()
+    // The song's page is the app's; its guest reads its recording and its
+    // lyrics as timed lines, and the link lists its recordings in list
+    // order: the app's Now Playing queue (`guest_view::queue`).
+    let joy = page_with(&w.url(&format!("{whole}01-joy/")), None, "Joy to the world").await;
+    assert!(joy.contains(&format!("{whole}Gig/media/joy.mp3")), "{joy}");
+    assert!(joy.contains("The Lord is come"), "{joy}");
+    let code_of = |link: &str| {
+        link.trim_matches('/')
+            .rsplit('/')
+            .next()
+            .unwrap()
+            .to_owned()
     };
-    let q = queue(&joy);
-    assert_eq!(q["scope"], whole.as_str());
-    let srcs: Vec<&str> = q["tracks"]
-        .as_array()
-        .unwrap()
+    let listed = guest(&w)
+        .link(code_of(&whole), String::new())
+        .await
+        .unwrap();
+    let media: Vec<&str> = listed
+        .notes
         .iter()
-        .map(|t| t["src"].as_str().unwrap())
+        .flat_map(|n| n.files.iter())
+        .filter(|f| {
+            [".mp3", ".mp4"]
+                .iter()
+                .any(|e| f.to_ascii_lowercase().ends_with(e))
+        })
+        .map(String::as_str)
         .collect();
+    assert_eq!(media, ["Gig/media/joy.mp3", "Gig/media/clip.mp4"]);
     assert_eq!(
-        srcs,
-        [
-            format!("{whole}Gig/media/joy.mp3"),
-            format!("{whole}Gig/media/clip.mp4"),
-        ]
+        listed.notes[0].page.as_deref(),
+        Some(format!("{whole}01-joy/").as_str())
     );
-    assert_eq!(q["tracks"][0]["page"], format!("{whole}01-joy/"));
-    assert_eq!(q["tracks"][1]["kind"], "video");
-    assert_eq!(q["tracks"][1]["title"], "Noel");
 
-    // A fence of LRC is drawn the same, escaped; a video is a <video>.
-    let noel = page_with(&w.url(&format!("{whole}02-noel/")), None, "site-lyrics").await;
-    assert!(noel.contains("<li data-at=\"2.000\"><button type=\"button\" class=\"site-lyric\">Noel &lt;b&gt;</button></li>"), "{noel}");
-    assert!(noel.contains("<video class=\"site-media\""), "{noel}");
-
-    // The page's script carries the player and its playhead.
-    let script = joy
-        .split('"')
-        .find(|s| s.contains("_site/site.") && Path::new(s).extension().is_some_and(|e| e == "js"))
-        .expect("the site's script")
-        .to_owned();
-    let (code, _, js) = get(&w.url(&script), None).await;
-    assert_eq!(code, StatusCode::OK);
-    assert!(
-        js.contains("arch.playhead = playhead"),
-        "no player in {script}"
-    );
+    // A fence of LRC reads the same, its words as words.
+    let noel = page_with(
+        &w.url(&format!("{whole}02-noel/")),
+        None,
+        "Born is the King",
+    )
+    .await;
+    assert!(noel.contains("Noel <b>"), "{noel}");
 
     // Ranges: a slice, the tail, the whole, and one past the end.
     let mp3 = w.url(&format!("{whole}Gig/media/joy.mp3"));
@@ -1447,11 +1543,13 @@ async fn media_streams_with_ranges_lyrics_follow_and_the_queue_is_the_links_orde
 
     // The band's link: its song plays with ranges; the crew's video is
     // 404 there, ranged or not, and is not in its queue.
-    let band_joy = page_with(&w.url(&format!("{band}01-joy/")), None, "site-queue").await;
-    let q = queue(&band_joy);
-    assert_eq!(q["scope"], band.as_str());
-    assert_eq!(q["tracks"].as_array().unwrap().len(), 1, "{q}");
-    assert_eq!(q["tracks"][0]["src"], format!("{band}Gig/media/joy.mp3"));
+    page_with(&w.url(&format!("{band}01-joy/")), None, "Joy to the world").await;
+    let band_listed = guest(&w).link(code_of(&band), String::new()).await.unwrap();
+    assert_eq!(band_listed.notes.len(), 1, "{band_listed:?}");
+    assert_eq!(
+        band_listed.notes[0].files,
+        ["Gig/media/joy.mp3", "Gig/media/joy.lrc"]
+    );
     let (code, headers, body) = get_range(
         &w.url(&format!("{band}Gig/media/joy.mp3")),
         Some("bytes=10-19"),
@@ -1486,8 +1584,13 @@ async fn a_claimed_fence_is_the_installed_extensions_drawing_live_and_per_audien
         .await;
     let link = share.path();
 
-    // The fence is the extension's SVG, not a code block.
-    let joy = page_with(&w.url(&format!("{link}joy/")), None, "demo-chart").await;
+    // The fence is the extension's SVG, not a code block: in the build
+    // (never served on the link, #646), and to the link's guest as a drawn
+    // block with its claim and its words.
+    let code = share.code.clone();
+    let words = page_with(&w.url(&format!("{link}joy/")), None, "fence:chart").await;
+    assert!(words.contains("Am"), "{words}");
+    let joy = built_page(&w, &code, None, "joy", "demo-chart").await;
     assert!(
         joy.contains("data-claim=\"fence:chart\" data-by=\"demo.chart\""),
         "{joy}"
@@ -1532,7 +1635,8 @@ async fn a_claimed_fence_is_the_installed_extensions_drawing_live_and_per_audien
     text.insert(before.chars().count() + "| Am ".len(), "| E7 ")
         .unwrap();
     replica.loro().commit();
-    let joy = page_with(&w.url(&format!("{link}joy/")), None, ">E7</text>").await;
+    page_with(&w.url(&format!("{link}joy/")), None, "E7").await;
+    let joy = built_page(&w, &code, None, "joy", ">E7</text>").await;
     assert!(joy.contains("viewBox=\"0 0 240 40\""), "{joy}");
     assert!(joy.contains("data-at=\"6\""), "{joy}");
     session.abort();
@@ -1564,10 +1668,10 @@ async fn a_claimed_fence_is_the_installed_extensions_drawing_live_and_per_audien
         .unwrap();
     let violin = share.audience_named("violin").unwrap().path();
     let cello = share.audience_named("cello").unwrap().path();
-    let mine = page_with(&w.url(&format!("{violin}joy/")), None, "demo-chart").await;
-    assert!(mine.contains(">E7</text>"), "{mine}");
-    let theirs = page_with(&w.url(&format!("{cello}noel/")), None, "demo-chart").await;
-    assert!(theirs.contains(">Bb</text>"), "{theirs}");
+    let mine = page_with(&w.url(&format!("{violin}joy/")), None, "fence:chart").await;
+    assert!(mine.contains("E7"), "{mine}");
+    let theirs = page_with(&w.url(&format!("{cello}noel/")), None, "fence:chart").await;
+    assert!(theirs.contains("Bb"), "{theirs}");
     for (link, other) in [(&violin, "noel"), (&cello, "joy")] {
         let (status, _, body) = get(&w.url(&format!("{link}{other}/")), None).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{link}{other}/: {body}");
@@ -1576,7 +1680,19 @@ async fn a_claimed_fence_is_the_installed_extensions_drawing_live_and_per_audien
     for path in ["", "joy/", "tags/"] {
         seen.push_str(&get(&w.url(&format!("{violin}{path}")), None).await.2);
     }
-    for leak in [">Bb</text>", "Dm7", "Noel chart"] {
+    seen.push_str(&mine);
+    let violin_code = violin
+        .trim_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap()
+        .to_owned();
+    let _ = write!(
+        seen,
+        "{:?}",
+        guest(&w).link(violin_code, String::new()).await.unwrap()
+    );
+    for leak in ["Bb", "Dm7", "Noel chart"] {
         assert!(!seen.contains(leak), "`{leak}` on the violin link: {seen}");
     }
 
@@ -1611,7 +1727,9 @@ async fn an_embedders_own_blocks_draw_on_a_link_after_the_installed_ones() {
             ShareAccess::Read,
         )
         .await;
-    let song = page_with(&w.url(&format!("{}song/", share.path())), None, "kf-chart").await;
+    let words = page_with(&w.url(&format!("{}song/", share.path())), None, "fence:kf").await;
+    assert!(words.contains("fence:chart"), "{words}");
+    let song = built_page(&w, &share.code, None, "song", "kf-chart").await;
     for kept in [
         "data-claim=\"fence:kf\" data-by=\"studio.kf\"",
         "<svg class=\"kf-chart\" data-follow-playhead=\"\" data-bars=\"2\">",
@@ -1813,7 +1931,7 @@ async fn a_links_layer_is_held_by_the_node_on_every_route() {
         assert_eq!(headers["x-architect-layer"], "full");
         let body = String::from_utf8_lossy(&bytes);
         assert!(
-            body.contains("<b>full</b>") && !body.contains("STEM"),
+            body.contains("the full layer") && !body.contains("STEM"),
             "{body}"
         );
     }
@@ -1928,8 +2046,22 @@ async fn a_links_layer_is_held_by_the_node_on_every_route() {
         StatusCode::OK
     );
 
-    // The files page, the archive and the queue leave out what is above.
-    let files = page_with(&format!("{orchestra}_files/"), None, "Files").await;
+    // The files the app lists (the guest's `files`, `_files.json`), the
+    // archive and the link's recordings leave out what is above.
+    let code_of = |link: &str| {
+        link.trim_matches('/')
+            .rsplit('/')
+            .next()
+            .unwrap()
+            .to_owned()
+    };
+    let files = format!(
+        "{:?}",
+        guest_of(&orchestra)
+            .files(code_of(&orchestra), String::new(), None)
+            .await
+            .unwrap()
+    );
     assert!(
         files.contains("Reference.ogg") && files.contains("Joy.session"),
         "{files}"
@@ -1960,14 +2092,25 @@ async fn a_links_layer_is_held_by_the_node_on_every_route() {
     );
     let names = zip_names(&format!("{full}_archive.zip?by=order")).await;
     assert!(names.iter().any(|n| n.contains("Bass")), "{names:?}");
-    let song = page_with(&format!("{orchestra}joy/joy/"), None, "site-queue").await;
-    let queue = song.split("id=\"site-queue\">").nth(1).unwrap();
-    assert!(
-        queue.contains("Reference.ogg") && !queue.contains("Bass.ogg"),
-        "{queue}"
+    let listed = format!(
+        "{:?}",
+        guest_of(&orchestra)
+            .link(code_of(&orchestra), String::new())
+            .await
+            .unwrap()
     );
-    let song = page_with(&format!("{full}joy/joy/"), None, "site-queue").await;
-    assert!(song.contains("Bass.ogg"));
+    assert!(
+        listed.contains("Reference.ogg") && !listed.contains("Bass.ogg"),
+        "{listed}"
+    );
+    let listed = format!(
+        "{:?}",
+        guest_of(&full)
+            .link(code_of(&full), String::new())
+            .await
+            .unwrap()
+    );
+    assert!(listed.contains("Bass.ogg"), "{listed}");
 
     // The JSON listing: what the link serves, its layer and the most it
     // plays; a viewer may ask for less, never more.
@@ -2463,6 +2606,13 @@ async fn an_unreadable_owner_holds_everything_back(broken: &str) {
         !files.contains("Bass.ogg") && !files.contains("Joy.session"),
         "{files}"
     );
+    let code = url.trim_matches('/').rsplit('/').next().unwrap().to_owned();
+    assert!(
+        guest_of(&url)
+            .files(code, String::new(), None)
+            .await
+            .is_err()
+    );
     let (status, _, zip) = get_bytes(&format!("{url}_archive.zip?by=order")).await;
     assert!(
         status != StatusCode::OK || !String::from_utf8_lossy(&zip).contains("STEM"),
@@ -2727,8 +2877,9 @@ async fn a_link_says_nothing_about_files_outside_it() {
     let (theirs, nowhere) = (comment("/joy/joy/").await, comment("/nope/nope/").await);
     assert_eq!(theirs.0, StatusCode::NOT_FOUND);
     assert_eq!(theirs, nowhere);
-    // Its own page takes one.
-    assert_eq!(comment("/noel/noel/").await.0, StatusCode::SEE_OTHER);
+    // Its own page takes none either: the page's comment form went with
+    // the page (#646).
+    assert_eq!(comment("/noel/noel/").await, nowhere);
     // In the link, above it: still 403 with the layer it needs.
     let (status, layer, _) = answer_of(
         &raw_get(
@@ -3264,6 +3415,15 @@ fn guest_status<T>(
 
 fn guest(w: &World) -> architect_spaces::guest::ShareGuestHttpClient {
     architect_spaces::guest::ShareGuestHttpClient::at(w.url(""))
+}
+
+/// The guest service of the node at `url`'s origin.
+fn guest_of(url: &str) -> architect_spaces::guest::ShareGuestHttpClient {
+    let origin = reqwest::Url::parse(url)
+        .unwrap()
+        .origin()
+        .ascii_serialization();
+    architect_spaces::guest::ShareGuestHttpClient::at(origin)
 }
 
 /// The guest service answers exactly as the link's pages do, for the
@@ -4101,6 +4261,266 @@ async fn a_link_serves_nothing_through_a_symlink() {
     match read().await {
         Err(architect::ClientError::App(architect_spaces::GuestFault::Building)) => {}
         other => panic!("a guest read through a symlink: {other:?}"),
+    }
+    w.host.stop().await;
+}
+
+/// A link's own files never run on the node's origin (the web app's,
+/// #646): a page, a picture that is a document (SVG) and a script a note
+/// links are downloads under a sandbox that allows nothing, never this
+/// origin's page; its pictures and recordings stay inline.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_links_own_page_svg_or_script_never_runs_on_the_origin() {
+    let w = world_full(architect_sites::Blocks::new(), Vec::new(), |vault| {
+        touch(
+            vault,
+            "Shared/run.md",
+            "---\ntitle: Run\n---\n![[x.html]]\n\n![[x.svg]]\n\n![[x.js]]\n\n![[x.xhtml]]\n\n![[x.xml]]\n\n![[take.mp3]]\n",
+        );
+        let script = "<script>fetch('/s/_signout')</script>";
+        touch(vault, "Shared/x.html", &format!("<!doctype html>{script}"));
+        touch(
+            vault,
+            "Shared/x.svg",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(localStorage.length)</script></svg>",
+        );
+        touch(vault, "Shared/x.js", "alert(localStorage.length)");
+        touch(
+            vault,
+            "Shared/x.xhtml",
+            &format!("<html xmlns=\"http://www.w3.org/1999/xhtml\">{script}</html>"),
+        );
+        touch(vault, "Shared/x.xml", "<a>b</a>");
+        touch(vault, "Shared/take.mp3", "ID3 not really");
+    })
+    .await;
+    let share = w
+        .share(
+            ShareScope::Folder("Shared".to_owned()),
+            Audience::Link,
+            ShareAccess::Read,
+        )
+        .await;
+    let link = format!("/s/{}/", share.code);
+    page_with(&w.url(&format!("{link}run/")), None, "Run").await;
+    for file in ["x.html", "x.svg", "x.js", "x.xhtml", "x.xml"] {
+        let (status, headers, body) = get(&w.url(&format!("{link}Shared/{file}")), None).await;
+        assert_eq!(status, StatusCode::OK, "{file}: {body}");
+        // The bytes as they are, but as a download in a sandbox that runs
+        // nothing: no script, no same origin, no storage, no cookie.
+        assert_eq!(
+            headers["content-security-policy"], "sandbox; default-src 'none'",
+            "{file}"
+        );
+        assert_eq!(headers["content-disposition"], "attachment", "{file}");
+        assert_eq!(headers["x-content-type-options"], "nosniff", "{file}");
+        assert_eq!(
+            headers.get_all("content-security-policy").iter().count(),
+            1,
+            "{file}: one policy, the sandbox"
+        );
+    }
+    // Pictures and recordings: inline, under the node's own policy (no
+    // script of theirs runs: they are not documents).
+    for (file, kind) in [
+        ("Shared/art.png", "image/png"),
+        ("Shared/take.mp3", "audio/mpeg"),
+    ] {
+        let (status, headers, _) = get(&w.url(&format!("{link}{file}")), None).await;
+        assert_eq!(status, StatusCode::OK, "{file}");
+        assert_eq!(headers["content-type"], kind, "{file}");
+        assert!(headers.get("content-disposition").is_none(), "{file}");
+        assert!(
+            !headers["content-security-policy"]
+                .to_str()
+                .unwrap()
+                .starts_with("sandbox"),
+            "{file}"
+        );
+        assert_eq!(headers["x-content-type-options"], "nosniff", "{file}");
+    }
+    w.host.stop().await;
+}
+
+/// Everything of an answer but its date.
+async fn answer_bytes(url: &str) -> (u16, Vec<(String, String)>, String) {
+    let res = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap()
+        .get(url)
+        .send()
+        .await
+        .unwrap();
+    let status = res.status().as_u16();
+    let mut headers: Vec<(String, String)> = res
+        .headers()
+        .iter()
+        .filter(|(k, _)| k.as_str() != "date")
+        .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or_default().to_owned()))
+        .collect();
+    headers.sort();
+    (status, headers, res.text().await.unwrap())
+}
+
+/// A link that never was, an expired one and a revoked one answer byte
+/// for byte alike, at the link, a page below it, a file and without the
+/// link's slash: a code's answer never says whether it was ever a link.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unknown_code_answers_exactly_as_a_revoked_or_expired_one() {
+    let w = world().await;
+    let links: ShareLinksClient = w.lane(&w.grace).await;
+    let revoked = w
+        .share(
+            ShareScope::Folder("Shared".to_owned()),
+            Audience::Link,
+            ShareAccess::Read,
+        )
+        .await;
+    let expired = w
+        .share(
+            ShareScope::Folder("Shared".to_owned()),
+            Audience::Link,
+            ShareAccess::Read,
+        )
+        .await;
+    page_with(&w.url(&format!("/s/{}/", revoked.code)), None, "The album").await;
+    links.revoke(revoked.code.clone()).await.unwrap();
+    links
+        .update(expired.code.clone(), ShareChange::Expires(Some(1)))
+        .await
+        .unwrap();
+    let unknown = "abcdefghjkmnpqrs";
+    assert_eq!(unknown.len(), revoked.code.len());
+    for rest in ["/", "/track/", "/Shared/art.png", "", "/_files/"] {
+        let never = answer_bytes(&w.url(&format!("/s/{unknown}{rest}"))).await;
+        let never = (never.0, never.1, never.2.replace(unknown, "CODE"));
+        for code in [&revoked.code, &expired.code] {
+            let (status, headers, body) = answer_bytes(&w.url(&format!("/s/{code}{rest}"))).await;
+            let body = body.replace(code.as_str(), "CODE");
+            let headers: Vec<_> = headers
+                .into_iter()
+                .map(|(k, v)| (k, v.replace(code.as_str(), unknown)))
+                .collect();
+            assert_eq!(
+                (status, &headers, &body),
+                (never.0, &never.1, &never.2),
+                "{rest}"
+            );
+        }
+        if rest.is_empty() {
+            assert_eq!(never.0, 308);
+        } else {
+            assert_eq!(never.0, 404, "{rest}");
+            assert!(
+                never
+                    .1
+                    .contains(&("cache-control".to_owned(), "no-store".to_owned()))
+            );
+        }
+    }
+    w.host.stop().await;
+}
+
+/// Sign-in and sign-out go back only to a path on this node: every way a
+/// browser would read `to` as another origin is `/`.
+#[tokio::test(flavor = "multi_thread")]
+async fn sign_out_goes_back_only_to_a_path_on_the_node() {
+    let w = world().await;
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let origin = format!("http://{}", w.host.http);
+    for (to, want) in [
+        ("/%09/evil.example", "/"),
+        ("/%0a/evil.example", "/"),
+        ("/%0d/evil.example", "/"),
+        ("%5C/evil.example", "/"),
+        ("//evil.example", "/"),
+        ("/%2F/evil.example", "/"),
+        ("/%5Cevil.example", "/"),
+        ("https:evil.example", "/"),
+        ("https://evil.example/", "/"),
+        ("/s/abcdefghjkmnpqrs/joy/", "/s/abcdefghjkmnpqrs/joy/"),
+    ] {
+        let res = client
+            .post(w.url(&format!("/s/_signout?to={to}")))
+            .header("origin", &origin)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::SEE_OTHER, "{to}");
+        assert_eq!(res.headers()["location"], want, "{to}");
+    }
+    w.host.stop().await;
+}
+
+/// The guest service answers any origin without credentials: a call that
+/// carried the node's cookie (its own app's) and its preflight say
+/// `Access-Control-Allow-Origin: *`, never the caller's origin and never
+/// `Access-Control-Allow-Credentials`, so no other site reads an answer a
+/// browser sent the cookie with.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_guest_service_never_shares_a_cookies_answer_with_another_origin() {
+    let w = world().await;
+    let share = w
+        .share(
+            ShareScope::Folder("Shared".to_owned()),
+            Audience::Org,
+            ShareAccess::Read,
+        )
+        .await;
+    let call = w.url(&format!("/s/{}/_guest/link", share.code));
+    let evil = "https://evil.example";
+    let body = format!("{{\"code\":\"{}\",\"token\":\"\"}}", share.code);
+    let res = reqwest::Client::new()
+        .post(&call)
+        .header("origin", evil)
+        .header("content-type", "application/json")
+        .header("cookie", format!("architect_session={}", w.alan))
+        .body(body.clone())
+        .send()
+        .await
+        .unwrap();
+    let status = res.status();
+    let headers = res.headers().clone();
+    let text = res.text().await.unwrap();
+    // The cookie opened it (a member of the org).
+    assert_eq!(status, StatusCode::OK, "{text}");
+    assert!(
+        !text.contains("SignIn") && !text.contains("Denied"),
+        "{text}"
+    );
+    let preflight = reqwest::Client::new()
+        .request(reqwest::Method::OPTIONS, &call)
+        .header("origin", evil)
+        .header("access-control-request-method", "POST")
+        .header("access-control-request-headers", "content-type")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(preflight.status(), StatusCode::NO_CONTENT);
+    for (what, headers) in [("answer", &headers), ("preflight", preflight.headers())] {
+        assert_eq!(headers["access-control-allow-origin"], "*", "{what}");
+        assert_eq!(
+            headers
+                .get_all("access-control-allow-origin")
+                .iter()
+                .count(),
+            1,
+            "{what}"
+        );
+        assert!(
+            headers.get("access-control-allow-credentials").is_none(),
+            "{what}"
+        );
+        assert!(
+            !headers
+                .iter()
+                .any(|(_, v)| v.to_str().is_ok_and(|v| v.contains("evil.example"))),
+            "{what}: the origin is never reflected"
+        );
     }
     w.host.stop().await;
 }

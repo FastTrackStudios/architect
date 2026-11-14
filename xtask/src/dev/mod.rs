@@ -386,6 +386,9 @@ impl Stack {
                     self.node_dir().join("files").display().to_string(),
                 ),
                 pair("ARCHITECT_FILES_HOLD", "true".to_owned()),
+                // A share link's page is the web app's (#646): served at
+                // `/app/` by the web app's dev server, beside the node.
+                pair("ARCHITECT_WEB_APP", "beside".to_owned()),
             ],
             Process::App => vec![
                 pair("ARCHITECT_AUTH_ISSUER", auth),
@@ -716,6 +719,10 @@ impl Stack {
             &public.join("app/config.json"),
             config.to_string().as_bytes(),
         )?;
+        // A share link's page (`/s/<code>/`, #646) is the node's copy of
+        // the app's page, which starts the app from `/app/start.js` as the
+        // bundle does: here, dx's own build of it.
+        write(&public.join("app/start.js"), DEV_START.as_bytes())?;
         // The demo's recording (silent), which the Now Playing bar plays.
         write(
             &public.join("app/demo-recording.mp3"),
@@ -1195,6 +1202,16 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
         .map_err(|e| format!("writing {}: {e}", path.display()))
 }
 
+/// `/app/start.js` for `dx serve`: what the bundle's does (the app's face
+/// at [`DEV_ASSETS`], then the app), with dx's build of the app
+/// (`/wasm/architect-web.js`, which starts itself). Only a share link's
+/// page loads it (`apps/desktop/src/node/share_shell.rs`); `/app/` is
+/// dx's own page.
+const DEV_START: &str = "// Written by `cargo xtask dev` (xtask/src/dev/mod.rs): the dev stack's\n\
+// start of the web app, for a share link's page (#646).\n\
+document.documentElement.dataset.assets = '/assets/app-dev/';\n\
+import('/wasm/architect-web.js');\n";
+
 /// The web app's page for `dx serve`, from the bundle's
 /// (`apps/web/app/index.html`), so the two cannot drift: without its
 /// Content-Security-Policy (dx's dev page loads the app and its hot reload
@@ -1330,6 +1347,10 @@ mod tests {
         assert!(dev.contains("href=\"/favicon.svg\""));
         // A page that lost a part this rewrites is refused, not served.
         assert!(dev_page(&page.replace("/app/start.js", "/app/go.js"), "").is_err());
+        // A share link's page starts the app from `/app/start.js`: dx's
+        // build here, with the face where the dev page puts it.
+        assert!(DEV_START.contains(&format!("'{DEV_ASSETS}'")));
+        assert!(DEV_START.contains("import('/wasm/architect-web.js')"));
         assert!(dev_page("<html lang=\"en\"><body></body></html>", "").is_err());
     }
 

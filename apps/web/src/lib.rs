@@ -50,6 +50,7 @@ mod browser;
 pub mod demo;
 pub mod ext_host;
 pub mod favourites;
+pub mod guest_view;
 pub mod keys;
 pub mod live_text;
 #[cfg(any(target_arch = "wasm32", test))]
@@ -203,6 +204,67 @@ pub enum Route {
     App,
     /// The app on the demo vault, in memory ([`DEMO`]).
     Demo,
+    /// A share link (`/s/<code>/…`, #646): the app as the link's guest,
+    /// opened at `rest` (the path below the link, from `/`, decoded).
+    Share {
+        /// The link's code.
+        code: String,
+        /// The path below the link: `/`, a note's page (`/joy/`), or
+        /// `/_files/` (the link's files).
+        rest: String,
+    },
+}
+
+/// Where a share link's page is, from its path: `/s/<code>/…` with a
+/// code, its code and the path below it (`/` at least, decoded). Never the
+/// node's own names under `/s/` (`/s/_signin`).
+#[must_use]
+pub fn share_route(path: &str) -> Option<(String, String)> {
+    let below = path
+        .strip_prefix(architect_spaces::share::LINKS)?
+        .strip_prefix('/')?;
+    let (code, rest) = below.split_once('/').unwrap_or((below, ""));
+    if !architect_spaces::share::is_code(code) {
+        return None;
+    }
+    let rest = decode_path(rest);
+    if rest.split('/').any(|s| s == ".." || s == ".") {
+        return None;
+    }
+    Some((code.to_owned(), format!("/{rest}")))
+}
+
+/// How the node that served a share link's page and this app differ
+/// (`architect_spaces::guest::SHARE_SHELL`, in the page's
+/// `<meta name="architect-share-shell">`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellSkew {
+    /// The node is of a later release: this app is out of date.
+    AppOlder,
+    /// The node is of an earlier release than this app.
+    NodeOlder,
+}
+
+/// How the page's share contract differs from this app's.
+///
+/// `meta` is the `content` of the page's `<meta
+/// name="architect-share-shell">`: None when it is this app's, or when
+/// the page has none (not a node's share page). One that does not read is
+/// a node this app does not know: [`ShellSkew::AppOlder`].
+#[must_use]
+pub fn shell_skew(meta: Option<&str>) -> Option<ShellSkew> {
+    let meta = meta?.trim();
+    let ours = architect_spaces::guest::SHARE_SHELL;
+    match meta.parse::<u32>() {
+        Ok(n) if n == ours => None,
+        Ok(n) if n < ours => Some(ShellSkew::NodeOlder),
+        _ => Some(ShellSkew::AppOlder),
+    }
+}
+
+/// Percent-decode a path (`+` stays a `+`).
+fn decode_path(v: &str) -> String {
+    decode(&v.replace('+', "%2B"))
 }
 
 /// Where `path` with `query` (without its `?`) leads.
@@ -214,6 +276,9 @@ pub fn route(path: &str, query: &str) -> Route {
             (k == name).then(|| decode(v))
         })
     };
+    if let Some((code, rest)) = share_route(path) {
+        return Route::Share { code, rest };
+    }
     if path.trim_end_matches('/') != CALLBACK {
         return if param("demo").is_some() {
             Route::Demo
@@ -510,6 +575,42 @@ mod tests {
             route("/auth/callback", "state=s"),
             Route::Refused(_)
         ));
+    }
+
+    #[test]
+    fn a_share_page_of_another_release_is_told_apart() {
+        let ours = architect_spaces::guest::SHARE_SHELL;
+        assert_eq!(shell_skew(None), None);
+        assert_eq!(shell_skew(Some(&ours.to_string())), None);
+        assert_eq!(shell_skew(Some(&format!(" {ours} "))), None);
+        assert_eq!(
+            shell_skew(Some(&(ours + 1).to_string())),
+            Some(ShellSkew::AppOlder)
+        );
+        assert_eq!(shell_skew(Some("2.x")), Some(ShellSkew::AppOlder));
+        assert_eq!(shell_skew(Some("0")), Some(ShellSkew::NodeOlder));
+    }
+
+    #[test]
+    fn a_share_links_path_is_the_app_as_its_guest() {
+        let code = "merrybrightstack";
+        let at = |rest: &str| Route::Share {
+            code: code.into(),
+            rest: rest.into(),
+        };
+        assert_eq!(route(&format!("/s/{code}/"), ""), at("/"));
+        assert_eq!(route(&format!("/s/{code}"), ""), at("/"));
+        assert_eq!(
+            route(&format!("/s/{code}/joy%20one/"), "x=1"),
+            at("/joy one/")
+        );
+        assert_eq!(route(&format!("/s/{code}/a+b/"), ""), at("/a+b/"));
+        assert_eq!(route(&format!("/s/{code}/_files/"), ""), at("/_files/"));
+        // The node's own names, a code that is none, a path trick: the app.
+        assert_eq!(route("/s/_signin", ""), Route::App);
+        assert_eq!(route("/s/NOT-A-CODE/", ""), Route::App);
+        assert_eq!(route(&format!("/s/{code}/%2e%2e/x/"), ""), Route::App);
+        assert_eq!(route(&format!("/app/s/{code}/"), ""), Route::App);
     }
 
     #[test]

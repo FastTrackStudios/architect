@@ -30,6 +30,31 @@ use crate::share::{LINKS, is_code, link_path};
 /// opens the share link in `url`.
 pub const APP_SCHEME: &str = "architect";
 
+/// What a share link's page and the web app it loads must agree on.
+///
+/// The page is the node's copy of the web app's page (#646): the node
+/// writes this in its `<meta name="architect-share-shell">`, the app compares it
+/// with its own and, when they differ, says it is out of date instead of
+/// drawing a link it may read wrong. Raise it whenever the page, the
+/// guest service or the app's share route change in a way the other side
+/// must know.
+pub const SHARE_SHELL: u32 = 1;
+
+/// The `<meta name>` that carries [`SHARE_SHELL`] on a share link's page.
+pub const SHARE_SHELL_META: &str = "architect-share-shell";
+
+/// The `<meta name>` that carries the node's own version on a share
+/// link's page (`<version>` or `<version>+<rev>`), for what the app says
+/// when it is out of date.
+pub const NODE_VERSION_META: &str = "architect-node-version";
+
+/// The id of the line a share link's page shows when the app has not
+/// drawn the link a while after it loaded.
+///
+/// That is a web app too old to know share links, or none served at all.
+/// The app removes it once it is showing the link.
+pub const SHARE_STALL_ID: &str = "share-stall";
+
 /// Why a link is not opened. Its words never carry the link (its code
 /// is a credential).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -343,6 +368,11 @@ pub struct ListedNote {
     pub page: Option<String>,
     /// The files it attaches that the link serves.
     pub files: Vec<String>,
+    /// Its art (`cover:`/`art:`), one of `files`: a list's tile and the
+    /// Now Playing card's picture (#646). None when it has none, or the
+    /// link does not serve it.
+    #[facet(default)]
+    pub art: Option<String>,
 }
 
 /// One file a link serves, at the layer asked for.

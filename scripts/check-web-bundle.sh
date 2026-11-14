@@ -14,6 +14,10 @@
 #   not the old apps/web/landing page (`hero-plan`)
 # - /download links a release's Linux build (by convention: the browser
 #   checks it against GitHub's API) and /changelog lists a release
+# - what a share link's page loads from the bundle (#646: the node answers
+#   /s/<code>/ with its copy of app/index.html, which loads /app/start.js
+#   and /app/style.css from here), and /s/ is never the bundle's: a 404
+#   here, so a proxy that forgot to send /s to the node shows
 # Run by site.yml on a pull request and by release.yml's `web` job.
 set -euo pipefail
 bundle="$(cd "${1:?usage: check-web-bundle.sh BUNDLE [PORT]}" && pwd)"
@@ -58,6 +62,9 @@ get /docs/ 200
 get /app/ 200
 has /app/ '/app/start.js'
 get /app/config.json 200
+get /app/style.css 200
+# A share link is the node's (scripts/web-routes.md): never a page here.
+get /s/abcdefghjkmnpqrs/ 404
 # The app's code is under the release's assets/app-<sha12>/ (cached for
 # good), named by start.js (never cached).
 get /app/start.js 200
@@ -70,4 +77,4 @@ get /no/such/page 404
 has /no/such/page "$mark"
 # A page's URL with a trailing slash is not the page (only folders take one).
 get /download/ 404
-echo "check-web-bundle: $bundle serves /, /download, /changelog, /extensions, /docs/, /app/ and a 404"
+echo "check-web-bundle: $bundle serves /, /download, /changelog, /extensions, /docs/, /app/, a share page's script and a 404"

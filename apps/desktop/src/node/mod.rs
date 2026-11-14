@@ -54,6 +54,7 @@ pub mod org;
 mod s3;
 pub mod service;
 pub mod share_layers;
+pub mod share_shell;
 pub mod shares;
 
 use std::collections::BTreeMap;
@@ -559,7 +560,14 @@ pub async fn start_with_shell(
         share_layers,
     )
     .with_islands(islands)
-    .with_favourites(favourites);
+    .with_favourites(favourites)
+    .with_web_app({
+        let (web, why) = share_shell::WebApp::from_setting(config.web_app.as_deref());
+        if let Some(why) = why {
+            tracing::warn!("{why}");
+        }
+        web
+    });
     for id in config.vaults.keys() {
         tasks.push(tokio::spawn(shares.clone().keep_built(id.clone())));
     }

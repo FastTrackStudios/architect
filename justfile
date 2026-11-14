@@ -409,32 +409,6 @@ web-test PORT="18080":
 web-org-test WEB="http://127.0.0.1:7413":
     ARCHITECT_ORG_WEB="{{WEB}}" ARCHITECT_ORG_VAULT="${DEVENV_STATE:-$PWD/.devenv/state}/stack/node/data/vaults/demo" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/org-vaults.test.mjs
 
-# A share link's player in a real browser (#511): the headless node
-# (`architect-desktop serve`, built without the window) on a vault of its
-# own with a link share of a two-song gig, in a headless Firefox
-# (FIREFOX=… names one): the lyric line follows playback, a click seeks,
-# and the queue goes on to the next song's page.
-# An island on a share's now-playing view in a real browser (studio#445): the
-# sandbox's WASI counter built for wasm32-wasip2 and by build-web, a node with it
-# linked in (apps/desktop/examples/island_node.rs), Firefox headless.
-share-island-test:
-    devenv --profile wasi shell -- bash -c 'cargo build -q -p architect-sandbox-wasi-counter --target wasm32-wasip2 && (cd features/extensions/web && npm ci --no-audit --no-fund >/dev/null) && node features/extensions/web/cli/cli.mjs build-web target/wasm32-wasip2/debug/architect_sandbox_wasi_counter.wasm target/island-counter --manifest apps/sandbox/wasi-counter/extension.toml >/dev/null'
-    devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
-    ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" ARCHITECT_ISLAND_FOLDER="$PWD/target/island-counter" env -u LD_LIBRARY_PATH node --test apps/web/test/share-island.test.mjs
-
-# An island's web view against a hostile bundle in a real browser
-# (architect#608): nothing reaches off the node, a frame that leaves its
-# document is taken down, WebRTC only when declared and granted.
-# DRIVER=safari (on a Mac: `safaridriver --enable` once, Safari quit) runs
-# it in Safari through safaridriver, started and stopped by the suite on a
-# free port; DRIVER=gecko runs that same classic-WebDriver path (no script
-# evaluated in the page) in Firefox through geckodriver
-# (`just share-webview-test-classic`); the default is Firefox over BiDi.
-# Each test prints PASS or FAIL with the page state it last read.
-share-webview-test:
-    devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
-    ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" env -u LD_LIBRARY_PATH node --test apps/web/test/share-webview.test.mjs
-
 # The web app's extension frames (#495) against hostile bundles in a real
 # browser: the release bundle (scripts/web-bundle.sh) behind a front that
 # sends `/_ext/` to a node with an island (island_node), Firefox headless
@@ -453,6 +427,17 @@ app-guest-content-test:
     devenv shell -- bash scripts/web-bundle.sh target/web-bundle
     ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-guest-content.test.mjs
 
+# A share link opens the web app as its guest (#646): `/s/<code>/` is the
+# app's page from the node, the link's notes in their sets, a note and its
+# picture, the files and "Download all", at 390 px and a desk's width;
+# the release bundle behind a front sending `/s/` to a node, Firefox
+# headless over BiDi off the audio graph; `SHOTS=<dir>` keeps screenshots.
+app-share-guest-test:
+    devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
+    devenv shell -- cargo build -q -p auth-server
+    devenv shell -- bash scripts/web-bundle.sh target/web-bundle
+    ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" ARCHITECT_AUTH_SERVER="$PWD/target/debug/auth-server" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-share-guest.test.mjs
+
 # The web app's bottom slots as favourites (#607) at 390 px: the default
 # set, a note type's declared set from the node's `/_ext/favourites.json`,
 # a tab opening its island view; `ARCHITECT_SHOTS=<dir>` keeps screenshots.
@@ -460,17 +445,6 @@ app-favourites-test:
     devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
     devenv shell -- bash scripts/web-bundle.sh target/web-bundle
     ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-favourites.test.mjs
-
-# The suite on the classic-WebDriver path Safari takes, in Firefox
-# (geckodriver from nixpkgs): what keeps that path from rotting without a Mac.
-share-webview-test-classic:
-    DRIVER=gecko GECKODRIVER="$(nix build --no-link --print-out-paths "$(sed -n 's/^ *url: \(github:NixOS\/nixpkgs\/[0-9a-f]*\)$/\1/p' devenv.yaml | head -1)#geckodriver")/bin/geckodriver" just share-webview-test
-
-# A share page on a phone, measured in Firefox (one title at the top, the
-# list's gutters, the card above the tab bar): apps/web/test/share-layout.test.mjs.
-share-layout-test:
-    devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
-    ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" env -u LD_LIBRARY_PATH node --test apps/web/test/share-layout.test.mjs
 
 # The site's /download (apps/site): its link logic (bun test), then the
 # built page in a headless Firefox with GitHub's API stubbed: every file
@@ -480,10 +454,13 @@ site-download-test:
     cd apps/site && bun install --frozen-lockfile && bun run test && bun run build
     cd apps/site && env -u LD_LIBRARY_PATH node --test test/download.browser.mjs
 
-share-player-test:
+# A Site's now-playing view in a real browser (studio#445): the chart and
+# the lyrics follow playback on a published page (Sites keep their page;
+# a share link is the web app, #646).
+site-player-test:
     devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --bin architect-desktop
     devenv shell -- cargo build -q -p architect-cli --bin architect
-    ARCHITECT_DESKTOP="$PWD/target/debug/architect-desktop" ARCHITECT_CLI="$PWD/target/debug/architect" env -u LD_LIBRARY_PATH node --test apps/web/test/share-player.test.mjs apps/web/test/share-playlist.test.mjs apps/web/test/site-now-playing.test.mjs
+    ARCHITECT_DESKTOP="$PWD/target/debug/architect-desktop" ARCHITECT_CLI="$PWD/target/debug/architect" env -u LD_LIBRARY_PATH node --test apps/web/test/site-now-playing.test.mjs
 
 # The sandbox's browser demo (apps/sandbox/web): the WASI Counter component built for
 # wasm32-wasip2, transpiled by jco (features/extensions/web), and the page
