@@ -13,6 +13,8 @@
 // - the setlist's text; a song opened from the list, its words and its
 //   picture loaded from below the link; the location follows;
 // - Files: each file a download, "Download all" the link's archive;
+// - Back steps back through the link (the files, the song, the setlist),
+//   never out of it, and Forward again;
 // - `/s/<code>/_files/` opens on the files.
 // At 390 px and at a desk's 1280 px; SHOTS=<dir> keeps the screenshots.
 //
@@ -312,6 +314,17 @@ test('a share link opens the web app as its guest: the list in sets, a note, its
       assert.equal(zip.headers.get('content-type'), 'application/zip');
       await sleep(300);
       await b.shot(join(shots, `share-guest-files-${tag}.png`));
+
+      // Back (a phone's swipe) steps back through the link, not out of
+      // it: the song, then the setlist; Forward comes to the song again.
+      const h2 = `(${q('[data-testid=guest-note] h2')} || {}).textContent`;
+      await b.eval('history.back(), true');
+      await until(async () => await b.eval('location.pathname') === `/s/${CODE}/gig/joy/` && await b.eval(h2) === 'Joy to the World', 10000, 'Back: the song');
+      await b.eval('history.back(), true');
+      await until(async () => await b.eval('location.pathname') === `/s/${CODE}/` && await b.eval(h2) === 'Merry and Bright', 10000, 'Back: the setlist');
+      assert.equal(await b.eval(`document.querySelectorAll('[data-guest-set]').length`), 2);
+      await b.eval('history.forward(), true');
+      await until(async () => await b.eval(h2) === 'Joy to the World', 10000, 'Forward: the song');
     }
 
     // Opened at the files page: the files.

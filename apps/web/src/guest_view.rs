@@ -48,6 +48,16 @@ pub fn open(link: &GuestLink, rest: &str) -> Open {
         .map_or(Open::Nothing, |n| Open::Note(n.path.clone()))
 }
 
+/// What of location `pathname` is below link `link` (its path, `/s/<code>/`),
+/// for [`open`]: what Back or Forward came to inside the link. `None`
+/// when the location is not on the link.
+#[must_use]
+pub fn rest_of<'a>(link: &str, pathname: &'a str) -> Option<&'a str> {
+    let base = link.trim_end_matches('/');
+    let rest = pathname.strip_prefix(base)?;
+    (rest.is_empty() || rest.starts_with('/')).then(|| rest.trim_start_matches('/'))
+}
+
 /// The link's root note: the one at its own page, else the first it
 /// lists with a page (a setlist shared with its songs: the setlist).
 #[must_use]
@@ -385,6 +395,20 @@ mod tests {
         let mut b = PlainBlock::new(BlockKind::List, "");
         b.items = items.iter().map(|i| (*i).to_owned()).collect();
         b
+    }
+
+    #[test]
+    fn back_and_forward_come_to_what_is_below_the_link_and_nothing_else() {
+        let link = gig();
+        let at = |path: &str| rest_of(&link.link, path).map(|r| open(&link, r));
+        assert_eq!(at("/s/c/"), Some(Open::Note("Gig/set.md".into())));
+        assert_eq!(at("/s/c"), Some(Open::Note("Gig/set.md".into())));
+        assert_eq!(at("/s/c/joy/"), Some(Open::Note("Gig/joy.md".into())));
+        assert_eq!(at("/s/c/_files/"), Some(Open::Files));
+        assert_eq!(at("/s/c/gone/"), Some(Open::Nothing));
+        // Another link whose code starts with this one's, or none.
+        assert_eq!(at("/s/cc/joy/"), None);
+        assert_eq!(at("/app/"), None);
     }
 
     #[test]
