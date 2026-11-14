@@ -76,6 +76,7 @@ members = [
     "features/shell",
     "features/theme",
     "features/favourites",
+    "features/media",
     "features/theme/picker",
     "features/settings/sheet",
     "features/guide",
@@ -241,6 +242,7 @@ architect-guide = { path = "features/guide" }
 architect-presence = { path = "features/presence" }
 architect-theme = { path = "features/theme" }
 architect-favourites = { path = "features/favourites" }
+architect-media = { path = "features/media" }
 architect-theme-picker = { path = "features/theme/picker" }
 architect-settings-sheet = { path = "features/settings/sheet" }
 # story — the component workbench (stories, snapshots, parity, fuzz).

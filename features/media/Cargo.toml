@@ -1,0 +1,24 @@
+[package]
+name = "architect-media"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Core media primitives (#668): a media item (a note with a title, a subtitle, a length, its media and its cover) and a collection (a note listing items in named sections), read from frontmatter and resolved against a vault's paths. Wasm-clean, nothing music-specific."
+
+# The model only: serde_json and a frontmatter reader, wasm-clean. The
+# apps draw it (`apps/web/src/app/collection.rs`, `apps/ui/src/collection.rs`),
+# the node lists it to a share's guests (`apps/desktop/src/node/shares.rs`).
+
+[dependencies]
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

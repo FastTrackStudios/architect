@@ -1559,6 +1559,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-media"
+version = "0.1.0"
+dependencies = [
+ "architect-workspace-hack",
+ "serde_json",
+ "serde_yaml",
+]
+
+[[package]]
 name = "architect-mobile"
 version = "0.1.0"
 dependencies = [
