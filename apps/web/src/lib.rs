@@ -234,6 +234,34 @@ pub fn share_route(path: &str) -> Option<(String, String)> {
     Some((code.to_owned(), format!("/{rest}")))
 }
 
+/// How the node that served a share link's page and this app differ
+/// (`architect_spaces::guest::SHARE_SHELL`, in the page's
+/// `<meta name="architect-share-shell">`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellSkew {
+    /// The node is of a later release: this app is out of date.
+    AppOlder,
+    /// The node is of an earlier release than this app.
+    NodeOlder,
+}
+
+/// How the page's share contract differs from this app's.
+///
+/// `meta` is the `content` of the page's `<meta
+/// name="architect-share-shell">`: None when it is this app's, or when
+/// the page has none (not a node's share page). One that does not read is
+/// a node this app does not know: [`ShellSkew::AppOlder`].
+#[must_use]
+pub fn shell_skew(meta: Option<&str>) -> Option<ShellSkew> {
+    let meta = meta?.trim();
+    let ours = architect_spaces::guest::SHARE_SHELL;
+    match meta.parse::<u32>() {
+        Ok(n) if n == ours => None,
+        Ok(n) if n < ours => Some(ShellSkew::NodeOlder),
+        _ => Some(ShellSkew::AppOlder),
+    }
+}
+
 /// Percent-decode a path (`+` stays a `+`).
 fn decode_path(v: &str) -> String {
     decode(&v.replace('+', "%2B"))
@@ -547,6 +575,20 @@ mod tests {
             route("/auth/callback", "state=s"),
             Route::Refused(_)
         ));
+    }
+
+    #[test]
+    fn a_share_page_of_another_release_is_told_apart() {
+        let ours = architect_spaces::guest::SHARE_SHELL;
+        assert_eq!(shell_skew(None), None);
+        assert_eq!(shell_skew(Some(&ours.to_string())), None);
+        assert_eq!(shell_skew(Some(&format!(" {ours} "))), None);
+        assert_eq!(
+            shell_skew(Some(&(ours + 1).to_string())),
+            Some(ShellSkew::AppOlder)
+        );
+        assert_eq!(shell_skew(Some("2.x")), Some(ShellSkew::AppOlder));
+        assert_eq!(shell_skew(Some("0")), Some(ShellSkew::NodeOlder));
     }
 
     #[test]

@@ -434,8 +434,9 @@ app-guest-content-test:
 # headless over BiDi off the audio graph; `SHOTS=<dir>` keeps screenshots.
 app-share-guest-test:
     devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
+    devenv shell -- cargo build -q -p auth-server
     devenv shell -- bash scripts/web-bundle.sh target/web-bundle
-    ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-share-guest.test.mjs
+    ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" ARCHITECT_AUTH_SERVER="$PWD/target/debug/auth-server" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-share-guest.test.mjs
 
 # The web app's bottom slots as favourites (#607) at 390 px: the default
 # set, a note type's declared set from the node's `/_ext/favourites.json`,

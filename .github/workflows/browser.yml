@@ -55,13 +55,15 @@ jobs:
           echo "FIREFOX=$(build firefox)/bin/firefox" >> "$GITHUB_ENV"
           echo "GECKODRIVER=$(build geckodriver)/bin/geckodriver" >> "$GITHUB_ENV"
           echo "NODE=$(build nodejs_24)/bin/node" >> "$GITHUB_ENV"
-      - name: the island node
-        run: cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
+      - name: the island node and an issuer
+        run: |
+          cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
+          cargo build -q -p auth-server
       # The browser runs outside the dev shell's libraries.
       - name: a share link opened as its guest
         run: |
           bash scripts/web-bundle.sh target/web-bundle
-          ARCHITECT_ISLAND_NODE="$CARGO_TARGET_DIR/debug/examples/island_node" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" \
+          ARCHITECT_ISLAND_NODE="$CARGO_TARGET_DIR/debug/examples/island_node" ARCHITECT_AUTH_SERVER="$CARGO_TARGET_DIR/debug/auth-server" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" \
             env -u LD_LIBRARY_PATH "$NODE" --test --test-concurrency=1 apps/web/test/app-share-guest.test.mjs apps/web/test/app-guest-content.test.mjs
       - name: the web app's extension frames against hostile bundles
         if: ${{ !cancelled() }}

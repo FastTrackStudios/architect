@@ -140,6 +140,8 @@ async function node(reads) {
     ARCHITECT_ISLAND_FOLDER: folder, ARCHITECT_ISLAND_ID: 'demo.setlist',
     ARCHITECT_ISLAND_VIEW: 'progress', ARCHITECT_ISLAND_TRANSPORT: 'transport',
     ARCHITECT_ISLAND_EMBEDS: 'list=setlist=date', ARCHITECT_ISLAND_READS: reads,
+    // The web bundle beside the node, as the front serves it (#646).
+    ARCHITECT_WEB_APP: BUNDLE,
   };
   delete env.ARCHITECT_ISLAND2_FOLDER;
   const port = await freePort();

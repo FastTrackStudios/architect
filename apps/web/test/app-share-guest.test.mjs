@@ -16,6 +16,13 @@
 // - `/s/<code>/_files/` opens on the files.
 // At 390 px and at a desk's 1280 px; SHOTS=<dir> keeps the screenshots.
 //
+// A link for signed-in people (an issuer, `auth-server`,
+// ARCHITECT_AUTH_SERVER): the app says to sign in, `/s/_signin` signs the
+// person in at the issuer (approved there), the node's cookie comes back
+// and the guest calls carry it: the link is shown. A session the app
+// holds that the issuer no longer knows does not keep the person out.
+// A node with no web app beside it says the link needs one.
+//
 // Firefox over WebDriver BiDi (FIREFOX=… or `firefox` on the PATH), muted,
 // in a mount namespace whose runtime dir and /run/pipewire are empty
 // (`unshare -r -m`). `just app-share-guest-test` builds and runs it.
@@ -23,6 +30,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { createServer, request } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -31,6 +39,7 @@ import { dirname, join, extname, normalize } from 'node:path';
 
 const NODE = process.env.ARCHITECT_ISLAND_NODE;
 const BUNDLE = process.env.ARCHITECT_WEB_BUNDLE;
+const AUTH = process.env.ARCHITECT_AUTH_SERVER;
 const SHOTS = process.env.SHOTS;
 function which(cmd) {
   try { return execFileSync('sh', ['-c', `command -v ${cmd}`]).toString().trim() || null; } catch { return null; }
@@ -38,6 +47,8 @@ function which(cmd) {
 const browser = process.env.FIREFOX || which('firefox');
 const skip = NODE && BUNDLE && browser ? false : 'needs ARCHITECT_ISLAND_NODE, ARCHITECT_WEB_BUNDLE (just app-share-guest-test) and a Firefox (FIREFOX=…)';
 if (process.env.ARCHITECT_BROWSER_REQUIRED && skip) throw new Error(`ARCHITECT_BROWSER_REQUIRED: ${skip}`);
+const skipSignIn = skip || (AUTH ? false : 'needs ARCHITECT_AUTH_SERVER (just app-share-guest-test)');
+if (process.env.ARCHITECT_BROWSER_REQUIRED && skipSignIn) throw new Error(`ARCHITECT_BROWSER_REQUIRED: ${skipSignIn}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const put = (root, rel, body) => { const p = join(root, rel); mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, body); };
 const freePort = () => new Promise((ok) => { const srv = createNetServer(); srv.listen(0, '127.0.0.1', () => { const { port } = srv.address(); srv.close(() => ok(port)); }); });
@@ -83,8 +94,10 @@ const SONGS = [
   ['noel', 'The First Noel', [110, 50, 140], [240, 180, 220]],
 ];
 
-/// A node sharing `Gig/` by link `CODE`.
-async function node() {
+/// A node sharing `Gig/` by link `CODE`: to anyone with the link, or to
+/// `invited` (emails) signed in at `issuer`; the web app beside it
+/// (ARCHITECT_WEB_APP, the bundle's folder) unless `webApp` is false.
+async function node({ invited = null, issuer = null, webApp = true } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'share-guest-'));
   const vault = join(dir, 'vault');
   put(vault, 'Gig/set.md', '---\ntitle: Merry and Bright\ntype: setlist\n---\nChristmas Eve, two sets.\n\n'
@@ -97,22 +110,30 @@ async function node() {
     put(vault, `Gig/media/${slug}.wav`, wav());
   }
   put(vault, 'Gig/art/stage.png', png(240, [60, 60, 70], [220, 200, 160]));
-  const share = { code: CODE, vault: 'notes', scope: { Notes: ['Gig/set.md', ...SONGS.map(([slug]) => `Gig/${slug}.md`)] }, title: 'Merry and Bright', audience: 'Link', access: 'Read', expires_at: null, revoked_at: null, created_at: 1, created_by: 'test', domain: null };
+  const audience = invited ? { Invited: invited } : 'Link';
+  const share = { code: CODE, vault: 'notes', scope: { Notes: ['Gig/set.md', ...SONGS.map(([slug]) => `Gig/${slug}.md`)] }, title: 'Merry and Bright', audience, access: 'Read', expires_at: null, revoked_at: null, created_at: 1, created_by: 'test', domain: null };
   put(vault, `_architect/shares/${CODE}.md`, `---\npublish: false\n---\n# Share ${CODE}\n\n\`\`\`json\n${JSON.stringify(share)}\n\`\`\`\n`);
   const env = {
     ...process.env, ARCHITECT_DATA_DIR: join(dir, 'data'), ARCHITECT_VAULTS: `notes=${vault}`,
     ARCHITECT_IROH: 'local', ARCHITECT_NAME: 'share-guest-test',
   };
-  for (const k of Object.keys(env)) if (k.startsWith('ARCHITECT_ISLAND') || k === 'ARCHITECT_FAVOURITES') delete env[k];
+  for (const k of Object.keys(env)) if (k.startsWith('ARCHITECT_ISLAND') || k === 'ARCHITECT_FAVOURITES' || k === 'ARCHITECT_WEB_APP' || k === 'ARCHITECT_ISSUER') delete env[k];
+  // The web bundle beside the node, as the front below serves it: its
+  // folder, which the node checks at start.
+  if (webApp) env.ARCHITECT_WEB_APP = BUNDLE;
+  if (issuer) env.ARCHITECT_ISSUER = issuer;
   const port = await freePort();
   env.ARCHITECT_BIND = `127.0.0.1:${port}`;
   const proc = spawn(NODE, [], { stdio: 'ignore', env });
   const origin = `http://127.0.0.1:${port}`;
   for (let i = 0; i < 160; i++) {
     await sleep(250);
-    const ok = await fetch(`${origin}/s/${CODE}/_guest/link`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: CODE, token: '' }) })
-      .then((r) => (r.ok ? r.json() : null), () => null)
-      .then((l) => !!l && JSON.stringify(l).split('"page":"/s/').length > SONGS.length + 1, () => false);
+    // A signed-in link: up once it is built (its page answers 401, not 503).
+    const ok = invited
+      ? await fetch(`${origin}/s/${CODE}/`).then((r) => r.status === 401, () => false)
+      : await fetch(`${origin}/s/${CODE}/_guest/link`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: CODE, token: '' }) })
+        .then((r) => (r.ok ? r.json() : null), () => null)
+        .then((l) => !!l && JSON.stringify(l).split('"page":"/s/').length > SONGS.length + 1, () => false);
     if (ok) return { origin, close: () => { proc.kill(); rmSync(dir, { recursive: true, force: true }); } };
   }
   proc.kill();
@@ -199,6 +220,7 @@ async function firefox() {
     shot: async (file) => { const r = await send('browsingContext.captureScreenshot', { context, origin: 'document' }); writeFileSync(file, Buffer.from(r.data, 'base64')); },
     eval: (e) => evalIn(context, e),
     evalIn,
+    cookies: async () => (await send('storage.getCookies', { partition: { type: 'context', context } })).cookies,
     frames: async () => ((await send('browsingContext.getTree', { root: context })).contexts[0].children || []).map((c) => c.context),
     close: async () => { try { ws.close(); } catch {} try { process.kill(-proc.pid, 'SIGKILL'); } catch {} await sleep(300); try { rmSync(profile, { recursive: true, force: true }); } catch {} },
   };
@@ -230,6 +252,11 @@ test('a share link opens the web app as its guest: the list in sets, a note, its
     assert.ok(!html.includes('Christmas Eve'), 'no note on the page');
     assert.match(res.headers.get('content-security-policy'), /^default-src 'none'; script-src 'self' 'wasm-unsafe-eval';/);
     assert.match(res.headers.get('content-security-policy'), /frame-ancestors 'none'$/);
+    // The node's share contract and version, and the line a too-old app
+    // would leave showing.
+    assert.match(html, /<meta name="architect-share-shell" content="\d+">/);
+    assert.match(html, /<meta name="architect-node-version" content="[^"]+">/);
+    assert.match(html, /<p id="share-stall"/);
 
     for (const [width, height, tag] of [[390, 844, '390'], [1280, 860, 'desk']]) {
       await b.size(width, height);
@@ -242,6 +269,8 @@ test('a share link opens the web app as its guest: the list in sets, a note, its
         throw new Error(`${e.message}\n${page}\n${f.proxied.join('\n')}`);
       });
       await until(() => b.eval(`document.querySelectorAll('[data-guest-set]').length === 2`), 20000, 'two sets');
+      // The app is drawing the link: the node's "still opening?" line is gone.
+      assert.equal(await b.eval(`!!document.getElementById('share-stall')`), false);
       const list = JSON.parse(await b.eval(`JSON.stringify([...document.querySelectorAll('[data-guest-set], [data-guest-note]')].map((e) => e.dataset.guestSet ? 'set:' + e.dataset.guestSet : e.dataset.guestNote))`));
       assert.deepEqual(list, ['set:Set 1', 'Joy to the World', 'Silent Night', 'set:Set 2', 'Sleigh Ride', 'The First Noel']);
       assert.ok(await b.eval(`document.querySelector('[data-testid=guest-note]').textContent.includes('Christmas Eve, two sets.')`));
@@ -302,4 +331,97 @@ test('a link that is nowhere says so, from the node and in the app', { skip }, a
     const page = await fetch(`${n.origin}/s/${CODE}/nowhere/`);
     assert.equal(page.status, 404);
   } finally { n.close(); }
+});
+
+test('a node with no web app beside it says the link needs one', { skip }, async () => {
+  const n = await node({ webApp: false });
+  try {
+    const res = await fetch(`${n.origin}/s/${CODE}/`);
+    assert.equal(res.status, 503);
+    assert.match(res.headers.get('content-type'), /^text\/plain/);
+    assert.equal(res.headers.get('cache-control'), 'no-store');
+    const text = await res.text();
+    assert.match(text, /opens in Architect's web app, which this server does not serve/);
+    assert.ok(!text.includes('start.js') && !text.includes('Merry'), text);
+  } finally { n.close(); }
+});
+
+/// An issuer of its own (`auth-server`, ARCHITECT_AUTH_SERVER) on a free
+/// port, its database in a temporary folder, its key made here and never
+/// shown; and `email` signed up at it: its session token there.
+async function issuer(email) {
+  const dir = mkdtempSync(join(tmpdir(), 'share-guest-auth-'));
+  const port = await freePort();
+  const env = { ...process.env, AUTH_BIND_ADDR: `127.0.0.1:${port}`, AUTH_SECRET: randomBytes(32).toString('hex'), AUTH_DATABASE_URL: `sqlite://${join(dir, 'auth.db')}?mode=rwc`, RUST_LOG: 'warn' };
+  for (const k of ['AUTH_SECRET_FILE', 'AUTH_DATABASE_URL_FILE', 'AUTH_DEV_SEED', 'AUTH_IMPORT_SNAPSHOT']) delete env[k];
+  const proc = spawn(AUTH, [], { stdio: 'ignore', env });
+  const origin = `http://127.0.0.1:${port}`;
+  const close = () => { proc.kill(); rmSync(dir, { recursive: true, force: true }); };
+  let token;
+  for (let i = 0; i < 160 && !token; i++) {
+    await sleep(250);
+    token = await fetch(`${origin}/auth/sign-up/email`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ input: { email, password: 'correct horse battery staple' } }) })
+      .then((r) => (r.ok ? r.json() : null), () => null).then((j) => j && j.token, () => null);
+  }
+  if (!token) { close(); throw new Error('the issuer never signed anyone up'); }
+  // Approve a device sign-in's code, as the person does at the issuer.
+  const approve = async (userCode) => {
+    const r = await fetch(`${origin}/auth/device/approve`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: `architect-auth.session=${token}` }, body: `user_code=${encodeURIComponent(userCode)}` });
+    assert.equal(r.status, 200, 'the issuer approved the code');
+  };
+  return { origin, approve, close };
+}
+
+test('a link for signed-in people: the sign-in, its cookie, the guest calls, the link', { skip: skipSignIn }, async () => {
+  const email = 'ada@local.test';
+  const auth = await issuer(email);
+  const n = await node({ invited: [email], issuer: auth.origin });
+  const f = await front(n.origin);
+  const b = await firefox();
+  const shots = SHOTS || '/tmp/share-web-guest';
+  mkdirSync(shots, { recursive: true });
+  try {
+    // Nobody signed in: the app's page names nothing of the link, and the
+    // app offers the node's sign-in.
+    const res = await fetch(`${n.origin}/s/${CODE}/`);
+    assert.equal(res.status, 401);
+    assert.ok(!(await res.text()).includes('Merry and Bright'));
+    await b.go(`${f.origin}/s/${CODE}/`);
+    await until(() => b.eval(`!!${q('[data-testid=guest-sign-in]')}`), 60000, 'the Sign in button');
+    assert.equal(await b.eval(`!!document.getElementById('share-stall')`), false);
+    // A session this browser's app keeps that the issuer does not know
+    // (signed out elsewhere, not yet expired here): it must not keep the
+    // person at "Sign in" once the node's cookie is there.
+    await b.eval(`localStorage.setItem('architect.session', JSON.stringify({ token: 'a-session-the-issuer-does-not-know', expires_at_unix: Math.floor(Date.now() / 1000) + 3600 })), true`);
+
+    // Sign in: the node starts the issuer's device sign-in and waits.
+    await b.eval(`${q('[data-testid=guest-sign-in]')}.click(), true`);
+    await until(() => b.eval(`location.pathname === '/s/_signin' && !!document.querySelector('b')`), 20000, 'the sign-in page');
+    const userCode = await b.eval(`document.querySelector('b').textContent`);
+    assert.ok(await b.eval(`!!${q('a.button')} && ${q('a.button')}.href.startsWith(${JSON.stringify(auth.origin)})`), 'the approval is at the issuer');
+    await b.shot(join(shots, 'share-guest-signin-wait.png'));
+    await auth.approve(userCode);
+
+    // The page goes on by itself: the node's cookie, back at the link, the
+    // link shown through guest calls that carry the cookie.
+    await until(() => b.eval(`(${q('[data-testid=guest-title]')} || {}).textContent === 'Merry and Bright'`), 60000, 'the link, signed in').catch(async (e) => {
+      await b.shot(join(shots, 'failed-signed-in.png')).catch(() => {});
+      const page = await b.eval(`location.href + '\\n' + document.body.innerText.slice(0, 800)`).catch((x) => x.message);
+      throw new Error(`${e.message}\n${page}\n${f.proxied.join('\n')}`);
+    });
+    assert.equal(await b.eval('location.pathname'), `/s/${CODE}/`);
+    await until(() => b.eval(`document.querySelectorAll('[data-guest-note]').length === ${SONGS.length + 1} || document.querySelectorAll('[data-guest-note]').length === ${SONGS.length}`), 20000, 'the link\'s notes');
+    const cookie = (await b.cookies()).find((c) => c.name === 'architect_session');
+    assert.ok(cookie, 'the node set its session cookie');
+    assert.equal(cookie.httpOnly, true);
+    assert.equal(cookie.sameSite, 'lax');
+    assert.ok(!(await b.eval('document.cookie')).includes('architect_session'), 'never readable by script');
+    assert.ok(f.proxied.includes('GET /s/_signin/wait'), f.proxied.join('\n'));
+    assert.ok(f.proxied.filter((p) => p === `POST /s/${CODE}/_guest/link`).length >= 2, f.proxied.join('\n'));
+    // The same guest call without the cookie is still refused: it was the
+    // cookie that opened it.
+    const bare = await fetch(`${n.origin}/s/${CODE}/_guest/link`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: CODE, token: '' }) });
+    assert.equal(bare.status, 401);
+    await b.shot(join(shots, 'share-guest-signed-in-390.png'));
+  } finally { await b.close(); f.close(); n.close(); auth.close(); }
 });

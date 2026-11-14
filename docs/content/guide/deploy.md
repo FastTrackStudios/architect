@@ -357,7 +357,9 @@ to read.
   offers the node's sign-in (`/s/_signin`). The guest service takes that
   sign-in's cookie from a page on the node's origin when a call carries
   no token, and the app sends this browser's own session when it is
-  signed in. Signed in, as anyone, the app still opens a link as its
+  signed in (when the node says to sign in to that session, one it no
+  longer knows, the app asks again without it, so the cookie counts).
+  Signed in, as anyone, the app still opens a link as its
   guest; "Sign in" in its account menu goes to your own vaults (`/app/`).
 - **Who serves the page.** The node, for `/s/<code>/…`; the bundle's
   `/app/start.js`, `/app/style.css` and `assets/app-<hash>/` come from
@@ -720,7 +722,9 @@ Tested on a headless node (`apps/desktop/tests/shares.rs`
 `media_streams_with_ranges_lyrics_follow_and_the_queue_is_the_links_order`)
 and in a headless Firefox (`apps/web/test/app-share-guest.test.mjs`, `just
 app-share-guest-test`): the link's notes in their sets with their art and
-play buttons, a note and its picture, the files and their archive.
+play buttons, a note and its picture, the files and their archive; a link
+for signed-in people opened through `/s/_signin` and the node's cookie,
+past a session the issuer no longer knows; a node with no web app.
 
 ### How far a link plays
 

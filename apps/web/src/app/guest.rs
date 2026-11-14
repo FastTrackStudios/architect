@@ -196,10 +196,60 @@ pub fn file_url(path: &str) -> Option<String> {
     FILES.with(|f| f.borrow().get(path).cloned())
 }
 
+thread_local! {
+    /// Whether this browser's session was refused by the link's node
+    /// (signed out or revoked elsewhere, not yet expired here): calls go
+    /// without it from then on, so the node's own sign-in cookie counts.
+    static SESSION_REFUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// The token a guest call carries: this browser's session, else none
 /// (the node then reads its own sign-in's cookie).
 fn token() -> String {
+    if SESSION_REFUSED.with(std::cell::Cell::get) {
+        return String::new();
+    }
     crate::browser::stored_token().unwrap_or_default()
+}
+
+/// `call` with [`token`]; when it carried this browser's session and the
+/// node said to sign in, once more with none, so the node's own sign-in
+/// cookie is used (a session revoked elsewhere that has not expired here
+/// would otherwise keep a signed-in person at "Sign in").
+async fn as_guest<T, F, Fut>(call: F) -> Result<T, architect::ClientError<GuestFault>>
+where
+    F: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = Result<T, architect::ClientError<GuestFault>>>,
+{
+    let sent = token();
+    match call(sent.clone()).await {
+        Err(architect::ClientError::App(GuestFault::SignIn)) if !sent.is_empty() => {
+            SESSION_REFUSED.with(|r| r.set(true));
+            call(String::new()).await
+        }
+        answer => answer,
+    }
+}
+
+/// What the page says of the release it was served by: the node's share
+/// contract and version (`apps/desktop/src/node/share_shell.rs`).
+fn page_meta(name: &str) -> Option<String> {
+    web_sys::window()?
+        .document()?
+        .query_selector(&format!("meta[name=\"{name}\"]"))
+        .ok()??
+        .get_attribute("content")
+}
+
+/// The line the node's page shows when no app drew the link: this app
+/// is drawing it.
+fn drop_stall() {
+    if let Some(stall) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id(architect_spaces::guest::SHARE_STALL_ID))
+    {
+        stall.remove();
+    }
 }
 
 /// What the guest service answered for the link.
@@ -316,6 +366,15 @@ fn play(id: &str) {
 #[component]
 pub fn GuestPage(code: String, rest: String) -> Element {
     let t = use_shell().theme;
+    use_hook(drop_stall);
+    // A page from a node of another release: say so, read nothing.
+    let skew = use_hook(|| {
+        crate::shell_skew(page_meta(architect_spaces::guest::SHARE_SHELL_META).as_deref())
+    });
+    if let Some(skew) = skew {
+        let node = page_meta(architect_spaces::guest::NODE_VERSION_META).unwrap_or_default();
+        return rsx! { OutOfDate { skew, node } };
+    }
     // Moves on with every `_live` event, and while the link is built.
     let mut revision = use_signal(|| 0_u64);
     use_hook({
@@ -350,12 +409,10 @@ pub fn GuestPage(code: String, rest: String) -> Element {
             let _ = revision();
             async move {
                 let c = client().ok_or(Shut::Unreachable)?;
-                let link = c
-                    .link(code.clone(), token())
+                let link = as_guest(|t| c.link(code.clone(), t))
                     .await
                     .map_err(|e| Shut::of(&e))?;
-                let files = c
-                    .files(code, token(), None)
+                let files = as_guest(|t| c.files(code.clone(), t, None))
                     .await
                     .map_err(|e| Shut::of(&e))?;
                 Ok::<_, Shut>(Opened {
@@ -435,6 +492,35 @@ pub fn GuestPage(code: String, rest: String) -> Element {
             style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: 16px 16px 120px; color: {t.ink};",
             div { style: "max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px;",
                 {body}
+            }
+        }
+    }
+}
+
+/// The node that served the page is of another release than this app.
+#[component]
+fn OutOfDate(skew: crate::ShellSkew, node: String) -> Element {
+    let t = use_shell().theme;
+    let (title, line) = match skew {
+        crate::ShellSkew::AppOlder => (
+            "This app is out of date",
+            "This server's web app is older than its node, so it cannot open this link. Reload in a while, or open the link in the Architect app.",
+        ),
+        crate::ShellSkew::NodeOlder => (
+            "This server is out of date",
+            "This server's node is older than its web app, so the link cannot open here yet. Open it in the Architect app.",
+        ),
+    };
+    rsx! {
+        div { "data-testid": "guest-page",
+            style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: 16px; color: {t.ink};",
+            section { "data-testid": "guest-problem", "data-why": "{title}",
+                style: "max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; padding: 24px 0;",
+                h1 { style: "margin: 0; font-size: 22px;", "{title}" }
+                p { style: "margin: 0; color: {t.ink_2}; line-height: 1.5;", "{line}" }
+                if !node.is_empty() {
+                    p { style: "margin: 0; color: {t.ink_3}; font-size: 13px;", "Node {node}" }
+                }
             }
         }
     }
@@ -539,7 +625,10 @@ fn NoteList(opened: Opened, chosen: String, on_open: EventHandler<Open>) -> Elem
         async move {
             let root = root?;
             let c = client()?;
-            c.read(code, token(), root).await.ok().map(|n| n.blocks)
+            as_guest(|t| c.read(code.clone(), t, root.clone()))
+                .await
+                .ok()
+                .map(|n| n.blocks)
         }
     }));
     let blocks = outline.read().clone().flatten().unwrap_or_default();
@@ -660,8 +749,7 @@ fn GuestNoteView(code: String, path: String) -> Element {
         {
             async move {
                 let c = client().ok_or("no origin")?;
-                let note = c
-                    .read(code.clone(), token(), path)
+                let note = as_guest(|t| c.read(code.clone(), t, path.clone()))
                     .await
                     .map_err(|e| said(&e))?;
                 let files = files_of(&code, &note).await;
