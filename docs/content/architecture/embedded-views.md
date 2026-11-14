@@ -237,8 +237,18 @@ Its limits for now: the IME's candidate window is not placed at the
 view's caret (no cursor area is set), a write to `HostData` or the
 `InputSink` needs an explicit wake, and `FrameStats` times the view's input and
 recording, not the GPU's raster. WebGL context restoration and a WebGPU backend
-are not implemented; plugin hosts mount no
-paint view yet. A Frame
+are not implemented.
+
+A linked extension registers a paint view with
+`features/extensions/src/linked.rs` `Builder::paint` (feature `paint` of
+`architect-extensions`, #591): `ext.paint::<Sketch>("sketch")` for a
+`[[views]]` entry with `kind = "paint"`, where `Sketch` is a
+`PaintView + Default` made once for each pane it opens in. The view is
+mounted as a `PaintPane`, so it takes the pane's input and draws in the
+window's scene. Its `ctx.extras` holds the pane's `PaintWake`, which it
+calls after its own data changes. The app registers the kind
+(`KindSpec::paint`) for `Host::load` to accept the view. Test:
+`features/extensions/tests/linked_paint.rs`. A Frame
 surface can draw through it in-process instead of in a process of its
 own.
 
