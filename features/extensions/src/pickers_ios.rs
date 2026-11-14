@@ -114,7 +114,7 @@ fn keep(delegate: &NSObject) {
 fn release(delegate: &NSObject) {
     KEPT.with(|k| {
         k.borrow_mut()
-            .retain(|d| !std::ptr::eq(&raw const **d, delegate))
+            .retain(|d| !std::ptr::eq(&raw const **d, delegate));
     });
 }
 
