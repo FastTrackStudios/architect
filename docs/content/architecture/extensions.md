@@ -3110,7 +3110,7 @@ ui = ["notify", "clipboard", "pickers", "prompts", "menus", "badges"]
 |---|---|---|---|
 | `notify {text, kind?, title?}` | a toast (`info`, `success`, `warning`, `error`), and a line in its log | `null` | `notify` |
 | `clipboard_read` / `clipboard_write {text}` | the clipboard's text | the text, or `null` | `clipboard` |
-| `pick {kind, title?, filters?, folder?, name?}` | a picker (`open`, `open_many`, `folder`) or a save dialog (`save`) | a path, a list (`open_many`), `null` when cancelled | `pickers` |
+| `pick {kind, title?, filters?, folder?, name?}` | a picker (`open`, `open_many`, `folder`), a save dialog (`save`), or the person's photos (`photo`, `photos`: a copy of each image made for it) | a path, a list (`open_many`, `photos`), `null` when cancelled | `pickers` |
 | `prompt {kind, title, message?, default?, placeholder?, choices?}` | asks for text (`text`), a yes or no (`confirm`), one of a list (`pick_one`) | the text, `true`/`false`, the choice's id; `null` when cancelled | `prompts` |
 | `menu {items, x?, y?}` | a context menu of its own items (`{id, label, icon?, shortcut?, disabled?, separator?}`) at a point in the window (none: its middle) | the id chosen, `null` when dismissed | `menus` |
 | `decorate {target, decoration?}` | an icon or badge (`{icon?, badge?, color?, tooltip?}`) on a file-tree row (`{kind: "file", id: <path>}`) or a tab (`{kind: "tab", id: <view kind or pane id>}`); none takes it off | `null` | `badges` |
@@ -3118,6 +3118,20 @@ ui = ["notify", "clipboard", "pickers", "prompts", "menus", "badges"]
 `pick`, `prompt` and `menu` wait for the person: the call answers when
 they do. A path picked is one the extension may then read for the run (a
 save, or inside a folder picked: write), past `capabilities.folders`.
+On a desk the pickers are the platform's own (rfd: the portal on Linux,
+the system's panels on macOS and Windows), and a photo pick is a file
+picker for images. On iOS (#708, `features/extensions/src/pickers_ios.rs`)
+they are UIKit's: `UIDocumentPickerViewController` opens a file as the
+app's own copy and a folder through its security scope (kept for the
+run); a save is a folder picked and the suggested `name` in it (iOS saves
+by exporting a file that exists); `photo` and `photos` are
+`PHPickerViewController`, which runs outside the app, so no photo-library
+permission is asked, and each image picked is written to the app's
+temporary folder as a plain JPEG, without its metadata (EXIF, the camera,
+GPS), and that copy's path answered. A save's `name` is one plain file
+name in the folder picked (`features/extensions/src/hostcall.rs`
+`save_path`: an absolute name, a slash, `.` or `..` is `Untitled`), and
+the folder's security scope is closed when the extension unloads.
 Every runtime makes the same calls: Luau's `host.notify`,
 `host.clipboard_read`, `host.pick`, `host.prompt`, `host.menu`,
 `host.decorate` (`features/extensions/src/luau_host.rs`; a cancel is
@@ -3179,6 +3193,79 @@ file, `EXT_PAGE_CALL`, a headless host), `features/extensions/tests/wasi.rs`
 (`a_component_notifies_copies_asks_and_gets_the_answers_back`),
 `features/pages/tests/host_ui.rs` (a TSX page on `QuickJS` and a Luau
 page).
+
+## The device: OS notifications, the camera, photos, health (#709)
+
+An extension asks for the device's own services in `capabilities.device`,
+one entry each, shown one line each in the consent prompt and granted
+entry by entry:
+
+```toml
+[capabilities]
+device = ["notifications", "camera", "photos", "health:read:steps", "health:write:dietary_energy"]
+```
+
+Health data is an allow-list: each type is named, read and write apart,
+from `features/extensions/src/device.rs` `HEALTH_TYPES` (`steps`,
+`active_energy`, `dietary_energy`, `protein`, `carbohydrates`, `fat`,
+`water`, `distance`, `body_mass`, `heart_rate`); a manifest naming any
+other entry does not load.
+
+| call | what it does | answer | needs |
+|---|---|---|---|
+| `os_notify {id?, title, body?, at_ms?, after_s?}` | an OS notification: now, at a time (ms since the epoch) or after some seconds; the same `id` replaces it | `{id}` | `notifications` |
+| `cancel_os_notify {id}` | takes one it sent or scheduled back | whether it had one | `notifications` |
+| `capture {kind?}` | the camera: the person takes a photo | the image's path, `null` when cancelled | `camera` |
+| `photos {limit?, since_ms?}` | the newest photos in the library (20, at most 200) | `[{id, created_ms, width, height}]` | `photos` |
+| `photo_file {id}` | one of them as a file copied for it | its path, `null` when there is none | `photos` |
+| `health_read {type, from_ms, to_ms, sum?}` | one type over a span: its sum (a summed type's default) or its samples | `{type, unit, sum}` or `{type, unit, samples: [{value, start_ms, end_ms}]}` | `health:read:<type>` |
+| `health_write {type, value, start_ms?, end_ms?}` | one sample, in the type's unit | `null` | `health:write:<type>` |
+
+Every runtime reaches them through its generic call (Luau `host.call`,
+WIT `call`, a page's `EXT_PAGE_CALL`, `EXT_HOST_CALL`). A notification is
+kept under the extension's id (`<extension>/<id>`), so one extension never
+replaces or cancels another's; its name is the banner's subtitle; and
+every one it scheduled or showed is taken back when it unloads, is
+removed, or loses `notifications` (`Device::forget`,
+`Host::grants_changed`). A capture or a photo's copy is a file the
+extension may read for the run, as one a person picked, and a plain JPEG
+drawn again from the pixels: no EXIF camera data, no GPS.
+
+The host answers them with its `Device`
+(`features/extensions/src/device.rs` `Device`; `Host::set_device`). On iOS
+it is `features/extensions/src/device_ios.rs` `IosDevice` (feature
+`device`): `UNUserNotificationCenter` (shown as a banner while the app is in
+front), `UIImagePickerController` with the camera (none on the Simulator:
+unsupported there), `PHAsset` and `PHImageManager`, and `HKHealthStore`.
+The OS asks the person too, the first time each is needed: its own
+prompts, after the manifest's consent. The app's Info.plist carries the
+usage strings (`NSCameraUsageDescription`, `NSPhotoLibraryUsageDescription`,
+`NSHealthShareUsageDescription`, `NSHealthUpdateUsageDescription`).
+
+**Health data is the app's own extensions' alone.** Only an extension
+compiled into the distribution (the Health bundle, #371) may read or
+write it; an installed or development copy is refused (`device.health`,
+`features/extensions/src/device.rs` `HEALTH_LINKED_ONLY`) even with the
+entry in its manifest, and so is a development copy of a built-in's id.
+Nor is it read or written on anyone else's behalf: a built-in's health
+call made for an outside caller (an agent over MCP, a peer) or relayed
+for an extension that is not built in (a service call) is refused
+(`HEALTH_NOT_RELAYED`). It stays on the device unless the person saves it
+to a note.
+
+**Signing.** A phone's build is signed with the app's own entitlements
+(`apps/mobile/ios/Architect.entitlements`: HealthKit with an empty
+`healthkit.access`, so no clinical health records, and no background
+delivery), each only where the App Store profile allows it, with the
+profile's identity; never the profile's whole set, which for HealthKit
+offers clinical records and background delivery.
+`apps/mobile/ios/sign-entitlements.py` makes the set and checks the signed
+app carries exactly it (`deploy-testflight.sh`). A Simulator build is
+signed ad hoc with no entitlements, and HealthKit there answers
+`Missing com.apple.developer.healthkit entitlement`. A desk and a browser answer every device
+call `unsupported` until they have a `Device` of their own: the shape is
+the platform's business only inside it. Tests: `features/extensions/tests/host_device.rs`
+(`FakeDevice`).
 
 ## Timers, events and background extensions
 

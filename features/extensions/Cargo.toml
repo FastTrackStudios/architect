@@ -148,8 +148,33 @@ web = [
 # The platform's file and folder pickers and save dialogs for extensions'
 # `pick` calls (`host_ui_view::WindowUi`): rfd, the same the shell's file
 # inputs use (the portal on Linux, the system's panels on macOS and
-# Windows). Without it a pick is unsupported.
-pickers = ["ui", "dep:rfd"]
+# Windows; UIKit's document and photo pickers on iOS,
+# `src/pickers_ios.rs`). Without it a pick is unsupported.
+# The device's services for extensions (#709, `src/device.rs`): on iOS
+# OS notifications, the camera, the photo library and HealthKit
+# (`src/device_ios.rs`); elsewhere every call unsupported.
+device = [
+    "host",
+    "dep:objc2",
+    "dep:objc2-foundation",
+    "dep:objc2-ui-kit",
+    "dep:objc2-user-notifications",
+    "dep:objc2-photos",
+    "dep:objc2-health-kit",
+    "dep:block2",
+    "dep:dispatch2",
+]
+pickers = [
+    "ui",
+    "dep:rfd",
+    "dep:objc2",
+    "dep:objc2-foundation",
+    "dep:objc2-ui-kit",
+    "dep:objc2-photos-ui",
+    "dep:objc2-uniform-type-identifiers",
+    "dep:block2",
+    "dep:dispatch2",
+]
 remote = ["process", "ui", "architect-theme/dioxus", "dep:blitz-dom", "dep:blitz-traits", "dep:dioxus-native-dom", "dep:futures-timer"]
 
 [dependencies]
@@ -287,6 +312,62 @@ rfd = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "ios")'.dependencies]
 wasmtime = { version = "50.0.1", optional = true, default-features = false, features = ["pulley"] }
+# `pickers` on iOS (src/pickers_ios.rs): the document picker, the photo
+# picker (out of process: no photo-library permission), on the main
+# thread.
+objc2 = { workspace = true, optional = true }
+objc2-foundation = { version = "0.3", optional = true, default-features = false, features = [
+    "std",
+    "block2",
+    "NSArray",
+    "NSData",
+    "NSDate",
+    "NSDictionary",
+    "NSEnumerator",
+    "NSError",
+    "NSSet",
+    "NSSortDescriptor",
+    "NSFileManager",
+    "NSItemProvider",
+    "NSProgress",
+    "NSString",
+    "NSURL",
+    "NSUUID",
+] }
+objc2-ui-kit = { workspace = true, optional = true, default-features = false, features = [
+    "std",
+    "block2",
+    "objc2-uniform-type-identifiers",
+    "objc2-core-foundation",
+    "UIApplication",
+    "UIDocumentPickerViewController",
+    "UIImage",
+    "UIImagePickerController",
+    "UINavigationController",
+    "UIResponder",
+    "UIScene",
+    "UISceneDefinitions",
+    "UIView",
+    "UIViewController",
+    "UIWindow",
+    "UIWindowScene",
+] }
+objc2-photos-ui = { version = "0.3", optional = true, default-features = false, features = [
+    "std",
+    "block2",
+    "PHPicker",
+] }
+objc2-uniform-type-identifiers = { version = "0.3", optional = true, default-features = false, features = [
+    "std",
+    "UTCoreTypes",
+    "UTType",
+] }
+# `device` on iOS (src/device_ios.rs).
+objc2-user-notifications = { version = "0.3", optional = true }
+objc2-photos = { version = "0.3", optional = true }
+objc2-health-kit = { version = "0.3", optional = true }
+block2 = { version = "0.6", optional = true }
+dispatch2 = { version = "0.3", optional = true, default-features = false, features = ["std", "objc2"] }
 
 [lib]
 doctest = false

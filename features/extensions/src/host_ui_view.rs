@@ -10,8 +10,9 @@
 //! The clipboard is the system's (`hostui::system_clipboard_read`); the
 //! pickers are the platform's own (`rfd`, feature `pickers`: the portal on
 //! Linux, the system's panels on macOS and Windows), the same the shell's
-//! file inputs use; without the feature, or on a platform without them,
-//! a pick is [`HostError::Unsupported`].
+//! file inputs use; on iOS `UIKit`'s document and photo pickers
+//! (`crate::pickers_ios`); without the feature, or on a platform without
+//! them, a pick is [`HostError::Unsupported`].
 //!
 //! [`Decorations`] draws what extensions set on a row or a tab
 //! (`Host::decorations_of`); a file tree puts one after each row's name.
@@ -217,8 +218,7 @@ impl HostUi for WindowUi {
     }
 
     fn pick(&self, from: &Asker, pick: Pick) -> Asked<Option<Vec<String>>> {
-        let _ = from;
-        native_pick(pick)
+        native_pick(&from.id, pick)
     }
 
     fn prompt(&self, from: &Asker, prompt: Prompt) -> Asked<Option<Value>> {
@@ -243,13 +243,19 @@ impl HostUi for WindowUi {
     feature = "pickers",
     any(target_os = "linux", target_os = "macos", target_os = "windows")
 ))]
-fn native_pick(pick: Pick) -> Asked<Option<Vec<String>>> {
+fn native_pick(owner: &str, pick: Pick) -> Asked<Option<Vec<String>>> {
     use crate::hostcall::PickKind;
+    let _ = owner;
     let (tx, rx) = oneshot::channel();
     std::thread::spawn(move || {
         let mut dialog = rfd::AsyncFileDialog::new();
         if let Some(title) = &pick.title {
             dialog = dialog.set_title(title.as_str());
+        }
+        // No photo library here: a photo is an image file.
+        if pick.kind.photos() && pick.filters.is_empty() {
+            let images = crate::hostcall::image_filter();
+            dialog = dialog.add_filter(images.name.as_str(), &images.extensions);
         }
         for f in &pick.filters {
             dialog = dialog.add_filter(f.name.as_str(), &f.extensions);
@@ -263,8 +269,8 @@ fn native_pick(pick: Pick) -> Asked<Option<Vec<String>>> {
         let path = |h: rfd::FileHandle| h.path().display().to_string();
         let picked = futures::executor::block_on(async move {
             match pick.kind {
-                PickKind::Open => dialog.pick_file().await.map(|h| vec![path(h)]),
-                PickKind::OpenMany => dialog
+                PickKind::Open | PickKind::Photo => dialog.pick_file().await.map(|h| vec![path(h)]),
+                PickKind::OpenMany | PickKind::Photos => dialog
                     .pick_files()
                     .await
                     .map(|hs| hs.into_iter().map(path).collect()),
@@ -277,12 +283,24 @@ fn native_pick(pick: Pick) -> Asked<Option<Vec<String>>> {
     Box::pin(async move { Ok(rx.await.unwrap_or(None)) })
 }
 
+/// `UIKit`'s pickers: the document picker (files, folders, a save as a
+/// folder and a name) and the photo picker.
+#[cfg(all(feature = "pickers", target_os = "ios"))]
+fn native_pick(owner: &str, pick: Pick) -> Asked<Option<Vec<String>>> {
+    crate::pickers_ios::pick(owner, pick)
+}
+
 #[cfg(not(all(
     feature = "pickers",
-    any(target_os = "linux", target_os = "macos", target_os = "windows")
+    any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "windows",
+        target_os = "ios"
+    )
 )))]
-fn native_pick(pick: Pick) -> Asked<Option<Vec<String>>> {
-    let _ = pick;
+fn native_pick(owner: &str, pick: Pick) -> Asked<Option<Vec<String>>> {
+    let _ = (owner, pick);
     Box::pin(async { Err(crate::hostui::unsupported("file pickers on this platform")) })
 }
 

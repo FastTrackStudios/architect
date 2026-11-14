@@ -40,6 +40,7 @@
 pub mod capabilities;
 pub mod catalog;
 pub mod contrib;
+pub mod device;
 pub mod documents;
 // The editor being typed in, for extensions (#312).
 pub mod editor;
@@ -71,6 +72,8 @@ pub mod clone;
 pub mod consent;
 #[cfg(feature = "host")]
 pub mod contrib_actions;
+#[cfg(all(feature = "device", target_os = "ios"))]
+pub mod device_ios;
 #[cfg(feature = "crdt")]
 pub mod doc;
 #[cfg(feature = "host")]
@@ -113,6 +116,8 @@ pub mod manage;
 pub mod manager;
 #[cfg(feature = "host")]
 pub mod net;
+#[cfg(all(feature = "pickers", target_os = "ios"))]
+pub(crate) mod pickers_ios;
 // Language servers through the host (#512): `Host::open_code`, the
 // `EDITOR_*` actions. Native only.
 #[cfg(all(feature = "lsp", not(target_family = "wasm")))]

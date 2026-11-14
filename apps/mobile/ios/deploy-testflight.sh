@@ -198,23 +198,25 @@ fi
 echo "=== signing (distribution) ==="
 cp "$PROFILE" "$APP/embedded.mobileprovision"
 security cms -D -i "$PROFILE" > "$WORK/profile.plist"
-/usr/libexec/PlistBuddy -x -c "Print :Entitlements" "$WORK/profile.plist" > "$WORK/entitlements.plist"
-# Universal links (#629): the domains in Architect.entitlements, only when
-# the profile allows Associated Domains (the App ID's capability); without
-# it the app is signed as before and claims no domain.
-if /usr/libexec/PlistBuddy -c "Print :com.apple.developer.associated-domains" "$WORK/entitlements.plist" >/dev/null 2>&1; then
-    /usr/libexec/PlistBuddy -c "Delete :com.apple.developer.associated-domains" "$WORK/entitlements.plist"
-    /usr/libexec/PlistBuddy -c "Merge $SCRIPT_DIR/Architect.entitlements" "$WORK/entitlements.plist"
-    echo "=== associated domains: $(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.associated-domains' "$WORK/entitlements.plist" | tr -d '\n') ==="
-else
-    echo "note: the profile has no Associated Domains: this build claims no universal links" >&2
-fi
+/usr/libexec/PlistBuddy -x -c "Print :Entitlements" "$WORK/profile.plist" > "$WORK/profile-entitlements.plist"
+# The app's own entitlements (Architect.entitlements: universal links,
+# HealthKit without clinical records), each only where the profile allows
+# it, with the profile's identity; never the profile's whole set, which
+# for HealthKit offers clinical records and background delivery (#709).
+echo "=== entitlements (the app's own, within the profile) ==="
+/usr/bin/python3 -I "$SCRIPT_DIR/sign-entitlements.py" make \
+    "$WORK/profile-entitlements.plist" "$SCRIPT_DIR/Architect.entitlements" "$WORK/entitlements.plist"
 # Inside out: anything nested first, then the app.
 find "$APP" -mindepth 1 \( -name "*.dylib" -o -name "*.framework" \) -print0 \
     | while IFS= read -r -d '' f; do codesign --force --keychain "$KEYCHAIN" --sign "$SIGN_ID" --timestamp "$f"; done
 codesign --force --keychain "$KEYCHAIN" --sign "$SIGN_ID" \
     --entitlements "$WORK/entitlements.plist" --timestamp "$APP"
 codesign --verify --deep --strict "$APP"
+# What it was signed with is what was made: no clinical records, nothing
+# of the profile's the app did not ask for.
+codesign -d --entitlements :- "$APP" > "$WORK/signed-entitlements.plist" 2>/dev/null
+/usr/bin/python3 -I "$SCRIPT_DIR/sign-entitlements.py" verify \
+    "$WORK/signed-entitlements.plist" "$WORK/entitlements.plist"
 
 echo "=== packaging IPA ==="
 mkdir -p "$WORK/Payload"
