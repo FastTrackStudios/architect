@@ -73,9 +73,10 @@ draws as this list at the note's head, in the place an extension's claimed view
 takes. Each row shows the item's cover, its title
 over its subtitle, and its length. Each section gets a heading. A row with
 nothing to play is greyed. Pressing a row plays it: the whole collection
-becomes one queue on the playhead (`architect.playhead`, #589), the playing
-row is marked, next and previous follow the list, and the end of an item moves
-on to the next.
+becomes one queue on the playhead (`architect.playhead`, #589), the current
+row's title takes the accent (its number gives way to moving bars while it
+plays, and stays, in the accent, while it is paused), next and previous follow
+the list, and the end of an item moves on to the next.
 
 - An extension whose island claims the note's type (`SiteIsland::embed_note`,
   #659) draws instead of the core list.
