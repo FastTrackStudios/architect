@@ -28,6 +28,12 @@ blitz-dom = { workspace = true }
 blitz-paint = { workspace = true, features = ["custom-widget"] }
 blitz-traits = { workspace = true }
 dioxus-native-dom = { workspace = true }
+# tests/shots.rs: the showcase's screenshots, rendered on the CPU in the
+# app's built-in themes.
+architect-theme = { workspace = true, features = ["dioxus"] }
+anyrender = { workspace = true }
+anyrender_vello_cpu = { workspace = true }
+png = { workspace = true }
 
 [lints]
 workspace = true

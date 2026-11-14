@@ -1943,8 +1943,11 @@ dependencies = [
 name = "architect-sandbox-sketch"
 version = "0.1.0"
 dependencies = [
+ "anyrender",
+ "anyrender_vello_cpu",
  "architect",
  "architect-extensions",
+ "architect-theme",
  "architect-workspace",
  "architect-workspace-hack",
  "blitz-dom",
@@ -1953,6 +1956,7 @@ dependencies = [
  "dioxus",
  "dioxus-native-dom",
  "futures",
+ "png 0.17.16",
  "tempfile",
 ]
 
