@@ -122,6 +122,20 @@
           # The node, without the window. `no_workspace_hack` drops the
           # hakari crate, which would otherwise pull the GUI stack's
           # features into every member (Cargo.toml's workspace-hack lines).
+          # `archext install` (features/extensions/archive): a signed
+          # extension archive checked against a pinned hash and publisher
+          # keys, then unpacked; what `lib.architectExtension` builds with.
+          archext = craneLib.buildPackage {
+            pname = "archext";
+            inherit version src cargoVendorDir;
+            strictDeps = true;
+            cargoArtifacts = null;
+            doCheck = false;
+            cargoExtraArgs = "--package architect-extension-archive --bin archext";
+            RUSTFLAGS = "--cfg no_workspace_hack";
+            meta.mainProgram = "archext";
+          };
+
           architect-node = craneLib.buildPackage {
             pname = "architect-node";
             inherit version src cargoVendorDir;
@@ -345,6 +359,7 @@
         in
         {
           inherit
+            archext
             architect-node
             architect-cli
             architect-web-wasm
@@ -388,10 +403,44 @@
         default = architect-desktop;
       };
 
-      # The launcher's choice between the store's AppImage and a downloaded
-      # update (nix/desktop/test-choose.sh).
-      checks.x86_64-linux.architect-desktop-choose =
-        self.packages.x86_64-linux.architect-desktop.passthru.tests.choose;
+      # Extensions for a Nix-built deployment (#583, nix/node/extension.nix):
+      # a signed `.archext` fetched by pinned version and hash, its signature
+      # checked at build time, unpacked into a store path.
+      lib.architectExtension =
+        args:
+        import ./nix/node/extension.nix (
+          {
+            archext = self.packages.${args.pkgs.stdenv.hostPlatform.system}.archext;
+          }
+          // args
+        );
+
+      # The node as a NixOS service, with `services.architect-node.extensions`
+      # (nix/node/module.nix).
+      nixosModules = rec {
+        architect-node = import ./nix/node/module.nix { inherit self; };
+        default = architect-node;
+      };
+
+      checks.x86_64-linux =
+        let
+          pkgs = import nixpkgs {
+            system = "x86_64-linux";
+            overlays = [ devenv-fleet.overlays.default ];
+          };
+        in
+        {
+          # The launcher's choice between the store's AppImage and a
+          # downloaded update (nix/desktop/test-choose.sh).
+          architect-desktop-choose = self.packages.x86_64-linux.architect-desktop.passthru.tests.choose;
+        }
+        # A node with an extension; a wrong hash, a bad signature and a
+        # tampered archive refused at build time (nix/tests/extensions.nix).
+        // import ./nix/tests/extensions.nix {
+          inherit pkgs nixpkgs;
+          inherit (self.lib) architectExtension;
+          module = self.nixosModules.architect-node;
+        };
     };
 
   nixConfig = {
