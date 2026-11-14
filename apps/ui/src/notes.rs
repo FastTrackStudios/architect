@@ -185,10 +185,9 @@ pub fn source() -> Option<architect_navigator::VaultSource> {
             let name = if crate::distribution().is_sandbox() {
                 "Demo vault".to_owned()
             } else {
-                open.root().file_name().map_or_else(
-                    || "Vault".to_owned(),
-                    |n| n.to_string_lossy().into_owned(),
-                )
+                open.root()
+                    .file_name()
+                    .map_or_else(|| "Vault".to_owned(), |n| n.to_string_lossy().into_owned())
             };
             crate::vault::watched(open, name)
         })

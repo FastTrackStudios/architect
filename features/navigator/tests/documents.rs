@@ -119,7 +119,10 @@ fn an_extension_lists_creates_edits_renames_and_files_notes_in_the_vault() {
 
     let made = run(list, "LAB_TIDY_NEW", &json!({ "title": "Inbox" }));
     assert_eq!(made["path"], "notes/Inbox.md", "{made}");
-    assert_eq!(on_disk(&root, "notes/Inbox.md").as_deref(), Some("# Inbox\n"));
+    assert_eq!(
+        on_disk(&root, "notes/Inbox.md").as_deref(),
+        Some("# Inbox\n")
+    );
     heard(list, "doc.created notes/Inbox.md");
 
     let after = run(list, "LAB_TIDY_TIDY", &json!({ "path": "notes/Inbox.md" }));
@@ -212,7 +215,10 @@ fn an_extensions_edit_merges_into_an_open_notes_typing() {
     // The person saved first: the extension's edit merges with what is
     // on disk now, not the text it read.
     source
-        .save("notes/Welcome.md", "---\ntidy: true\n---\n# Big Welcome\n\n— tidied\n")
+        .save(
+            "notes/Welcome.md",
+            "---\ntidy: true\n---\n# Big Welcome\n\n— tidied\n",
+        )
         .unwrap();
     let docs = VaultDocuments::new(source.clone());
     let by = architect::action::Principal::extension("lab.tidy", None);
@@ -228,7 +234,10 @@ fn an_extensions_edit_merges_into_an_open_notes_typing() {
         )
         .unwrap();
     assert!(after.ends_with("— tidied\n- [ ] call Sam\n"), "{after}");
-    assert_eq!(on_disk(&root, "notes/Welcome.md").as_deref(), Some(after.as_str()));
+    assert_eq!(
+        on_disk(&root, "notes/Welcome.md").as_deref(),
+        Some(after.as_str())
+    );
 }
 
 #[test]
@@ -276,5 +285,8 @@ fn a_path_that_is_not_a_note_is_refused_and_nothing_changes() {
         ),
         Err(DocError::Invalid(_))
     ));
-    assert_eq!(on_disk(&root, "notes/Welcome.md").as_deref(), Some("# Welcome\n"));
+    assert_eq!(
+        on_disk(&root, "notes/Welcome.md").as_deref(),
+        Some("# Welcome\n")
+    );
 }

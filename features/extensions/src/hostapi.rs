@@ -99,6 +99,21 @@ pub trait SettingValues: Send + Sync {
     fn set(&self, key: &str, value: Value) -> Result<(), String>;
 }
 
+/// Where each extension's data (`data.get` / `data.set`) is kept when
+/// the host has no data root ([`Host::with_data_root`]): a browser's
+/// storage (#495). Without one either, in memory for the run.
+pub trait DataStore: Send + Sync {
+    /// Extension `id`'s data, when it has any kept.
+    fn load(&self, id: &str) -> Option<BTreeMap<String, Value>>;
+
+    /// Keeps extension `id`'s data, in place of what it had.
+    ///
+    /// # Errors
+    ///
+    /// The store refused it (full, or not there).
+    fn keep(&self, id: &str, data: &BTreeMap<String, Value>) -> Result<(), String>;
+}
+
 /// Settings' values in memory, for the run.
 #[derive(Debug, Default)]
 pub struct MemoryValues(Mutex<BTreeMap<String, Value>>);
@@ -144,8 +159,10 @@ pub(crate) struct Services {
     data_root: Mutex<Option<PathBuf>>,
     /// The app's own list, when its actions are not on the host's.
     app_list: Mutex<Option<architect::action::ActionList>>,
-    /// Data kept in memory, when there is no data root.
+    /// Data kept in memory, when there is no data root or store.
     data: Mutex<BTreeMap<String, BTreeMap<String, Value>>>,
+    /// Where data is kept when there is no data root.
+    data_store: Mutex<Option<Arc<dyn DataStore>>>,
     /// The app's interface, for extensions (none given: [`NoUi`]).
     ui: Mutex<Option<Arc<dyn HostUi>>>,
     /// The window's own interface, kept for whoever draws it
@@ -206,6 +223,7 @@ impl Default for Services {
             data_root: Mutex::new(None),
             app_list: Mutex::new(None),
             data: Mutex::new(BTreeMap::new()),
+            data_store: Mutex::new(None),
             ui: Mutex::new(None),
             #[cfg(feature = "ui")]
             window: Mutex::new(None),
@@ -442,6 +460,14 @@ impl Host {
     #[must_use]
     pub fn with_data_root(self, root: impl Into<PathBuf>) -> Self {
         *lock(&self.services().data_root) = Some(root.into());
+        self
+    }
+
+    /// Keeps each extension's data in `store` when there is no data root
+    /// (a browser's storage, #495).
+    #[must_use]
+    pub fn with_data_store(self, store: impl DataStore + 'static) -> Self {
+        *lock(&self.services().data_store) = Some(Arc::new(store));
         self
     }
 
@@ -1459,10 +1485,13 @@ impl ExtensionApi {
     fn data(&self, host: &Host) -> BTreeMap<String, Value> {
         self.data_file(host).map_or_else(
             || {
-                lock(&host.services().data)
-                    .get(&self.id)
-                    .cloned()
-                    .unwrap_or_default()
+                let store = lock(&host.services().data_store).clone();
+                store.and_then(|s| s.load(&self.id)).unwrap_or_else(|| {
+                    lock(&host.services().data)
+                        .get(&self.id)
+                        .cloned()
+                        .unwrap_or_default()
+                })
             },
             |file| {
                 std::fs::read_to_string(file)
@@ -1475,6 +1504,12 @@ impl ExtensionApi {
 
     fn keep_data(&self, host: &Host, data: BTreeMap<String, Value>) -> Result<(), HostError> {
         let Some(file) = self.data_file(host) else {
+            let store = lock(&host.services().data_store).clone();
+            if let Some(store) = store {
+                return store
+                    .keep(&self.id, &data)
+                    .map_err(|message| HostError::Failed { message });
+            }
             lock(&host.services().data).insert(self.id.clone(), data);
             return Ok(());
         };

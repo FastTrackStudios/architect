@@ -719,6 +719,29 @@ What changes in a browser:
 `cargo xtask dist web` builds a distribution crate's own wasm when it has
 a `web` feature (`xtask/src/dist.rs` `build_web`).
 
+**Documents, events and data in the browser** (#495 H1, H2, H4):
+
+- **Documents.** The host's documents are the web vault
+  (`apps/web/src/app/documents.rs` `WebDocuments`, the desktop's
+  `VaultDocuments` over the page's `MemorySource`). That is the demo
+  vault in `?demo`, and the signed-in org's vaults otherwise. An edit is
+  `documents::apply_edits`, and a note open in the app shows it.
+  - On the org's vaults a create or an edit is also sent to the node
+    (`Notes::write`). A rename, move or delete is the desktop app's for
+    now: the org lane has no such call.
+- **Events.** The person's own edits are raised as `doc.*` on the app's
+  list (`WebDocuments::raise_on`), the extension's own left out. The
+  host hears the app's events on a page timer, where a desk has
+  `Host::watch`'s thread.
+- **Data** goes to the browser's `localStorage`, one entry per
+  extension and org (`hostapi::DataStore`, `Host::with_data_store`). The
+  demo keeps nothing.
+- **Settings** are the settings page's, kept in the browser by the page
+  (`ui::use_page_setting_values`).
+
+`apps/web/test/app-documents.test.mjs` drives all of it through the
+demo's probe extension (`/app/?demo&probe` only).
+
 ## Processes over vox
 
 A process extension is a program the host starts and speaks

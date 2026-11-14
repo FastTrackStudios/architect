@@ -56,12 +56,12 @@ pub mod template;
 pub mod tree;
 pub mod virtualize;
 
+#[cfg(feature = "documents")]
+pub mod documents;
 #[cfg(feature = "ui")]
 pub mod ui;
 #[cfg(feature = "vault")]
 pub mod vault_source;
-#[cfg(feature = "documents")]
-pub mod documents;
 
 pub use appearance::Appearance;
 pub use calendar::{CalendarDay, CalendarGrid, CalendarWeek, HeaderPeriod, PeriodicNotes};

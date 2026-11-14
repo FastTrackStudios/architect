@@ -48,6 +48,12 @@ fn edited() {
     EDITED.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// The demo vault was changed (an extension's documents too): leaving it
+/// asks first.
+pub fn mark_edited() {
+    edited();
+}
+
 /// The vault the app shows, in context above the Vault tab: the demo's,
 /// or the signed-in account's org vaults (`org`, which reads notes not yet
 /// read and writes edits back to the node).
@@ -843,6 +849,36 @@ impl Editor {
         (self.keep)(body);
     }
 
+    /// The note changed in the vault from elsewhere (an extension's
+    /// document edit, #495): its body into the text area, the caret kept,
+    /// unless it is what the text area shows already (this editor's own
+    /// keep coming back). Not while an IME composes: the next change
+    /// brings it.
+    fn outside(&self, full: &str) {
+        if self.composing.get() {
+            return;
+        }
+        self.absorb();
+        let (_, body) = architect_navigator::markdown::split_block(full);
+        if *self.shown.borrow() == body {
+            return;
+        }
+        if let Some(area) = self.area() {
+            let now = area.value();
+            let caret =
+                |at: Option<u32>| at.map(|at| crate::live_text::caret_after(at, &now, body));
+            let (start, end) = (
+                caret(area.selection_start().ok().flatten()),
+                caret(area.selection_end().ok().flatten()),
+            );
+            area.set_value(body);
+            if let (Some(start), Some(end)) = (start, end) {
+                let _ = area.set_selection_range(start, end);
+            }
+        }
+        body.clone_into(&mut self.shown.borrow_mut());
+    }
+
     /// The session attached: the text area shows the document, and is
     /// typed into from now on (what it held before is dropped: it was
     /// read-only).
@@ -956,6 +992,31 @@ fn NoteText(path: String, text: String) -> Element {
             });
         }
         editor
+    });
+    // The demo's note follows its vault: a change made elsewhere (an
+    // extension's document edit) shows here; on the org's vaults the live
+    // session brings every change.
+    let _follow = use_hook(|| {
+        if vault.org.is_some() {
+            return None;
+        }
+        let (tx, mut rx) = futures_channel::mpsc::unbounded::<()>();
+        let watched = path.clone();
+        let sub = source.subscribe(Box::new(move |e| {
+            if matches!(e, architect_navigator::SourceEvent::FileModified(f) if f.path == watched) {
+                let _ = tx.unbounded_send(());
+            }
+        }));
+        let (ed, src, p) = (std::rc::Rc::clone(&editor), source.clone(), path.clone());
+        spawn(async move {
+            use futures_util::StreamExt as _;
+            while rx.next().await.is_some() {
+                if let Some(full) = src.read_text(&p) {
+                    ed.outside(&full);
+                }
+            }
+        });
+        Some(std::rc::Rc::new(sub))
     });
     let editing = architect_shell::use_editing_actions("editor:note", &[]);
     let on_input = {

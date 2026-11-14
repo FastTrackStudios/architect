@@ -8,7 +8,9 @@ use architect::action::Principal;
 use crdt::loro::{ID, LoroDoc, LoroText, UpdateOptions};
 use crdt::{CrdtDoc, History};
 
-use super::{DocEdit, DocError, DocInfo, Documents, is_under};
+use super::{DocEdit, DocError};
+#[cfg(not(target_family = "wasm"))]
+use super::{DocInfo, Documents, is_under};
 
 /// How many steps of each document's undo are kept.
 const KEEP: usize = 100;
@@ -254,6 +256,10 @@ pub fn apply_edits(text: &str, edits: &[DocEdit], by: &Principal) -> Result<Stri
     Ok(t.to_string())
 }
 
+// Its store is not `Send` in a browser, where nothing is: there the
+// documents are the web app's own (`apps/web`), and `apply_edits` is what
+// it shares from here (#495).
+#[cfg(not(target_family = "wasm"))]
 impl Documents for CrdtDocuments {
     fn list(&self, under: Option<&str>) -> Result<Vec<DocInfo>, DocError> {
         Ok(self
