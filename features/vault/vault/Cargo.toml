@@ -27,6 +27,7 @@ repository.workspace = true
 [dependencies]
 vault-proto = { workspace = true, default-features = false }
 vault-live = { workspace = true, optional = true }
+vault-query = { workspace = true, optional = true }
 vault-obsidian = { workspace = true, optional = true }
 # `actions`: the VAULT_* actions on architect's action list.
 architect = { workspace = true, optional = true, features = ["action-list"] }
@@ -38,7 +39,7 @@ tracing = { workspace = true, optional = true }
 
 [features]
 default = ["live", "obsidian", "vox"]
-live = ["dep:vault-live"]
+live = ["dep:vault-live", "dep:vault-query"]
 obsidian = ["dep:vault-obsidian", "live"]
 vox = ["vault-proto/vox"]
 # The VAULT_* actions over an open folder (`actions::OpenVault`).

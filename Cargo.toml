@@ -91,6 +91,7 @@ members = [
     "features/bases",
     "features/vault/vault-proto",
     "features/vault/vault-live",
+    "features/vault/vault-query",
     "features/vault/vault-obsidian",
     "features/vault/vault-entity",
     "features/vault/vault-doc",
@@ -196,6 +197,7 @@ architect-updates = { path = "features/updates" }
 vault-proto = { path = "features/vault/vault-proto", default-features = false }
 vault-live = { path = "features/vault/vault-live" }
 vault-obsidian = { path = "features/vault/vault-obsidian" }
+vault-query = { path = "features/vault/vault-query" }
 vault-entity = { path = "features/vault/vault-entity" }
 vault-doc = { path = "features/vault/vault-doc" }
 vault-collab = { path = "features/vault/vault-collab" }

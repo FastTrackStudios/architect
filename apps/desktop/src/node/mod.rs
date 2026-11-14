@@ -436,6 +436,7 @@ pub async fn start_with_shell(
         account: Arc::new(Mutex::new(service::AccountView::default())),
         files: files.clone(),
         hosts: config.host_org.clone(),
+        indexed: service::Indexed::default(),
     };
 
     // ── The account ──────────────────────────────────────────────────
@@ -636,7 +637,10 @@ pub async fn start_with_shell(
         tasks.push(task);
     }
     if let (Some(lane), Some(_)) = (&lane, &config.host_org) {
-        let notes = architect::layers![service::notes::NotesService].provide(state.clone());
+        // The notes, and their index for a browser's queries (it runs them
+        // itself, over its copy).
+        let notes = architect::layers![service::notes::NotesService, service::index_sync::VaultIndexSyncService]
+            .provide(state.clone());
         host = lane
             .clone()
             .with_vaults(registry.clone(), catalog.clone(), notes)

@@ -39,6 +39,8 @@ license.workspace = true
 # in-memory snapshot; vault-obsidian translates obsidian-shaped
 # directories into that shape.
 vault-live.workspace = true
+# The note parser and a note as a row, wasm-clean.
+vault-query.workspace = true
 vault-proto = { workspace = true, features = ["vox"] }
 # `graph.rs` — the `VaultGraph` RPC backend needs the
 # `architect::HasDispatcher` derive so the bridge can marshal
