@@ -33,7 +33,7 @@
 //! handle to detach. Caller is expected to start one watcher per
 //! registered vault; the backend itself doesn't auto-spawn.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -1192,7 +1192,7 @@ fn walk_files(
 /// Every file the manifest covers, hashed — the manifest's rows, for
 /// the files `keep` admits (by root-relative path).
 ///
-/// Each file is hashed by streaming it through [`sha256_file`], never
+/// Each file is hashed by streaming it through [`sha256_reader`], never
 /// read whole: a manifest is asked for on every replica poll and every
 /// doc-peer `list`, and a vault holds whatever its people drop into it.
 /// Reading each file into a `Vec` to hash it made the peak of one call
@@ -1208,9 +1208,20 @@ fn collect(
         if !keep(&rel) {
             return Ok(());
         }
-        let (sha256, size) = sha256_file(path).map_err(io_err)?;
-        let mtime_ms = std::fs::metadata(path)
-            .map_err(io_err)?
+        // Opened through `open_own`, never by path: a file swapped for a
+        // link since the walk saw its type is skipped, not hashed
+        // through the link.
+        let file = match crate::own::open_own(root, &rel) {
+            Ok(file) => file,
+            Err(e) if crate::own::is_not_own(&e) => {
+                tracing::debug!(path = %path.display(), ?e, "not the vault's own file now; not in the manifest");
+                return Ok(());
+            }
+            Err(e) => return Err(io_err(e)),
+        };
+        let meta = file.metadata().map_err(io_err)?;
+        let (sha256, size) = sha256_reader(file).map_err(io_err)?;
+        let mtime_ms = meta
             .modified()
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
@@ -1597,6 +1608,10 @@ fn forward_watcher_events(
     vault_id: String,
 ) {
     let mut seen: HashMap<String, Seen> = HashMap::new();
+    // Every path known to be a symlink: those at start, and each an event
+    // finds is one. Once a link is removed its path is simply gone, which
+    // looks like a deleted file; this set is what tells the two apart.
+    let mut links = symlinks_under(&root);
     // The watcher reports canonical paths (macOS's FSEvents: `/private/var`
     // for a root given as `/var`, a symlink), so an event is matched
     // against the root as given and as the filesystem names it — else
@@ -1627,16 +1642,21 @@ fn forward_watcher_events(
         // it on every peer (`crate::own`).
         if crate::own::through_symlink(&root, &rel) {
             tracing::debug!(path = %rel, "watcher: a symlink in the vault; ignored");
+            links.insert(rel);
             continue;
         }
         // `Changed` events from the debouncer cover both
         // create+modify AND delete. Reload-or-classify by
-        // existence — cheaper than disambiguating the raw
-        // `notify::EventKind`.
-        let payload = if abs.exists() {
-            // Hashed by streaming: the event needs the digest and the
-            // size, never the bytes.
-            match sha256_file(&abs) {
+        // existence (never following a link) — cheaper than
+        // disambiguating the raw `notify::EventKind`.
+        let payload = if std::fs::symlink_metadata(&abs).is_ok() {
+            // A plain file now, where a link may have been: its later
+            // removal is a real deletion.
+            links.remove(&rel);
+            // Hashed by streaming, through `open_own` (no link followed,
+            // even one swapped in since the check above): the event
+            // needs the digest and the size, never the bytes.
+            match crate::own::open_own(&root, &rel).and_then(sha256_reader) {
                 Ok((sha256, size)) => {
                     let mtime_ms = mtime_ms(&abs);
                     let now = Seen {
@@ -1653,11 +1673,23 @@ fn forward_watcher_events(
                         size,
                     }
                 }
+                Err(e) if crate::own::is_not_own(&e) => {
+                    // A folder, or a link swapped in since the check.
+                    tracing::debug!(path = %rel, ?e, "watcher: not a plain file; ignored");
+                    continue;
+                }
                 Err(e) => {
                     tracing::warn!(?abs, ?e, "watcher: failed to read changed file");
                     continue;
                 }
             }
+        } else if was_link(&mut links, &rel) {
+            // A symlink removed (`stow -D`): the vault never had this
+            // file, so nothing was deleted. A `Delete` would tombstone
+            // the document of the note the link once hid and remove it
+            // on every peer.
+            tracing::debug!(path = %rel, "watcher: a symlink removed; ignored");
+            continue;
         } else {
             seen.remove(&rel);
             VaultEvent::Delete { path: rel }
@@ -1674,6 +1706,49 @@ fn forward_watcher_events(
     }
 }
 
+/// Every symlink below `root`, root-relative and `/`-separated, found by
+/// the entries' own types: a symlinked folder is recorded, never walked
+/// into. Unreadable folders are skipped.
+fn symlinks_under(root: &Path) -> HashSet<String> {
+    fn walk(root: &Path, dir: &Path, out: &mut HashSet<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            let path = entry.path();
+            if kind.is_symlink() {
+                if let Ok(rel) = path.strip_prefix(root) {
+                    out.insert(rel.to_string_lossy().replace('\\', "/"));
+                }
+            } else if kind.is_dir() {
+                walk(root, &path, out);
+            }
+        }
+    }
+    let mut out = HashSet::new();
+    walk(root, root, &mut out);
+    out
+}
+
+/// Whether the gone path `rel` was a symlink, or under a symlinked
+/// folder, by `links`; a removed link leaves the set.
+fn was_link(links: &mut HashSet<String>, rel: &str) -> bool {
+    if links.remove(rel) {
+        return true;
+    }
+    let mut at = rel;
+    while let Some((parent, _)) = at.rsplit_once('/') {
+        if links.contains(parent) {
+            return true;
+        }
+        at = parent;
+    }
+    false
+}
+
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(bytes);
@@ -1688,8 +1763,13 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// allocated the whole file (and, for a vault holding a bounce or a
 /// PDF, made that the peak of the call).
 fn sha256_file(path: &Path) -> std::io::Result<(String, u64)> {
+    sha256_reader(std::fs::File::open(path)?)
+}
+
+/// [`sha256_file`] of a file already open (through
+/// [`crate::own::open_own`], so no link is followed).
+fn sha256_reader(mut file: std::fs::File) -> std::io::Result<(String, u64)> {
     use std::io::Read as _;
-    let mut file = std::fs::File::open(path)?;
     let mut h = Sha256::new();
     let mut buf = [0u8; 16 * 1024];
     let mut len = 0u64;

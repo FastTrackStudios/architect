@@ -709,6 +709,25 @@ async fn a_symlinked_note_is_neither_synced_nor_deleted_on_either_node() {
         reads(&laptop_vault.join("hello.md"), "After the swap.")
     })
     .await;
+    // Then the link removed (`stow -D`): the path is gone, but it was a
+    // link, so that is no deletion either. Another edit marks the laptop
+    // caught up past it.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    std::fs::remove_file(always_vault.join("Hidden.md")).unwrap();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    always
+        .state
+        .write(
+            "notes".into(),
+            "hello.md".into(),
+            "# Hello\n\nKept.\n\nAfter the swap.\n\nAfter the unlink.\n".into(),
+        )
+        .await
+        .unwrap();
+    until("the edit after the unlink reaches the laptop", || {
+        reads(&laptop_vault.join("hello.md"), "After the unlink.")
+    })
+    .await;
     // A few more sweeps, for anything still to arrive.
     tokio::time::sleep(Duration::from_secs(3)).await;
 
@@ -719,11 +738,13 @@ async fn a_symlinked_note_is_neither_synced_nor_deleted_on_either_node() {
         "the laptop's copy of the hidden note was removed or changed"
     );
     assert_ne!(laptop.note_deleted("notes", "Hidden.md").await, Some(true));
+    assert_ne!(always.note_deleted("notes", "Hidden.md").await, Some(true));
     assert_eq!(
         std::fs::read_to_string(laptop_vault.join("Alias.md")).unwrap(),
         alias
     );
-    for link in ["Alias.md", "Out.md", "Ext", "Hidden.md"] {
+    assert!(std::fs::symlink_metadata(always_vault.join("Hidden.md")).is_err());
+    for link in ["Alias.md", "Out.md", "Ext"] {
         let meta = std::fs::symlink_metadata(always_vault.join(link)).unwrap();
         assert!(
             meta.file_type().is_symlink(),

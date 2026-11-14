@@ -219,13 +219,21 @@ fn a_file_swapped_for_a_symlink_after_listing_is_not_followed() {
 
 /// The watcher reports no `Delete` (and no `Put`) for a symlink: a note
 /// swapped for a link, or a dangling link, is hidden, never deleted, so
-/// its document is not tombstoned and no peer removes its copy. A real
-/// edit after them still arrives, and arrives first.
+/// its document is not tombstoned and no peer removes its copy. Nor when
+/// the link is removed later (`stow -D`): the path was a link, so its
+/// going is no deletion either — whether the link was there before the
+/// watcher started or came while it ran. A real edit after them still
+/// arrives, and arrives first; a real file deleted still reports one.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_watcher_reports_no_delete_for_a_hidden_symlink() {
     let (tmp, b) = setup();
     let vault = b.root("v").unwrap();
     fs::write(vault.join("Swap.md"), "plain at first").unwrap();
+    fs::write(vault.join("Plain.md"), "deleted for real").unwrap();
+    // Links there before the watcher starts.
+    symlink("Note.md", vault.join("Before.md")).unwrap();
+    fs::create_dir_all(vault.join("sub")).unwrap();
+    symlink(tmp.path().join("outside/dir"), vault.join("sub/Ext")).unwrap();
     let tx = b.channel("v").await;
     let mut rx = tx.subscribe();
     let _watch = b.start_watcher("v").await.expect("start watcher");
@@ -238,6 +246,18 @@ async fn the_watcher_reports_no_delete_for_a_hidden_symlink() {
     symlink("Note.md", vault.join("Alias.md")).unwrap();
     symlink("Gone.md", vault.join("Dangling.md")).unwrap();
     symlink(tmp.path().join("outside/dir"), vault.join("Ext")).unwrap();
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    // Every link removed again, as `stow -D` unlinks: the paths are gone.
+    for link in [
+        "Swap.md",
+        "Alias.md",
+        "Dangling.md",
+        "Ext",
+        "Before.md",
+        "sub/Ext",
+    ] {
+        fs::remove_file(vault.join(link)).unwrap();
+    }
     tokio::time::sleep(Duration::from_millis(1200)).await;
     // Then a real edit, the marker the links' events would precede.
     fs::write(vault.join("Real.md"), "real").unwrap();
@@ -255,11 +275,26 @@ async fn the_watcher_reports_no_delete_for_a_hidden_symlink() {
         }
     }
     assert!(seen.is_empty(), "the watcher reported a symlink: {seen:?}");
-    assert!(
-        fs::symlink_metadata(vault.join("Swap.md"))
-            .unwrap()
-            .file_type()
-            .is_symlink()
-    );
+    assert!(!vault.join("Swap.md").exists());
     assert_outside_untouched(tmp.path());
+
+    // A real file deleted is still a deletion, and so is one that
+    // replaced a removed link.
+    fs::write(vault.join("Swap.md"), "plain again").unwrap();
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    fs::remove_file(vault.join("Plain.md")).unwrap();
+    fs::remove_file(vault.join("Swap.md")).unwrap();
+    // (A removal can be reported in more than one debounce window.)
+    let mut deleted = std::collections::BTreeSet::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while deleted.len() < 2 {
+        let evt = tokio::time::timeout_at(deadline, rx.recv())
+            .await
+            .unwrap_or_else(|_| panic!("a real file's delete never arrived: {deleted:?}"))
+            .expect("rx recv ok");
+        if let VaultEvent::Delete { path } = evt {
+            deleted.insert(path);
+        }
+    }
+    assert_eq!(Vec::from_iter(deleted), ["Plain.md", "Swap.md"]);
 }
