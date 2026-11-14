@@ -901,7 +901,7 @@ test('the demo setlist: each song\'s cover reaches its frame as data and the car
     // (#668), and the list's own rows stay in the property table.
     assert.equal(await b.eval(`!!document.querySelector('[data-testid=media-list]')`), false, 'no core list under a claim');
     assert.ok((await b.eval(`[...document.querySelectorAll('[data-testid=note-properties] dt')].map((d) => d.textContent).join(',')`)).includes('sets'));
-    await ask(b, 'transport', 'PLAYHEAD_ITEM', { id: 'Songs/Christmas/Silent Night/Silent Night.md', play: true });
+    await ask(b, 'transport', 'PLAYHEAD_ITEM', { id: 'Libraries/Christmas/Silent Night/Silent Night.md', play: true });
     const s = await until(async () => { const s = await bar(b); return s && s.title === 'Silent Night' && s; }, 10000, 'the card on Silent Night');
     assert.match(s.subtitle, /for KING & COUNTRY/);
     assert.match(await artSrc(b), /^data:image\/svg\+xml;base64,/);
@@ -920,7 +920,7 @@ test('a demo song note plays its recording on the card under its artist, with it
   try {
     await b.go(`${w.f.origin}/app/?demo`);
     await until(() => b.eval(`!!document.querySelector('[data-testid=note-text]')`), 60000, 'the demo');
-    for (const folder of ['Songs', 'Christmas']) await until(() => expand(b, folder), 10000, `the folder ${folder} expanded`);
+    for (const folder of ['Libraries', 'Christmas']) await until(() => expand(b, folder), 10000, `the folder ${folder} expanded`);
     await openNote(b, w.f.origin, ['Sleigh Ride'], 'Sleigh Ride', false);
     await until(() => press(b, 'note-recording-play'), 10000, 'the note\'s Play recording');
     const s = await until(async () => { const s = await bar(b); return s && s.title === 'Sleigh Ride' && s; }, 10000, 'the card on Sleigh Ride');

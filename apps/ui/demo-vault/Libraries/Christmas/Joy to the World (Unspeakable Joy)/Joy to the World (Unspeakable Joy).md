@@ -7,7 +7,7 @@ tempo: 128
 meter: 4/4
 duration: "3:51"
 recording: Recordings/Christmas/Joy to the World (Unspeakable Joy).mp3
-cover: Songs/Christmas/Joy to the World (Unspeakable Joy)/cover.svg
+cover: Libraries/Christmas/Joy to the World (Unspeakable Joy)/cover.svg
 setlist: "[[Setlists/Merry & Bright|Merry & Bright]]"
 tags: [music/christmas]
 ---

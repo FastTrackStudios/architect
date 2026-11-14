@@ -1,7 +1,7 @@
 ---
 title: What Christmas Means
 type: song
-cover: Songs/Christmas/What Christmas Means/cover.svg
+cover: Libraries/Christmas/What Christmas Means/cover.svg
 setlist: "[[Setlists/Merry & Bright|Merry & Bright]]"
 tags: [music/christmas]
 ---

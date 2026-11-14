@@ -165,7 +165,7 @@ mod tests {
 
     #[test]
     fn a_demo_image_is_art_as_a_data_url_and_nothing_else_is() {
-        let cover = super::image_url("Songs/Christmas/Sleigh Ride/cover.svg");
+        let cover = super::image_url("Libraries/Christmas/Sleigh Ride/cover.svg");
         assert!(
             cover
                 .as_deref()
@@ -180,9 +180,9 @@ mod tests {
         assert_eq!(super::image_url("Attachments/Brief.pdf"), None);
         assert_eq!(super::image_url("Attachments/plasma-one.png"), None);
         assert_eq!(super::image_url("Welcome.md"), None);
-        assert_eq!(super::image_url("Songs/Christmas/nothing.svg"), None);
+        assert_eq!(super::image_url("Libraries/Christmas/nothing.svg"), None);
         assert_eq!(
-            super::image_url("../Songs/Christmas/Sleigh Ride/cover.svg"),
+            super::image_url("../Libraries/Christmas/Sleigh Ride/cover.svg"),
             None
         );
         assert_eq!(super::image_url("/Attachments/sun.jpg"), None);
