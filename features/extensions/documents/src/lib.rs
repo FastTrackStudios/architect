@@ -439,12 +439,15 @@ pub fn apply(text: &str, edits: &[Edit]) -> Result<String, DocsError> {
             Edit::Append { text } => chars.extend(text.chars()),
             Edit::Delete { at, len } => {
                 let (at, len) = (at_of(*at), at_of(*len));
-                let end = at.checked_add(len).filter(|e| *e <= chars.len()).ok_or_else(|| {
-                    DocsError::Invalid(format!(
-                        "edit {i}: deletes {len} from {at}, past the text's end ({})",
-                        chars.len()
-                    ))
-                })?;
+                let end = at
+                    .checked_add(len)
+                    .filter(|e| *e <= chars.len())
+                    .ok_or_else(|| {
+                        DocsError::Invalid(format!(
+                            "edit {i}: deletes {len} from {at}, past the text's end ({})",
+                            chars.len()
+                        ))
+                    })?;
                 chars.drain(at..end);
             }
             Edit::Replace { text } => chars = text.chars().collect(),

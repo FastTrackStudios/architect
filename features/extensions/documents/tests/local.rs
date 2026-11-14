@@ -50,7 +50,10 @@ async fn the_client_reaches_the_documents_through_the_gate() {
     let s = |x: &str| x.to_owned();
 
     // Reading needs reads; changing needs writes, on every transport.
-    assert_eq!(refused(docs.list(s("lab.bare"), None).await), "reads.documents");
+    assert_eq!(
+        refused(docs.list(s("lab.bare"), None).await),
+        "reads.documents"
+    );
     assert_eq!(
         refused(docs.create(s("lab.reader"), s("notes/x.md"), s("")).await),
         "writes.documents"
@@ -69,8 +72,13 @@ async fn the_client_reaches_the_documents_through_the_gate() {
             s("lab.writer"),
             s("notes/Inbox.md"),
             vec![
-                Edit::Insert { at: 0, text: s("> ") },
-                Edit::Append { text: s("- [ ] call Sam\n") },
+                Edit::Insert {
+                    at: 0,
+                    text: s("> "),
+                },
+                Edit::Append {
+                    text: s("- [ ] call Sam\n"),
+                },
             ],
             s("Tidy"),
         )
@@ -82,7 +90,9 @@ async fn the_client_reaches_the_documents_through_the_gate() {
         .edit(
             s("lab.writer"),
             s("notes/Inbox.md"),
-            vec![Edit::Replace { text: edited.text.clone() }],
+            vec![Edit::Replace {
+                text: edited.text.clone(),
+            }],
             s("Same"),
         )
         .await
@@ -92,7 +102,9 @@ async fn the_client_reaches_the_documents_through_the_gate() {
         .await
         .unwrap();
     assert_eq!(
-        docs.read(s("lab.reader"), s("archive/Inbox.md")).await.unwrap(),
+        docs.read(s("lab.reader"), s("archive/Inbox.md"))
+            .await
+            .unwrap(),
         edited.text
     );
     // A path that is not one is refused before the store sees it.
@@ -100,16 +112,32 @@ async fn the_client_reaches_the_documents_through_the_gate() {
         user(docs.read(s("lab.reader"), s("../etc/passwd")).await),
         DocsError::Invalid(_)
     ));
-    docs.delete(s("lab.writer"), s("archive/Inbox.md")).await.unwrap();
+    docs.delete(s("lab.writer"), s("archive/Inbox.md"))
+        .await
+        .unwrap();
 
     // Each extension's own data, apart from the others'.
-    docs.set_data(s("lab.reader"), s("k"), Some(s("1"))).await.unwrap();
-    assert_eq!(docs.data(s("lab.reader"), s("k")).await.unwrap(), Some(s("1")));
+    docs.set_data(s("lab.reader"), s("k"), Some(s("1")))
+        .await
+        .unwrap();
+    assert_eq!(
+        docs.data(s("lab.reader"), s("k")).await.unwrap(),
+        Some(s("1"))
+    );
     assert_eq!(docs.data(s("lab.writer"), s("k")).await.unwrap(), None);
 
     // The memory store has no metadata: said, not faked.
     assert!(matches!(
-        user(docs.metadata(s("lab.reader"), MetaQuery { path: Some(s("notes/Welcome.md")), ..MetaQuery::default() }).await),
+        user(
+            docs.metadata(
+                s("lab.reader"),
+                MetaQuery {
+                    path: Some(s("notes/Welcome.md")),
+                    ..MetaQuery::default()
+                }
+            )
+            .await
+        ),
         DocsError::Unsupported(_)
     ));
 }
