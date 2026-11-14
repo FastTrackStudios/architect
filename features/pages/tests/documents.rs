@@ -103,7 +103,7 @@ impl Documents for Memo {
         edits: &[DocEdit],
         step: &str,
         by: &Principal,
-    ) -> Result<String, DocError> {
+    ) -> Result<architect_extensions::documents::Edited, DocError> {
         let mut texts = self.texts.lock().unwrap();
         let text = texts
             .get_mut(path)
@@ -123,14 +123,18 @@ impl Documents for Memo {
                 DocEdit::Replace { text } => chars = text.chars().collect(),
             }
         }
-        *text = chars.into_iter().collect();
-        let after = text.clone();
+        let after: String = chars.into_iter().collect();
+        let changed = *text != after;
+        text.clone_from(&after);
         drop(texts);
         self.steps
             .lock()
             .unwrap()
             .push((step.to_owned(), by.describe()));
-        Ok(after)
+        Ok(architect_extensions::documents::Edited {
+            text: after,
+            changed,
+        })
     }
 
     fn rename(&self, path: &str, to: &str, _by: &Principal) -> Result<DocInfo, DocError> {

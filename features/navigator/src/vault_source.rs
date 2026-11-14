@@ -146,6 +146,23 @@ impl VaultSource {
         Ok(())
     }
 
+    /// Saves `text` as the note at `path` only if it holds `expected` now
+    /// ([`OpenVault::save_if`]), and says so. Whether it wrote.
+    ///
+    /// # Errors
+    ///
+    /// No such note, or it cannot be written.
+    pub fn save_if(&self, path: &str, expected: &str, text: &str) -> Result<bool, String> {
+        if expected == text {
+            return Ok(self.inner.vault.text(path).as_deref() == Some(text));
+        }
+        let wrote = self.inner.vault.save_if(path, expected, text)?;
+        if wrote && let Some(f) = self.file(path) {
+            self.emit(&SourceEvent::FileModified(f));
+        }
+        Ok(wrote)
+    }
+
     /// Makes a new, empty note in `folder` (`""` for the root), named as
     /// Obsidian names one (`Untitled`, `Untitled 1`, …), and says so. Its
     /// path.

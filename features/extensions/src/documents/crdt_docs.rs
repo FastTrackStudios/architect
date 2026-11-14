@@ -8,7 +8,7 @@ use architect::action::Principal;
 use crdt::loro::{ID, LoroDoc, LoroText, UpdateOptions};
 use crdt::{CrdtDoc, History};
 
-use super::{DocEdit, DocError, DocInfo, Documents, is_under};
+use super::{DocEdit, DocError, DocInfo, Documents, Edited, is_under};
 
 /// How many steps of each document's undo are kept.
 const KEEP: usize = 100;
@@ -232,6 +232,28 @@ fn apply(text: &LoroText, edits: &[DocEdit]) -> Result<(), String> {
     Ok(())
 }
 
+/// `edits` applied to `text` as one Loro transaction made as `by`.
+///
+/// The way [`CrdtDocuments`] applies them, for a document set kept as
+/// plain text (a vault on disk): a `replace` is diffed and positions
+/// count characters the same everywhere. Its text after.
+///
+/// # Errors
+///
+/// An edit outside the text ([`DocError::Invalid`]; nothing applied).
+pub fn apply_edits(text: &str, edits: &[DocEdit], by: &Principal) -> Result<String, DocError> {
+    let doc = LoroDoc::new();
+    let t = CrdtDocuments::text_of(&doc);
+    t.insert(0, text)
+        .map_err(|e| DocError::Failed(e.to_string()))?;
+    doc.commit();
+    check_edits(t.len_unicode(), edits)?;
+    doc.set_next_commit_message(&by.describe());
+    apply(&t, edits).map_err(DocError::Failed)?;
+    doc.commit();
+    Ok(t.to_string())
+}
+
 impl Documents for CrdtDocuments {
     fn list(&self, under: Option<&str>) -> Result<Vec<DocInfo>, DocError> {
         Ok(self
@@ -272,7 +294,7 @@ impl Documents for CrdtDocuments {
         edits: &[DocEdit],
         step: &str,
         by: &Principal,
-    ) -> Result<String, DocError> {
+    ) -> Result<Edited, DocError> {
         let mut inner = self.lock();
         let entry = inner
             .docs
@@ -281,6 +303,16 @@ impl Documents for CrdtDocuments {
         let doc = entry.doc.loro();
         let text = Self::text_of(doc);
         check_edits(text.len_unicode(), edits)?;
+        // What it would be, worked out first: an edit that changes
+        // nothing commits nothing (no empty undo step, no save).
+        let before = text.to_string();
+        if apply_edits(&before, edits, by)? == before {
+            drop(inner);
+            return Ok(Edited {
+                text: before,
+                changed: false,
+            });
+        }
         let author = by.describe();
         entry
             .history
@@ -290,7 +322,10 @@ impl Documents for CrdtDocuments {
             })
             .map_err(DocError::Failed)?;
         drop(inner);
-        Ok(text.to_string())
+        Ok(Edited {
+            text: text.to_string(),
+            changed: true,
+        })
     }
 
     fn rename(&self, path: &str, to: &str, _by: &Principal) -> Result<DocInfo, DocError> {
@@ -353,8 +388,22 @@ mod tests {
                 &ext(),
             )
             .unwrap();
-        assert_eq!(after, " hello world");
+        assert_eq!(after.text, " hello world");
+        assert!(after.changed);
         assert_eq!(docs.steps("notes/a.md"), ["Tidy"]);
+        // An edit that changes nothing commits nothing.
+        let same = docs
+            .edit(
+                "notes/a.md",
+                &[DocEdit::Replace {
+                    text: " hello world".to_owned(),
+                }],
+                "Same",
+                &ext(),
+            )
+            .unwrap();
+        assert!(!same.changed);
+        assert_eq!(docs.steps("notes/a.md"), ["Tidy"], "no empty step");
         assert!(
             docs.edit(
                 "notes/a.md",

@@ -118,6 +118,16 @@ pub fn is_under(path: &str, under: Option<&str>) -> bool {
     }
 }
 
+/// What an edit did: the text after, and whether it changed (an edit
+/// that changes nothing raises no `doc.saved`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Edited {
+    /// The document's text after the edit.
+    pub text: String,
+    /// Whether the edit changed it.
+    pub changed: bool,
+}
+
 #[cfg(feature = "host")]
 pub use host::{DocError, Documents};
 
@@ -196,7 +206,8 @@ mod host {
         fn create(&self, path: &str, text: &str, by: &Principal) -> Result<DocInfo, DocError>;
 
         /// `edits`, in order, as one transaction: one commit, one undo
-        /// step named `step`, made as `by`. Its text after.
+        /// step named `step`, made as `by`. Its text after, and whether
+        /// it changed (nothing is committed when it did not).
         ///
         /// # Errors
         ///
@@ -207,7 +218,7 @@ mod host {
             edits: &[DocEdit],
             step: &str,
             by: &Principal,
-        ) -> Result<String, DocError>;
+        ) -> Result<super::Edited, DocError>;
 
         /// Document `path` at `to`, its history kept.
         ///
@@ -228,7 +239,7 @@ mod host {
 #[cfg(all(feature = "host", feature = "crdt"))]
 mod crdt_docs;
 #[cfg(all(feature = "host", feature = "crdt"))]
-pub use crdt_docs::{CrdtDocuments, authors_of};
+pub use crdt_docs::{CrdtDocuments, apply_edits, authors_of};
 
 #[cfg(test)]
 mod tests {

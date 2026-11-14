@@ -936,7 +936,7 @@ pub fn use_now_playing_art() -> Callback<String, Option<String>> {
 }
 
 /// A vault on disk as the navigator reads it, watched.
-fn watched(open: vault::actions::OpenVault, name: String) -> VaultSource {
+pub fn watched(open: vault::actions::OpenVault, name: String) -> VaultSource {
     let source = VaultSource::named(open, name);
     if let Err(e) = source.watch() {
         tracing::warn!(error = %e, "lab.vault.watch_failed");
@@ -946,18 +946,9 @@ fn watched(open: vault::actions::OpenVault, name: String) -> VaultSource {
 
 fn use_lab_vault() -> LabVault {
     use_root_context(|| {
-        let disk = crate::notes::open_vault().map(|open| {
-            // The sandbox's is the demo vault; the Architect app's is the
-            // person's, by its folder's name.
-            let name = if crate::distribution().is_sandbox() {
-                "Demo vault".to_owned()
-            } else {
-                let root = open.root();
-                root.file_name()
-                    .map_or_else(|| "Vault".to_owned(), |n| n.to_string_lossy().into_owned())
-            };
-            watched(open, name)
-        });
+        // The app's vault, the one source its extensions' documents
+        // change too (`crate::notes::source`): an open note hears them.
+        let disk = crate::notes::source();
         let memory = disk.is_none().then(lab_vault);
         let catalog = crate::vaults::catalog();
         let dir = disk.as_ref().map(|d| d.vault().root());

@@ -777,9 +777,15 @@ impl ExtensionApi {
                 host.list().changed("settings", &key);
                 Ok(Value::Null)
             }
-            HostRequest::Data { key } => Ok(self.data(&host).remove(&key).unwrap_or(Value::Null)),
+            HostRequest::Data { key } => {
+                let _held = self.data_lock(&host);
+                Ok(self.data(&host)?.remove(&key).unwrap_or(Value::Null))
+            }
             HostRequest::SetData { key, value } => {
-                let mut data = self.data(&host);
+                // Read, change and write as one: two hooks setting keys at
+                // once both keep theirs.
+                let _held = self.data_lock(&host);
+                let mut data = self.data(&host)?;
                 match value {
                     Some(v) => {
                         data.insert(key, v);
@@ -1215,22 +1221,29 @@ impl ExtensionApi {
                 (info(made), Some(DocEvent::Created { path }))
             }
             HostRequest::EditDocument { path, edits, name } => {
+                let path = path_ok(&path)?;
                 let step = name.unwrap_or_else(|| format!("{}: edit", manifest.name));
-                let text = docs.edit(&path, &edits, &step, &by)?;
-                (Value::String(text), Some(DocEvent::Saved { path }))
+                let edited = docs.edit(&path, &edits, &step, &by)?;
+                // An edit that changed nothing is no save: a format-on-save
+                // hook that finds nothing to do is not heard again.
+                let event = edited.changed.then_some(DocEvent::Saved { path });
+                (Value::String(edited.text), event)
             }
             HostRequest::RenameDocument { path, to } => {
+                let path = path_ok(&path)?;
                 let to = path_ok(&to)?;
                 let moved = docs.rename(&path, &to, &by)?;
                 (info(moved), Some(DocEvent::Renamed { from: path, to }))
             }
             HostRequest::MoveDocument { path, folder } => {
+                let path = path_ok(&path)?;
                 let to =
                     moved_to(&path, &folder).map_err(|message| HostError::Failed { message })?;
                 let moved = docs.rename(&path, &to, &by)?;
                 (info(moved), Some(DocEvent::Renamed { from: path, to }))
             }
             HostRequest::DeleteDocument { path } => {
+                let path = path_ok(&path)?;
                 docs.delete(&path, &by)?;
                 (Value::Null, Some(DocEvent::Deleted { path }))
             }
@@ -1456,38 +1469,80 @@ impl ExtensionApi {
         self.own_dir(host).map(|d| d.join("data.json"))
     }
 
-    fn data(&self, host: &Host) -> BTreeMap<String, Value> {
-        self.data_file(host).map_or_else(
-            || {
-                lock(&host.services().data)
-                    .get(&self.id)
-                    .cloned()
-                    .unwrap_or_default()
-            },
-            |file| {
-                std::fs::read_to_string(file)
-                    .ok()
-                    .and_then(|t| serde_json::from_str(&t).ok())
-                    .unwrap_or_default()
-            },
-        )
+    /// The lock on this extension's data: one read-change-write at a
+    /// time, whichever of its runtimes asks.
+    fn data_lock(&self, host: &Host) -> std::sync::MutexGuard<'static, ()> {
+        static LOCKS: std::sync::LazyLock<Mutex<BTreeMap<String, &'static Mutex<()>>>> =
+            std::sync::LazyLock::new(Mutex::default);
+        let key = self
+            .data_file(host)
+            .map_or_else(|| format!("mem:{}", self.id), |f| f.display().to_string());
+        let one: &'static Mutex<()> = lock(&LOCKS)
+            .entry(key)
+            .or_insert_with(|| Box::leak(Box::new(Mutex::new(()))));
+        lock(one)
     }
 
+    /// Its data: none yet is empty. A file that does not parse is an
+    /// error, never read as empty, so the next write cannot wipe it.
+    fn data(&self, host: &Host) -> Result<BTreeMap<String, Value>, HostError> {
+        let Some(file) = self.data_file(host) else {
+            return Ok(lock(&host.services().data)
+                .get(&self.id)
+                .cloned()
+                .unwrap_or_default());
+        };
+        let text = match std::fs::read_to_string(&file) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+            Err(e) => {
+                return Err(HostError::Failed {
+                    message: format!("{}: {e}", file.display()),
+                });
+            }
+        };
+        serde_json::from_str(&text).map_err(|e| HostError::Failed {
+            message: format!(
+                "{}: not its data ({e}); left as it is, and nothing is written over it",
+                file.display()
+            ),
+        })
+    }
+
+    /// Writes its data: a file only its owner reads (0600), written
+    /// whole or not at all (a temporary file, synced, renamed over it).
     fn keep_data(&self, host: &Host, data: BTreeMap<String, Value>) -> Result<(), HostError> {
         let Some(file) = self.data_file(host) else {
             lock(&host.services().data).insert(self.id.clone(), data);
             return Ok(());
         };
-        if let Some(dir) = file.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        let text = serde_json::to_string_pretty(&data).map_err(|e| HostError::Failed {
-            message: e.to_string(),
-        })?;
-        std::fs::write(&file, text).map_err(|e| HostError::Failed {
+        let failed = |e: &dyn std::fmt::Display| HostError::Failed {
             message: format!("{}: {e}", file.display()),
-        })
+        };
+        if let Some(dir) = file.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| failed(&e))?;
+        }
+        let text = serde_json::to_string_pretty(&data).map_err(|e| failed(&e))?;
+        write_private(&file, text.as_bytes()).map_err(|e| failed(&e))
     }
+}
+
+/// `bytes` as the file at `path`, atomically, readable by its owner only.
+fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let tmp = path.with_extension(format!("json.tmp.{}", std::process::id()));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    let mut f = options.open(&tmp)?;
+    f.write_all(bytes)?;
+    f.sync_all()?;
+    drop(f);
+    std::fs::rename(&tmp, path)
 }
 
 impl Host {
