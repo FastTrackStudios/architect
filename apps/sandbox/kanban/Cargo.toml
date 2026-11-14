@@ -27,6 +27,14 @@ tempfile = "3"
 blitz-dom = { workspace = true }
 blitz-traits = { workspace = true }
 dioxus-native-dom = { workspace = true }
+# tests/shots.rs: the showcase's screenshots, rendered on the CPU in the
+# app's built-in themes.
+architect-theme = { workspace = true, features = ["dioxus"] }
+blitz-paint = { workspace = true, features = ["custom-widget"] }
+anyrender = { workspace = true }
+anyrender_vello_cpu = { workspace = true }
+peniko = { workspace = true }
+png = { workspace = true }
 
 [lints]
 workspace = true
