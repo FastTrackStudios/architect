@@ -1293,6 +1293,7 @@ dependencies = [
  "architect-time-tracker",
  "architect-updates",
  "architect-workspace-hack",
+ "include_dir",
  "serde_json",
  "tempfile",
  "tracing",
