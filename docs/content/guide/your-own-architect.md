@@ -57,7 +57,7 @@ Every face of the build reads this one list:
 | face | what it does with the list |
 | --- | --- |
 | the window | links each extension (`apps/ui/src/extensions.rs` `use_lab_extensions`), beside the core every build has: Bases, the theme picker, the Command Palette, Navigator, the extensions manager, the settings page |
-| the node (`<bin> serve`) | draws each extension's `[[embeds]] page` that claims a fence on share links and Sites, and the distribution's own `block`s (`Distribution::blocks`; the page ships in the extension's `Extension::files`) |
+| the node (in the window, and `<bin> serve` with none) | draws each extension's `[[embeds]] page` that claims a fence on share links and Sites, and the distribution's own `block`s (`Distribution::blocks`; the page ships in the extension's `Extension::files`) |
 | the web app | with a `web` feature, links each extension into the browser build (`architect_web::run`, below); `/app/distribution.json` (`Distribution::describe`) names it |
 
 On an iPhone or iPad the same distribution runs through
@@ -233,8 +233,10 @@ pub fn start() {
 - **A crate with no `web` feature** gets the Architect app's wasm, which
   shows only its name and its list (`dist` says so).
 
-The deployment's node is the same binary running `serve`, so its share
-links and Sites draw the blocks those extensions claim.
+The app is its node: its window runs the node in-process, and a
+deployment runs the same binary with `serve`, the node with no window.
+Either way its share links and Sites draw the blocks those extensions
+claim.
 
 ## Proving it
 

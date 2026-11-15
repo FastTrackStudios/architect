@@ -1,18 +1,28 @@
-//! The app as an always-on node: `architect-desktop serve`.
+//! The app's node: what makes a running Architect app a device on the
+//! account and a sync peer.
+//!
+//! The app is the node. Its window starts it in the same process
+//! (`architect_desktop::run`, `start_node`), so installing the app is all
+//! a machine needs. A server runs the same app without the window,
+//! `architect-desktop serve` ([`main`]), the one that is always online.
+//! Both start it through [`start_parts`] from one [`Config`]; where they
+//! differ (where HTTP listens, where state lives, the device's platform,
+//! whose session) it is the configuration's defaults
+//! ([`config::app_defaults`]), never a second code path.
 //!
 //! The desktop and mobile apps are peers; the account server only
 //! introduces them (accounts, orgs, the device address book, pairing:
-//! `features/devices`). A node run with no window is one more of those
-//! devices, the one that is always online. It is not a central server:
-//! every other device syncs with it the way it syncs with any peer, and
-//! they keep working with it stopped.
+//! `features/devices`). No node is a central server: every device syncs
+//! with the others the way it syncs with any peer, and they keep working
+//! with any one of them stopped.
 //!
 //! [`start`] runs it:
 //!
 //! - **A device on the account.** With an issuer and a session
-//!   ([`Config::issuer`], [`Config::session_file`]) it registers itself
-//!   in the account's address book as a `server` device at its iroh
-//!   endpoint, offers its org ([`Config::org`]) while the account shares
+//!   ([`Config::issuer`], [`Config::session_file`]; in the window, else
+//!   the app's signed-in account, an [`AccountSource`]) it registers
+//!   itself in the account's address book as a device of its
+//!   [`Config::platform`] (`server` for `serve`) at its iroh endpoint, offers its org ([`Config::org`]) while the account shares
 //!   none, and lets the account's other devices in
 //!   (`architect_devices::account::pass`). Again every few minutes, and
 //!   every sweep until somebody else is on the account.
@@ -902,7 +912,7 @@ pub fn main(
                 let _ = writeln!(
                     std::io::stdout(),
                     "architect-desktop serve [--config <file>] [s3-key <issue|list|revoke> …]\n\n\
-                     The Architect app as an always-on node, with no window.\n\
+                     The Architect app's node with no window (a server).\n\
                      Configured by the file and ARCHITECT_* variables; see\n\
                      docs/content/guide/deploy.md."
                 );

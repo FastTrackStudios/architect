@@ -1,5 +1,9 @@
 //! The Architect app on a desk, painted by Blitz: the person's vault (its
-//! first run asks for one), the shell, the workspace and extensions.
+//! first run asks for one), the shell, the workspace and extensions. The
+//! app is also its node (`src/node/`): the window starts it in-process,
+//! so installing the app is all a machine needs to be a device on the
+//! account and a sync peer. A server runs the same app without the
+//! window (`serve`).
 //! `ARCHITECT_DEVICE=iphone|iphone-side|ipad|ipad-side` opens it standing
 //! in for that device. Served with `dx serve`, an `rsx!` edit in
 //! `apps/ui` or in `architect-shell` shows at once.
@@ -21,7 +25,7 @@
 //! architect-desktop extensions check <folder>  # EXT_CHECK with no window; nonzero when it fails
 //! architect-desktop extensions dev <folder>    # EXT_DEV: the folder as a development copy in the running app
 //! architect-desktop extensions registries      # EXT_REGISTRIES: the store's and the person's registries
-//! architect-desktop serve [--config <file>]    # the always-on node, no window (src/node/)
+//! architect-desktop serve [--config <file>]    # the app's node with no window: a server (src/node/)
 //! ```
 //!
 //! In a window it keeps `<app dir>/AGENTS.md` and `actions.schema.json`
@@ -29,9 +33,9 @@
 //! sandbox, on made-up data, is `architect-sandbox` (`apps/sandbox`).
 
 /// The Architect app: architect's own distribution
-/// (`architect_distribution::architect`). Built without the window
-/// (`--no-default-features`), the binary is its node: `serve`, or the same
-/// with `serve` left out.
+/// (`architect_distribution::architect`). The window runs its node in the
+/// same process; built without the window (`--no-default-features`), the
+/// binary is that node alone: `serve`, or the same with `serve` left out.
 fn main() -> std::process::ExitCode {
     architect_desktop::run(architect_distribution::architect())
 }
