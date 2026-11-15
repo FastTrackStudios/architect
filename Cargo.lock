@@ -1284,6 +1284,7 @@ dependencies = [
  "architect-dayplan",
  "architect-extensions",
  "architect-files-extension",
+ "architect-mealplan",
  "architect-notify",
  "architect-projects",
  "architect-sites",
@@ -1627,6 +1628,28 @@ dependencies = [
  "futures",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "architect-mealplan"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-cookbook",
+ "architect-extensions",
+ "architect-settings",
+ "architect-workspace-hack",
+ "chrono",
+ "cooklang",
+ "facet",
+ "futures",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "vox",
 ]
 
 [[package]]

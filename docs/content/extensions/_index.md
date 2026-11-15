@@ -34,10 +34,13 @@ the app's features and the showcase of how an extension is built
 | Calendar (`extensions/calendar`) | events as notes (Task's shape) with repeats and exceptions, day, week, month and agenda views with drag, tasks and tracked time on it, calendar and timeline base views | [Calendar](@/extensions/calendar.md) |
 | Day Plans (`extensions/dayplan`) | day templates (allocatable blocks, meal prep, resets, sleep), rules that pick each day's template with overrides, each day's plan with blocks given to tasks, projects and recipes, drawn under the Calendar's events | [Day Plans](@/extensions/day-plans.md) |
 | Cookbook (`extensions/cookbook`) | recipes as Cooklang files: found, read scaled, edited, cooked step by step with timers; one `Recipes` service served in process | [Cookbook](@/extensions/cookbook.md) |
+| Mealplan (`extensions/mealplan`) | the week's meals from the Cookbook, the pantry and substitutions, and the grocery list built from the planned recipes as a checklist note | [Mealplan](@/extensions/mealplan.md) |
 
 Projects, Tasks and the Time Tracker are the Project Management bundle
 (#375): each runs alone, and together a project's page shows its tasks
 and their time, and a task its timer.
 
-The Cookbook is the Cookbook bundle (`apps/distribution/src/lib.rs`
-`cookbook`).
+The Cookbook and Mealplan are the Cookbook bundle
+(`apps/distribution/src/lib.rs` `cookbook`, #792): each runs alone (Mealplan
+needs the Cookbook's service), and together a week's plan becomes a
+grocery list.

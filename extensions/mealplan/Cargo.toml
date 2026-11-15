@@ -1,0 +1,59 @@
+[package]
+name = "architect-mealplan"
+description = "Mealplan, a first-party architect extension: the week's meals, the pantry, substitutions and the automatic grocery list, all as vault notes; its `Meals` service (`#[architect::rpc]`, served in process) and `architect.mealplan`; recipes come from `architect.cookbook`, only through the host (extensions/mealplan)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[[bin]]
+name = "architect-mealplan"
+path = "src/main.rs"
+
+[dependencies]
+# The trait (`linked-core`): linked into an app, a browser's too (#495);
+# off the browser also its process copy (`guest`, vox and tokio).
+architect-extensions = { workspace = true, features = ["linked-core"] }
+# Its one service, `Meals`, served in process (`serve_local`).
+architect = { workspace = true, features = ["local"] }
+# The service's generated server and client (`#[architect::rpc]`, under
+# this crate's `vox` feature).
+vox = { workspace = true }
+facet = { workspace = true }
+chrono = { workspace = true }
+# Cooklang's units, to add 500 g and 0.5 kg. Not the Cookbook's crate:
+# recipes come from `architect.cookbook`, through the host.
+cooklang = "0.18"
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+
+[features]
+# `#[architect::rpc]` emits its server and client under `vox`: always on.
+default = ["vox"]
+vox = []
+
+[dev-dependencies]
+architect = { workspace = true, features = ["action-list", "local"] }
+architect-extensions = { workspace = true, features = ["host", "linked", "process", "crdt"] }
+architect-settings = { workspace = true }
+# The Cookbook linked in beside it, as the app does: the recipes'
+# ingredients it builds a grocery list from.
+architect-cookbook = { workspace = true }
+futures = "0.3"
+tempfile = "3"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+architect-extensions = { workspace = true, features = ["guest"] }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
