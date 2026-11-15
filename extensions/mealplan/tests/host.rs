@@ -174,6 +174,18 @@ fn a_week_planned_and_its_grocery_list_built() {
         "{text}"
     );
 
+    // Read as it is, not built again.
+    let as_is = run(&list, "MEALPLAN_GROCERY_LIST", json!({ "week": WEEK }));
+    assert_eq!(as_is["text"], text.as_str());
+    assert!(
+        try_run(
+            &list,
+            "MEALPLAN_GROCERY_LIST",
+            json!({ "week": "2030-W11" })
+        )
+        .is_err()
+    );
+
     // Bought: ticked, and into the pantry.
     run(
         &list,

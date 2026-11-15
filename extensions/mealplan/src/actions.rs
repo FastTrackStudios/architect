@@ -168,6 +168,31 @@ pub async fn groceries(a: Value) -> Result<Value, String> {
     out(c.groceries(r).await.map_err(architect::vox_into_app))
 }
 
+/// `MEALPLAN_GROCERY_LIST {week?, date?, from?, to?}`.
+pub async fn grocery_list(a: Value) -> Result<Value, String> {
+    let r: Range = args(a)?;
+    let c = client().await.map_err(|e| e.to_string())?;
+    out(c.grocery_list(r).await.map_err(architect::vox_into_app))
+}
+
+/// `MEALPLAN_OPEN {view?}`: week (the default), pantry or groceries.
+pub async fn open(a: Value) -> Result<Value, String> {
+    let view = match text(&a, "view").as_deref() {
+        None | Some("week") => "week",
+        Some("pantry") => "pantry",
+        Some("groceries") => "groceries",
+        Some(v) => return Err(format!("view: week, pantry or groceries ({v:?})")),
+    };
+    let h = crate::client::handle().ok_or("Mealplan is not running")?;
+    h.host(architect_extensions::hostcall::HostRequest::Run {
+        action: "EXT_VIEW_OPEN".to_owned(),
+        args: json!({ "extension": crate::ID, "view": view }),
+        ticket: None,
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 /// `MEALPLAN_CHECK {item, week?, path?, checked?, bought?}`.
 pub async fn check(a: Value) -> Result<Value, String> {
     if text(&a, "item").is_none() {

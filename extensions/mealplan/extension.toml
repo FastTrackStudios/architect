@@ -48,6 +48,29 @@ effect = "destructive"
 reads = ["documents"]
 writes = ["documents"]
 
+[[views]]
+id = "week"
+title = "Meal plan"
+icon = "utensils"
+
+[[views]]
+id = "pantry"
+title = "Pantry"
+icon = "archive"
+
+[[views]]
+id = "groceries"
+title = "Groceries"
+icon = "shopping-cart"
+
+[[actions]]
+id = "MEALPLAN_OPEN"
+name = "Mealplan: open"
+description = "Opens the week's meals (`view` week, the default), the pantry and substitutions (`view` pantry) or the grocery list (`view` groceries)."
+group = "Mealplan"
+effect = "read_only"
+params = '{"type":"object","properties":{"view":{"type":"string","enum":["week","pantry","groceries"]}}}'
+
 [[actions]]
 id = "MEALPLAN_WEEK"
 name = "Mealplan: the week"
@@ -149,6 +172,14 @@ name = "Mealplan: build the grocery list"
 description = "Builds, or refreshes, the grocery list for `week` (2026-W47), `date`'s week, or `from`..`to` (this week by default): every planned meal's recipe's ingredients from the Cookbook, scaled to its servings, nested recipes cooked out, added up with units converted, less the pantry (expired stock does not count), with substitutions applied, plus staples under their min, grouped by aisle. Written as a checklist note, Groceries/<week>.md; ticked items, and lines added by hand, are kept. One undo step. Its path, sections, items, what was substituted and the note's text."
 group = "Mealplan"
 effect = "mutating"
+params = '{"type":"object","properties":{"week":{"type":"string"},"date":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"}}}'
+
+[[actions]]
+id = "MEALPLAN_GROCERY_LIST"
+name = "Mealplan: the grocery list"
+description = "The grocery list of `week`, `date`'s week or `from`..`to` (this week's by default) as it is, not built again: its path, aisles and items (name, qty, unit, text, checked, own: written by hand) and the note's text."
+group = "Mealplan"
+effect = "read_only"
 params = '{"type":"object","properties":{"week":{"type":"string"},"date":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"}}}'
 
 [[actions]]

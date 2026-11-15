@@ -362,6 +362,8 @@ pub trait Meals {
     ) -> Result<Vec<Substitution>, MealplanError>;
     /// Builds or refreshes a range's grocery list (one undo step).
     async fn groceries(&self, range: Range) -> Result<Groceries, MealplanError>;
+    /// A range's grocery list as it is (not built again).
+    async fn grocery_list(&self, range: Range) -> Result<Groceries, MealplanError>;
     /// Ticks or unticks an item on a grocery list.
     async fn check(&self, check: Check) -> Result<Groceries, MealplanError>;
     /// Whether the pantry has what a recipe needs.

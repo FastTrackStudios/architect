@@ -169,13 +169,44 @@ action `MEALPLAN_<M>` and `architect.mealplan`'s method `m`:
 | `MEALPLAN_REMOVE_ITEM` | deletes a pantry item |
 | `MEALPLAN_SUBSTITUTIONS`, `MEALPLAN_SUBSTITUTE`, `MEALPLAN_UNSUBSTITUTE` | the substitutions |
 | `MEALPLAN_GROCERIES` | builds or refreshes the grocery list |
+| `MEALPLAN_GROCERY_LIST` | the grocery list as it is, not built again |
 | `MEALPLAN_CHECK` | ticks a grocery item; `bought` stocks the pantry |
 | `MEALPLAN_CAN_COOK` | Task's `recipe can-cook`: what the pantry has and lacks for a recipe |
+| `MEALPLAN_OPEN` | opens a view: `week`, `pantry` or `groceries` |
 
 Each change is one undo step named for what it did (a meal moved across
 weeks is two notes, so two). Task's shopping-list templates and its
 low-stock and expired verbs are folded into the list: staples under
 their `min` are added to it, and expired stock does not count.
+
+## 5. Its views
+
+Three views (`extensions/mealplan/src/ui.rs`), one component with a tab for
+each, so ⌘K's `MEALPLAN_OPEN` and the extension's view list land on any
+of them:
+
+- **Week** (`WeekView`): the days of a week (‹ › and the week's name,
+  which goes back to this week), each with its breakfast, lunch, snack
+  and dinner. A slot's `+` opens the recipe picker: the Cookbook's
+  `list` through the host, a search, the servings. A meal opens its
+  recipe; ⇄ picks it up and "Move here" on any slot puts it down (no
+  drag, so a phone works the same); ✕ unplans it. A desk shows seven
+  columns and the picker as a side panel; a phone (narrower than 760
+  px, measured as the Calendar measures its views) a list of days with
+  only the slots that have meals, and dinner, and the picker as a
+  bottom sheet.
+- **Pantry** (`PantryView`): the items with their stock, `−`/`+` (100 g
+  or ml, else 1), ✕, low and expired flagged; a row to add one; the
+  substitutions, added and removed.
+- **Groceries** (`GroceriesView`): the week's list by aisle; a tap ticks
+  a line (Task's mark-have), Bought ticks it and stocks the pantry;
+  Build makes it again.
+
+Each view holds only the `Meals` client. What it shows is read in a
+future that peeks (`use_read`): when the week shown or a change it made
+moves, and every five seconds, and a signal is written only when what
+was read differs, so a view never reads for ever. No keyed row makes
+signals, and there is no `<select>` (Blitz draws one blank).
 
 ## Tests to read
 
