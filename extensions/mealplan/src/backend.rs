@@ -678,6 +678,18 @@ impl Meals for Backend {
         Ok(read_list(&path, &text))
     }
 
+    async fn grocery_list(&self, r: Range) -> Result<Groceries, MealplanError> {
+        let (from, to, week) = range(&r, self.today())?;
+        let title = For { week, from, to }.title();
+        let path = self.groceries_path(&title).await;
+        let text = self.files.read(&path).await?.ok_or_else(|| {
+            MealplanError::NotFound(format!(
+                "no grocery list for {title} yet: build it (MEALPLAN_GROCERIES)"
+            ))
+        })?;
+        Ok(read_list(&path, &text))
+    }
+
     async fn check(&self, c: Check) -> Result<Groceries, MealplanError> {
         let given = c.path.as_deref().map(str::trim).filter(|p| !p.is_empty());
         let path = if let Some(p) = given {
@@ -880,7 +892,12 @@ mod tests {
             .is_err()
         );
 
+        assert!(matches!(
+            block(b.grocery_list(Range::default())),
+            Err(MealplanError::NotFound(_))
+        ));
         let list = block(b.groceries(Range::default())).unwrap();
+        assert_eq!(block(b.grocery_list(Range::default())).unwrap(), list);
         assert_eq!(list.path, "Groceries/2026-W47.md");
         // Pancakes for 4: 400 g flour, 600 ml milk, 4 eggs; bread for 2:
         // 1 kg flour, 14 g yeast. Less 750 g flour and 1 l milk.
