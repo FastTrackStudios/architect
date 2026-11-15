@@ -1260,6 +1260,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-documents"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-workspace-hack",
+ "facet",
+ "thiserror 2.0.20",
+ "tokio",
+ "vox",
+]
+
+[[package]]
 name = "architect-editor"
 version = "0.1.0"
 dependencies = [
@@ -1330,6 +1342,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-commands",
+ "architect-documents",
  "architect-editor",
  "architect-extension-archive",
  "architect-extensions",
@@ -1609,7 +1622,10 @@ dependencies = [
 name = "architect-navigator"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "architect-commands",
+ "architect-documents",
+ "architect-extensions",
  "architect-navigator",
  "architect-navigator-api",
  "architect-settings",
@@ -1622,6 +1638,7 @@ dependencies = [
  "dioxus",
  "dioxus-native",
  "facet",
+ "futures",
  "futures-channel",
  "futures-timer",
  "futures-util",
@@ -1629,8 +1646,10 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "tempfile",
+ "tokio",
  "unicode-normalization",
  "vault",
+ "vault-doc",
  "vault-proto",
 ]
 

@@ -25,6 +25,15 @@ description = "Extensions: adding to an app at run time — data, Luau, WASM and
 default = []
 host = [
     "dep:architect",
+    # The documents service (`docs_service`): the host reaches the app's
+    # documents and extensions' data only through its client, served
+    # in-process on a runtime of its own.
+    "dep:architect-documents",
+    "architect/local",
+    # Native only (`tokio` is a native dependency): the runtime its
+    # in-process server runs on; a browser's host serves it with
+    # `spawn_local`.
+    "dep:tokio",
     "dep:architect-scripting",
     "architect-scripting/luau",
     "dep:tracing",
@@ -238,6 +247,7 @@ url = "2"
 # the host follows each one and checks it.
 reqwest = { version = "0.12", optional = true, default-features = false, features = ["rustls-tls", "stream"] }
 architect = { workspace = true, optional = true, features = ["action-list"] }
+architect-documents = { workspace = true, optional = true }
 architect-extension-archive = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
@@ -251,7 +261,6 @@ base64 = { workspace = true, optional = true }
 vox = { workspace = true, optional = true }
 vox-core = { workspace = true, optional = true }
 vox-stream = { version = "0.10.0-rc.7", optional = true }
-tokio = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 blitz-dom = { workspace = true, optional = true }
 blitz-traits = { workspace = true, optional = true }
@@ -327,6 +336,10 @@ rfd = { workspace = true, optional = true }
 # Luau (C++) is not built for a browser: `host` there runs data and linked
 # extensions, with pages and WASI components beside it (`web`), #495.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
+# The runtime of processes, guests, WASI, the network and the documents
+# service (`docs_service`): native only, so `host` turning it on never
+# reaches a browser's build.
+tokio = { workspace = true, optional = true }
 architect-scripting = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "ios")'.dependencies]

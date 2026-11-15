@@ -291,6 +291,10 @@ rendered by the app.
 > runner, workers too, on Wasmtime's Pulley interpreter. **The web
 > (2026-11-04, the rest of part 3)** behind the `web` feature: the same
 > components, transpiled by jco, in Web Workers ("On the web" below).
+> **In the release builds (#707):** `cargo xtask dist desktop` and
+> `dist ios` build the app with `wasi` (Cranelift on the desk, Pulley
+> on iOS), so an installed component runs in the shipped app;
+> `--no-wasi` leaves Wasmtime out.
 
 A `kind = "wasm"` extension is a WebAssembly component against the
 `architect:extension` world (`features/extensions/wit/extension.wit`),
@@ -549,9 +553,18 @@ serves its Action List on a control socket as the desk lab does
 (`FTS_CONTROL_DIR` puts it in a folder on the Mac), so
 `scripts/mac-live-check.sh` drives it ([A live check on a Mac](@/guide/live-check-mac.md)).
 
-**Size.** Wasmtime and Cranelift add about 19 MB to a stripped
-`architect-desktop` built with the dev profile (opt-level 1): behind the
-feature, off by default.
+**Size and memory.** Wasmtime and Cranelift add about 19 MB to a
+stripped `architect-desktop` built with the dev profile (opt-level 1).
+In a stripped release build (#707, measured 2026-11-14 on x86-64 Linux
+with a probe that links Wasmtime 50.0.1 with this crate's features, an
+engine, WASI p2 on a linker and a component compile) they add 15.9 MB;
+with Pulley as the target, as on iOS, 16.0 MB. Making the engine and
+the linker costs about 6 MB resident either way. Each running
+instance's linear memory then reserves address space: 4 GiB and a guard
+under Cranelift (virtual, not resident), `PULLEY_RESERVATION` (64 MiB)
+under Pulley; what it touches is what it uses, up to its limit. The
+release builds have the feature on (`cargo xtask dist`); the crate
+keeps it off by default.
 
 ### On the web
 
@@ -3522,11 +3535,112 @@ whose documents are `crdt` documents uses
 `History`, in named spaces (`with_space`), its text the root text
 `CrdtDocuments::TEXT`, its document there for the app's editor and sync
 (`CrdtDocuments::doc`), its undo (`undo`, `redo`, `steps`) and who
-changed it (`authors`). Task's vault implements `Documents` over its
-notes; the sandbox gives its spaces, `notes` and `archive`
-(`apps/ui/src/extensions.rs` `documents`). With no documents given,
-the calls answer `unsupported`; `read_document` falls back to
-`AppContext::document`. In a browser they are not there yet.
+changed it (`authors`). With no documents given, the calls answer
+`unsupported`; `read_document` falls back to `AppContext::document`.
+
+**The person's vault** (#706). The Architect app, on the desk and on
+iOS, gives extensions the vault it opened:
+`architect_navigator::documents::VaultDocuments` (feature `documents`)
+over the one `VaultSource` its navigator and editors use
+(`apps/ui/src/notes.rs` `source`, set on the host by `on_source` once a
+vault is open, the first run's choice too). Its documents are the
+vault's notes (`.md`) by their vault paths; a path with a hidden part
+(`.obsidian/…`) is none, and a create or rename onto a path that is
+another note's on a case- or normalisation-blind file system
+(`Notes/Café.md`, `notes/cafe\u{301}.md`) is refused everywhere, so a
+vault behaves the same on the desk and on iOS. A create, an edit, a
+rename (the links that named it follow) and a delete (to the vault's
+`.trash`) go through that source, so an open note hears an extension's
+edit and merges it into its typing (`vault_doc::merge3`, two forks of
+one Loro document, property by key and the body character by
+character). No write goes through a symlink (a linked folder out of the
+vault: `vault_live::own::through_symlink`), and a note is written whole
+(a temporary file renamed over it). An edit's `DocEdit`s apply with a
+Loro document's semantics (`documents::apply_edits`) and are written by
+compare-and-swap (`VaultSource::save_if`, under the vault's write lock):
+if the person saved since the extension read the note, the two are
+merged and written again, so no one's characters are lost. A file keeps
+no authorship or undo of its own: the open note takes the change as
+one edit. An edit that changes nothing writes nothing and raises no
+`doc.saved` (`documents::Edited::changed`), so a format-on-save hook is
+not heard again.
+
+`VaultDocuments::raise_on(&app_list)` raises the person's own changes
+as `doc.*` on the app's list, which the host hears (`Host::watch`):
+typing as it is saved, a new note, a rename, move or delete in the
+navigator (a folder's: each note in it), an edit made outside the app.
+What an extension's call changes (a rename's relinked notes too) is
+left out there: the host raised its event. They go out in ticks
+(`documents::TICK`, 100 ms): the same event twice in one tick once, at
+most `documents::PER_TICK` (64) a tick and the rest in the next, so a
+git pull or a sync reaches every hook in order without flooding it. A
+`changed:doc.*` list topic is no way around `reads`: the host raises a
+document event as itself only, and a hook on `changed:doc.saved` is a
+document event's hook (`events::is_doc_event`). An org's other vaults
+(`@org/…`) are not documents yet. The sandbox with no vault on disk
+keeps its in-memory spaces, `notes` and `archive`
+(`apps/ui/src/extensions.rs` `documents`). The web app's host is
+#495's; it gives the same shape (a `Documents` over its vault and the
+person's edits raised as `doc.*` on the list).
+
+**A note's parsed metadata** is the read-only action `VAULT_METADATA`
+(`features/vault/vault-obsidian/src/metadata.rs` `metadata`): `{path}`
+answers one note's headings `{level, text, line}`, list items `{line,
+text, depth, parent, ordered, task, done, block, section}`, its tasks
+(indices into the list items), block ids `{id, line}` and inline fields
+`{key, value, line}` (`key:: value`, `[key:: value]`, `(key:: value)`);
+`{folder, limit?, cursor?}` answers a page of the notes' under `folder`
+(`""`: the whole vault) in path order, `{notes, next}`, at most `limit`
+(100 by default, 1000 at most) after `cursor`. Neither is refused: a
+caller never parses the whole vault without asking. Each note is parsed
+outside the vault's lock and kept by its modified time and length, so a
+note is parsed once until it changes. The parser follows CommonMark's
+fences (a closing run at least the opening's, of its character, nothing
+after it; an inline ```` ``` ```` opens none), counts frontmatter only
+when it closes, and leaves out `%%` comments, `$$` math and indented
+code. It is an action, like `VAULT_READ` and `BASES_ROWS`, not a host
+call: an extension runs it with `capabilities.actions = ["VAULT_"]`,
+and so do the CLI, MCP and the node, with no runtime-specific binding;
+the document calls stay what every app's document set has, and metadata
+is the vault's.
+
+**The vault's actions are the documents.** An extension runs a
+`VAULT_*` action only with `reads = ["documents"]` (a read-only one:
+`VAULT_READ`, `VAULT_LIST`, `VAULT_SEARCH`, `VAULT_METADATA`) or
+`writes = ["documents"]` (the rest), past its `actions` grant
+(`capabilities::VAULT_ACTIONS`, `Capabilities::may_run`), so the consent
+prompt says "Read your documents" or "Change your documents" for it and
+an `actions = ["VAULT_"]` grant alone reads no note.
+
+**One service, through its client.** The document calls and an
+extension's data are one `#[architect::rpc]` service,
+`architect_documents::Documents` (`features/extensions/documents`,
+wasm-clean): `list`, `read`, `create`, `edit`, `rename`, `delete`,
+`metadata` (`VAULT_METADATA`'s answer), `data`, `set_data`, each naming
+the extension it is for. Its one implementation, `DocumentsServer`, has
+the gate in it (`Gate`: `reads` / `writes = ["documents"]`), so every
+transport gets the same check, and calls a `DocumentStore` and a
+`DataStore` below it. The host reaches it only through the generated
+`DocumentsClient` (`features/extensions/src/docs_service.rs`): it serves
+`DocumentsServer` over the app's `Documents` (`AsStore`), each
+extension's data (`FileData`) and its own gate (`HostGate`) with
+`architect::serve_local` on a runtime of its own, the same on the desk
+and iOS. A browser's host uses the same client over vox on the org
+lane, the node serving the same `DocumentsServer`; the demo serves it
+in wasm over `MemoryStore`. What is not wasm-clean is only below the
+stores: the vault on disk and the data files.
+
+**Extension data and settings persist.** `host.data`/`set_data` are a
+file per extension under the host's data root (the app's
+`<app dir>/extension-data`), written whole (a temporary file, synced,
+renamed over it), readable by its owner only (0600), one change at a
+time per extension; a file that does not parse is an error, never read
+as empty, so a write never wipes it. Settings are the settings page's,
+kept in the app's device values. Both survive a restart
+(`features/navigator/tests/documents.rs`
+`what_an_extension_keeps_survives_a_restart`;
+`features/extensions/tests/documents.rs`
+`an_extensions_data_is_written_whole_privately_and_never_wiped`).
 
 The sandbox's `lab.tidy` (`apps/sandbox/extensions/tidy`, beside its registry; the
 lab runs it as a development copy with `ARCHITECT_LAB_TIDY=1`) makes,
@@ -3534,7 +3648,12 @@ tidies, renames, files away and watches notes: `LAB_TIDY_NEW`,
 `LAB_TIDY_TIDY` (one transaction), `LAB_TIDY_RENAME`, `LAB_TIDY_FILE`,
 `LAB_TIDY_WATCH`, `LAB_TIDY_LIST`.
 
-Tests: `features/extensions/tests/documents.rs` (`lab.tidy` in the
+Tests: `features/navigator/tests/documents.rs` (`lab.tidy` in a vault
+on disk: lists, creates, tidies, renames and files notes; the person's
+save, new note, rename and delete heard once each; an edit merged into
+an open note's typing; its data after a restart),
+`features/vault/vault/tests/actions.rs` (`VAULT_METADATA`),
+`features/extensions/tests/documents.rs` (`lab.tidy` in the
 sandbox's spaces: creates, tidies as one undo step, renames, files and
 hears each; the person's concurrent typing merges with its transaction;
 refused without `reads` / `writes`), `features/pages/tests/documents.rs`
@@ -4596,19 +4715,48 @@ Tests: `features/extensions/tests/share_needs.rs`,
 |---|---|---|---|---|
 | macOS, Linux, Windows | yes | compiled | yes | yes |
 | Android | yes | compiled (Play allows code in a VM) | yes | no |
-| iOS | yes | interpreted (Pulley) | yes | no |
+| iOS | yes | interpreted (Pulley), in the release build (#707) | yes | no |
 | Web | yes, and linked ones compiled into the web build | the browser's WebAssembly (components transpiled) | not yet (Luau is C++, #495) | no |
 
 On iOS, a catalogue of third-party features is the App Store's §4.7
 case (an index, moderation, consent); themes, keymaps, frame views and a
 person's own scripts are not.
 
+**Installed WASM extensions on iOS (decided 2026-11-14, #716).** The
+App Store build ships `wasi`, so a person can install WASM component
+extensions in the iPhone and iPad app, positioned under guideline 2.5.2
+the way Obsidian's community plugins are:
+
+- **The person installs them.** Nothing is downloaded or turned on by
+  the app itself; an extension comes from a registry or a file the
+  person chose, after a consent prompt that lists its capabilities.
+- **Sandboxed add-ons.** A component runs in Wasmtime with no ambient
+  access: no files, network, or app state but what its manifest asks for
+  and the person granted (`hostcall::check`), each instance under a
+  memory, fuel and time limit.
+- **Interpreted, not compiled to native code.** Pulley interprets each
+  component's bytecode: no JIT, no executable memory, no W^X exception
+  (`wasi::PULLEY`).
+- **They cannot change the app's core features.** An extension adds
+  views, actions and handlers through the host's contribution points;
+  it cannot replace the app's code, its sign-in, its purchases or its
+  review-relevant behaviour, and it can be turned off or removed at any
+  time with its data kept.
+
 ## Risks
 
 - The component tooling is young: WASI 0.3 (async components) needs
   Wasmtime 46+, and the newest needs Rust 1.95 — past the fleet's 1.94.
-- Pulley on iOS is a lower-tested tier, and Wasmtime's default memory
-  reservation has to come down for App Store builds.
+- Pulley on iOS is a lower-tested tier (Wasmtime's memory reservation
+  is down to `PULLEY_RESERVATION`, 64 MiB, with no guard, for App Store
+  builds).
+- App Review: installed WASM extensions on iOS rest on guideline 2.5.2's
+  reading for user-installed, sandboxed, interpreted add-ons that cannot
+  change the app's core features (Obsidian's community plugins are the
+  precedent; "On each platform" above). A reviewer who reads it
+  otherwise would have the iOS build ship without `wasi`
+  (`cargo xtask dist ios --no-wasi`) until it is settled; linked
+  extensions, Luau and pages are unaffected.
 - Frame documents have to be expressive enough for real views without
   growing into a second Dioxus.
 - Old WIT versions are kept forever.

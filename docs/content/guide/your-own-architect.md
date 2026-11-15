@@ -141,7 +141,11 @@ Architect app through the same command: `cargo xtask dist node`, `web` and
 
 `--features a,b` turns on features of the distribution crate (with
 `--manifest-path`), such as `node-wasi` for a node that draws installed WASI
-components' blocks as the release's node does. The standard release's own
+components' blocks as the release's node does. The desktop and iOS apps
+are built with the crate's `wasi` feature when it has one (Wasmtime, so
+installed WASI component extensions run; #707), unless `--no-wasi`; a
+distribution crate declares it as `dist/standard` does
+(`wasi = ["architect-desktop/wasi", "architect-mobile/wasi"]`). The standard release's own
 distribution crate, `dist/standard`, is built this way from the
 [core extensions](@/guide/core-extensions.md) list.
 

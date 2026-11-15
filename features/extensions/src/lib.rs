@@ -86,6 +86,8 @@ pub mod device_ios;
 #[cfg(feature = "crdt")]
 pub mod doc;
 #[cfg(feature = "host")]
+pub mod docs_service;
+#[cfg(feature = "host")]
 pub mod embeds;
 #[cfg(feature = "host")]
 pub mod extensions;

@@ -905,13 +905,31 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             .with_app_context(LabContext {
                 list: Arc::clone(&lab),
             })
-            // The lab's spaces, as documents extensions list, change and
-            // watch (`lab.tidy`).
-            .with_documents(documents())
             // The note being edited, for extensions' editor calls
             // (`lab.outline`; src/note_editor.rs).
             .with_editors(crate::note_editor::Live)
             .with_setting_values(values.clone());
+        // The sandbox with no vault on disk: its in-memory spaces, as
+        // documents extensions list, change and watch (`lab.tidy`). The
+        // Architect app has none until a vault is open.
+        if crate::distribution().is_sandbox() {
+            host.set_documents(Arc::new(documents()));
+        }
+        // The person's vault, once one is open (now, or when the first
+        // run's choice opens it), in place of the lab's spaces: its notes
+        // as documents, changed through the source its editors save
+        // through, and its own edits raised as `doc.*` on the app's list,
+        // which the host hears (`host.watch` above) (#706).
+        {
+            let host = host.clone();
+            let app = Arc::clone(&lab);
+            crate::notes::on_source(move |source| {
+                let docs = architect_navigator::documents::VaultDocuments::new(source.clone());
+                *DOC_EVENTS.lock().unwrap_or_else(PoisonError::into_inner) =
+                    Some(docs.raise_on(&app));
+                host.set_documents(Arc::new(docs));
+            });
+        }
         // MIDI ports and OSC endpoints for extensions (`capabilities.ports`),
         // and the targets their control surfaces move: the metronome's
         // tempo, the theme's accent hue.
@@ -926,7 +944,9 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         let sandbox = crate::distribution().is_sandbox();
         let clicker = clicker(&root).filter(|_| sandbox);
         let frame = frame_dev(&root).filter(|_| sandbox);
-        let wasi = wasi_counter(&root).filter(|_| sandbox);
+        // Made only in the sandbox: it writes `dev/lab.wasi-counter`, which
+        // has no place in the person's app folder.
+        let wasi = if sandbox { wasi_counter(&root) } else { None };
         // `EXT_CLONE` puts its copies beside the development ones.
         let mut extensions = Extensions::new(host, Installs::new(root.join("extensions")))
             .with_dev_root(root.join("dev"));
@@ -1394,6 +1414,10 @@ pub fn VaultNeedsBanner() -> Element {
         }
     }
 }
+
+/// The person's own edits to the app's vault, raised as document events
+/// while it is open (`crate::notes::on_source`).
+static DOC_EVENTS: Mutex<Option<architect_navigator::Subscription>> = Mutex::new(None);
 
 /// The lab's spaces: `notes` and `archive`, each document a `crdt`
 /// document with its own undo, as extensions reach them (`lab.tidy`).

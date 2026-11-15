@@ -156,6 +156,71 @@ pub fn open_vault() -> Option<vault::actions::OpenVault> {
     OPEN.get().cloned()
 }
 
+/// The app's vault as the navigator, its editors and the extensions'
+/// documents see it: one source, so each hears what the others change.
+static SOURCE: OnceLock<architect_navigator::VaultSource> = OnceLock::new();
+
+/// What waits for the app's vault to open ([`on_source`]).
+type Waiting = Vec<Box<dyn FnOnce(&architect_navigator::VaultSource) + Send>>;
+static WAITING: std::sync::Mutex<Waiting> = std::sync::Mutex::new(Vec::new());
+
+/// The app's vault ([`open_vault`]) as a watched navigator source, the
+/// same one for the run: the Vault's navigator and editors read and save
+/// through it, and the extension host's documents
+/// (`architect_navigator::documents::VaultDocuments`) change it, so an
+/// open note merges an extension's edit into its typing and the person's
+/// own saves are document events (#706).
+#[must_use]
+pub fn source() -> Option<architect_navigator::VaultSource> {
+    if let Some(s) = SOURCE.get() {
+        return Some(s.clone());
+    }
+    let open = open_vault()?;
+    let mut fresh = false;
+    let s = SOURCE
+        .get_or_init(|| {
+            fresh = true;
+            // The sandbox's is the demo vault; the Architect app's is the
+            // person's, by its folder's name.
+            let name = if crate::distribution().is_sandbox() {
+                "Demo vault".to_owned()
+            } else {
+                open.root()
+                    .file_name()
+                    .map_or_else(|| "Vault".to_owned(), |n| n.to_string_lossy().into_owned())
+            };
+            crate::vault::watched(open, name)
+        })
+        .clone();
+    if fresh {
+        let waiting = std::mem::take(
+            &mut *WAITING
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        for f in waiting {
+            f(&s);
+        }
+    }
+    Some(s)
+}
+
+/// Runs `f` with the app's vault's [`source`] once there is one: now, or
+/// when the first run's choice opens it.
+pub fn on_source(f: impl FnOnce(&architect_navigator::VaultSource) + Send + 'static) {
+    let mut waiting = WAITING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(s) = SOURCE.get() {
+        drop(waiting);
+        f(s);
+        return;
+    }
+    waiting.push(Box::new(f));
+    drop(waiting);
+    let _ = source();
+}
+
 /// The base view types the lab's extensions add, for `BASES_VIEW_TYPES`:
 /// filled from the extension host once it is up (`crate::extensions`).
 pub fn view_types() -> &'static ViewTypes {
@@ -180,6 +245,8 @@ pub fn register(list: &Arc<ActionList>) {
             }
         }
     };
+    // Its source, for whatever waits on it (the extensions' documents).
+    let _ = source();
     if list.info(vault::actions::ids::READ).is_some() {
         return;
     }

@@ -118,6 +118,16 @@ pub fn is_under(path: &str, under: Option<&str>) -> bool {
     }
 }
 
+/// What an edit did: the text after, and whether it changed (an edit
+/// that changes nothing raises no `doc.saved`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Edited {
+    /// The document's text after the edit.
+    pub text: String,
+    /// Whether the edit changed it.
+    pub changed: bool,
+}
+
 #[cfg(feature = "host")]
 pub use host::{DocError, Documents};
 
@@ -137,6 +147,8 @@ mod host {
         Exists(String),
         /// Not a path, or an edit outside the text.
         Invalid(String),
+        /// These documents do not do that (no metadata).
+        Unsupported(String),
         /// It was allowed and did not work.
         Failed(String),
     }
@@ -146,7 +158,7 @@ mod host {
             match self {
                 Self::NotFound(what) => write!(f, "no {what}"),
                 Self::Exists(path) => write!(f, "{path} exists already"),
-                Self::Invalid(why) | Self::Failed(why) => f.write_str(why),
+                Self::Invalid(why) | Self::Unsupported(why) | Self::Failed(why) => f.write_str(why),
             }
         }
     }
@@ -157,6 +169,7 @@ mod host {
         fn from(e: DocError) -> Self {
             match e {
                 DocError::NotFound(what) => Self::NotFound { what },
+                DocError::Unsupported(what) => Self::Unsupported { what },
                 other => Self::Failed {
                     message: other.to_string(),
                 },
@@ -196,7 +209,8 @@ mod host {
         fn create(&self, path: &str, text: &str, by: &Principal) -> Result<DocInfo, DocError>;
 
         /// `edits`, in order, as one transaction: one commit, one undo
-        /// step named `step`, made as `by`. Its text after.
+        /// step named `step`, made as `by`. Its text after, and whether
+        /// it changed (nothing is committed when it did not).
         ///
         /// # Errors
         ///
@@ -207,7 +221,7 @@ mod host {
             edits: &[DocEdit],
             step: &str,
             by: &Principal,
-        ) -> Result<String, DocError>;
+        ) -> Result<super::Edited, DocError>;
 
         /// Document `path` at `to`, its history kept.
         ///
@@ -222,13 +236,26 @@ mod host {
         ///
         /// No document at `path`.
         fn delete(&self, path: &str, by: &Principal) -> Result<(), DocError>;
+
+        /// The per-note metadata `VAULT_METADATA` answers, as its JSON:
+        /// what a vault has (`VaultDocuments`); none by default.
+        ///
+        /// # Errors
+        ///
+        /// [`DocError::Unsupported`] here; a vault's: no such note.
+        fn metadata(&self, query: &architect_documents::MetaQuery) -> Result<String, DocError> {
+            let _ = query;
+            Err(DocError::Unsupported(
+                "metadata: these documents have none".to_owned(),
+            ))
+        }
     }
 }
 
 #[cfg(all(feature = "host", feature = "crdt"))]
 mod crdt_docs;
 #[cfg(all(feature = "host", feature = "crdt"))]
-pub use crdt_docs::{CrdtDocuments, authors_of};
+pub use crdt_docs::{CrdtDocuments, apply_edits, authors_of};
 
 #[cfg(test)]
 mod tests {
