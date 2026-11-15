@@ -52,7 +52,7 @@ web-sys = { version = "0.3", features = ["Crypto", "console", "CssStyleDeclarati
 # The app (src/app): the same components as the desktop and phone apps
 # (apps/ui), on dioxus-web.
 dioxus = { workspace = true, features = ["web"] }
-architect = { workspace = true, features = ["action-list", "connect", "http-client"] }
+architect = { workspace = true, features = ["action-list", "connect", "http-client", "local"] }
 # The org lane's `Notes` (src/app/org.rs).
 vault-proto = { workspace = true, features = ["vox"] }
 gloo-timers = { version = "0.3", default-features = false, features = ["futures"] }
@@ -86,8 +86,15 @@ architect-media = { workspace = true, features = ["ui"] }
 architect-distribution = { workspace = true }
 architect-extensions = { workspace = true, features = ["ui", "linked", "crdt"] }
 architect-theme-picker = { workspace = true }
+# The vault's query service, run in the page over the vault index (#495,
+# #710): the one implementation, `QueryEngine`, its index synced from the
+# node (signed in) or built here (the demo) (src/app/index_sync.rs).
+vault-query = { workspace = true }
 
 [dev-dependencies]
+# tests/index_snapshot.rs: a large vault's index, its bytes on the wire.
+vault-query = { workspace = true }
+flate2 = "1"
 # src/read_only.rs's tests: the navigator's source, natively (no UI).
 architect-navigator = { workspace = true }
 

@@ -756,6 +756,30 @@ a `web` feature (`xtask/src/dist.rs` `build_web`).
 `apps/web/test/app-documents.test.mjs` drives all of it through the
 demo's probe extension (`/app/?demo&probe` only).
 
+**The vault's query service in the browser** (#495, #710's data model).
+Queries run in the page, over the vault index, with the one engine
+(`vault_query::QueryEngine`) served there (`architect::serve_local`); the
+extension host holds only its client (`Host::set_vault_query`), so
+`query_vault` answers as on a desk (`apps/web/src/app/index_sync.rs`):
+
+- **Signed in**, the index is the node's (`VaultIndexSync` on the org
+  lane): a snapshot of the org's first vault as the person may read it,
+  then the deltas since its revision every two seconds, applied to a
+  `vault_query::Replica` (`Replica::reset` takes a snapshot again when
+  the node no longer keeps the deltas). The browser never holds the
+  vault: an entry is a note's title, properties, tags, links, headings
+  and task lines, no body. Kept in memory; a reload or sign-out drops
+  it.
+- **In the demo**, the index is built in the page from the demo vault,
+  with the one builder (`vault_query::Built` over `DemoNotes`).
+
+For a 10 000-note vault (`apps/web/tests/index_snapshot.rs`,
+`apps/web/test/app-index.test.mjs`): a 2.5 MiB snapshot (260 B a note);
+146 KiB gzipped for the generated notes, which repeat (a real vault
+compresses less); one property edit's delta 279 B (206 B gzipped). In
+Firefox, reading the snapshot takes 37 to 60 ms and the first query 52
+to 105 ms.
+
 ### A share link's guests
 
 A share link's guests will run extensions, scoped to the share (#495 G1;

@@ -153,7 +153,20 @@ pub fn use_web_extensions(app: &Arc<ActionList>) -> ExtensionUi {
             }
         };
         let events = docs.raise_on(app);
-        host.set_documents(std::sync::Arc::new(docs));
+        let docs: std::sync::Arc<dyn architect_extensions::documents::Documents> =
+            std::sync::Arc::new(docs);
+        host.set_documents(std::sync::Arc::clone(&docs));
+        // The vault's query service, in this page, over the vault index:
+        // the node's synced, signed in; built here in the demo (#495). It
+        // is set with the documents, for the person (`Host::set_vault`).
+        match &web.org {
+            Some(org) => {
+                if let Some(vault) = org.vaults().first().cloned() {
+                    super::index_sync::serve_org(&host, docs, org.clone(), vault);
+                }
+            }
+            None => super::index_sync::serve_demo(&host, docs, web.source.clone()),
+        }
         // Kept for the app's life.
         std::mem::forget(events);
     });
@@ -185,6 +198,7 @@ pub fn use_web_extensions(app: &Arc<ActionList>) -> ExtensionUi {
         if web.as_ref().is_some_and(|w| w.org.is_none()) && probe_asked() {
             // On the host's own list, where `EXT_PAGE_CALL` is.
             install_probe(Arc::clone(&list));
+            super::index_sync::install_probe();
         }
     });
     // Each linked extension's root context, for its views below.

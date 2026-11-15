@@ -227,6 +227,19 @@ impl Replica {
         result
     }
 
+    /// Takes a new snapshot's bytes in place of what it had: what a
+    /// client does when `since` answers "take a snapshot". The engine over
+    /// it sees the new index at once.
+    ///
+    /// # Errors
+    ///
+    /// They are not one; the index it had stays.
+    pub fn reset(&self, bytes: &[u8]) -> Result<(), String> {
+        let next = VaultIndex::from_bytes(bytes)?;
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Arc::new(next);
+        Ok(())
+    }
+
     /// Its history and revision: what to ask `since` with.
     #[must_use]
     pub fn at(&self) -> (u64, u64) {
