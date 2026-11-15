@@ -86,6 +86,8 @@ pub mod device_ios;
 #[cfg(feature = "crdt")]
 pub mod doc;
 #[cfg(feature = "host")]
+pub mod docs_service;
+#[cfg(feature = "host")]
 pub mod embeds;
 #[cfg(feature = "host")]
 pub mod extensions;
@@ -113,6 +115,10 @@ pub mod interface;
 pub mod interop_actions;
 #[cfg(any(feature = "host", feature = "web"))]
 mod invocation;
+/// An action's invocation, and its caller's, as the JSON an extension is
+/// handed (a WASI component's `invoke`, a TypeScript action's `ctx`).
+#[cfg(any(feature = "host", feature = "web"))]
+pub use invocation::{caller_json, invocation_json};
 #[cfg(any(feature = "linked-core", all(feature = "guest", unix)))]
 pub mod linked;
 #[cfg(feature = "host")]
@@ -125,6 +131,8 @@ pub mod manage;
 pub mod manager;
 #[cfg(feature = "host")]
 pub mod net;
+#[cfg(any(feature = "host", feature = "vox"))]
+pub mod node;
 #[cfg(all(feature = "pickers", target_os = "ios"))]
 pub(crate) mod pickers_ios;
 // Language servers through the host (#512): `Host::open_code`, the

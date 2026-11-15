@@ -125,6 +125,7 @@ pub fn create_page(
         raw,
         parsed,
         mtime,
+        generation: crate::vault::next_generation(),
     };
     // Replace if somehow already present in snapshot; else push.
     if let Some(existing) = vault.pages.iter_mut().find(|p| p.rel_path == rel_path) {

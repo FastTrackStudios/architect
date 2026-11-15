@@ -25,6 +25,9 @@ pub const DOCUMENTS: &str = "documents";
 /// …): an extension runs them only with `reads` (read-only ones) or
 /// `writes` (the rest) `= ["documents"]`, as the document calls.
 pub const VAULT_ACTIONS: &str = "VAULT_";
+/// The bases' actions (`BASES_ROWS`, `BASES_READ`, …): what notes a base
+/// finds, and the `.base` files. The documents too, as [`VAULT_ACTIONS`].
+pub const BASES_ACTIONS: &str = "BASES_";
 /// The images and lyrics files of a note its view draws (#669).
 ///
 /// Art, chart images and synced lyrics, read-only and size-capped
@@ -475,7 +478,7 @@ impl Capabilities {
 
     /// [`Self::may_run`] for an action of the app's, run from the
     /// extension (the host service's `run`, the actions it lists): past
-    /// that rule, a `VAULT_*` action ([`VAULT_ACTIONS`]) needs
+    /// that rule, a `VAULT_*` or `BASES_*` action ([`VAULT_ACTIONS`], [`BASES_ACTIONS`]) needs
     /// `reads = ["documents"]` (read-only) or `writes` (the rest). Kept
     /// apart from [`Self::may_run`], the rule a browser's favourites share.
     ///
@@ -492,7 +495,7 @@ impl Capabilities {
         // them is reading (or, past read-only, changing) the documents, so
         // they need what the document calls need, and the consent prompt
         // says so ("Read your documents").
-        if id.starts_with(VAULT_ACTIONS) {
+        if id.starts_with(VAULT_ACTIONS) || id.starts_with(BASES_ACTIONS) {
             let (needs, have, cap) = if effect == Reach::ReadOnly {
                 ("reads", self.may_read(DOCUMENTS), "reads.documents")
             } else {
@@ -763,8 +766,17 @@ mod tests {
         let mut writer = reader;
         writer.writes = vec!["documents".to_owned()];
         assert_eq!(run(&writer, "VAULT_CREATE", Reach::Mutating), None);
-        // Other actions are as they were.
+        // A base's rows are the notes it finds: the documents too.
         let other = caps(&["BASES_"], Reach::ReadOnly, &[]);
-        assert_eq!(run(&other, "BASES_ROWS", Reach::ReadOnly), None);
+        assert_eq!(
+            run(&other, "BASES_ROWS", Reach::ReadOnly),
+            Some("reads.documents")
+        );
+        let base_reader = caps(&["BASES_"], Reach::Mutating, &["documents"]);
+        assert_eq!(run(&base_reader, "BASES_ROWS", Reach::ReadOnly), None);
+        assert_eq!(
+            run(&base_reader, "BASES_SET_SORT", Reach::Mutating),
+            Some("writes.documents")
+        );
     }
 }

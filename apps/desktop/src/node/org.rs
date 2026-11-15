@@ -102,6 +102,16 @@ const NOTES_PERMITS: ServicePermits = ServicePermits {
     ],
 };
 
+/// `VaultIndexSync` on the org lane: the index is a read, as `Notes`'
+/// `read` is.
+const INDEX_PERMITS: ServicePermits = ServicePermits {
+    service: "VaultIndexSync",
+    methods: &[
+        MethodPermit::new("snapshot", "read", "vaults/**"),
+        MethodPermit::new("since", "read", "vaults/**"),
+    ],
+};
+
 /// `DocSync` on the org lane; which note is [`OrgLane::opens`]' call.
 const SYNC_PERMITS: ServicePermits = ServicePermits {
     service: "DocSync",
@@ -131,6 +141,8 @@ pub struct OrgLane {
     /// session watches that connection's bearer ([`VaultSync`]).
     vaults: Option<(crdt::DocRegistry, super::VaultCatalog)>,
     shares: bool,
+    /// Whether installed extensions' node actions are served (#583).
+    node_actions: bool,
     recheck: Duration,
     issuer_grace: Duration,
     /// Browser origins besides the node's own that may open the lane.
@@ -151,7 +163,9 @@ impl OrgLane {
             DeviceEnrolmentDispatcher::new(EnrolmentHost::new(admission.clone(), members.clone())),
         );
         let sessions = Arc::new(IssuerSessions::new(issuer.clone()).with_ttl(RECHECK));
-        let gate = gate(&engine, &members, &issuer, &sessions, false, false, RECHECK);
+        let gate = gate(
+            &engine, &members, &issuer, &sessions, false, false, false, RECHECK,
+        );
         Self {
             org,
             members,
@@ -162,6 +176,7 @@ impl OrgLane {
             issuer,
             vaults: None,
             shares: false,
+            node_actions: false,
             recheck: RECHECK,
             issuer_grace: ISSUER_GRACE,
             origins: Arc::from(Vec::new()),
@@ -181,6 +196,7 @@ impl OrgLane {
             &self.sessions,
             self.vaults.is_some(),
             self.shares,
+            self.node_actions,
             self.recheck,
         );
     }
@@ -215,6 +231,21 @@ impl OrgLane {
             architect_spaces::ShareLinksDispatcher::new(super::shares::SharesLane(shares)),
         );
         self.shares = true;
+        self.rebuild_gate();
+        self
+    }
+
+    /// Serve installed extensions' node actions on the lane too (#583,
+    /// `architect_extensions::node::NodeActions`): any member lists them, a
+    /// member runs one, an admin sees and sets their secrets
+    /// (`architect_extensions::node::PERMITS`).
+    #[must_use]
+    pub fn with_node_actions(mut self, node: architect_extensions::node::NodeHost) -> Self {
+        self.router = self.router.with(
+            architect_extensions::node::node_actions_service_descriptor(),
+            architect_extensions::node::NodeActionsDispatcher::new(node),
+        );
+        self.node_actions = true;
         self.rebuild_gate();
         self
     }
@@ -273,6 +304,37 @@ impl OrgLane {
                     &Action::write(),
                 )
                 .allowed()
+    }
+
+    /// Whether a person may read note `path` of vault `vault`: a member of
+    /// the org whose role may `read` it (the vault index's filter, as
+    /// [`Self::opens`] is the live note's). Share guests get no index here
+    /// (a guest's subset of it is later work, #710 G1).
+    #[must_use]
+    pub fn reads(&self, who: &Principal, vault: &str, path: &str) -> bool {
+        let doc_id = vault_proto::collab_doc_id(vault, path);
+        matches!(who, Principal::User { .. })
+            && self
+                .engine
+                .check(
+                    who,
+                    &Resource::new(format!("org/{}/docs/{doc_id}", self.org.id.0)),
+                    &Action::read(),
+                )
+                .allowed()
+    }
+
+    /// A fingerprint of what `who` may read in the org: their role, which
+    /// the lane's rules are per ([`engine`]). It moves when their role does.
+    #[must_use]
+    pub fn read_key(&self, who: &Principal) -> u64 {
+        use std::hash::{Hash as _, Hasher as _};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.members
+            .role(who, &self.org.id)
+            .map(|r| r.label())
+            .hash(&mut h);
+        h.finish()
     }
 
     /// Serve the lane at `/org/{slug}/vox` on `host`; any other slug is
@@ -334,7 +396,8 @@ pub fn origin_allowed(headers: &architect::http::axum::http::HeaderMap, extra: &
 
 /// The lane's gate: the org's engine, callers resolved by the issuer;
 /// with `vaults`, `Notes` and `DocSync` permitted too, with `shares`
-/// `ShareLinks`.
+/// `ShareLinks`, with `node_actions` `NodeActions`.
+#[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
 fn gate(
     engine: &Arc<ConfinedEngine>,
     members: &Members,
@@ -342,6 +405,7 @@ fn gate(
     sessions: &Arc<IssuerSessions>,
     vaults: bool,
     shares: bool,
+    node_actions: bool,
     recheck: Duration,
 ) -> Arc<PermissionsGate> {
     let identity = MembersResolver::new(
@@ -359,12 +423,22 @@ fn gate(
                 super::service::notes::notes_service_descriptor(),
                 &NOTES_PERMITS,
             )
+            .permit(
+                super::service::index_sync::vault_index_sync_service_descriptor(),
+                &INDEX_PERMITS,
+            )
             .permit(crdt::sync::doc_sync_service_descriptor(), &SYNC_PERMITS);
     }
     if shares {
         gate = gate.permit(
             architect_spaces::share_links_rpc_service_descriptor(),
             &architect_spaces::SHARE_PERMITS,
+        );
+    }
+    if node_actions {
+        gate = gate.permit(
+            architect_extensions::node::node_actions_service_descriptor(),
+            &architect_extensions::node::PERMITS,
         );
     }
     Arc::new(gate)

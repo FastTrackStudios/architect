@@ -31,6 +31,15 @@ use chrono::{Datelike as _, Local, NaiveDate, Weekday};
 use futures::executor::block_on;
 use serde_json::{Value, json};
 
+/// The extension keeps its host's handle in a static (the copy built
+/// last), so its tests run one at a time: an action that waits (the query
+/// service's `BASES_ROWS`) would otherwise reach another test's vault.
+fn serial() -> std::sync::MutexGuard<'static, ()> {
+    static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    ONE.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// The app's side: its list with `VAULT_*` and `BASES_*` over `dir`.
 fn app_list(dir: &Path) -> Arc<ActionList> {
     let list = Arc::new(ActionList::new());
@@ -38,7 +47,13 @@ fn app_list(dir: &Path) -> Arc<ActionList> {
     vault::actions::register(&list, &open).unwrap();
     let types: &'static architect_bases::model::ViewTypes =
         Box::leak(Box::new(architect_bases::model::ViewTypes::new()));
-    architect_bases::actions::register(&list, &open, types).unwrap();
+    architect_bases::actions::register(
+        &list,
+        &open,
+        types,
+        architect_bases::actions::local_queries(&open),
+    )
+    .unwrap();
     list
 }
 
@@ -465,6 +480,7 @@ fn vault_in(tmp: &Path) -> std::path::PathBuf {
 
 #[test]
 fn calendar_two_ways() {
+    let _one_at_a_time = serial();
     // Linked in.
     let tmp = tempfile::tempdir().unwrap();
     let dir = vault_in(tmp.path());
@@ -529,6 +545,7 @@ fn calendar_two_ways() {
 /// calendar, and tracked time as a block.
 #[test]
 fn calendar_with_tasks_and_time() {
+    let _one_at_a_time = serial();
     let tmp = tempfile::tempdir().unwrap();
     let dir = vault_in(tmp.path());
     let app = app_list(&dir);
@@ -615,6 +632,7 @@ fn calendar_with_tasks_and_time() {
 /// events), a booking checked again, on the calendar, and cancelled.
 #[test]
 fn booking_slots() {
+    let _one_at_a_time = serial();
     let tmp = tempfile::tempdir().unwrap();
     let dir = vault_in(tmp.path());
     let app = app_list(&dir);
@@ -749,6 +767,7 @@ fn ics(events: &str) -> String {
 /// dropped ones tombstoned, read only on the calendar; and a file imported.
 #[test]
 fn calendar_subscriptions() {
+    let _one_at_a_time = serial();
     let tmp = tempfile::tempdir().unwrap();
     let dir = vault_in(tmp.path());
     let app = app_list(&dir);

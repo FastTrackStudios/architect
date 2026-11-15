@@ -816,6 +816,7 @@ fn token_in(dir: &Path) -> String {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_signed_in_web_client_edits_a_note_live_on_the_org_lane() {
+    use architect_desktop::node::service::index_sync::VaultIndexSyncClient;
     use architect_desktop::node::service::notes::NotesClient;
     use crdt::sync::{DocSyncClient, SyncedDoc};
 
@@ -846,6 +847,51 @@ async fn a_signed_in_web_client_edits_a_note_live_on_the_org_lane() {
     let notes: NotesClient = web(&host, Some(alan.clone())).await;
     let listed = notes.list().await.unwrap();
     assert!(listed.iter().any(|n| n.path == "hello.md"), "{listed:?}");
+
+    // The vault index, synced to a browser: a snapshot, then a delta
+    // after a write brings the new note.
+    let index: VaultIndexSyncClient = web(&host, Some(alan.clone())).await;
+    let snap = index.snapshot("notes".to_owned()).await.unwrap();
+    let mut replica = vault::query::VaultIndex::from_bytes(&snap.bytes).unwrap();
+    assert_eq!(replica.epoch, snap.epoch);
+    assert!(replica.entries.contains_key("hello.md"), "{replica:?}");
+    notes
+        .create(
+            "notes".to_owned(),
+            "second.md".to_owned(),
+            "---\nstatus: new\n---\n# Second\n".to_owned(),
+        )
+        .await
+        .unwrap();
+    let mut caught_up = false;
+    for _ in 0..100 {
+        match index
+            .since(
+                "notes".to_owned(),
+                snap.epoch,
+                snap.access,
+                replica.revision,
+            )
+            .await
+            .unwrap()
+        {
+            Some(delta) => replica
+                .apply_interned(vault::query::IndexDelta::from_bytes(&delta.bytes).unwrap())
+                .unwrap(),
+            None => panic!("the same history and access: a delta, not a snapshot"),
+        }
+        if replica
+            .entries
+            .get("second.md")
+            .is_some_and(|e| e.props["status"] == "new")
+        {
+            caught_up = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(caught_up, "the delta brought the new note");
+    assert!(index.snapshot("nope".to_owned()).await.is_err());
 
     let sync: DocSyncClient = web(&host, Some(alan)).await;
     let doc_id = vault_proto::collab_doc_id("notes", "hello.md");
@@ -878,6 +924,11 @@ async fn a_signed_in_web_client_edits_a_note_live_on_the_org_lane() {
     // No session, or a session not in the org: refused.
     let anonymous: NotesClient = web(&host, None).await;
     assert!(anonymous.list().await.is_err());
+    let anonymous: VaultIndexSyncClient = web(&host, None).await;
+    assert!(
+        anonymous.snapshot("notes".to_owned()).await.is_err(),
+        "the index is a read"
+    );
     let ada_dir = tmp.path().join("ada-web");
     session_of(&origin, &ada_dir, "ada@local.test").await;
     let ada: NotesClient = web(&host, Some(token_in(&ada_dir))).await;
@@ -886,6 +937,108 @@ async fn a_signed_in_web_client_edits_a_note_live_on_the_org_lane() {
         format!("{refused:?}").contains("not a member"),
         "{refused:?}"
     );
+
+    host.stop().await;
+}
+
+/// A mock of a bank's token exchange (`features/extensions/tests/support`).
+#[path = "../../../features/extensions/tests/support/server.rs"]
+mod bank;
+
+/// Copies `from` into `to`, files and folders.
+fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap().flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            copy_dir(&path, &to.join(entry.file_name()));
+        } else {
+            std::fs::copy(&path, to.join(entry.file_name())).unwrap();
+        }
+    }
+}
+
+/// #583: an installed extension's node action, served on the org lane.
+/// A member runs the showcase's Bank link exchange with the node's
+/// operator secrets; a viewer of none of the org is refused; the lane
+/// sets no operator's secret.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_member_runs_an_installed_extensions_node_action_on_the_org_lane() {
+    use architect_extensions::node::NodeActionsClient;
+
+    let bank = bank::serve();
+    let origin = issuer().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let host_dir = tmp.path().join("host");
+    std::fs::create_dir_all(host_dir.join("data/vaults/notes")).unwrap();
+    // Installed as the node's deployment installs it: a package folder.
+    let ext = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/showcase/bank-link");
+    copy_dir(&ext, &host_dir.join("data/extensions/showcase.bank-link"));
+    // Its operator's secrets: a file each, as sops-nix writes them.
+    let secrets = host_dir.join("secrets");
+    std::fs::create_dir_all(secrets.join("showcase.bank-link")).unwrap();
+    std::fs::write(
+        secrets.join("showcase.bank-link/client_id"),
+        bank::EXCHANGE_ID,
+    )
+    .unwrap();
+    std::fs::write(
+        secrets.join("showcase.bank-link/client_secret"),
+        format!("{}\n", bank::EXCHANGE_SECRET),
+    )
+    .unwrap();
+    let mut config = config(
+        "indie-host",
+        &host_dir,
+        &origin,
+        session_of(&origin, &host_dir, "grace@local.test").await,
+    );
+    config.host_org = Some("indie".to_owned());
+    config.extension_secrets = Some(secrets);
+    let host = node::start(config).await.unwrap();
+
+    let alan_dir = tmp.path().join("alan-web");
+    session_of(&origin, &alan_dir, "alan@local.test").await;
+    let alan: NodeActionsClient = web(&host, Some(token_in(&alan_dir))).await;
+    let listed = alan.list().await.unwrap();
+    assert_eq!(listed.len(), 1, "{listed:?}");
+    assert!(listed[0].missing.is_empty(), "{listed:?}");
+    let api = format!("http://127.0.0.1:{}", bank.port);
+    let out = alan
+        .run(
+            "showcase.bank-link".to_owned(),
+            "SHOWCASE_BANK_LINK_EXCHANGE".to_owned(),
+            json!({ "public_token": "public-sandbox-7", "api": api }).to_string(),
+        )
+        .await
+        .unwrap();
+    let out: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(out, json!({ "linked": true, "item_id": "item-42" }));
+    let heard = bank.heard.to("/item/public_token/exchange");
+    assert_eq!(heard[0].1["plaid-secret"], bank::EXCHANGE_SECRET);
+
+    // The operator's secrets: not set on the lane, even by the owner.
+    let grace: NodeActionsClient = web(&host, Some(token_in(&host_dir))).await;
+    let refused = grace
+        .set_secret(
+            "showcase.bank-link".to_owned(),
+            "client_secret".to_owned(),
+            "x".to_owned(),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        format!("{refused:?}").contains("OperatorSecrets"),
+        "{refused:?}"
+    );
+
+    // Not in the org, or no session: refused.
+    let ada_dir = tmp.path().join("ada-web");
+    session_of(&origin, &ada_dir, "ada@local.test").await;
+    let ada: NodeActionsClient = web(&host, Some(token_in(&ada_dir))).await;
+    assert!(ada.list().await.is_err());
+    let anonymous: NodeActionsClient = web(&host, None).await;
+    assert!(anonymous.list().await.is_err());
 
     host.stop().await;
 }

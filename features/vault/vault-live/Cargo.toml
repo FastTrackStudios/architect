@@ -9,6 +9,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+# The parsers and the evaluator, wasm-clean (`bases`, `refs`).
+vault-query = { workspace = true }
 # Vault is native-only (file IO + watching). The `#![cfg(not(wasm))]`
 # at the crate root keeps wasm builds happy.
 walkdir = { workspace = true }

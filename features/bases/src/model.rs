@@ -8,10 +8,10 @@
 use std::sync::{Arc, PoisonError, RwLock};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 use vault::bases::{
     BaseRow, Conjunction, Formula, ParsedBase, SortDir, SortKey, ViewKind, ViewSpec,
-    filter_clauses, filter_of_clauses,
+    filter_of_clauses,
 };
 
 /// A view type a base's view may be: Bases' own (table, cards, list), or
@@ -121,46 +121,14 @@ pub fn kind_of(kind: &str) -> ViewKind {
     }
 }
 
-/// One table of `file.name`: the view a base with none reads as.
-#[must_use]
-pub fn default_view() -> ViewSpec {
-    ViewSpec {
-        kind: ViewKind::Table,
-        name: "Table".to_owned(),
-        filter: None,
-        order: vec!["file.name".to_owned()],
-        sort: Vec::new(),
-        limit: None,
-        group_by: None,
-        extras: Value::Null,
-    }
-}
+// The base's shape as JSON, and its views: the vault's (`vault::base_json`),
+// the one the query service answers in.
+pub use vault::base_json::{base_json, default_view, view_index, view_json, with_a_view};
 
-/// `base` with a view to show: as it is, or with [`default_view`] when it
-/// has none.
+/// Every column a view may show over `rows` (`vault::base_json::columns`).
 #[must_use]
-pub fn with_a_view(mut base: ParsedBase) -> ParsedBase {
-    if base.views.is_empty() {
-        base.views.push(default_view());
-    }
-    base
-}
-
-/// The index of view `name` (any case), or the first when `None`.
-///
-/// # Errors
-///
-/// No view has that name.
-pub fn view_index(base: &ParsedBase, name: Option<&str>) -> Result<usize, String> {
-    match name.map(str::trim).filter(|n| !n.is_empty()) {
-        None if base.views.is_empty() => Err("the base has no views".to_owned()),
-        None => Ok(0),
-        Some(n) => base
-            .views
-            .iter()
-            .position(|v| v.name.eq_ignore_ascii_case(n))
-            .ok_or_else(|| format!("no view {n:?}")),
-    }
+pub fn columns(base: &ParsedBase, rows: &[BaseRow]) -> Vec<String> {
+    vault::base_json::columns(base, &vault::base_json::property_keys(rows))
 }
 
 /// A JSON value's field, `null` when it has none (never panics, unlike
@@ -189,71 +157,6 @@ fn view_mut<'a>(base: &'a mut ParsedBase, name: Option<&str>) -> Result<&'a mut 
     base.views
         .get_mut(i)
         .ok_or_else(|| "no such view".to_owned())
-}
-
-/// A view as JSON, in the base's own words: `type`, `name`, `order`,
-/// `sort` (`[{property, direction}]`), `groupBy`, `filters` (`{join,
-/// clauses}`), `limit`, and its type's options (`options`).
-#[must_use]
-pub fn view_json(view: &ViewSpec) -> Value {
-    let (join, clauses) = view
-        .filter
-        .as_ref()
-        .map_or((Conjunction::And, Vec::new()), filter_clauses);
-    json!({
-        "type": view.kind.as_str(),
-        "name": view.name,
-        "order": view.order,
-        "sort": view.sort.iter().map(|k| json!({
-            "property": k.property,
-            "direction": if k.direction == SortDir::Desc { "DESC" } else { "ASC" },
-        })).collect::<Vec<_>>(),
-        "groupBy": view.group_by,
-        "filters": { "join": join, "clauses": clauses },
-        "limit": view.limit,
-        "options": if view.extras.is_object() { view.extras.clone() } else { json!({}) },
-    })
-}
-
-/// A base as JSON: its filters, formulas, properties' display names and
-/// views.
-#[must_use]
-pub fn base_json(path: &str, base: &ParsedBase) -> Value {
-    let (join, clauses) = filter_clauses(&base.global_filter);
-    json!({
-        "path": path,
-        "filters": { "join": join, "clauses": clauses },
-        "formulas": base.formulas.iter().map(|f| json!({ "name": f.name, "expression": f.expression })).collect::<Vec<_>>(),
-        "properties": base.properties.iter().map(|p| json!({ "key": p.key, "displayName": p.display_name })).collect::<Vec<_>>(),
-        "views": base.views.iter().map(view_json).collect::<Vec<_>>(),
-    })
-}
-
-/// Every column a view may show over `rows`: the file's own (`file.name`,
-/// `file.folder`, …), each property a note has, each of the base's
-/// formulas (`formula.<name>`).
-#[must_use]
-pub fn columns(base: &ParsedBase, rows: &[BaseRow]) -> Vec<String> {
-    let mut out: Vec<String> = [
-        "file.name",
-        "file.path",
-        "file.folder",
-        "file.ext",
-        "file.tags",
-        "file.mtime",
-    ]
-    .into_iter()
-    .map(str::to_owned)
-    .collect();
-    let mut keys: Vec<String> = rows
-        .iter()
-        .flat_map(|r| r.frontmatter.keys().cloned())
-        .collect();
-    keys.sort_by_key(|k| k.to_lowercase());
-    keys.dedup();
-    out.extend(keys);
-    out.extend(base.formulas.iter().map(|f| format!("formula.{}", f.name)));
-    out
 }
 
 /// The property a column writes when its cell is edited: a note's own
@@ -458,6 +361,7 @@ pub fn set_option(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn base() -> ParsedBase {
         vault::bases::parse(

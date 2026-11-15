@@ -111,6 +111,7 @@ documents.
 | 1. **Data** | a manifest and files: themes, keymaps, screensets, settings defaults, frame views with no logic, action presets | everywhere, iOS included | most customisation |
 | 2. **WASM components** | code against `architect:extension`, a WIT world generated from the Action List and the services | Wasmtime: compiled on desk and Android, its interpreter (Pulley) on iOS; the browser's WebAssembly on the web | third-party features |
 | 3. **Scripts** | Luau (through mlua): query, branch, loop, run actions | everywhere (interpreted) | a person's own macros and conditional actions |
+| 3b. **TypeScript** | `kind = "typescript"`: actions and hooks as `.ts`/`.js` modules beside TSX pages, on the pages' runtime with the whole host service, typed by the generated `architect.d.ts` ([Pages as files](@/architecture/pages.md), "Actions as files") | `QuickJS` on desk and iOS (interpreted); a Web Worker on the browser's engine on the web | light extensions with no Rust and no WASM toolchain |
 | 4. **Processes** | a program speaking vox, registering actions as a client does | desk only | heavy or other-language tools (Python, a model, an MCP server) |
 | 5. **Native** | a dynamic library | first-party only | what must be native and is ours (CLAP/VST3 already covers audio) |
 
@@ -290,6 +291,10 @@ rendered by the app.
 > runner, workers too, on Wasmtime's Pulley interpreter. **The web
 > (2026-11-04, the rest of part 3)** behind the `web` feature: the same
 > components, transpiled by jco, in Web Workers ("On the web" below).
+> **In the release builds (#707):** `cargo xtask dist desktop` and
+> `dist ios` build the app with `wasi` (Cranelift on the desk, Pulley
+> on iOS), so an installed component runs in the shipped app;
+> `--no-wasi` leaves Wasmtime out.
 
 A `kind = "wasm"` extension is a WebAssembly component against the
 `architect:extension` world (`features/extensions/wit/extension.wit`),
@@ -548,9 +553,18 @@ serves its Action List on a control socket as the desk lab does
 (`FTS_CONTROL_DIR` puts it in a folder on the Mac), so
 `scripts/mac-live-check.sh` drives it ([A live check on a Mac](@/guide/live-check-mac.md)).
 
-**Size.** Wasmtime and Cranelift add about 19 MB to a stripped
-`architect-desktop` built with the dev profile (opt-level 1): behind the
-feature, off by default.
+**Size and memory.** Wasmtime and Cranelift add about 19 MB to a
+stripped `architect-desktop` built with the dev profile (opt-level 1).
+In a stripped release build (#707, measured 2026-11-14 on x86-64 Linux
+with a probe that links Wasmtime 50.0.1 with this crate's features, an
+engine, WASI p2 on a linker and a component compile) they add 15.9 MB;
+with Pulley as the target, as on iOS, 16.0 MB. Making the engine and
+the linker costs about 6 MB resident either way. Each running
+instance's linear memory then reserves address space: 4 GiB and a guard
+under Cranelift (virtual, not resident), `PULLEY_RESERVATION` (64 MiB)
+under Pulley; what it touches is what it uses, up to its limit. The
+release builds have the feature on (`cargo xtask dist`); the crate
+keeps it off by default.
 
 ### On the web
 
@@ -791,6 +805,7 @@ author's edit shows in the running app in the time it takes to build.
 |---|---|
 | Data (themes, keymaps, frame views) | re-read: instant |
 | Luau scripts | re-read on the next run; a running one finishes on the old code |
+| TypeScript actions | its folder transpiled again as it reloads (a mistake keeps the last good one, at its line); each run loads its module fresh, a running one finishes on the old code |
 | WASM components | rebuilt (`cargo component build`), re-instantiated: seconds, state kept |
 | WASM views' `rsx!` | Dioxus's own hot reload: the extension's `VirtualDom` takes template changes from the dev server, so markup and style edits apply without rebuilding the `.wasm` — instant |
 | Processes | rebuilt and restarted by the supervisor, state handed over; in development the extension can run under `dx serve` with Rust hot-patching (it is its own binary), so most code edits apply without a restart at all |
@@ -3597,6 +3612,24 @@ is the vault's.
 prompt says "Read your documents" or "Change your documents" for it and
 an `actions = ["VAULT_"]` grant alone reads no note.
 
+**One service, through its client.** The document calls and an
+extension's data are one `#[architect::rpc]` service,
+`architect_documents::Documents` (`features/extensions/documents`,
+wasm-clean): `list`, `read`, `create`, `edit`, `rename`, `delete`,
+`metadata` (`VAULT_METADATA`'s answer), `data`, `set_data`, each naming
+the extension it is for. Its one implementation, `DocumentsServer`, has
+the gate in it (`Gate`: `reads` / `writes = ["documents"]`), so every
+transport gets the same check, and calls a `DocumentStore` and a
+`DataStore` below it. The host reaches it only through the generated
+`DocumentsClient` (`features/extensions/src/docs_service.rs`): it serves
+`DocumentsServer` over the app's `Documents` (`AsStore`), each
+extension's data (`FileData`) and its own gate (`HostGate`) with
+`architect::serve_local` on a runtime of its own, the same on the desk
+and iOS. A browser's host uses the same client over vox on the org
+lane, the node serving the same `DocumentsServer`; the demo serves it
+in wasm over `MemoryStore`. What is not wasm-clean is only below the
+stores: the vault on disk and the data files.
+
 **Extension data and settings persist.** `host.data`/`set_data` are a
 file per extension under the host's data root (the app's
 `<app dir>/extension-data`), written whole (a temporary file, synced,
@@ -3627,6 +3660,141 @@ refused without `reads` / `writes`), `features/pages/tests/documents.rs`
 (a TSX and a Luau page on an app's own `Documents`),
 `features/extensions/tests/wasi_wit.rs` (the typed imports are the
 calls).
+
+## The vault's query service
+
+The vault keeps an index of its notes, as Obsidian's metadata cache is
+what Dataview, Tasks and Bases read (`features/vault/vault-query`,
+wasm-clean).
+
+**The index** (`vault_query::index`). One compact `Entry` per note: its
+title, frontmatter properties, inline tags, body links, headings and task
+lines, never its prose; and one per `.base` file, its YAML. An entry is
+capped (`MAX_PROPS`, `MAX_LIST`, `MAX_TEXT`, `MAX_VALUE`, `MAX_BASE`) and
+says when it was (`truncated`). Property keys, tags and link targets are
+shared strings, one per distinct text (`Interner`).
+
+`index::Builder` keeps it from a vault that changes (`NoteSource`), a
+note at a time. A note whose stamp moved and whose text changed gets a
+new entry, and each sync is an `IndexDelta` (entries put, paths gone).
+It reads `index::CHUNK` notes per hold of the vault's lock. When a write
+lands between two chunks, it reads again, waiting a little longer each
+time (`index::TRIES`), and never holds the lock for more than a chunk.
+
+- **Where it runs:** wherever the vault lives. A desk and a phone build
+  it over their own copy (`vault::actions::OpenVault` is a `NoteSource`,
+  its stamps hashes of each note's text; `vault_query::Built` keeps one).
+- **On the node:** the index is built from the vault's folder
+  (`vault::actions::query::DiskSource`). It holds no note's text, reads
+  only the files whose time or size moved, and is moved on by a watcher.
+  Each vault is built once, however many ask at once, and let go after
+  `INDEX_IDLE` with no one asking.
+- **In a browser:** a browser holds no vault, only the notes it opens and
+  a copy of the index. It gets the copy from the node's
+  `vault_proto::index_sync::VaultIndexSync` on the org lane: a
+  `snapshot`, then everything `since` a revision as one delta.
+- **What each reader gets:** the node filters every answer per caller
+  (`OrgLane::reads`: a `read` of `org/<id>/docs/<note>`, as
+  `OrgLane::opens` checks a write). A delta never names a path the caller
+  may not read. When nothing the caller may read changed, the answer
+  stays at its revision, so it cannot count edits to notes it cannot
+  read. Its `access` is a fingerprint of its rights (`OrgLane::read_key`,
+  its role); when that moves, `since` answers "take a snapshot".
+- **Histories:** each builder has a random `epoch`. A node started again
+  is another history, and `since` from an old one answers "take a
+  snapshot", as does a revision further back than the deltas kept
+  (`index::KEPT`). The first full build is no delta.
+- **On the wire:** JSON with a version (`v`, `index::WIRE`), the epoch,
+  short keys and empty fields left out (`VaultIndex::to_bytes`,
+  `IndexDelta::to_bytes`), at most `index::MAX_WIRE` bytes.
+- **Share guests** get no index yet; a guest's subset of it is #710 G1.
+
+**The engine** (`vault_query::QueryEngine`). It runs a base's view over
+the index: filters, formulas, sort and group-by (`vault_query::bases`,
+over `vault_proto::grouping`), never over a note's body. It is the one
+implementation of `vault_proto::query::VaultQuery`. Every client serves
+it in process (`architect::serve_local`) over its own index: a desk and a
+phone over their vault (`vault_query::Built`), a browser over its synced
+copy (`engine::Replica`). The node answers no queries, and full-text
+search over bodies is a separate service. `BASES_ROWS` is the same
+engine, through the same client (`architect_bases::actions::register`).
+
+- **It keeps no rows.** A query makes one per note from the index's
+  entries (sharing their properties), runs its view, builds the table
+  only for the rows its `limit` keeps (`bases::view_table_at_most`), and
+  lets the rest go. What a client holds between queries is its index.
+- **The answer is written once** (`QueryEngine::run_text`). Its hash is
+  that text's, and `revision` and `hash` go in front.
+- **Live:** a view hears the document events (`doc.saved`,
+  `doc.created`, `doc.renamed`, `doc.deleted`) and asks again with
+  `if_changed: <hash>`. When the index has not moved, the answer is
+  `{unchanged: true, revision, hash}`, with nothing run. After any edit,
+  even to a note the view does not show, the view runs again in full;
+  following each view's own notes is later work.
+
+**From an extension.** The host holds only the service's client, given
+with its documents in one call for one scope (`Host::set_vault`,
+`hostapi::VaultScope`): a share guest's host gets none, and
+`Host::set_documents` alone lets any client go. An extension asks with
+the host call `query_vault` (`HostRequest::QueryVault`: `{path? |
+source?, view?, if_changed?, limit?}`; `host.query_vault{…}` in Luau),
+which needs `reads = ["documents"]`, as the document calls and every
+`BASES_*` action do (`capabilities::BASES_ACTIONS`). Its answers are
+pages: `hostapi::QUERY_LIMIT` rows unless it asks for more, at most
+`hostapi::QUERY_LIMIT_MAX`. The answer has:
+
+- the base's views;
+- the view (`type`, `name`, `order`, `sort`, `groupBy`, `filters`,
+  `limit`, `options`);
+- its rows in groups (`{label, rows: [{path, name, values, formulas}]}`)
+  and `total`;
+- every column it could show, and its formulas and filters;
+- the index's `revision` and a `hash` of the answer.
+
+A row's `file.mtime` is its note's (RFC 3339). `file.ctime`, `file.size`
+and `file.backlinks` are not in the index yet.
+
+**The boundary.** The index, its builder, its sync and the engine are the
+core. Bases is an extension over them, using only what a third party
+could. It opens `.base` files, draws a base with its toolbar and view
+picker, adds table, cards and list as `[[base_views]]`, keeps the
+`BASES_*` actions, draws the fence, and provides `architect.bases` to
+other extensions. Reading and parsing a `.base` file, and writing one
+back, go through the document calls.
+
+**What it costs** on a generated vault of 10 000 notes, through the
+service's client, so each answer is serialized and read back as an
+extension gets it (`features/vault/vault/tests/query_bench.rs`, ignored:
+run it with `--release --ignored --nocapture`). The base has a filter, a
+formula, a sort and a group-by. The even vault is about a kilobyte a
+note; the skewed one has a note in a hundred with 120 properties and a
+long body, every note linking to one note, and most notes sharing one
+status.
+
+| | even | skewed |
+|---|---:|---:|
+| index built from an open vault | 66 ms | 96 ms |
+| a snapshot on the wire (JSON) | 257 B a note | 303 B a note |
+| a delta for one property set | 315 B | 320 B |
+| the index in memory, natively (entries and stamps) | 1059 B a note | 1190 B a note |
+| a browser's copy in memory, in V8 (wasm) | 611 B a note | |
+
+| query, through the client, p50 / p99 | even | skewed |
+|---|---:|---:|
+| every matching row (7 500 / 9 496 rows answered) | 97 / 129 ms | 159 / 428 ms |
+| `limit: 50`, an extension's page | 37 / 62 ms | 75 / 312 ms |
+| `if_changed`, nothing moved | 0.02 / 0.10 ms | 0.03 / 0.07 ms |
+| index sync after one edit | 10 / 13 ms | 13 / 17 ms |
+| `limit: 50` after one edit | 45 / 66 ms | 73 / 94 ms |
+| a save, with syncs and queries on two other threads | 0.02 / 0.04 ms | 0.02 / 0.45 ms |
+
+Measured 2026-11-14 on THEBATTLESHIP in release, beside other builds (the
+spread is theirs). A browser's copy is measured in V8 by
+`features/vault/vault-query/examples/index_memory.mjs` (built to wasm
+with `wasm-bindgen`). There a query over 10 000 notes peaks at about
+5 MiB while it runs and keeps nothing, at 41–57 ms. Before this, a query
+made every note a row under the vault's lock, every time; now a save
+waits on a sync for at most a chunk of notes, never on a query.
 
 ## The editor: commands, keys, decorations, slash rows
 
@@ -3964,6 +4132,96 @@ and granted), `features/extensions/tests/wasi.rs`
 `a_component_makes_edits_lists_and_reads_a_document` for the document
 imports), `features/pages/tests/net.rs` (a TSX and a Luau page).
 
+## Server-side parts on the node
+
+The org's node does sync, access control and only what truly needs a
+server (#710). Extension code runs on the person's device or in their
+browser, against their own copy of the vault. The one exception is a
+**node action** (#583): code that holds a secret the person's devices
+must never have, such as a bank-link token exchange that needs the
+client secret (Finance, #370).
+
+```toml
+[capabilities]
+hosts = ["sandbox.plaid.com"]
+
+[[secrets]]
+id = "client_secret"
+title = "Plaid secret"
+hosts = ["sandbox.plaid.com"]
+
+[[actions]]
+id = "LEDGER_EXCHANGE"
+name = "Link a bank"
+script = "node/exchange.luau"
+runs = "node"                    # the default is "app"
+secrets = ["client_secret"]      # why it needs a server: at least one
+```
+
+**The bar.** `Manifest::check` keeps it high. A node action:
+- is a `luau` extension's action with a script;
+- holds at least one of its `[[secrets]]`;
+- is never a preset, a toggle or a window opener.
+
+An app action names no `secrets`. Anything else that seems to need a
+server (a webhook, a schedule that runs while every device sleeps) is an
+owner's decision first, not a new kind of node action.
+
+**What the node runs.** `Manifest::node_part` is all of the extension the
+node loads:
+- its node actions;
+- the secrets they hold;
+- of its capabilities, only `hosts` and `effect`.
+
+It gets no views, hooks, workers, background, settings, documents,
+interface or ports. On the node a script has `host.fetch` to its declared
+hosts (each redirect checked). Its secrets go into a request's headers
+(`{{secret:client_secret}}`), put in by the host, never readable by the
+script (["The network and secrets"](#the-network-and-secrets)). The
+deployment that names the extension, by pinned version, hash and
+signature through Nix, is the node's consent (`docs/content/guide/deploy.md`).
+
+**One implementation.** `NodeActions` (`features/extensions/src/node.rs`) is one
+`#[architect::rpc]` service:
+- `list`: any member;
+- `run`: a member (`write`), audited;
+- `secrets` and `set_secret`: an admin.
+
+`NodeHost` (feature `node`) is its one implementation. The node loads
+each installed extension's node part on a host of its own and serves it
+on the org lane (`/org/{slug}/vox`) behind the org's permissions gate
+(`node::PERMITS`).
+
+Every client holds the generated `NodeActionsClient`: the desktop, iOS
+and the browser. An app's host registers a node action as a forwarder to
+it (`Host::with_node`, a `node::NodeLane`), so ⌘K, the CLI, MCP and a
+script run it like any other action. With no node (signed out, or an org
+whose node doesn't run the extension), running it says where it runs.
+
+**Secrets are insert-only.** A node's secrets come from one of two places:
+- **its operator**: a folder of files, `<dir>/<ext id>/<secret id>`, as
+  sops-nix writes them (`NodeHost::with_operator_secrets`); the lane
+  then sets none;
+- **an org admin**: through `set_secret`, kept in the node's private file
+  (`NodeHost::new`).
+
+No call reads a value back: `secrets` says which are set.
+
+The example is the showcase's Bank link (`examples/showcase/bank-link`):
+a token exchange against a local mock of Plaid. Its test is
+`features/extensions/tests/node.rs`. It covers:
+- an app's host runs the exchange over vox behind a gate, through the
+  generated client;
+- the bank hears both secrets, and the app holds neither;
+- a viewer is refused, a missing secret is named, and secrets are
+  insert-only;
+- an operator's node takes no secret from the lane;
+- an undeclared host is refused;
+- the manifest's rules.
+
+**Not yet.** Node-kept data, so an access token stays on the node for
+later calls, is a follow-up. So are WASI components' node actions.
+
 ## MIDI, OSC and control surfaces
 
 CSI, DrivenByMoss, ReaLearn, LBX Stripper and Playtime talk to devices:
@@ -4223,8 +4481,8 @@ Linux x86_64 and aarch64 (`x86_64-unknown-linux-gnu`,
 `aarch64-unknown-linux-gnu`; Windows later); its manifest names the
 program once, `[entry] path = "bin/<program>"`. Installing extracts this
 platform's build to `bin/<program>` (executable) and leaves the others
-out, so the runner needs nothing new. A WASI component, Luau and data are
-platform-neutral: no `bin/`.
+out, so the runner needs nothing new. A WASI component, Luau, TypeScript
+and data are platform-neutral: no `bin/`.
 
 The registry's entry lists the platforms (`platforms`), so the answer
 comes before a download: a preview says `runs_here: false` and
@@ -4682,19 +4940,48 @@ Tests: `features/extensions/tests/share_needs.rs`,
 |---|---|---|---|---|
 | macOS, Linux, Windows | yes | compiled | yes | yes |
 | Android | yes | compiled (Play allows code in a VM) | yes | no |
-| iOS | yes | interpreted (Pulley) | yes | no |
+| iOS | yes | interpreted (Pulley), in the release build (#707) | yes | no |
 | Web | yes, and linked ones compiled into the web build | the browser's WebAssembly (components transpiled) | not yet (Luau is C++, #495) | no |
 
 On iOS, a catalogue of third-party features is the App Store's §4.7
 case (an index, moderation, consent); themes, keymaps, frame views and a
 person's own scripts are not.
 
+**Installed WASM extensions on iOS (decided 2026-11-14, #716).** The
+App Store build ships `wasi`, so a person can install WASM component
+extensions in the iPhone and iPad app, positioned under guideline 2.5.2
+the way Obsidian's community plugins are:
+
+- **The person installs them.** Nothing is downloaded or turned on by
+  the app itself; an extension comes from a registry or a file the
+  person chose, after a consent prompt that lists its capabilities.
+- **Sandboxed add-ons.** A component runs in Wasmtime with no ambient
+  access: no files, network, or app state but what its manifest asks for
+  and the person granted (`hostcall::check`), each instance under a
+  memory, fuel and time limit.
+- **Interpreted, not compiled to native code.** Pulley interprets each
+  component's bytecode: no JIT, no executable memory, no W^X exception
+  (`wasi::PULLEY`).
+- **They cannot change the app's core features.** An extension adds
+  views, actions and handlers through the host's contribution points;
+  it cannot replace the app's code, its sign-in, its purchases or its
+  review-relevant behaviour, and it can be turned off or removed at any
+  time with its data kept.
+
 ## Risks
 
 - The component tooling is young: WASI 0.3 (async components) needs
   Wasmtime 46+, and the newest needs Rust 1.95 — past the fleet's 1.94.
-- Pulley on iOS is a lower-tested tier, and Wasmtime's default memory
-  reservation has to come down for App Store builds.
+- Pulley on iOS is a lower-tested tier (Wasmtime's memory reservation
+  is down to `PULLEY_RESERVATION`, 64 MiB, with no guard, for App Store
+  builds).
+- App Review: installed WASM extensions on iOS rest on guideline 2.5.2's
+  reading for user-installed, sandboxed, interpreted add-ons that cannot
+  change the app's core features (Obsidian's community plugins are the
+  precedent; "On each platform" above). A reviewer who reads it
+  otherwise would have the iOS build ship without `wasi`
+  (`cargo xtask dist ios --no-wasi`) until it is settled; linked
+  extensions, Luau and pages are unaffected.
 - Frame documents have to be expressive enough for real views without
   growing into a second Dioxus.
 - Old WIT versions are kept forever.

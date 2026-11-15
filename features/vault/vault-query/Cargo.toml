@@ -1,0 +1,40 @@
+[package]
+name = "vault-query"
+description = "The vault's query service, wasm-clean: a note parsed (frontmatter, blocks, tags, links), a note as a base's row, the `.base` parser and evaluator (filters, formulas, sort, group-by), the rows kept per note between queries (`Index`), kept a note at a time from any `NoteSource` and synced as deltas, and `QueryEngine`, the one implementation of `vault_proto::query::VaultQuery`, over it."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# `grouping` (wasm-clean), and the `VaultQuery` contract the engine serves.
+vault-proto = { workspace = true, features = ["vox"] }
+architect = { workspace = true }
+# `rc`: an entry's properties are shared with its row (`Arc`).
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+indexmap = { workspace = true, features = ["serde"] }
+regex = { workspace = true }
+# `js`: a row's id is a v4 uuid, in a browser too.
+uuid = { workspace = true, features = ["v4", "v5", "serde", "js"] }
+facet = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+# examples/index_memory.rs: the index in a browser's engine (wasm + Node).
+wasm-bindgen = "0.2"
+
+# A browser's copy of the index, measured in V8 (examples/index_memory.mjs).
+[[example]]
+name = "index_memory"
+crate-type = ["cdylib"]
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../../workspace-hack" }

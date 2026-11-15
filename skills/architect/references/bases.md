@@ -1,6 +1,6 @@
 # Bases: table, cards, list, and view types extensions add
 
-A base is Obsidian's `.base` file: filters and formulas over a vault's notes, and views of the result. `architect-bases` (`features/bases`, MIT OR Apache-2.0) draws one as a workspace view with Obsidian's three built-in view types, and lets extensions add more (#346). The parser and evaluator are the vault's (`references/vault.md`, `features/vault/vault-live/src/bases.rs` `ParsedBase`, `ViewSpec`, `view_table`). Page: `docs/content/features/bases.md`.
+A base is Obsidian's `.base` file: filters and formulas over a vault's notes, and views of the result. `architect-bases` (`features/bases`, MIT OR Apache-2.0) draws one as a workspace view with Obsidian's three built-in view types, and lets extensions add more (#346). The parser and evaluator are the vault's (`references/vault.md`, `features/vault/vault-query/src/moved/bases.rs` `ParsedBase`, `ViewSpec`, `view_table`). Page: `docs/content/features/bases.md`.
 
 ## Wiring an app
 
@@ -39,7 +39,7 @@ Symbols: `features/extensions/src/contrib.rs` `BaseViewDecl` (`view_name`), `Bas
 
 ## Grouping, shared
 
-`features/vault/vault-proto/src/grouping.rs` `group_by` (`label`, `Order`: first seen, ascending, descending, the empty group last) is what a base's `groupBy` runs on and what the navigator's list pane uses to group notes by a property. Filters read and written as text: `features/vault/vault-live/src/bases.rs` `filter_clauses`, `filter_of_clauses`.
+`features/vault/vault-proto/src/grouping.rs` `group_by` (`label`, `Order`: first seen, ascending, descending, the empty group last) is what a base's `groupBy` runs on and what the navigator's list pane uses to group notes by a property. Filters read and written as text: `features/vault/vault-query/src/moved/bases.rs` `filter_clauses`, `filter_of_clauses`.
 
 ## Gotchas
 

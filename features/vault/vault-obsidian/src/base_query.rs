@@ -20,10 +20,8 @@
 //! No CRDT, no Loro, no Dioxus — native-only, same as the rest of
 //! this crate.
 
-use uuid::Uuid;
 use vault_live::bases::{self, BaseRow, ExecutedView, ParsedBase, ViewTable};
 
-use crate::obsidian_parse::{ParsedPage, parse_page};
 use crate::vault::{Vault, VaultPage};
 
 #[derive(thiserror::Error, Debug)]
@@ -43,19 +41,7 @@ pub fn vault_to_rows(vault: &Vault) -> Vec<BaseRow> {
     vault.pages.iter().map(page_to_row).collect()
 }
 
-/// Rows from `(vault-relative path, markdown)` pairs — for callers that
-/// hold note bytes rather than a filesystem vault (the MCP lane reads
-/// them through `VaultSync`). Non-`.md` paths are skipped.
-pub fn rows_from_markdown<'a>(files: impl IntoIterator<Item = (&'a str, &'a str)>) -> Vec<BaseRow> {
-    files
-        .into_iter()
-        .filter(|(path, _)| path.ends_with(".md"))
-        .map(|(path, raw)| {
-            let (folder, basename) = split_rel(path);
-            row_of(path, &basename, &folder, &parse_page(raw))
-        })
-        .collect()
-}
+pub use vault_query::rows::rows_from_markdown;
 
 /// Run `view` (case-insensitive name), or every view when `None`, and
 /// project each into a [`ViewTable`]: visible columns plus every
@@ -142,75 +128,21 @@ fn resolve_base<'a>(vault: &'a Vault, rel_path: &str) -> Result<&'a ParsedBase, 
     }
 }
 
-fn page_to_row(page: &VaultPage) -> BaseRow {
-    row_of(&page.rel_path, &page.basename, &page.folder, &page.parsed)
-}
-
-/// `Music/Charts.md` → (`Music`, `Charts`).
-fn split_rel(rel: &str) -> (String, String) {
-    let (folder, file) = rel.rsplit_once('/').unwrap_or(("", rel));
-    let basename = file.rsplit_once('.').map_or(file, |(stem, _)| stem);
-    (folder.to_string(), basename.to_string())
-}
-
-fn row_of(rel_path: &str, basename: &str, folder: &str, parsed: &ParsedPage) -> BaseRow {
-    // The frontmatter goes to the row as a map, not as a JSON string
-    // for `BaseRow::from_parts_full` to parse back (zero-copy audit B1:
-    // that was two more copies of every page's frontmatter per query).
-    // It is still collected through a `serde_json::Map` so the row sees
-    // what it saw before: last write wins on a duplicate key (how
-    // Obsidian collapses them), and keys in the Map's order, which is
-    // sorted (serde_json is built without `preserve_order`). The test
-    // `rows_match_the_json_round_trip` pins the two readings.
-    let mut obj = serde_json::Map::with_capacity(parsed.frontmatter.len());
-    for entry in &parsed.frontmatter {
-        obj.insert(entry.key.clone(), entry.value.clone());
-    }
-    let frontmatter: indexmap::IndexMap<String, serde_json::Value> = obj.into_iter().collect();
-
-    // Inline `#tag` markers get merged into `file.tags` so
-    // `file.tags.contains("chart")` filters match the way Obsidian's
-    // bases engine does (frontmatter ∪ inline body tags). Body
-    // `[[wikilinks]]` join the frontmatter links behind `file.links`.
-    let mut inline_tags: Vec<String> = Vec::new();
-    let mut body_links: Vec<&str> = Vec::new();
-    for block in &parsed.blocks {
-        for r in &block.refs {
-            match r {
-                vault_live::refs::Ref::Tag(t) => {
-                    let joined = t.path.join("/");
-                    if !joined.is_empty() && !inline_tags.iter().any(|x| x == &joined) {
-                        inline_tags.push(joined);
-                    }
-                }
-                vault_live::refs::Ref::Link(l) => body_links.push(&l.target_linkpath),
-                _ => {}
-            }
-        }
-    }
-
-    let ext = rel_path
-        .rsplit_once('.')
-        .map(|(_, e)| e.to_string())
-        .unwrap_or_default();
-
-    BaseRow::from_frontmatter(
-        Uuid::new_v4(),
-        basename,
-        rel_path,
-        folder,
-        ext,
-        frontmatter,
-        &inline_tags,
-    )
-    .with_links(body_links)
+/// One page as a `BaseRow`: what [`vault_to_rows`] makes of each, for a
+/// caller that keeps rows between queries and rebuilds only the pages
+/// that changed (`vault::actions::query`).
+#[must_use]
+pub fn page_to_row(page: &VaultPage) -> BaseRow {
+    vault_query::rows::row_of(&page.rel_path, &page.basename, &page.folder, &page.parsed)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::obsidian_parse::parse_page;
     use std::fs;
     use std::path::Path;
+    use vault_query::rows::row_of;
 
     fn touch(p: &Path, body: &str) {
         if let Some(parent) = p.parent() {

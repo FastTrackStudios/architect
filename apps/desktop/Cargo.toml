@@ -29,7 +29,8 @@ gui = [
     "dep:architect-shell",
     "dep:architect-presence",
     "dep:architect-workspace",
-    "dep:architect-extensions",
+    "architect-extensions/process",
+    "architect-extensions/remote",
     "dep:dioxus",
     "dep:dioxus-native",
     "architect-mcp/bridge",
@@ -57,7 +58,9 @@ architect-presence = { workspace = true, features = ["native"], optional = true 
 architect-workspace = { workspace = true, features = ["native", "hot-reload"], optional = true }
 # `extensions check <folder>` (EXT_CHECK with no window), its report as JSON;
 # `net`, extensions' fetches (#310): the app turns the client on, not its UI crates.
-architect-extensions = { workspace = true, features = ["host", "process", "remote", "net"], optional = true }
+# `node`: the node serves installed extensions' node actions on its org
+# lane (#583); the window adds `process` and `remote` (`gui`).
+architect-extensions = { workspace = true, features = ["host", "net", "node"] }
 dioxus = { workspace = true, optional = true }
 dioxus-native = { workspace = true, features = ["vello", "hot-reload"], optional = true }
 facet-json = { version = "0.50.0-rc.5" }
@@ -85,6 +88,9 @@ auth-proto = { workspace = true, features = ["vox"] }
 # lanes that move those between nodes.
 crdt = { workspace = true, features = ["vox"] }
 vault-live = { workspace = true }
+# The vault index for browsers on the org lane (`VaultIndexSync`), built
+# over each vault the node holds (`vault::query`).
+vault = { workspace = true, features = ["actions"] }
 # `actions`: `Notes` on the node's Action List (`NOTES_*`).
 vault-proto = { workspace = true, features = ["vox", "actions"] }
 vault-collab = { workspace = true }

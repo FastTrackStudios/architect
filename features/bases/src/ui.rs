@@ -206,26 +206,45 @@ pub fn BaseView(
     let mut problem = use_signal(|| None::<String>);
     let mut bump = use_signal(|| 0_u64);
     let types = use_types();
-    let _ = (rev(), bump());
-    let ask = |view: Option<String>| {
-        let mut args = json!({ "view": view });
-        if let Some(p) = &path {
-            put(&mut args, "path", json!(p));
-        }
-        if let Some(s) = &source {
-            put(&mut args, "source", json!(s));
-        }
-        run(&list, ids::ROWS, &args)
+    // The rows are the query service's (`BASES_ROWS`, async): asked again
+    // when a write runs, the view changes or an edit here lands.
+    let rows = {
+        let (list, path, source) = (list.clone(), path.clone(), source.clone());
+        use_resource(move || {
+            let (list, path, source) = (list.clone(), path.clone(), source.clone());
+            let view = chosen();
+            let _ = (rev(), bump());
+            async move {
+                let ask = |view: Option<String>| {
+                    let mut args = json!({ "view": view });
+                    if let Some(p) = &path {
+                        put(&mut args, "path", json!(p));
+                    }
+                    if let Some(s) = &source {
+                        put(&mut args, "source", json!(s));
+                    }
+                    let list = list.clone();
+                    async move {
+                        let out = list
+                            .run_json_async(ids::ROWS, args.to_string().as_bytes())
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        Ok::<Value, String>(serde_json::from_slice(&out).unwrap_or(Value::Null))
+                    }
+                };
+                match ask(view.clone()).await {
+                    // The view it was on is gone (renamed, or the file
+                    // changed): the first.
+                    Err(_) if view.is_some() => ask(None).await,
+                    other => other,
+                }
+            }
+        })
     };
-    let data = match ask(chosen()) {
-        Ok(d) => d,
-        // The view it was on is gone (renamed, or the file changed): the
-        // first.
-        Err(_) if chosen.peek().is_some() => match ask(None) {
-            Ok(d) => d,
-            Err(e) => return rsx! { Note { text: e } },
-        },
-        Err(e) => return rsx! { Note { text: e } },
+    let data = match rows.read().clone() {
+        None => return rsx! { Note { text: "Loading…" } },
+        Some(Err(e)) => return rsx! { Note { text: e } },
+        Some(Ok(d)) => d,
     };
     let file = path.clone().filter(|_| source.is_none());
     let spec = data.at("view").clone();

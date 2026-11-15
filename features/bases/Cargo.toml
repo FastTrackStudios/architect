@@ -20,6 +20,9 @@ default = []
 actions = [
     "dep:architect",
     "architect/action-list",
+    "architect/local",
+    "dep:vault-proto",
+    "dep:tokio",
     "dep:facet",
     "vault/actions",
     "dep:vault-obsidian",
@@ -37,6 +40,10 @@ ui = [
 
 [dependencies]
 vault = { workspace = true, default-features = false, features = ["live"] }
+# BASES_ROWS asks the vault's query service (`VaultQueryClient`).
+vault-proto = { workspace = true, optional = true, features = ["vox"] }
+# `actions::local_queries`: the query service in process, on a runtime of its own.
+tokio = { workspace = true, optional = true, features = ["rt-multi-thread"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 architect = { workspace = true, optional = true }

@@ -53,6 +53,32 @@ pub fn use_app_accounts(list: &Arc<ActionList>, files: bool) -> Option<AccountsU
     }))
 }
 
+/// Extensions' node actions (`runs = "node"`, #583), run on the current
+/// org's node over its lane as the active account
+/// (`architect_extensions::node::NodeActionsClient`). Who that is and
+/// which node are read at each run, so a sign-in or an org switch is
+/// followed with nothing to update.
+pub struct OrgNode(pub Accounts);
+
+impl architect_extensions::node::NodeLane for OrgNode {
+    fn run(&self, ext: &str, action: &str, args: String) -> architect_extensions::node::NodeFuture {
+        let lane = self.0.org_lane();
+        let (ext, action) = (ext.to_owned(), action.to_owned());
+        Box::pin(async move {
+            let (host, endpoint) = lane?;
+            let client: architect_extensions::node::NodeActionsClient =
+                architect::connect::Pool::new()
+                    .client(&endpoint)
+                    .await
+                    .map_err(|e| format!("{host}: {e}"))?;
+            client
+                .run(ext, action, args)
+                .await
+                .map_err(|e| e.to_string())
+        })
+    }
+}
+
 /// The window's orgs as the active account's: provided from its cached
 /// list (signed out, the person's own on this device), a switch in the
 /// window kept for the account, and the window following every change

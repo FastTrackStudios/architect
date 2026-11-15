@@ -189,13 +189,38 @@ impl std::fmt::Debug for Services {
 /// Makes a page's runtime for a file, on the page's thread.
 pub type Load = Arc<dyn Fn(&PageFile, &Services) -> Result<Box<dyn Engine>, String> + Send + Sync>;
 
-/// A page's log: what it printed (`console.log`, `print`), the last few
-/// hundred lines, each also a `tracing` event under its extension.
-#[derive(Clone, Debug, Default)]
-pub struct Log(Arc<Mutex<VecDeque<String>>>);
+/// A page's log: what it printed (`console.log`, `print`).
+///
+/// The last few hundred lines, each also a `tracing` event under its
+/// extension, and to its sink when it has one ([`Self::with_sink`]: a
+/// TypeScript action's lines go to its extension's log, `EXT_LOGS`).
+#[derive(Clone, Default)]
+pub struct Log {
+    lines: Arc<Mutex<VecDeque<String>>>,
+    sink: Option<LogSink>,
+}
+
+/// Where a [`Log`]'s lines go besides: `(level, text)`.
+pub type LogSink = Arc<dyn Fn(&str, &str) + Send + Sync>;
+
+impl std::fmt::Debug for Log {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Log")
+            .field("lines", &lock(&self.lines).len())
+            .field("sink", &self.sink.is_some())
+            .finish()
+    }
+}
 
 impl Log {
     pub const KEPT: usize = 300;
+
+    /// Each line to `sink` too.
+    #[must_use]
+    pub fn with_sink(mut self, sink: LogSink) -> Self {
+        self.sink = Some(sink);
+        self
+    }
 
     pub fn line(&self, extension: &str, level: &str, text: &str) {
         match level {
@@ -203,17 +228,20 @@ impl Log {
             "warn" => tracing::warn!(extension, "{text}"),
             _ => tracing::info!(extension, "{text}"),
         }
-        let mut lines = lock(&self.0);
+        let mut lines = lock(&self.lines);
         lines.push_back(format!("[{level}] {text}"));
         while lines.len() > Self::KEPT {
             lines.pop_front();
         }
         drop(lines);
+        if let Some(sink) = &self.sink {
+            sink(level, text);
+        }
     }
 
     #[must_use]
     pub fn lines(&self) -> Vec<String> {
-        lock(&self.0).iter().cloned().collect()
+        lock(&self.lines).iter().cloned().collect()
     }
 }
 

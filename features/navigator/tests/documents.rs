@@ -584,3 +584,70 @@ fn hidden_and_colliding_paths_are_refused() {
     docs.rename("notes/Welcome.md", "notes/WELCOME.md", &ext())
         .unwrap();
 }
+
+/// The documents service over the person's vault, as every transport
+/// reaches it: the one implementation (`DocumentsServer`) over
+/// `VaultDocuments`, served in-process and called through the generated
+/// client; the gate in the service; the vault's metadata through it.
+#[test]
+fn the_service_reaches_the_vault_through_its_client() {
+    use architect_documents::{
+        Access, DocumentsClient, DocumentsServer, Gate, MemoryStore, MetaQuery,
+    };
+    use architect_extensions::docs_service::AsStore;
+
+    struct Reader;
+    impl Gate for Reader {
+        fn allows(&self, extension: &str, access: Access) -> bool {
+            extension == "lab.reader" && access != Access::Write
+        }
+    }
+
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("vault");
+    let source = vault(&root);
+    std::fs::write(
+        root.join("notes/Week.md"),
+        "# Week\n## Monday\n- [ ] Call Sam ^call\n",
+    )
+    .unwrap();
+    source.vault().reload().unwrap();
+    let server = DocumentsServer::new(
+        AsStore(std::sync::Arc::new(VaultDocuments::new(source))),
+        MemoryStore::new(),
+        Reader,
+    );
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let scope = architect::resource::Scope::new();
+        let local = architect::serve_local(server, &scope);
+        let docs: DocumentsClient = local.establish().await.unwrap();
+        let s = |x: &str| x.to_owned();
+        let listed = docs.list(s("lab.reader"), Some(s("notes"))).await.unwrap();
+        let mut paths: Vec<String> = listed.into_iter().map(|d| d.path).collect();
+        paths.sort();
+        assert_eq!(paths, ["notes/Week.md", "notes/Welcome.md"]);
+        let meta = docs
+            .metadata(
+                s("lab.reader"),
+                MetaQuery {
+                    path: Some(s("notes/Week.md")),
+                    ..MetaQuery::default()
+                },
+            )
+            .await
+            .unwrap();
+        let meta: Value = serde_json::from_str(&meta).unwrap();
+        assert_eq!(meta["headings"][1]["text"], "Monday", "{meta}");
+        assert_eq!(meta["list_items"][0]["block"], "call", "{meta}");
+        // The gate is the service's: no write for a reader, nothing for
+        // an extension it does not know.
+        assert!(
+            docs.create(s("lab.reader"), s("notes/x.md"), s(""))
+                .await
+                .is_err()
+        );
+        assert!(docs.list(s("lab.other"), None).await.is_err());
+        assert!(!root.join("notes/x.md").exists());
+    });
+}

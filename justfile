@@ -550,10 +550,13 @@ sandbox-web PORT="8090":
 
 # The sandbox's browser demo in a real browser (apps/sandbox/web/test): the Board's page file,
 # a runaway page and a page's reach, in a headless Chrome of its own
-# (CHROME=… names one; screenshots in target/web-shots).
+# (CHROME=… names one; screenshots in target/web-shots); the Recipe
+# scaler's TypeScript actions in Web Workers, in a headless Firefox over
+# WebDriver BiDi (FIREFOX=… names one).
 sandbox-web-test:
     just sandbox-web 0
     node --test apps/sandbox/web/test/pages.test.mjs
+    env -u LD_LIBRARY_PATH node --test apps/sandbox/web/test/actions.test.mjs
 
 alias lab-web := sandbox-web
 alias lab-web-test := sandbox-web-test

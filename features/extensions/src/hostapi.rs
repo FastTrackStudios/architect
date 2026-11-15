@@ -134,6 +134,20 @@ fn wide(key: &'static str, value: impl Into<String>) {
 #[cfg(not(feature = "wide-events"))]
 fn wide(_key: &'static str, _value: impl Into<String>) {}
 
+/// The documents service's client and the scope its server lives in.
+type DocsClient = (
+    architect_documents::DocumentsClient,
+    Arc<architect::resource::Scope>,
+);
+
+#[cfg(target_family = "wasm")]
+thread_local! {
+    /// A browser's hosts' documents clients, by host (`Host::client_key`):
+    /// not `Send` there, so never in the host itself.
+    static WEB_CLIENTS: std::cell::RefCell<BTreeMap<usize, DocsClient>> =
+        const { std::cell::RefCell::new(BTreeMap::new()) };
+}
+
 /// The host's side of the service: what it was given.
 pub(crate) struct Services {
     grants: Mutex<Option<Grants>>,
@@ -141,6 +155,8 @@ pub(crate) struct Services {
     app: Mutex<Option<Arc<dyn AppContext>>>,
     /// The app's documents, for the document calls.
     documents: Mutex<Option<Arc<dyn Documents>>>,
+    /// The vault's query service, when the app keeps a vault index.
+    vault_query: Mutex<Option<vault_proto::query::VaultQueryClient>>,
     /// The app's editors, for the editor calls (`crate::editor`).
     editors: Mutex<Option<Arc<dyn crate::editor::Editors>>>,
     values: Mutex<Arc<dyn SettingValues>>,
@@ -148,7 +164,12 @@ pub(crate) struct Services {
     /// The app's own list, when its actions are not on the host's.
     app_list: Mutex<Option<architect::action::ActionList>>,
     /// Data kept in memory, when there is no data root.
-    data: Mutex<BTreeMap<String, BTreeMap<String, Value>>>,
+    data: Arc<Mutex<BTreeMap<String, BTreeMap<String, Value>>>>,
+    /// The documents service's client and the scope its in-process server
+    /// lives in (`crate::docs_service`): made when first needed, again
+    /// after the documents or the data root change.
+    #[cfg(not(target_family = "wasm"))]
+    docs_client: Mutex<Option<DocsClient>>,
     /// The app's interface, for extensions (none given: [`NoUi`]).
     ui: Mutex<Option<Arc<dyn HostUi>>>,
     /// The window's own interface, kept for whoever draws it
@@ -208,6 +229,21 @@ impl Services {
     }
 }
 
+/// Whom a host's vault is for ([`Host::set_vault`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VaultScope {
+    /// The person whose vault it is: every note they may read, and the
+    /// vault's index.
+    Person,
+    /// A share link's guest: the share's documents, and no index yet.
+    Guest,
+}
+
+/// The rows a `query_vault` answers when the extension names no `limit`.
+pub const QUERY_LIMIT: u32 = 200;
+/// The most rows a `query_vault` answers.
+pub const QUERY_LIMIT_MAX: u32 = 5000;
+
 impl Default for Services {
     fn default() -> Self {
         Self {
@@ -215,11 +251,14 @@ impl Default for Services {
             logs: Logs::default(),
             app: Mutex::new(None),
             documents: Mutex::new(None),
+            vault_query: Mutex::new(None),
             editors: Mutex::new(None),
             values: Mutex::new(Arc::new(MemoryValues::default())),
             data_root: Mutex::new(None),
             app_list: Mutex::new(None),
-            data: Mutex::new(BTreeMap::new()),
+            data: Arc::new(Mutex::new(BTreeMap::new())),
+            #[cfg(not(target_family = "wasm"))]
+            docs_client: Mutex::new(None),
             ui: Mutex::new(None),
             #[cfg(feature = "ui")]
             window: Mutex::new(None),
@@ -293,15 +332,114 @@ impl Host {
         self
     }
 
-    /// [`Self::with_documents`] on a host already shared.
+    /// [`Self::with_documents`] on a host already shared. Documents with no
+    /// vault index: any query service given before is let go (a query
+    /// never reaches past the documents the host has now).
     pub fn set_documents(&self, documents: Arc<dyn Documents>) {
         *lock(&self.services().documents) = Some(documents);
+        *lock(&self.services().vault_query) = None;
+        self.forget_documents_client();
+    }
+
+    /// Its key among a browser thread's clients: the host's services.
+    #[cfg(target_family = "wasm")]
+    fn client_key(&self) -> usize {
+        std::ptr::from_ref(self.services()) as usize
+    }
+
+    pub(crate) fn cached_documents_client(&self) -> Option<architect_documents::DocumentsClient> {
+        #[cfg(not(target_family = "wasm"))]
+        {
+            lock(&self.services().docs_client)
+                .as_ref()
+                .map(|(c, _)| c.clone())
+        }
+        #[cfg(target_family = "wasm")]
+        {
+            let key = self.client_key();
+            WEB_CLIENTS.with(|m| m.borrow().get(&key).map(|(c, _)| c.clone()))
+        }
+    }
+
+    /// The service is made again over what changed at its next call.
+    fn forget_documents_client(&self) {
+        #[cfg(not(target_family = "wasm"))]
+        {
+            *lock(&self.services().docs_client) = None;
+        }
+        #[cfg(target_family = "wasm")]
+        {
+            let key = self.client_key();
+            WEB_CLIENTS.with(|m| m.borrow_mut().remove(&key));
+        }
+    }
+
+    pub(crate) fn keep_documents_client(
+        &self,
+        client: architect_documents::DocumentsClient,
+        scope: Arc<architect::resource::Scope>,
+    ) {
+        #[cfg(not(target_family = "wasm"))]
+        {
+            *lock(&self.services().docs_client) = Some((client, scope));
+        }
+        #[cfg(target_family = "wasm")]
+        {
+            let key = self.client_key();
+            WEB_CLIENTS.with(|m| m.borrow_mut().insert(key, (client, scope)));
+        }
+    }
+
+    pub(crate) fn data_root(&self) -> Option<PathBuf> {
+        lock(&self.services().data_root).clone()
+    }
+
+    pub(crate) fn memory_data(&self) -> Arc<Mutex<BTreeMap<String, BTreeMap<String, Value>>>> {
+        Arc::clone(&self.services().data)
     }
 
     /// The app's documents, when it gave them.
     #[must_use]
     pub fn documents(&self) -> Option<Arc<dyn Documents>> {
         lock(&self.services().documents).clone()
+    }
+
+    /// A vault for extensions: its `documents` and its query service's
+    /// client (`vault_proto::query::VaultQuery`, served wherever the app
+    /// keeps the vault's index: in process on a desk and a phone, over a
+    /// browser's synced index), given together, for one [`VaultScope`], so
+    /// a host never queries past the documents it gives. A share guest's
+    /// host gets no query service (a guest's subset of the index is #710
+    /// G1): `query_vault` answers `unsupported` there.
+    #[must_use]
+    pub fn with_vault(
+        self,
+        documents: Arc<dyn Documents>,
+        queries: vault_proto::query::VaultQueryClient,
+        scope: VaultScope,
+    ) -> Self {
+        self.set_vault(documents, queries, scope);
+        self
+    }
+
+    /// [`Self::with_vault`] on a host already shared.
+    pub fn set_vault(
+        &self,
+        documents: Arc<dyn Documents>,
+        queries: vault_proto::query::VaultQueryClient,
+        scope: VaultScope,
+    ) {
+        *lock(&self.services().documents) = Some(documents);
+        *lock(&self.services().vault_query) = match scope {
+            VaultScope::Person => Some(queries),
+            VaultScope::Guest => None,
+        };
+    }
+
+    /// The vault's query service's client, when the app gave one.
+    #[must_use]
+    pub fn vault_query(&self) -> Option<vault_proto::query::VaultQueryClient> {
+        lock(&self.services().vault_query).clone()
     }
 
     /// The app's editors, for extensions that may read and change the one
@@ -490,6 +628,7 @@ impl Host {
     #[must_use]
     pub fn with_data_root(self, root: impl Into<PathBuf>) -> Self {
         *lock(&self.services().data_root) = Some(root.into());
+        self.forget_documents_client();
         self
     }
 
@@ -812,11 +951,13 @@ impl ExtensionApi {
                 .await
                 .map_err(|message| HostError::Failed { message }),
             HostRequest::ReadDocument { path } => {
-                if let Some(docs) = host.documents() {
-                    match docs.read(&path) {
+                if host.documents().is_some() {
+                    let client = host.documents_client().await?;
+                    match client.read(self.id.clone(), path.clone()).await {
                         Ok(text) => return Ok(Value::String(text)),
-                        Err(crate::documents::DocError::NotFound(_)) => {}
-                        Err(e) => return Err(e.into()),
+                        Err(architect::vox::VoxError::User(e))
+                            if matches!(*e, architect_documents::DocsError::NotFound(_)) => {}
+                        Err(e) => return Err(crate::docs_service::host_error(e)),
                     }
                 }
                 match host.app_context().and_then(|c| c.document(&path)) {
@@ -827,13 +968,40 @@ impl ExtensionApi {
                     }),
                 }
             }
+            HostRequest::QueryVault {
+                path,
+                source,
+                view,
+                if_changed,
+                limit,
+            } => {
+                let client = host.vault_query().ok_or_else(|| HostError::Unsupported {
+                    what: "the vault's query service: this host has no vault index (none kept, or a share's guest)".to_owned(),
+                })?;
+                let request = vault_proto::query::QueryRequest {
+                    path,
+                    source,
+                    view,
+                    if_changed,
+                    // An extension's answers are pages: at most
+                    // `QUERY_LIMIT` rows unless it asks, `QUERY_LIMIT_MAX`
+                    // if it does.
+                    limit: Some(limit.map_or(QUERY_LIMIT, |n| n.min(QUERY_LIMIT_MAX))),
+                };
+                let answer = client.query(request).await.map_err(|e| HostError::Failed {
+                    message: e.to_string(),
+                })?;
+                serde_json::from_str(&answer).map_err(|e| HostError::Failed {
+                    message: format!("the query service's answer: {e}"),
+                })
+            }
             HostRequest::ListDocuments { .. }
             | HostRequest::CreateDocument { .. }
             | HostRequest::EditDocument { .. }
             | HostRequest::RenameDocument { .. }
             | HostRequest::MoveDocument { .. }
             | HostRequest::DeleteDocument { .. }
-            | HostRequest::WatchDocuments { .. } => self.document(&host, manifest, request),
+            | HostRequest::WatchDocuments { .. } => self.document(&host, manifest, request).await,
             HostRequest::EditorState
             | HostRequest::EditEditor { .. }
             | HostRequest::DecorateEditor { .. } => self.editor(&host, manifest, request),
@@ -881,24 +1049,24 @@ impl ExtensionApi {
                 host.list().changed("settings", &key);
                 Ok(Value::Null)
             }
+            // Its own data, through the documents service (one change at a
+            // time, written whole and private: `docs_service::FileData`).
             HostRequest::Data { key } => {
-                let _held = self.data_lock(&host);
-                Ok(self.data(&host)?.remove(&key).unwrap_or(Value::Null))
+                let client = host.documents_client().await?;
+                let got = client
+                    .data(self.id.clone(), key)
+                    .await
+                    .map_err(crate::docs_service::host_error)?;
+                Ok(got.map_or(Value::Null, |t| {
+                    serde_json::from_str(&t).unwrap_or(Value::String(t))
+                }))
             }
             HostRequest::SetData { key, value } => {
-                // Read, change and write as one: two hooks setting keys at
-                // once both keep theirs.
-                let _held = self.data_lock(&host);
-                let mut data = self.data(&host)?;
-                match value {
-                    Some(v) => {
-                        data.insert(key, v);
-                    }
-                    None => {
-                        data.remove(&key);
-                    }
-                }
-                self.keep_data(&host, data)?;
+                let client = host.documents_client().await?;
+                client
+                    .set_data(self.id.clone(), key, value.map(|v| v.to_string()))
+                    .await
+                    .map_err(crate::docs_service::host_error)?;
                 Ok(Value::Null)
             }
             HostRequest::Service {
@@ -1368,7 +1536,7 @@ impl ExtensionApi {
     /// A document call (`crate::documents`), its capability checked: done
     /// on the app's [`Documents`] as the extension, and the document event
     /// it is raised for the hooks that watch.
-    fn document(
+    async fn document(
         &self,
         host: &Host,
         manifest: &Manifest,
@@ -1405,25 +1573,43 @@ impl ExtensionApi {
                 .collect::<Result<Vec<_>, _>>()?;
             return Ok(Value::Array(keys));
         }
-        let docs = host.documents().ok_or_else(|| HostError::Unsupported {
-            what: "documents: this app gives extensions none".to_owned(),
-        })?;
-        let by = self.principal();
-        let info = |i: DocInfo| serde_json::to_value(i).unwrap_or(Value::Null);
+        if host.documents().is_none() {
+            return Err(HostError::Unsupported {
+                what: "documents: this app gives extensions none".to_owned(),
+            });
+        }
+        // Through the documents service's client, as every transport
+        // reaches it: the gate (`reads` / `writes`) is the service's.
+        let docs = host.documents_client().await?;
+        let me = self.id.clone();
+        let fail = crate::docs_service::host_error;
+        let info = |d: architect_documents::Doc| {
+            serde_json::to_value(crate::docs_service::info_of(d)).unwrap_or(Value::Null)
+        };
         let (answer, event) = match request {
             HostRequest::ListDocuments { under } => {
-                let list = docs.list(under.as_deref().filter(|u| !u.is_empty()))?;
+                let list: Vec<DocInfo> = docs
+                    .list(me, under.filter(|u| !u.is_empty()))
+                    .await
+                    .map_err(fail)?
+                    .into_iter()
+                    .map(crate::docs_service::info_of)
+                    .collect();
                 (serde_json::to_value(list).unwrap_or(Value::Null), None)
             }
             HostRequest::CreateDocument { path, text } => {
                 let path = path_ok(&path)?;
-                let made = docs.create(&path, &text, &by)?;
+                let made = docs.create(me, path.clone(), text).await.map_err(fail)?;
                 (info(made), Some(DocEvent::Created { path }))
             }
             HostRequest::EditDocument { path, edits, name } => {
                 let path = path_ok(&path)?;
                 let step = name.unwrap_or_else(|| format!("{}: edit", manifest.name));
-                let edited = docs.edit(&path, &edits, &step, &by)?;
+                let edits = edits.iter().map(crate::docs_service::wire_edit).collect();
+                let edited = docs
+                    .edit(me, path.clone(), edits, step)
+                    .await
+                    .map_err(fail)?;
                 // An edit that changed nothing is no save: a format-on-save
                 // hook that finds nothing to do is not heard again.
                 let event = edited.changed.then_some(DocEvent::Saved { path });
@@ -1432,19 +1618,25 @@ impl ExtensionApi {
             HostRequest::RenameDocument { path, to } => {
                 let path = path_ok(&path)?;
                 let to = path_ok(&to)?;
-                let moved = docs.rename(&path, &to, &by)?;
+                let moved = docs
+                    .rename(me, path.clone(), to.clone())
+                    .await
+                    .map_err(fail)?;
                 (info(moved), Some(DocEvent::Renamed { from: path, to }))
             }
             HostRequest::MoveDocument { path, folder } => {
                 let path = path_ok(&path)?;
                 let to =
                     moved_to(&path, &folder).map_err(|message| HostError::Failed { message })?;
-                let moved = docs.rename(&path, &to, &by)?;
+                let moved = docs
+                    .rename(me, path.clone(), to.clone())
+                    .await
+                    .map_err(fail)?;
                 (info(moved), Some(DocEvent::Renamed { from: path, to }))
             }
             HostRequest::DeleteDocument { path } => {
                 let path = path_ok(&path)?;
-                docs.delete(&path, &by)?;
+                docs.delete(me, path.clone()).await.map_err(fail)?;
                 (Value::Null, Some(DocEvent::Deleted { path }))
             }
             other => {
@@ -1664,85 +1856,6 @@ impl ExtensionApi {
             Ok(file)
         }
     }
-
-    fn data_file(&self, host: &Host) -> Option<PathBuf> {
-        self.own_dir(host).map(|d| d.join("data.json"))
-    }
-
-    /// The lock on this extension's data: one read-change-write at a
-    /// time, whichever of its runtimes asks.
-    fn data_lock(&self, host: &Host) -> std::sync::MutexGuard<'static, ()> {
-        static LOCKS: std::sync::LazyLock<Mutex<BTreeMap<String, &'static Mutex<()>>>> =
-            std::sync::LazyLock::new(Mutex::default);
-        let key = self
-            .data_file(host)
-            .map_or_else(|| format!("mem:{}", self.id), |f| f.display().to_string());
-        let one: &'static Mutex<()> = lock(&LOCKS)
-            .entry(key)
-            .or_insert_with(|| Box::leak(Box::new(Mutex::new(()))));
-        lock(one)
-    }
-
-    /// Its data: none yet is empty. A file that does not parse is an
-    /// error, never read as empty, so the next write cannot wipe it.
-    fn data(&self, host: &Host) -> Result<BTreeMap<String, Value>, HostError> {
-        let Some(file) = self.data_file(host) else {
-            return Ok(lock(&host.services().data)
-                .get(&self.id)
-                .cloned()
-                .unwrap_or_default());
-        };
-        let text = match std::fs::read_to_string(&file) {
-            Ok(t) => t,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
-            Err(e) => {
-                return Err(HostError::Failed {
-                    message: format!("{}: {e}", file.display()),
-                });
-            }
-        };
-        serde_json::from_str(&text).map_err(|e| HostError::Failed {
-            message: format!(
-                "{}: not its data ({e}); left as it is, and nothing is written over it",
-                file.display()
-            ),
-        })
-    }
-
-    /// Writes its data: a file only its owner reads (0600), written
-    /// whole or not at all (a temporary file, synced, renamed over it).
-    fn keep_data(&self, host: &Host, data: BTreeMap<String, Value>) -> Result<(), HostError> {
-        let Some(file) = self.data_file(host) else {
-            lock(&host.services().data).insert(self.id.clone(), data);
-            return Ok(());
-        };
-        let failed = |e: &dyn std::fmt::Display| HostError::Failed {
-            message: format!("{}: {e}", file.display()),
-        };
-        if let Some(dir) = file.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| failed(&e))?;
-        }
-        let text = serde_json::to_string_pretty(&data).map_err(|e| failed(&e))?;
-        write_private(&file, text.as_bytes()).map_err(|e| failed(&e))
-    }
-}
-
-/// `bytes` as the file at `path`, atomically, readable by its owner only.
-fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write as _;
-    let tmp = path.with_extension(format!("json.tmp.{}", std::process::id()));
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
-    }
-    let mut f = options.open(&tmp)?;
-    f.write_all(bytes)?;
-    f.sync_all()?;
-    drop(f);
-    std::fs::rename(&tmp, path)
 }
 
 impl Host {

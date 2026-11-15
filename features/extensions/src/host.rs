@@ -411,10 +411,10 @@ impl Instance for Luau {
                 let report = runtime.run(&caller, &source, args, &step).await;
                 log_report(&logs, &owner, &id, &report);
                 match report.result {
-                    Ok(value) => Ok(value.to_string().into_bytes()),
+                    Ok(value) => capped_answer(&id, value.to_string().into_bytes()),
                     Err(e) => Err(ActionError::Failed {
                         id,
-                        message: e.to_string(),
+                        message: capped_error(e.to_string()),
                     }),
                 }
             });
@@ -441,13 +441,13 @@ impl Instance for Luau {
         Some(Box::pin(async move {
             let report = runtime.run(&caller, &source, args, &step).await;
             log_report(&logs, &owner, &step, &report);
-            report
-                .result
-                .map(|v| v.to_string().into_bytes())
-                .map_err(|e| ActionError::Failed {
+            match report.result {
+                Ok(v) => capped_answer(&id, v.to_string().into_bytes()),
+                Err(e) => Err(ActionError::Failed {
                     id,
-                    message: e.to_string(),
-                })
+                    message: capped_error(e.to_string()),
+                }),
+            }
         }))
     }
 
@@ -573,6 +573,46 @@ pub fn now_ms() -> u64 {
 }
 
 pub use crate::invocation::invocation_json;
+
+/// The most a script's action (Luau's, a TypeScript one's) may answer:
+/// 1 MB of JSON. Past it the run fails and says so.
+pub const MAX_ANSWER: usize = 1 << 20;
+
+/// The most of a script's error that is kept: 4 KB (a stack past it is
+/// cut, said so).
+pub const MAX_ERROR: usize = 4 << 10;
+
+/// A script action's answer, when it is within [`MAX_ANSWER`].
+///
+/// # Errors
+///
+/// It is larger: [`ActionError::Failed`], with its size.
+pub fn capped_answer(id: &str, answer: Vec<u8>) -> Result<Vec<u8>, ActionError> {
+    if answer.len() > MAX_ANSWER {
+        return Err(ActionError::Failed {
+            id: id.to_owned(),
+            message: format!(
+                "its answer is {} bytes, past the {MAX_ANSWER} an action may answer",
+                answer.len()
+            ),
+        });
+    }
+    Ok(answer)
+}
+
+/// A script's error, cut to [`MAX_ERROR`] bytes (at a character).
+#[must_use]
+pub fn capped_error(mut error: String) -> String {
+    if error.len() > MAX_ERROR {
+        let at = (0..=MAX_ERROR)
+            .rev()
+            .find(|i| error.is_char_boundary(*i))
+            .unwrap_or_default();
+        error.truncate(at);
+        error.push_str("… (cut at 4 KB)");
+    }
+    error
+}
 
 /// An action's arguments as JSON: nothing is `null`.
 fn json_args(id: &str, args: &[u8]) -> Result<Value, ActionError> {
@@ -880,6 +920,21 @@ struct Inner {
     /// The clock, app-defined events, hooks made at run time, schedules
     /// and background extensions (`crate::host_events`).
     events: crate::host_events::EventState,
+    /// Where its extensions' node actions run (`crate::node`).
+    node: Mutex<NodeSide>,
+}
+
+/// Where a host's node actions (`runs = "node"`) run.
+#[derive(Clone, Default)]
+enum NodeSide {
+    /// An app's host: each is forwarded to the org's node through this
+    /// lane, or answers that there is none.
+    #[default]
+    App,
+    AppWith(Arc<dyn crate::node::NodeLane>),
+    /// The node's own host (`crate::node::NodeHost`): it runs them.
+    #[cfg_attr(not(feature = "node"), allow(dead_code))]
+    Node,
 }
 
 /// A [`Host`] held weakly: what an extension's session keeps, so an
@@ -980,6 +1035,7 @@ impl Host {
                 not_here: Mutex::new(BTreeMap::new()),
                 delivered: std::sync::atomic::AtomicU64::new(0),
                 events: crate::host_events::EventState::default(),
+                node: Mutex::new(NodeSide::App),
             }),
         };
         // Icons and badges on rows and tabs (`crate::hostui`).
@@ -1028,6 +1084,94 @@ impl Host {
             inner.contributions = contributions;
         }
         self
+    }
+
+    /// Runs its extensions' node actions (`runs = "node"`, #583) on the
+    /// org's node through `lane`: the org lane's `NodeActionsClient`. With
+    /// none, running one answers that it needs the org's node.
+    #[must_use]
+    pub fn with_node(self, lane: Arc<dyn crate::node::NodeLane>) -> Self {
+        self.set_node(Some(lane));
+        self
+    }
+
+    /// [`Self::with_node`] on a host already shared; `None` when the app
+    /// leaves the org (signs out, switches to one with no node). Loaded
+    /// extensions' node actions follow at once.
+    pub fn set_node(&self, lane: Option<Arc<dyn crate::node::NodeLane>>) {
+        let mut side = self
+            .inner
+            .node
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if !matches!(*side, NodeSide::Node) {
+            *side = lane.map_or(NodeSide::App, NodeSide::AppWith);
+        }
+    }
+
+    /// The node's own host (`crate::node::NodeHost`): node actions run
+    /// here, never forwarded.
+    #[cfg(feature = "node")]
+    #[must_use]
+    pub(crate) fn serving_node(self) -> Self {
+        *self
+            .inner
+            .node
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = NodeSide::Node;
+        self
+    }
+
+    fn runs_node_actions(&self) -> bool {
+        matches!(
+            *self
+                .inner
+                .node
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner),
+            NodeSide::Node
+        )
+    }
+
+    /// A node action's handler in an app: it runs on the org's node, with
+    /// the arguments it was given.
+    fn node_forwarder(&self, extension: &str, decl: &ActionDecl) -> CallerAsyncHandler {
+        let weak = self.downgrade();
+        let (extension, id) = (extension.to_owned(), decl.id.clone());
+        Arc::new(move |_caller: &ActionCaller, args: &[u8]| {
+            let lane = weak.upgrade().and_then(|host| {
+                match &*host
+                    .inner
+                    .node
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                {
+                    NodeSide::AppWith(lane) => Some(Arc::clone(lane)),
+                    NodeSide::App | NodeSide::Node => None,
+                }
+            });
+            let args = if args.is_empty() {
+                "{}".to_owned()
+            } else {
+                String::from_utf8_lossy(args).into_owned()
+            };
+            let id = id.clone();
+            let Some(lane) = lane else {
+                return Err(ActionError::Failed {
+                    message: format!(
+                        "{id} runs on the org's node: sign in to an org whose node runs {extension}"
+                    ),
+                    id,
+                });
+            };
+            let run = lane.run(&extension, &id, args);
+            let out: ActionFuture = Box::pin(async move {
+                run.await
+                    .map(String::into_bytes)
+                    .map_err(|message| ActionError::Failed { id, message })
+            });
+            Ok(out)
+        })
     }
 
     /// Runs hooks' work with `spawn` (the app's executor) in place of a
@@ -1348,13 +1492,18 @@ impl Host {
     /// Runs `runner`'s kind with it from now, in place of the one there
     /// was ([`Self::with_runner`] on a host already shared).
     pub fn add_runner(&self, runner: impl Runner + 'static) {
+        self.add_runner_arc(Arc::new(runner));
+    }
+
+    /// [`Self::add_runner`] for a runner already shared.
+    pub fn add_runner_arc(&self, runner: Arc<dyn Runner>) {
         let mut runners = self
             .inner
             .runners
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         runners.retain(|r| r.kind() != runner.kind());
-        runners.push(Arc::new(runner));
+        runners.push(runner);
     }
 
     /// The view kinds it takes.
@@ -1371,9 +1520,12 @@ impl Host {
     /// kinds, and whether it runs process extensions.
     #[must_use]
     pub fn checker(&self) -> crate::check::Checker {
-        let checker = crate::check::Checker::new()
+        let mut checker = crate::check::Checker::new()
             .with_view_kinds(self.view_kinds())
             .with_processes(self.runs(Kind::Process));
+        if let Some(runner) = self.runner(Kind::TypeScript) {
+            checker = checker.with_typescript(runner);
+        }
         match self.page_checker() {
             Some(pages) => checker.with_page_checker(pages),
             None => checker,
@@ -1693,6 +1845,10 @@ impl Host {
         let mut actions = Vec::with_capacity(manifest.actions.len());
         for decl in &manifest.actions {
             let handler = match (&decl.preset, manifest.window_opened_by(&decl.id)) {
+                // A node action, in an app: run on the org's node.
+                _ if decl.on_node() && !self.runs_node_actions() => {
+                    self.node_forwarder(&manifest.id, decl)
+                }
                 (Some(_), _) => preset(list, self.live_gate(manifest, origin), &manifest.id, decl),
                 (None, Some(window)) => self.window_opener(&manifest.id, window),
                 (None, None) => instance.action(decl).map_err(|why| LoadError::Action {

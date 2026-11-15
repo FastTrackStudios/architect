@@ -18,7 +18,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use vault_live::refs::{BlockRef, EmbedRef, EntityRef, LinkRef, MarkdownLinkRef, Ref, TagRef};
+use crate::moved::refs::{BlockRef, EmbedRef, EntityRef, LinkRef, MarkdownLinkRef, Ref, TagRef};
 
 // ── Regex sources ───────────────────────────────────────────────────
 

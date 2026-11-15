@@ -85,7 +85,7 @@ architect-navigator-extension = { workspace = true }
 architect-navigator-api = { workspace = true }
 # Pages as files (apps/sandbox/board/pages/board.tsx, overrides under the
 # lab's folder `pages/`): TSX on QuickJS, drawn in a pane, live on save.
-architect-pages = { workspace = true, features = ["js", "luau", "a2ui", "ui", "codegen", "manager"] }
+architect-pages = { workspace = true, features = ["js", "luau", "a2ui", "ui", "codegen", "manager", "actions"] }
 architect-canvas = { workspace = true, features = ["ui", "luau"] }
 architect-scripting = { workspace = true, features = ["luau"] }
 # A slow or busy extension view, to the log (`extensions::LogSlowViews`).
@@ -100,6 +100,9 @@ crdt = { workspace = true }
 # The lab's vault: a folder of markdown and its VAULT_* actions
 # (src/notes.rs, the sample in apps/sandbox/vault).
 vault = { workspace = true, features = ["actions"] }
+# The vault's query service's client, which the extension host holds
+# (`notes::vault_query`).
+vault-proto = { workspace = true, features = ["vox"] }
 # `PUBLISH_EXPORT` (src/publish.rs): a part of the vault as a static site (#374).
 architect-sites = { workspace = true }
 # An outside edit merged into an open note's typing (`vault_doc::merge3`).
@@ -111,7 +114,8 @@ tag = { workspace = true, features = ["actions"] }
 # Bases: a .base as a workspace view, a note's ```base fence, the
 # BASES_* actions (src/notes.rs, src/vault.rs).
 architect-bases = { workspace = true, features = ["ui"] }
-architect = { workspace = true, features = ["action-list", "settings", "http-client"] }
+# `connect`: an extension's node actions on the org's node (`src/accounts.rs` `OrgNode`).
+architect = { workspace = true, features = ["action-list", "settings", "http-client", "connect", "local"] }
 dioxus = { workspace = true }
 facet = { workspace = true }
 dioxus-native = { workspace = true }

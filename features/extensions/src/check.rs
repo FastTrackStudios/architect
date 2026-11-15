@@ -185,12 +185,26 @@ impl std::fmt::Debug for PageChecker {
     }
 }
 
+/// The app's TypeScript runner, as a checker holds it.
+#[derive(Clone)]
+struct TsRunner(Arc<dyn crate::host::Runner>);
+
+impl std::fmt::Debug for TsRunner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("TsRunner")
+    }
+}
+
 /// Checks extension folders as an app would load them.
 #[derive(Clone, Debug)]
 pub struct Checker {
     kinds: ViewKinds,
     processes: bool,
     pages: Option<PageChecker>,
+    /// The app's TypeScript runner (#536), when it has one: a
+    /// `typescript` extension's modules are transpiled and its actions
+    /// made with it.
+    typescript: Option<TsRunner>,
     /// How long a view has to send its first frame.
     pub frame_within: Duration,
 }
@@ -210,6 +224,7 @@ impl Checker {
             kinds: ViewKinds::new(),
             processes: cfg!(all(feature = "process", unix)),
             pages: None,
+            typescript: None,
             frame_within: Duration::from_secs(10),
         }
     }
@@ -219,6 +234,15 @@ impl Checker {
     #[must_use]
     pub fn with_page_checker(mut self, pages: PageChecker) -> Self {
         self.pages = Some(pages);
+        self
+    }
+
+    /// Loads a `typescript` extension with `runner` (the app's,
+    /// `architect_pages`' `actions::TsRunner`): without one, it is said to
+    /// have no runner here.
+    #[must_use]
+    pub fn with_typescript(mut self, runner: Arc<dyn crate::host::Runner>) -> Self {
+        self.typescript = Some(TsRunner(runner));
         self
     }
 
@@ -313,6 +337,9 @@ impl Checker {
     fn load_and_render(&self, package: &Package, report: &mut CheckReport) {
         let manifest = &package.manifest;
         let host = Host::new(ActionList::new(), Discard).with_view_kinds(self.kinds.clone());
+        if let Some(TsRunner(runner)) = &self.typescript {
+            host.add_runner_arc(Arc::clone(runner));
+        }
         #[cfg(all(feature = "process", unix))]
         let processes = self.process_runner(&host, manifest.kind, report);
         // Kept alive for the whole check; read only when remote views are
@@ -503,6 +530,7 @@ pub(crate) fn manifest_fields(error: &ManifestError) -> (Option<String>, Option<
         ManifestError::BadCapability(_) => (Some("capabilities".to_owned()), None),
         ManifestError::Interop { field, .. } => (Some(field.clone()), None),
         ManifestError::BadShareLayers(_) => (Some("share_layers".to_owned()), None),
+        ManifestError::NodeAction { action, .. } => (Some(format!("actions[{action}].runs")), None),
     };
     let message = match error {
         // TOML's own text carries a drawing of the line; the message is
@@ -546,9 +574,13 @@ fn toml_field(text: &str) -> Option<String> {
         .filter(|key| !key.is_empty())
 }
 
-/// Every Luau file the manifest names, compiled.
+/// Every Luau file the manifest names, compiled. A `typescript`
+/// extension's modules are transpiled as it loads (its runner's).
 fn scripts(package: &Package, report: &mut CheckReport) {
     let manifest: &Manifest = &package.manifest;
+    if manifest.kind != Kind::Luau {
+        return;
+    }
     let named = manifest
         .actions
         .iter()

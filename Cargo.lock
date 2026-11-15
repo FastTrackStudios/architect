@@ -892,6 +892,7 @@ dependencies = [
  "url",
  "vault",
  "vault-doc",
+ "vault-proto",
 ]
 
 [[package]]
@@ -968,8 +969,10 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
  "vault",
  "vault-obsidian",
+ "vault-proto",
 ]
 
 [[package]]
@@ -1205,6 +1208,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "vault",
  "vault-collab",
  "vault-live",
  "vault-proto",
@@ -1257,6 +1261,18 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tracing",
+]
+
+[[package]]
+name = "architect-documents"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-workspace-hack",
+ "facet",
+ "thiserror 2.0.20",
+ "tokio",
+ "vox",
 ]
 
 [[package]]
@@ -1330,6 +1346,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-commands",
+ "architect-documents",
  "architect-editor",
  "architect-extension-archive",
  "architect-extensions",
@@ -1385,6 +1402,8 @@ dependencies = [
  "tracing",
  "unicode-normalization",
  "url",
+ "vault-proto",
+ "vault-query",
  "vox",
  "vox-core",
  "vox-stream",
@@ -1611,6 +1630,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-commands",
+ "architect-documents",
  "architect-extensions",
  "architect-navigator",
  "architect-navigator-api",
@@ -1632,6 +1652,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "tempfile",
+ "tokio",
  "unicode-normalization",
  "vault",
  "vault-doc",
@@ -19432,6 +19453,7 @@ dependencies = [
  "vault-live",
  "vault-obsidian",
  "vault-proto",
+ "vault-query",
 ]
 
 [[package]]
@@ -19512,6 +19534,7 @@ dependencies = [
  "tracing",
  "uuid",
  "vault-proto",
+ "vault-query",
  "walkdir",
 ]
 
@@ -19538,6 +19561,7 @@ dependencies = [
  "uuid",
  "vault-live",
  "vault-proto",
+ "vault-query",
  "walkdir",
 ]
 
@@ -19558,6 +19582,25 @@ dependencies = [
  "uuid",
  "vox",
  "vox-types",
+]
+
+[[package]]
+name = "vault-query"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-workspace-hack",
+ "chrono",
+ "facet",
+ "indexmap",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 2.0.20",
+ "uuid",
+ "vault-proto",
+ "wasm-bindgen",
 ]
 
 [[package]]
