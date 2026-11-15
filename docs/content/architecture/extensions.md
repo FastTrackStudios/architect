@@ -733,6 +733,67 @@ What changes in a browser:
 `cargo xtask dist web` builds a distribution crate's own wasm when it has
 a `web` feature (`xtask/src/dist.rs` `build_web`).
 
+**Documents, events and data in the browser** (#495 H1, H2, H4):
+
+- **Documents.** The host's documents are the web vault
+  (`apps/web/src/app/documents.rs` `WebDocuments`, the desktop's
+  `VaultDocuments` over the page's `MemorySource`). That is the demo
+  vault in `?demo`, and the signed-in org's vaults otherwise. An edit is
+  `documents::apply_edits`, and a note open in the app shows it.
+  - On the org's vaults a create or an edit is also sent to the node
+    (`Notes::write`). A rename, move or delete is the desktop app's for
+    now: the org lane has no such call.
+- **Events.** The person's own edits are raised as `doc.*` on the app's
+  list (`WebDocuments::raise_on`), the extension's own left out. The
+  host hears the app's events on a page timer, where a desk has
+  `Host::watch`'s thread.
+- **Data** goes to the browser's `localStorage`, one entry per
+  extension and org (`hostapi::DataStore`, `Host::with_data_store`). The
+  demo keeps nothing.
+- **Settings** are the settings page's, kept in the browser by the page
+  (`ui::use_page_setting_values`).
+
+`apps/web/test/app-documents.test.mjs` drives all of it through the
+demo's probe extension (`/app/?demo&probe` only).
+
+**The vault's query service in the browser** (#495, #710's data model).
+Queries run in the page, over the vault index, with the one engine
+(`vault_query::QueryEngine`) served there (`architect::serve_local`); the
+extension host holds only its client (`Host::set_vault_query`), so
+`query_vault` answers as on a desk (`apps/web/src/app/index_sync.rs`):
+
+- **Signed in**, the index is the node's (`VaultIndexSync` on the org
+  lane): a snapshot of the org's first vault as the person may read it,
+  then the deltas since its revision every two seconds, applied to a
+  `vault_query::Replica` (`Replica::reset` takes a snapshot again when
+  the node no longer keeps the deltas). The browser never holds the
+  vault: an entry is a note's title, properties, tags, links, headings
+  and task lines, no body. Kept in memory; a reload or sign-out drops
+  it.
+- **In the demo**, the index is built in the page from the demo vault,
+  with the one builder (`vault_query::Built` over `DemoNotes`).
+
+For a 10 000-note vault (`apps/web/tests/index_snapshot.rs`,
+`apps/web/test/app-index.test.mjs`): a 2.5 MiB snapshot (260 B a note);
+146 KiB gzipped for the generated notes, which repeat (a real vault
+compresses less); one property edit's delta 279 B (206 B gzipped). In
+Firefox, reading the snapshot takes 37 to 60 ms and the first query 52
+to 105 ms.
+
+### A share link's guests
+
+A share link's guests will run extensions, scoped to the share (#495 G1;
+the model is #495's G1 comment). What an extension may do for a guest is
+the install workstream's guest profile, one function every host uses:
+`share_needs::guest_capabilities` (#755: the share's documents read-only,
+no writes, no secrets, `fetch` only to hosts the owner approved, no app
+actions past its own). Which extensions a link runs, and the packages
+and signers it trusts, are the link's owner-signed or node-held needs
+(`share_needs::LinkNeeds`, `plan_link`, `verify_package`), never a vault
+file. The guest host scopes the documents and the vault query engine to
+the share: `GUEST_READS`' `documents` is the generic capability. Until the
+hosts run a guest's extensions, a guest runs none.
+
 ## Processes over vox
 
 A process extension is a program the host starts and speaks

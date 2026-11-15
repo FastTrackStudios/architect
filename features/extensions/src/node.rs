@@ -179,10 +179,12 @@ impl NodeLane for NodeActionsClient {
     }
 }
 
+/// In a browser vox's client holds `Rc`s and the page has one thread:
+/// the lane is the client in a `SendWrapper`, so the host stays `Send`.
 #[cfg(all(feature = "host", feature = "vox", target_arch = "wasm32"))]
-impl NodeLane for NodeActionsClient {
+impl NodeLane for send_wrapper::SendWrapper<NodeActionsClient> {
     fn run(&self, ext: &str, action: &str, args: String) -> NodeFuture {
-        let (client, ext, action) = (self.clone(), ext.to_owned(), action.to_owned());
+        let (client, ext, action) = ((**self).clone(), ext.to_owned(), action.to_owned());
         Box::pin(async move {
             client
                 .run(ext, action, args)

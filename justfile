@@ -496,6 +496,24 @@ app-linked-extensions-test:
     devenv shell -- bash scripts/web-bundle.sh target/web-bundle
     ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-linked-extensions.test.mjs
 
+# The document API, document events and kept data in the web app (#495
+# H1, H2, H4): the demo's probe extension (`/app/?demo&probe`) lists,
+# reads, creates, edits, renames and deletes the demo vault's notes, hears
+# the person's typing, and finds its setting and data after a reload.
+# Firefox headless over BiDi; `SHOTS=<dir>` keeps screenshots.
+app-documents-test:
+    devenv shell -- bash scripts/web-bundle.sh target/web-bundle
+    ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-documents.test.mjs
+
+# The vault's query service in the browser (#495): `query_vault` over the
+# index in `/app/?demo&probe`, following the vault; and a 10 000-note
+# index's first load in Firefox (its snapshot made by
+# `apps/web/tests/index_snapshot.rs`).
+app-index-test:
+    devenv shell -- bash -c 'INDEX_SNAPSHOT_OUT=target/index-10k.json cargo test -q -p architect-web --release --test index_snapshot -- --ignored --nocapture'
+    devenv shell -- bash scripts/web-bundle.sh target/web-bundle
+    INDEX_SNAPSHOT="$PWD/target/index-10k.json" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-index.test.mjs
+
 # The web app's bottom slots as favourites (#607) at 390 px: the default
 # set, a note type's declared set from the node's `/_ext/favourites.json`,
 # a tab opening its island view; `ARCHITECT_SHOTS=<dir>` keeps screenshots.

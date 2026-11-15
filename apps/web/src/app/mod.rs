@@ -39,11 +39,13 @@
 mod audio;
 mod click;
 mod collection;
+mod documents;
 mod embed;
 pub mod extensions;
 mod favourites;
 mod frames;
 mod guest;
+mod index_sync;
 mod keys;
 pub mod org;
 mod page;

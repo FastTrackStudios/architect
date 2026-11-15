@@ -378,6 +378,11 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
 rfd = { workspace = true, optional = true }
 
+# A browser's host keeps the vault query service's client (vox's, which
+# holds `Rc`s there) in a `SendWrapper`: the page has one thread (#495).
+[target.'cfg(target_family = "wasm")'.dependencies]
+send_wrapper = "0.6"
+
 # Luau (C++) is not built for a browser: `host` there runs data and linked
 # extensions, with pages and WASI components beside it (`web`), #495.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]

@@ -102,6 +102,40 @@ pub trait SettingValues: Send + Sync {
     fn set(&self, key: &str, value: Value) -> Result<(), String>;
 }
 
+/// Where each extension's data (`data.get` / `data.set`) is kept when
+/// the host has no data root ([`Host::with_data_root`]): a browser's
+/// storage (#495). Without one either, in memory for the run.
+pub trait DataStore: Send + Sync {
+    /// Extension `id`'s data, when it has any kept.
+    fn load(&self, id: &str) -> Option<BTreeMap<String, Value>>;
+
+    /// Keeps extension `id`'s data, in place of what it had.
+    ///
+    /// # Errors
+    ///
+    /// The store refused it (full, or not there).
+    fn keep(&self, id: &str, data: &BTreeMap<String, Value>) -> Result<(), String>;
+}
+
+/// The vault query service's client as a host keeps it: as it is
+/// natively; in a browser, where vox's clients hold `Rc`s and the page
+/// has one thread, wrapped so the host stays `Send` and `Sync` (touched
+/// from another thread, it panics rather than race), #495.
+#[cfg(not(target_family = "wasm"))]
+type HeldQuery = Box<vault_proto::query::VaultQueryClient>;
+#[cfg(target_family = "wasm")]
+type HeldQuery = send_wrapper::SendWrapper<vault_proto::query::VaultQueryClient>;
+
+#[cfg(not(target_family = "wasm"))]
+fn held_query(client: vault_proto::query::VaultQueryClient) -> HeldQuery {
+    Box::new(client)
+}
+
+#[cfg(target_family = "wasm")]
+fn held_query(client: vault_proto::query::VaultQueryClient) -> HeldQuery {
+    send_wrapper::SendWrapper::new(client)
+}
+
 /// Settings' values in memory, for the run.
 #[derive(Debug, Default)]
 pub struct MemoryValues(Mutex<BTreeMap<String, Value>>);
@@ -156,7 +190,7 @@ pub(crate) struct Services {
     /// The app's documents, for the document calls.
     documents: Mutex<Option<Arc<dyn Documents>>>,
     /// The vault's query service, when the app keeps a vault index.
-    vault_query: Mutex<Option<vault_proto::query::VaultQueryClient>>,
+    vault_query: Mutex<Option<HeldQuery>>,
     /// The app's editors, for the editor calls (`crate::editor`).
     editors: Mutex<Option<Arc<dyn crate::editor::Editors>>>,
     values: Mutex<Arc<dyn SettingValues>>,
@@ -170,6 +204,9 @@ pub(crate) struct Services {
     /// after the documents or the data root change.
     #[cfg(not(target_family = "wasm"))]
     docs_client: Mutex<Option<DocsClient>>,
+    /// Where data is kept when there is no data root (a browser's
+    /// storage, `Host::with_data_store`); in memory without one either.
+    data_store: Mutex<Option<Arc<dyn DataStore>>>,
     /// The app's interface, for extensions (none given: [`NoUi`]).
     ui: Mutex<Option<Arc<dyn HostUi>>>,
     /// The window's own interface, kept for whoever draws it
@@ -259,6 +296,7 @@ impl Default for Services {
             data: Arc::new(Mutex::new(BTreeMap::new())),
             #[cfg(not(target_family = "wasm"))]
             docs_client: Mutex::new(None),
+            data_store: Mutex::new(None),
             ui: Mutex::new(None),
             #[cfg(feature = "ui")]
             window: Mutex::new(None),
@@ -398,6 +436,11 @@ impl Host {
         Arc::clone(&self.services().data)
     }
 
+    /// Where data is kept when there is no data root (`with_data_store`).
+    pub(crate) fn data_store(&self) -> Option<Arc<dyn DataStore>> {
+        lock(&self.services().data_store).clone()
+    }
+
     /// The app's documents, when it gave them.
     #[must_use]
     pub fn documents(&self) -> Option<Arc<dyn Documents>> {
@@ -431,7 +474,7 @@ impl Host {
     ) {
         *lock(&self.services().documents) = Some(documents);
         *lock(&self.services().vault_query) = match scope {
-            VaultScope::Person => Some(queries),
+            VaultScope::Person => Some(held_query(queries)),
             VaultScope::Guest => None,
         };
     }
@@ -439,7 +482,9 @@ impl Host {
     /// The vault's query service's client, when the app gave one.
     #[must_use]
     pub fn vault_query(&self) -> Option<vault_proto::query::VaultQueryClient> {
-        lock(&self.services().vault_query).clone()
+        lock(&self.services().vault_query)
+            .as_ref()
+            .map(|held| (**held).clone())
     }
 
     /// The app's editors, for extensions that may read and change the one
@@ -629,6 +674,14 @@ impl Host {
     pub fn with_data_root(self, root: impl Into<PathBuf>) -> Self {
         *lock(&self.services().data_root) = Some(root.into());
         self.forget_documents_client();
+        self
+    }
+
+    /// Keeps each extension's data in `store` when there is no data root
+    /// (a browser's storage, #495).
+    #[must_use]
+    pub fn with_data_store(self, store: impl DataStore + 'static) -> Self {
+        *lock(&self.services().data_store) = Some(Arc::new(store));
         self
     }
 

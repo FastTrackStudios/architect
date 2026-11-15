@@ -488,7 +488,12 @@ mod desk {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex, PoisonError};
 
-    use futures::future::BoxFuture;
+    /// A call's answer, to run: `Send` natively; in a browser, where a
+    /// host call is not, local (#495).
+    #[cfg(not(target_family = "wasm"))]
+    type BoxFuture<'a, T> = futures::future::BoxFuture<'a, T>;
+    #[cfg(target_family = "wasm")]
+    type BoxFuture<'a, T> = futures::future::LocalBoxFuture<'a, T>;
 
     use super::{Budget, Inbound, Listening, MAX_IN_FLIGHT, Outbound, parse, refusal};
     use crate::host::Host;

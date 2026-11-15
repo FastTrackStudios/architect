@@ -8,7 +8,9 @@ use architect::action::Principal;
 use crdt::loro::{ID, LoroDoc, LoroText, UpdateOptions};
 use crdt::{CrdtDoc, History};
 
-use super::{DocEdit, DocError, DocInfo, Documents, Edited, is_under};
+use super::{DocEdit, DocError};
+#[cfg(not(target_family = "wasm"))]
+use super::{DocInfo, Documents, Edited, is_under};
 
 /// How many steps of each document's undo are kept.
 const KEEP: usize = 100;
@@ -26,6 +28,8 @@ pub struct CrdtDocuments {
 }
 
 #[derive(Default)]
+// The undo step is Luau's and pages' (not in a browser).
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
 struct Inner {
     /// None: any path is one.
     spaces: BTreeSet<String>,
@@ -38,6 +42,8 @@ struct Inner {
 
 /// One run's step across documents.
 #[derive(Default)]
+// The undo step is Luau's and pages' (not in a browser).
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
 struct Step {
     name: String,
     /// Documents whose own history has the step open.
@@ -272,6 +278,10 @@ pub fn apply_edits(text: &str, edits: &[DocEdit], by: &Principal) -> Result<Stri
     Ok(t.to_string())
 }
 
+// Its store is not `Send` in a browser, where nothing is: there the
+// documents are the web app's own (`apps/web`), and `apply_edits` is what
+// it shares from here (#495).
+#[cfg(not(target_family = "wasm"))]
 impl Documents for CrdtDocuments {
     fn list(&self, under: Option<&str>) -> Result<Vec<DocInfo>, DocError> {
         Ok(self
@@ -406,6 +416,8 @@ impl Documents for CrdtDocuments {
 /// history holds the step while it runs; taken back, its edits are
 /// undone, what it made is removed, what it deleted and renamed is put
 /// back.
+// Luau and pages' undo; no Luau in a browser (#495).
+#[cfg(not(target_family = "wasm"))]
 impl architect_scripting::Transactions for CrdtDocuments {
     fn begin(&self, name: &str) -> bool {
         let mut inner = self.lock();

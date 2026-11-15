@@ -33,6 +33,7 @@ use crdt::sync::{DocSyncClient, SyncedDoc};
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use futures_util::StreamExt as _;
 use futures_util::future::{Either, select};
+use vault_proto::index_sync::{IndexBytes, VaultIndexSyncClient};
 use vault_proto::notes::{NoteRef, NotesClient};
 use wasm_bindgen_futures::spawn_local;
 
@@ -59,6 +60,8 @@ pub fn lane_url(slug: &str) -> Option<String> {
 struct Lane {
     notes: NotesClient,
     sync: DocSyncClient,
+    /// The vaults' index, synced (#495, `vault_proto::index_sync`).
+    index: VaultIndexSyncClient,
 }
 
 async fn dial(slug: &str, token: String) -> Result<Lane, String> {
@@ -73,7 +76,11 @@ async fn dial(slug: &str, token: String) -> Result<Lane, String> {
         .client(&at)
         .await
         .map_err(|e| format!("the org's lane: {e}"))?;
-    Ok(Lane { notes, sync })
+    let index: VaultIndexSyncClient = pool
+        .client(&at)
+        .await
+        .map_err(|e| format!("the org's lane: {e}"))?;
+    Ok(Lane { notes, sync, index })
 }
 
 struct Inner {
@@ -223,6 +230,62 @@ impl OrgVaults {
             .ok_or_else(|| format!("{path} is in no vault"))?;
         self.notes()
             .read(vault.to_owned(), rest.to_owned())
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// Vault `vault`'s whole index, as the node lets this person read it.
+    ///
+    /// # Errors
+    ///
+    /// The node refused (not a member, no such vault).
+    pub async fn index_snapshot(&self, vault: &str) -> Result<IndexBytes, String> {
+        let client = self.0.lane.borrow().index.clone();
+        client
+            .snapshot(vault.to_owned())
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// What changed in vault `vault`'s index since the answer `at` (its
+    /// history, access and revision); `None`: take a snapshot (the node
+    /// started again, this person's access moved, or it is further back
+    /// than the node keeps).
+    ///
+    /// # Errors
+    ///
+    /// The node refused.
+    pub async fn index_since(
+        &self,
+        vault: &str,
+        at: &IndexBytes,
+    ) -> Result<Option<IndexBytes>, String> {
+        let client = self.0.lane.borrow().index.clone();
+        client
+            .since(vault.to_owned(), at.epoch, at.access, at.revision)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// The org's slug.
+    #[must_use]
+    pub fn slug(&self) -> String {
+        self.0.slug.clone()
+    }
+
+    /// Writes `text` as the note at `path` (`<vault>/<path in it>`) on the
+    /// node (`Notes::write`): an extension's document change (#495).
+    ///
+    /// # Errors
+    ///
+    /// Not inside a vault, or the node refused the write.
+    pub async fn write(&self, path: &str, text: String) -> Result<(), String> {
+        let (vault, rest) = path
+            .split_once('/')
+            .filter(|(v, r)| !v.is_empty() && !r.is_empty())
+            .ok_or_else(|| format!("{path} is in no vault"))?;
+        self.notes()
+            .write(vault.to_owned(), rest.to_owned(), text)
             .await
             .map_err(|e| e.to_string())
     }
