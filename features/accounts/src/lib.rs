@@ -23,7 +23,11 @@
 //! - [`ui`] (feature `ui`): the shell's Account item with the switcher, and
 //!   the sign-in sheet with the devices.
 
+#[cfg(feature = "http")]
+pub mod browser;
 mod model;
+#[cfg(feature = "http")]
+pub mod redirect;
 mod secrets;
 mod store;
 
@@ -61,7 +65,7 @@ pub use keychain::{
 #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 pub use controller::{Accounts, BrowserWait, Sheet, Status};
 #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
-pub use enrolment::{ORG_HOST_ENV, org_host_from_env};
+pub use enrolment::{ORG_HOST_ENV, lane, org_host_from_env};
 #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 pub use issuer::{DEFAULT_ISSUER, ISSUER_ENV, Issuer, IssuerError, SignedIn, issuer_from_env};
 #[cfg(all(feature = "http", not(target_arch = "wasm32")))]

@@ -20,6 +20,9 @@ pub struct LabState {
     /// A phone's bar at the foot: `actions`, or `editing` while a field
     /// is typed in. Read when asked.
     pub bar: String,
+    /// Whether a side is open over the page (a phone's left drawer). Read
+    /// when asked.
+    pub drawer: bool,
 }
 
 impl LabState {
@@ -34,6 +37,7 @@ impl LabState {
             tab: route.tab().to_owned(),
             page: page.to_owned(),
             bar: String::new(),
+            drawer: false,
         }
     }
 }
@@ -43,7 +47,7 @@ static STATE: ActionMeta = ActionMeta {
     trait_name: "",
     method_name: "",
     display_name: "Where the lab is",
-    description: "The tab on show, whether it is the list, an item or a capture, and whether a phone's bar is the action bar or the editing bar.",
+    description: "The tab on show, whether it is the list, an item or a capture, whether a phone's bar is the action bar or the editing bar, and whether a side (a phone's drawer) is open over the page.",
     category: "Lab",
     group: "Go",
     shortcut: "",
@@ -112,6 +116,7 @@ pub fn use_lab_actions(list: &Arc<ActionList>, lab: &Lab, opener: &crate::favour
                     tab: tab.to_owned(),
                     page: "list".to_owned(),
                     bar: String::new(),
+                    drawer: architect_shell::drawer_open(),
                 })
             });
         }
@@ -129,6 +134,7 @@ pub fn use_lab_actions(list: &Arc<ActionList>, lab: &Lab, opener: &crate::favour
                     "actions"
                 };
                 bar.clone_into(&mut now.bar);
+                now.drawer = architect_shell::drawer_open();
                 Ok(now)
             });
         }

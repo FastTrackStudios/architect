@@ -284,6 +284,11 @@ struct OidcClientJson {
     rotate_refresh_tokens: bool,
     #[serde(default)]
     disabled: bool,
+    /// A first-party native app (the Architect app) trades its fresh
+    /// access token for an issuer session at `/oauth2/token` (token
+    /// exchange): off unless set.
+    #[serde(default)]
+    issue_sessions: bool,
     /// Every key this version does not know; see [`unknown_key`]. A map
     /// because `flatten` needs one; the values are read only to refuse an
     /// object, never kept past parsing nor reported.
@@ -292,9 +297,9 @@ struct OidcClientJson {
 }
 
 /// The client keys a near-miss of which is refused rather than ignored,
-/// since the deployment meant the key: every key this version reads, and
-/// the session key a later issuer reads (`LATER_KEYS`). Each grants,
-/// withholds or routes something, and a misspelled boolean reads `false`.
+/// since the deployment meant the key: every key this version reads. Each
+/// grants, withholds or routes something, and a misspelled boolean reads
+/// `false`.
 const GUARDED_KEYS: &[&str] = &[
     "client_id",
     "client_secret",
@@ -307,11 +312,6 @@ const GUARDED_KEYS: &[&str] = &[
     "disabled",
     "issue_sessions",
 ];
-
-/// Guarded keys this version does not read yet: written exactly, they are
-/// ignored like any unknown key (a config written for a newer issuer still
-/// starts this one); a near-miss is still refused.
-const LATER_KEYS: &[&str] = &["issue_sessions"];
 
 /// Other words for the two keys that widen access when missing: a client
 /// turned off as `enabled: false` or `revoked: true` would stay on, and
@@ -340,9 +340,6 @@ fn unknown_key(key: &str) -> Option<&'static str> {
             .filter(|c| !matches!(c, '-' | '_' | ' '))
             .flat_map(char::to_lowercase)
             .collect()
-    }
-    if LATER_KEYS.contains(&key) {
-        return None;
     }
     let key = folded(key);
     let text: String = key.iter().collect();
@@ -401,6 +398,7 @@ impl From<OidcClientJson> for OidcClientConfig {
             first_party: value.first_party,
             rotate_refresh_tokens: value.rotate_refresh_tokens,
             disabled: value.disabled,
+            issue_sessions: value.issue_sessions,
         }
     }
 }
@@ -650,7 +648,7 @@ mod oidc_client_json_tests {
     /// Its value is never reported.
     #[test]
     fn an_unknown_client_key_is_ignored_and_named() {
-        for key in ["issue_sessions", "comment", "note", "logo_uri", "contacts"] {
+        for key in ["comment", "note", "logo_uri", "contacts"] {
             let raw = client_with(&format!(r#","{key}":"secret-looking-value""#));
             let (clients, ignored) =
                 parse_oidc_clients("AUTH_OIDC_CLIENTS", &raw).expect("an unknown key starts");
@@ -729,9 +727,14 @@ mod oidc_client_json_tests {
     /// The keys this version knows read as before.
     #[test]
     fn known_keys_read_with_nothing_ignored() {
-        let raw = client_with(r#","rotate_refresh_tokens":true,"public_client":true"#);
+        let raw = client_with(
+            r#","rotate_refresh_tokens":true,"public_client":true,"issue_sessions":true"#,
+        );
         let (clients, ignored) = parse_oidc_clients("AUTH_OIDC_CLIENTS", &raw).unwrap();
         assert!(ignored.is_empty());
         assert!(clients[0].rotate_refresh_tokens && clients[0].public_client);
+        assert!(clients[0].issue_sessions);
+        let (clients, _) = parse_oidc_clients("AUTH_OIDC_CLIENTS", &client_with("")).unwrap();
+        assert!(!clients[0].issue_sessions, "off unless set");
     }
 }

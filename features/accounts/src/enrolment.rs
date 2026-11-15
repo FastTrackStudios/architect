@@ -39,6 +39,7 @@ fn clean_host(host: &str) -> Option<String> {
 
 /// The `/org/{slug}/vox` lane of the node at `host` (`https://x` →
 /// `wss://x/org/{slug}/vox`).
+#[must_use]
 pub fn lane(host: &str, slug: &str) -> String {
     let host = host.trim().trim_end_matches('/');
     let ws = host
@@ -77,6 +78,21 @@ impl Accounts {
             )?,
         };
         Ok((org, host))
+    }
+
+    /// The node that hosts org `org` (its id): the one given for it, else
+    /// the one `ARCHITECT_ORG_HOST` names. An app pulls the org's vault from
+    /// its lane (`lane`).
+    #[must_use]
+    pub fn host_of(&self, org: &str) -> Option<String> {
+        host_or_default(self.active()?.org_host(org), org_host_from_env())
+    }
+
+    /// The active account's session, as the bearer of a node's org lane
+    /// (`lane`); `None` signed out. Never logged or shown.
+    #[must_use]
+    pub fn lane_bearer(&self) -> Option<String> {
+        Some(self.store().active_session().ok()??.token)
     }
 
     /// The node that hosts the current org's enrolments, if one was given.

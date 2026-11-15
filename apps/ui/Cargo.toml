@@ -101,7 +101,8 @@ crdt = { workspace = true }
 # (src/notes.rs, the sample in apps/sandbox/vault).
 vault = { workspace = true, features = ["actions"] }
 # The vault's query service's client, which the extension host holds
-# (`notes::vault_query`).
+# (`notes::vault_query`), and the node's `Notes` client an org vault is
+# synced with over the org's lane (src/org_vaults.rs).
 vault-proto = { workspace = true, features = ["vox"] }
 # `PUBLISH_EXPORT` (src/publish.rs): a part of the vault as a static site (#374).
 architect-sites = { workspace = true }

@@ -1085,6 +1085,7 @@ fn web_client(id: &str, first_party: bool) -> architect_auth::OidcClientConfig {
         first_party,
         rotate_refresh_tokens: first_party,
         disabled: false,
+        issue_sessions: false,
     }
 }
 

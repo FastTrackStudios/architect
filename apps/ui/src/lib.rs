@@ -35,6 +35,7 @@ mod note;
 mod note_editor;
 mod note_head;
 mod notes;
+pub mod org_vaults;
 mod pages;
 mod paint;
 pub mod presence;
@@ -54,8 +55,8 @@ use architect_shell::{self as shell, AppShell, ShellStyle};
 use dioxus::prelude::*;
 use lucide_dioxus::{
     ArrowLeft, CalendarDays, CheckCheck, CircleQuestionMark, Command as CommandIcon, Feather,
-    Inbox, Keyboard, LayoutGrid, ListTodo, NotebookText, Palette, Plus, Search, Settings2, Timer,
-    Undo2, Users,
+    Inbox, Keyboard, LayoutGrid, ListTodo, NotebookText, Palette, PanelLeft, Plus, Search,
+    Settings2, Timer, Undo2, Users,
 };
 
 pub use distribution::{app_dir, app_dir_or_temp, distribution, sandbox};
@@ -787,6 +788,9 @@ pub fn LabApp() -> Element {
     use_hook(|| confirm::require(&list));
     // Sign-in (#188): the person's accounts, ACCOUNT_* on the list.
     let accounts = accounts::use_app_accounts(&list, files);
+    // The account's org vaults: kept, mounted in the navigator and synced
+    // with the node that hosts each org (`org_vaults`).
+    let _org_vaults = org_vaults::use_org_vaults(accounts);
     // The lab's vault: a folder of markdown, its VAULT_* actions (only
     // with files: a film's run keeps nothing).
     use_hook(|| {
@@ -1647,7 +1651,15 @@ pub fn LabApp() -> Element {
                         foot,
                         // The sandbox's made-up projects; the Architect app's
                         // sidebar is the Vault's navigator.
-                        left: crate::distribution().is_sandbox().then(|| rsx! { pages::LeftSide {} }),
+                        // A phone's left drawer: the account's orgs and their
+                        // vaults (on a desk the Vault's navigator claims it).
+                        left: if crate::distribution().is_sandbox() {
+                            Some(rsx! { pages::LeftSide {} })
+                        } else if screen().form() == architect_shell::FormFactor::Phone {
+                            Some(rsx! { org_vaults::OrgVaultsPanel {} })
+                        } else {
+                            None
+                        },
                         // The details are the lists': the Vault's panes are its own,
                         // an item's page is its details, the help is the help.
                         right: if (lab.right)() && on_a_list(route) && !matches!(route, Route::Tab(t) if t == guest::TAB || ext_ui.is_tab(t)) { Some(rsx! { pages::RightSide {} }) } else { None },
@@ -1662,6 +1674,9 @@ pub fn LabApp() -> Element {
                         // A phone's action bar (a page adds its own: the
                         // Vault, its tabs).
                         actions: vec![
+                            // The left drawer (the orgs, their vaults, the
+                            // navigator), as an edge swipe opens it.
+                            shell::BarAction::new(architect_commands::TOGGLE_SIDEBAR, "Sidebar", icon!(PanelLeft)),
                             shell::BarAction::new("LAB_GO_BACK", "Go back", icon!(ArrowLeft)),
                             shell::BarAction::new("COMMAND_PALETTE_OPEN_ANYTHING", "Open…", icon!(Search)),
                             shell::BarAction::new("LAB_UNDO", "Undo", icon!(Undo2)),

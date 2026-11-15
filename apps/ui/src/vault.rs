@@ -970,6 +970,8 @@ pub fn VaultPage() -> Element {
                 title_row,
                 // One left side: the shell's ribbon and sidebar are the dock's.
                 in_shell: shell.desk(),
+                // On a phone the navigator is the shell's left drawer.
+                drawer_dock: true,
                 phone_header: !phone,
                 switcher,
                 screensets: sets,
@@ -1094,6 +1096,31 @@ fn use_lab_vault() -> LabVault {
             kept: Signal::new_in_scope(None, ScopeId::ROOT),
         }
     })
+}
+
+/// Mounts every org vault in `vaults` that the navigator does not hold
+/// yet (an account signed in, an org joined), beside the app's own: a
+/// no-op before the Vault has been shown, which reads the catalog then.
+pub fn mount_org_vaults(vaults: &[crate::vaults::OrgVault]) {
+    let Some(lab) = try_consume_context::<LabVault>() else {
+        return;
+    };
+    let own = lab.own.peek().clone();
+    for v in vaults {
+        let m = Mount::vault(v.badge());
+        if m.id == own || lab.others.peek().contains_key(&m.id) {
+            continue;
+        }
+        match vault::actions::OpenVault::open(&v.dir) {
+            Ok(open) => {
+                let source = watched(open, v.name.clone());
+                let mut others = lab.others;
+                others.write().insert(m.id.clone(), source.clone());
+                lab.mounts.peek().mount(m, Arc::new(source));
+            }
+            Err(e) => tracing::warn!(org = %v.org, error = %e, "lab.vault.org_vault_unopened"),
+        }
+    }
 }
 
 /// Where the navigator keeps what it had open between runs: the app's
@@ -2050,9 +2077,20 @@ fn VaultFiles(providers: Vec<LoadedProvider>) -> Element {
     }
     let ui = try_use_context::<architect_extensions::interface::ExtensionUi>();
     let app_list = try_use_context::<Arc<architect::action::ActionList>>();
+    // A phone's drawer goes away once a note is opened from it: the note
+    // is what was asked for (a browse that only previews keeps it).
+    // The drawer's signal (a handle, `Copy`), so the handler can close it.
+    let drawer = architect_shell::try_use_shell()
+        .filter(|s| s.form() == FormFactor::Phone)
+        .map(|s| s.drawer);
     let on_open = EventHandler::new({
         let own = own.clone();
         move |o: Open| {
+            if !o.browsing
+                && let Some(mut drawer) = drawer
+            {
+                drawer.set(None);
+            }
             let target = match (o.how, o.browsing) {
                 (OpenIn::Split, _) => Target::Split(Side::Right),
                 (_, true) => Target::Here,

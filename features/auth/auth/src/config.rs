@@ -114,6 +114,11 @@ pub struct OidcClientConfig {
     /// keeps reusable refresh tokens.
     pub rotate_refresh_tokens: bool,
     pub disabled: bool,
+    /// A first-party native app may trade an access token it was just
+    /// issued for an issuer session (`/oauth2/token`, grant type
+    /// [`crate::TOKEN_EXCHANGE`]): what its vox calls (organizations,
+    /// devices, an org's node) authenticate. Off for every other client.
+    pub issue_sessions: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

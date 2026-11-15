@@ -4473,6 +4473,7 @@ pub mod email_password {
                     first_party: false,
                     rotate_refresh_tokens: false,
                     disabled: false,
+                    issue_sessions: false,
                 })
                 .storage(MemoryStorage::default())
                 .build()
@@ -4497,6 +4498,7 @@ pub mod email_password {
                 first_party: false,
                 rotate_refresh_tokens: false,
                 disabled: false,
+                issue_sessions: false,
             };
             let without = ArchitectAuth::builder()
                 .secret("a-secret-at-least-32-bytes-long!!")
@@ -4621,6 +4623,7 @@ pub mod email_password {
                 first_party,
                 rotate_refresh_tokens: false,
                 disabled: false,
+                issue_sessions: false,
             };
             let auth = ArchitectAuth::builder()
                 .secret("a-secret-at-least-32-bytes-long!!")
@@ -4896,6 +4899,7 @@ pub mod email_password {
                     first_party: true,
                     rotate_refresh_tokens: false,
                     disabled: false,
+                    issue_sessions: false,
                 })
                 .storage(MemoryStorage::default())
                 .build();
@@ -4938,6 +4942,7 @@ pub mod email_password {
                     first_party: true,
                     rotate_refresh_tokens: true,
                     disabled: false,
+                    issue_sessions: false,
                 })
                 .storage(storage)
                 .build()
@@ -7516,6 +7521,217 @@ pub mod email_password {
         // correct server-side clients that predate PKCE — Discourse's
         // oauth2-basic among them — are otherwise locked out at
         // /oauth2/authorize before a login page is ever drawn.
+        /// The Architect app's sign-in: code + PKCE in the system browser,
+        /// back on a loopback port of its choosing (RFC 8252 §7.3), its
+        /// fresh access token traded once for an issuer session (what the
+        /// issuer's vox services take), and only by a client allowed to.
+        #[tokio::test]
+        async fn a_native_app_signs_in_by_code_and_pkce_and_trades_its_token_for_a_session() {
+            use crate::{ACCESS_TOKEN_TYPE, ExchangeForSession, SESSION_TOKEN_TYPE};
+            let client = |id: &str, issue_sessions: bool| OidcClientConfig {
+                client_id: id.into(),
+                client_secret: None,
+                name: id.into(),
+                redirect_uris: vec![
+                    "http://127.0.0.1/oauth/callback".into(),
+                    "app.fasttrackstudio.architect:/oauth/callback".into(),
+                ],
+                scopes: vec![
+                    "openid".into(),
+                    "profile".into(),
+                    "email".into(),
+                    "offline_access".into(),
+                ],
+                public_client: true,
+                skip_consent: true,
+                first_party: true,
+                rotate_refresh_tokens: false,
+                disabled: false,
+                issue_sessions,
+            };
+            let auth = ArchitectAuth::builder()
+                .secret("a-secret-at-least-32-bytes-long!!")
+                .base_url("https://auth.example.com")
+                .jwt_issuer("https://auth.example.com")
+                .jwt_audience("architect-auth")
+                .oidc_issuer("https://auth.example.com")
+                .oidc_client(client("architect", true))
+                .oidc_client(client("other", false))
+                .storage(MemoryStorage::default())
+                .build()
+                .expect("build auth");
+            let browser = auth
+                .create_email_password_user(CreateEmailPasswordUser {
+                    email: "ada@example.com".into(),
+                    password: "correct horse battery staple".into(),
+                    name: Some("Ada".into()),
+                    username: None,
+                    image: None,
+                    metadata_json: None,
+                    ip_address: None,
+                    user_agent: None,
+                })
+                .await
+                .expect("create user");
+            let verifier = "a-native-apps-verifier-of-at-least-43-characters";
+            let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(sha2::Sha256::digest(verifier.as_bytes()));
+            let authorize = |client_id: &str, redirect: &str| AuthorizeOidc {
+                session_token: browser.token.clone(),
+                client_id: client_id.into(),
+                redirect_uri: redirect.into(),
+                response_type: "code".into(),
+                scope: Some("openid profile email offline_access".into()),
+                state: Some("state-1".into()),
+                nonce: None,
+                code_challenge: Some(challenge.clone()),
+                code_challenge_method: Some("S256".into()),
+                prompt: None,
+            };
+            // A redirect that is not registered, and a name for loopback.
+            for bad in [
+                "http://127.0.0.1:5000/elsewhere",
+                "http://localhost:5000/oauth/callback",
+                "https://evil.example/oauth/callback",
+            ] {
+                assert!(
+                    matches!(
+                        auth.authorize_oidc(authorize("architect", bad)).await,
+                        Err(AuthFlowError::InvalidInput(_))
+                    ),
+                    "{bad}"
+                );
+            }
+            // The loopback redirect on the app's port.
+            let redirect = "http://127.0.0.1:53124/oauth/callback";
+            let code = auth
+                .authorize_oidc(authorize("architect", redirect))
+                .await
+                .expect("authorize")
+                .code;
+            let redeem = |code: &str, redirect: &str, verifier: &str| ExchangeOidcToken {
+                grant_type: "authorization_code".into(),
+                code: Some(code.into()),
+                redirect_uri: Some(redirect.into()),
+                client_id: "architect".into(),
+                client_secret: None,
+                code_verifier: Some(verifier.into()),
+                refresh_token: None,
+            };
+            // Another port than the one it was sent to: refused.
+            assert!(
+                auth.exchange_oidc_token(redeem(
+                    &code,
+                    "http://127.0.0.1:1/oauth/callback",
+                    verifier
+                ))
+                .await
+                .is_err()
+            );
+            let tokens = auth
+                .exchange_oidc_token(redeem(&code, redirect, verifier))
+                .await
+                .expect("redeem");
+            // The code is used: a replay is refused.
+            assert!(
+                auth.exchange_oidc_token(redeem(&code, redirect, verifier))
+                    .await
+                    .is_err()
+            );
+
+            let trade = |client_id: &str, token: &str| ExchangeForSession {
+                client_id: client_id.into(),
+                client_secret: None,
+                subject_token: token.into(),
+                subject_token_type: ACCESS_TOKEN_TYPE.into(),
+                requested_token_type: SESSION_TOKEN_TYPE.into(),
+                user_agent: Some("Architect".into()),
+            };
+            // Another client may not trade it, nor mint sessions at all.
+            assert!(matches!(
+                auth.exchange_for_session(trade("other", &tokens.access_token))
+                    .await,
+                Err(AuthFlowError::PermissionDenied)
+            ));
+            // Not a token: refused. Asking for something else: refused.
+            assert!(
+                auth.exchange_for_session(trade("architect", "not-a-token"))
+                    .await
+                    .is_err()
+            );
+            let mut wrong = trade("architect", &tokens.access_token);
+            wrong.requested_token_type = ACCESS_TOKEN_TYPE.into();
+            assert!(auth.exchange_for_session(wrong).await.is_err());
+
+            let session = auth
+                .exchange_for_session(trade("architect", &tokens.access_token))
+                .await
+                .expect("trade");
+            assert_ne!(
+                session.token, browser.token,
+                "a new session, not the browser's"
+            );
+            assert_eq!(session.user.id, browser.user.id);
+            let current = auth
+                .current_session(CurrentSession {
+                    token: session.token.clone(),
+                })
+                .await
+                .expect("the session works");
+            assert_eq!(current.user.id, browser.user.id);
+            // Once per token.
+            assert!(matches!(
+                auth.exchange_for_session(trade("architect", &tokens.access_token))
+                    .await,
+                Err(AuthFlowError::InvalidCredentials)
+            ));
+
+            // A token issued to another client is not this one's to trade.
+            let other_code = auth
+                .authorize_oidc(authorize("other", "http://127.0.0.1:4000/oauth/callback"))
+                .await
+                .expect("authorize other")
+                .code;
+            let mut other_redeem = redeem(
+                &other_code,
+                "http://127.0.0.1:4000/oauth/callback",
+                verifier,
+            );
+            other_redeem.client_id = "other".into();
+            let other_tokens = auth
+                .exchange_oidc_token(other_redeem)
+                .await
+                .expect("redeem other");
+            assert!(matches!(
+                auth.exchange_for_session(trade("architect", &other_tokens.access_token))
+                    .await,
+                Err(AuthFlowError::InvalidCredentials)
+            ));
+
+            // A revoked sign-in's token (the app's Sign out) buys nothing.
+            let code = auth
+                .authorize_oidc(authorize("architect", redirect))
+                .await
+                .expect("authorize again")
+                .code;
+            let revoked = auth
+                .exchange_oidc_token(redeem(&code, redirect, verifier))
+                .await
+                .expect("redeem again");
+            auth.revoke_oidc_token(crate::RevokeOidcToken {
+                token: revoked.access_token.clone(),
+                client_id: "architect".into(),
+                client_secret: None,
+            })
+            .await
+            .expect("revoke");
+            assert!(matches!(
+                auth.exchange_for_session(trade("architect", &revoked.access_token))
+                    .await,
+                Err(AuthFlowError::InvalidCredentials)
+            ));
+        }
+
         #[tokio::test]
         async fn oidc_pkce_is_required_of_public_clients_and_optional_for_confidential_ones() {
             let auth = ArchitectAuth::builder()
@@ -7535,6 +7751,7 @@ pub mod email_password {
                     first_party: false,
                     rotate_refresh_tokens: false,
                     disabled: false,
+                    issue_sessions: false,
                 })
                 .oidc_client(OidcClientConfig {
                     client_id: "native".into(),
@@ -7547,6 +7764,7 @@ pub mod email_password {
                     first_party: false,
                     rotate_refresh_tokens: false,
                     disabled: false,
+                    issue_sessions: false,
                 })
                 .storage(MemoryStorage::default())
                 .build()
@@ -13210,9 +13428,10 @@ pub mod oidc_provider {
     use crate::{
         ArchitectAuth, AuthStorage, CurrentSession, VerifyJwt,
         commands::{
-            AuthorizeOidc, ExchangeOidcToken, GetOidcUserInfo, OidcAuthorization,
-            OidcClientRegistration, OidcDiscovery, OidcTokenResponse, OidcUserInfo,
-            RegisterOidcClient, RevokeOidcToken,
+            ACCESS_TOKEN_TYPE, AuthorizeOidc, EXCHANGE_WINDOW_SECONDS, ExchangeForSession,
+            ExchangeOidcToken, GetOidcUserInfo, OidcAuthorization, OidcClientRegistration,
+            OidcDiscovery, OidcTokenResponse, OidcUserInfo, RegisterOidcClient, RevokeOidcToken,
+            SESSION_TOKEN_TYPE,
         },
         config::OidcClientConfig,
         crypto::{decrypt_secret, encrypt_secret, generate_token, hash_token},
@@ -13293,7 +13512,11 @@ pub mod oidc_provider {
                     .chain(self.config.oidc.extra_scopes.iter().cloned())
                     .collect(),
                 response_types_supported: vec!["code".into()],
-                grant_types_supported: vec!["authorization_code".into(), "refresh_token".into()],
+                grant_types_supported: vec![
+                    "authorization_code".into(),
+                    "refresh_token".into(),
+                    crate::TOKEN_EXCHANGE.into(),
+                ],
                 token_endpoint_auth_methods_supported: vec![
                     "client_secret_post".into(),
                     "none".into(),
@@ -13375,7 +13598,7 @@ pub mod oidc_provider {
             if !client
                 .redirect_uris
                 .iter()
-                .any(|uri| uri == &input.redirect_uri)
+                .any(|uri| redirect_matches(uri, &input.redirect_uri))
             {
                 return Err(AuthFlowError::InvalidInput(
                     "redirect_uri is not registered".into(),
@@ -13491,6 +13714,93 @@ pub mod oidc_provider {
                 name: scopes.contains("profile").then_some(user.name).flatten(),
                 picture: scopes.contains("profile").then_some(user.image).flatten(),
             })
+        }
+
+        /// [`ExchangeForSession`]: a fresh access token, issued to a client
+        /// with `issue_sessions`, traded once for a new issuer session of
+        /// its person (not the browser's own: signing the app out leaves
+        /// the browser signed in).
+        pub async fn exchange_for_session(
+            &self,
+            input: ExchangeForSession,
+        ) -> Result<auth_proto::AuthSessionBundle, AuthFlowError> {
+            if input.subject_token_type != ACCESS_TOKEN_TYPE
+                || input.requested_token_type != SESSION_TOKEN_TYPE
+            {
+                return Err(AuthFlowError::InvalidInput(
+                    "only an access token is traded, and only for a session".into(),
+                ));
+            }
+            let client = self.oidc_client(&input.client_id)?;
+            if client.disabled || !client.issue_sessions {
+                return Err(AuthFlowError::PermissionDenied);
+            }
+            self.validate_oidc_client_secret(&input.client_id, input.client_secret.as_deref())?;
+            let verification = self
+                .verify_jwt(VerifyJwt {
+                    token: input.subject_token.clone(),
+                    audience: None,
+                })
+                .await?;
+            let claims = verification.claims;
+            let claim = |name: &str| {
+                claims
+                    .extra
+                    .as_ref()
+                    .and_then(|extra| extra.get(name))
+                    .and_then(serde_json::Value::as_str)
+            };
+            if claim("client_id") != Some(input.client_id.as_str()) {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            // An access token (not an id token) of a sign-in still in
+            // force: a revoked grant's token (the app's Sign out, a reused
+            // refresh token) buys no session.
+            if claim("token_use") != Some("access") {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            let Some(grant) = claim("grant") else {
+                return Err(AuthFlowError::InvalidCredentials);
+            };
+            if !self.oidc_grant_live(grant).await? {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            let now = Utc::now().timestamp();
+            if now.saturating_sub(claims.iat) > EXCHANGE_WINDOW_SECONDS || claims.exp <= now {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            // Once per token: a copy of it, taken later, buys nothing.
+            let identifier = format!(
+                "oidc-exchange:{}",
+                hash_token(&self.config.secret, &input.subject_token)
+            );
+            if self
+                .storage
+                .find_latest_verification_by_identifier(&identifier)
+                .await?
+                .is_some()
+            {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            self.storage
+                .create_verification(AuthVerificationCreate {
+                    identifier,
+                    value_hash: String::new(),
+                    expires_at: chrono::DateTime::from_timestamp(claims.exp, 0)
+                        .unwrap_or_else(Utc::now),
+                })
+                .await?;
+            let user_id = claims
+                .sub
+                .parse()
+                .map_err(|_| AuthFlowError::InvalidCredentials)?;
+            let user = self
+                .storage
+                .find_user_by_id(user_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            self.issue_session(user, None, input.user_agent, None, None)
+                .await
         }
 
         fn oidc_client(&self, client_id: &str) -> Result<&OidcClientConfig, AuthFlowError> {
@@ -13934,6 +14244,38 @@ pub mod oidc_provider {
         Ok(normalized.join(" "))
     }
 
+    /// Whether `requested` is `registered`: the same, or (RFC 8252 §7.3) a
+    /// loopback IP redirect (`http://127.0.0.1` or `http://[::1]`) that
+    /// differs only in its port, which a native app picks when it listens.
+    /// `localhost` is not loopback here: a name can be made to resolve
+    /// anywhere.
+    pub(crate) fn redirect_matches(registered: &str, requested: &str) -> bool {
+        if registered == requested {
+            return true;
+        }
+        let (Ok(reg), Ok(req)) = (url::Url::parse(registered), url::Url::parse(requested)) else {
+            return false;
+        };
+        let loopback = |u: &url::Url| {
+            u.scheme() == "http"
+                && matches!(
+                    u.host(),
+                    Some(url::Host::Ipv4(ip)) if ip.is_loopback()
+                )
+                || u.scheme() == "http"
+                    && matches!(u.host(), Some(url::Host::Ipv6(ip)) if ip.is_loopback())
+        };
+        loopback(&reg)
+            && loopback(&req)
+            && reg.host() == req.host()
+            && reg.path() == req.path()
+            && reg.query() == req.query()
+            && reg.fragment().is_none()
+            && req.fragment().is_none()
+            && req.username().is_empty()
+            && req.password().is_none()
+    }
+
     fn ensure_client_scopes(client: &OidcClientConfig, scope: &str) -> Result<(), AuthFlowError> {
         for requested in scope.split_whitespace() {
             if !client.scopes.iter().any(|allowed| allowed == requested) {
@@ -14004,6 +14346,60 @@ pub mod oidc_provider {
     /// holds only as a hash, so only its holder can open the successor.
     fn successor_key(secret: &str, refresh_token: &str) -> String {
         hash_token(secret, &format!("oidc-refresh-successor:{refresh_token}"))
+    }
+
+    #[cfg(test)]
+    mod redirect_tests {
+        use super::redirect_matches;
+
+        #[test]
+        fn a_loopback_redirect_takes_any_port_and_nothing_else_does() {
+            let reg = "http://127.0.0.1/oauth/callback";
+            assert!(redirect_matches(
+                reg,
+                "http://127.0.0.1:53124/oauth/callback"
+            ));
+            assert!(redirect_matches(reg, "http://127.0.0.1/oauth/callback"));
+            assert!(redirect_matches(
+                "http://[::1]/oauth/callback",
+                "http://[::1]:4000/oauth/callback"
+            ));
+            // Another path, host, scheme or a name: refused.
+            assert!(!redirect_matches(reg, "http://127.0.0.1:53124/other"));
+            assert!(!redirect_matches(
+                reg,
+                "http://127.0.0.2:53124/oauth/callback"
+            ));
+            assert!(!redirect_matches(
+                reg,
+                "https://127.0.0.1:53124/oauth/callback"
+            ));
+            assert!(!redirect_matches(
+                reg,
+                "http://localhost:53124/oauth/callback"
+            ));
+            assert!(!redirect_matches(
+                reg,
+                "http://evil@127.0.0.1:1/oauth/callback"
+            ));
+            assert!(!redirect_matches(
+                reg,
+                "http://127.0.0.1:1/oauth/callback?x=1"
+            ));
+            // Not loopback: exact only.
+            let web = "https://architect.fasttrackstudio.app/auth/callback";
+            assert!(redirect_matches(web, web));
+            assert!(!redirect_matches(
+                web,
+                "https://architect.fasttrackstudio.app:444/auth/callback"
+            ));
+            let app = "app.fasttrackstudio.architect:/oauth/callback";
+            assert!(redirect_matches(app, app));
+            assert!(!redirect_matches(
+                app,
+                "app.fasttrackstudio.architect:/other"
+            ));
+        }
     }
 }
 pub mod anonymous {
