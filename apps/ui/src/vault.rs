@@ -2687,6 +2687,18 @@ fn VaultNote(path: String) -> Element {
     } else {
         Vec::new()
     };
+    // A note of a type an extension claims (a `.cook` recipe's `recipe`)
+    // and that is no collection: its embed at its head, over its text.
+    let claimed_head = (!is_list && claimed).then(|| {
+        rsx! {
+            architect_extensions::embeds::EmbedView {
+                claim: architect_extensions::contrib::Claim::NoteType(note_type.clone()),
+                source: body.cloned(),
+                props: serde_json::Value::Object(fields.clone()),
+                fallback: rsx! {},
+            }
+        }
+    });
     let head = is_list.then(|| disk.peek().clone()).flatten().map(|d| {
         let list = rsx! {
             crate::collection::CollectionHead {
@@ -2709,7 +2721,8 @@ fn VaultNote(path: String) -> Element {
                 }
             }
         }
-    });
+    })
+    .or(claimed_head);
     // Its head in the bar at the top: its title, its Properties.
     let on_props = use_callback(move |b: String| {
         let mut ours = ours;

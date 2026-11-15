@@ -33,6 +33,10 @@ path = "extensions/cookbook"
 # and the vault's and Bases' actions for its base.
 [capabilities]
 actions = ["VAULT_", "BASES_", "EXT_VIEW_OPEN"]
+# A toast when a timer is set or done; the device's notification when it
+# is done (iOS), even with the app in the background.
+ui = ["notify"]
+device = ["notifications"]
 # Destructive: COOKBOOK_DELETE deletes a recipe (to the vault's trash).
 effect = "destructive"
 reads = ["documents"]
@@ -48,6 +52,51 @@ note_type = "recipe"
 # Cooklang, not markdown: `#pan{}` is cookware, no tag; its [[links]]
 # (a recipe it calls for) are read.
 body = "text"
+
+[[views]]
+id = "cookbook"
+title = "Cookbook"
+icon = "chef-hat"
+
+[[views]]
+id = "cook"
+title = "Cook"
+icon = "cooking-pot"
+
+[[views]]
+id = "edit"
+title = "Edit recipe"
+icon = "pencil"
+
+[[views]]
+id = "recipe"
+title = "Recipe"
+icon = "chef-hat"
+
+# A recipe note (`type: recipe`, which a .cook file is) draws its card
+# at its head: scale it, its ingredients, its steps with their timers.
+[[embeds]]
+id = "recipe"
+title = "Recipe"
+view = "recipe"
+claims = { note_type = ["recipe"] }
+max_height = 900
+
+[[actions]]
+id = "COOKBOOK_OPEN"
+name = "Cookbook: open"
+description = "Opens the cookbook, or the recipe at `path` in cook mode (`view` cook: step by step, with its timers) or the editor (`view` edit: Cooklang with what it reads as beside it); `servings` scales what cook mode shows."
+group = "Cookbook"
+effect = "read_only"
+params = '{"type":"object","properties":{"path":{"type":"string"},"view":{"type":"string","enum":["cookbook","cook","edit"]},"servings":{"type":"number","exclusiveMinimum":0}}}'
+
+[[actions]]
+id = "COOKBOOK_TIMER"
+name = "Cookbook: start a timer"
+description = "A kitchen timer of `seconds` (1 to 86400) named `label`: the device's notification when it is done (on iOS, even with the app in the background); where there is none, a toast says it was set and cook mode counts it down."
+group = "Cookbook"
+effect = "read_only"
+params = '{"type":"object","properties":{"seconds":{"type":"integer","minimum":1,"maximum":86400},"label":{"type":"string"}},"required":["seconds"]}'
 
 [[actions]]
 id = "COOKBOOK_LIST"
