@@ -1,5 +1,7 @@
 //! A share link opened in the web app as its guest (#629, #646): what
-//! `https://<node>/s/<code>/…` is. The node answers every page path of a
+//! `https://<node>/s/<code>/…` is. A link is this same app as a guest
+//! (`docs/content/guide/shares.md`); this guest-only page is a second
+//! implementation to replace with the app's own vault views (#804). The node answers every page path of a
 //! link with this app's page (`apps/desktop/src/node/share_shell.rs`); the
 //! app reads the code and the path from its location (`crate::route`) and
 //! draws the link from its guest service on this origin (`ShareGuest`,

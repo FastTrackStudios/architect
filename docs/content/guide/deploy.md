@@ -25,7 +25,7 @@ beside `actions`, `mcp` and `--headless`, so it is one product with one
 binary and one version. Built with `--no-default-features --features vox`
 (no `gui` feature), the binary is the node alone: no Blitz, wgpu or wayland,
 and no GPU libraries in the image. `node-wasi` adds Wasmtime, so installed
-WASI components draw a share's blocks ([below](#blocks-extensions-draw)). The desktop build is unchanged.
+WASI components draw a Site's blocks ([below](#blocks-extensions-draw)). The desktop build is unchanged.
 
 ## What it does
 
@@ -420,8 +420,17 @@ prefix to the node and a code never clashes with the web front end's paths
 
 A share link is Architect itself (#629, #646): a person with the app
 opens it there, as a guest of that link, and a browser opens the web app
-as a guest of it. The node renders no note of a link to HTML for anyone
-to read.
+as a guest of it. It is not a separate site or viewer: the same app,
+views and extensions, with what a guest can't do left to permissions
+(the scope, audience and layer the node checks, read-only or comments,
+the capabilities a guest isn't granted). The rule, and the code that
+still breaks it: [A share link is the app](@/guide/shares.md). The node
+renders no note of a link to HTML for anyone to read.
+
+What follows describes what runs today. Where it names a guest-only
+page or renderer (`GuestPage`, `guest_view`, plain blocks, the native
+**Shared** tab), that is a known gap against the rule (#804, #805,
+#806, #807), not the design.
 
 - **In a browser.** `GET /s/<code>/` and every page path below it
   (anything ending in `/`, a page's folder, and `_files/`) answer the web
@@ -434,8 +443,9 @@ to read.
   `scripts/web-routes.md` gives, with the node's issuer). The page loads
   the app from `/app/start.js` on the same origin; the app reads the code
   and the path from its location (`apps/web/src/lib.rs` `share_route`)
-  and draws the link from its guest service (`apps/web/src/app/guest.rs`
-  `GuestPage`): the link's notes in their sets (headings over lists in
+  and draws the link from its guest service, today on a guest-only page
+  (`apps/web/src/app/guest.rs` `GuestPage`, to become the app's own vault
+  views, #804): the link's notes in their sets (headings over lists in
   the link's root note, `apps/web/src/guest_view.rs` `sections`), each
   with its art and a play button for its recording (a root setlist an
   island claims: its view first, the notes after it under "Notes on this
@@ -519,7 +529,8 @@ to read.
   open in the app through `architect://open?url=<the link>`
   (`features/spaces/src/guest.rs` `app_link`).
 - **In the app.** A link opens in the **Shared** tab
-  (`apps/ui/src/guest.rs` `GuestPage`): the sharer's node by name, who
+  (`apps/ui/src/guest.rs` `GuestPage`, its own renderer for now, #807):
+  the sharer's node by name, who
   it is shared with, "Read only"; never one of your vaults. It comes from
   `SHARE_OPEN {url}` (⌘K "Open a share link…", a pasted link, an
   agent) or from the OS (`incoming`: a universal link, the
@@ -531,7 +542,8 @@ to read.
   makes no host-service call and keeps its settings and shared state
   apart (`features/pages/src/host.rs` `AppHost::guest`): it reads and
   writes nothing of yours. A linked or process view, which runs with
-  your own session, never draws it. On a phone the tab takes the bar's
+  your own session, never draws it (until guests run views as
+  `Principal::Guest`, #805). On a phone the tab takes the bar's
   fourth place while a link is open (`Tab::kept`). The account's session is
   sent only to a node the account already uses for an org of its own
   (`trusts`). A revoke or an expiry empties the tab on the link's next
@@ -567,7 +579,10 @@ A Site's pages draw the fences extensions claim, as the app draws them
 in a note (#488): a ```` ```kf ```` fence is the chart, not its source. A
 share's build draws them too, and a link's guest reads a drawn block as
 its words and its claim (`architect_spaces::BlockKind::Drawn`); in the
-web app the extension that claims the note's type draws it (#646). The
+web app the extension that claims the note's type draws it (#646). For a
+link this node-side drawing, with the node's own extension set, is a
+second renderer to remove: the app and its extensions draw a guest's
+notes (#806). The
 node asks, in this order:
 
 1. **The extensions installed on it**, a package folder each under
@@ -646,8 +661,10 @@ architect-desktop actions run SHARE_REVOKE --arg code=<code>
 **Served** (`apps/desktop/src/node/shares.rs` `gate`, the node's outermost
 layer, ahead of a Site mounted at `/`):
 
-- Each live share is built as a scoped Site (`architect_sites::Scope`) at
-  `/s/<code>/` into `<data>/shares/<code>/`: what its guests read (each
+- Each live share is built with the Site builder, scoped
+  (`architect_sites::Scope`), into `<data>/shares/<code>/`. That build is
+  the link's data, not a site anyone reads (plain blocks today, the
+  note's text once #806 lands): what its guests read (each
   page's plain blocks, `_note.json` beside the served folder) and the
   files it serves; its HTML pages are never served on the link. It is
   rebuilt whenever its vault changes: an edit on disk, from a peer's

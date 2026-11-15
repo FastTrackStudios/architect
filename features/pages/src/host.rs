@@ -256,6 +256,11 @@ impl AppHost {
     /// network, the interface: those are its extension's, and a guest's
     /// content has no extension's grants), and its settings and shared
     /// state are its own, in memory. The theme and its notices stay.
+    ///
+    /// A page-only guest path is a known gap, not the design: a share
+    /// link is the app as a guest, whose extensions run under
+    /// `share_needs::guest_capabilities` (#805,
+    /// `docs/content/guide/shares.md`).
     #[must_use]
     pub fn guest(mut self) -> Self {
         self.caller = ActionCaller::new(architect::action::Principal::Guest {

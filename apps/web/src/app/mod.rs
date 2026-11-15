@@ -157,17 +157,19 @@ fn WebApp() -> Element {
     let commands = architect_commands::use_commands_provider();
     // Under the commands (its actions are listed in ⌘K).
     // The distribution's linked extensions (#495, W1), on the demo and
-    // the signed-in vaults; a share link's guest runs none (its views are
-    // the node's, in frames). The mode never changes while the app runs,
-    // so the hooks below keep their order.
+    // the signed-in vaults. A share link's guest runs none yet: a known
+    // gap (#805), since a link is this same app as a guest and should run
+    // them under `share_needs::guest_capabilities`
+    // (`docs/content/guide/shares.md`). The mode never changes while the
+    // app runs, so the hooks below keep their order.
     let ext_ui = (!matches!(mode, Mode::Guest { .. })).then(|| {
         let ui = extensions::use_web_extensions(&list);
         use_context_provider(|| ui)
     });
     architect_commands::use_command_actions(list);
-    // A share link's guest runs no extensions: the Command Palette's
-    // views drawn by the app itself, as its extension does elsewhere
-    // (`[[palette_views]]`).
+    // A share link's guest runs no extensions yet (#805): the Command
+    // Palette's views drawn by the app itself, as its extension does
+    // elsewhere (`[[palette_views]]`). A second implementation to remove.
     if ext_ui.is_none() {
         own_palette(commands);
     }
