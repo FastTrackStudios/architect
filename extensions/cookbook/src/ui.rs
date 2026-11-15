@@ -104,6 +104,24 @@ pub fn clock(seconds: u32) -> String {
     }
 }
 
+/// A step as a cook reads it: `[[Hot Honey]]{3}` is "Hot Honey" (an
+/// alias, `[[Hot Honey|the honey]]`, its own words).
+#[must_use]
+pub fn as_read(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    for link in crate::wiki::scan_links(text) {
+        let end = link.start.saturating_add(link.len);
+        if let (Some(before), true) = (text.get(at..link.start), end <= text.len()) {
+            out.push_str(before);
+            out.push_str(&link.display);
+            at = end;
+        }
+    }
+    out.push_str(text.get(at..).unwrap_or_default());
+    out
+}
+
 /// A recipe as a note's frontmatter (`props`) and Cooklang body.
 #[must_use]
 pub fn source_of(props: &Value, body: &str) -> String {
@@ -154,6 +172,8 @@ pub fn CookbookView() -> Element {
     let mut problem = use_signal(|| None::<String>);
     let mut picked = use_signal(|| None::<String>);
     let mut recipe = use_signal(|| None::<Recipe>);
+    let mut importing = use_signal(|| false);
+    let mut from = use_signal(String::new);
 
     // The list, again when the text or the cookbook changes.
     use_effect(move || {
@@ -208,11 +228,21 @@ pub fn CookbookView() -> Element {
     });
 
     let list = found();
+    let mounted = use_signal(|| None::<std::rc::Rc<MountedData>>);
+    let width = use_width(mounted);
+    // A phone's pane shows the list or the recipe, not both.
+    let phone = width().is_some_and(|w| w < WIDE);
+    let show_list = !phone || picked().is_none();
+    let show_detail = !phone || picked().is_some();
     rsx! {
-        div { class: "cb-root",
+        div { class: "cb-root", "data-phone": "{phone}",
+            onmounted: move |e: MountedEvent| { let mut m = mounted; m.set(Some(e.data())); },
             style: "display: flex; flex-direction: column; height: 100%; box-sizing: border-box; color: var(--foreground); font-size: 14px;",
             div { style: "display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border);",
-                span { style: "font-size: 18px; font-weight: 700; margin-right: 4px;", "Cookbook" }
+                // A phone's shell titles the pane already.
+                if !phone {
+                    span { style: "font-size: 18px; font-weight: 700; margin-right: 4px;", "Cookbook" }
+                }
                 input { class: "cb-search", style: "{FIELD} flex: 1 1 160px; min-width: 120px;",
                     placeholder: "Find a recipe, a tag, a course…",
                     value: "{text}",
@@ -220,14 +250,54 @@ pub fn CookbookView() -> Element {
                 button { class: "cb-new", style: "{BUTTON}",
                     onclick: move |_| show("edit", Open { path: None, source: NEW.to_owned(), servings: None }),
                     "New" }
+                button { class: "cb-import-open", style: "{BUTTON}",
+                    onclick: move |_| importing.set(!importing()),
+                    "Import" }
                 button { class: "cb-base", style: "{BUTTON}",
                     onclick: move |_| spawn_action("COOKBOOK_BASE", Value::Null),
                     "As a base" }
+            }
+            if importing() {
+                div { class: "cb-import", style: "display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--border);",
+                    input { class: "cb-import-from", style: "{FIELD} flex: 1 1 220px;",
+                        placeholder: "A recipe page's address, or a .cook file's text",
+                        value: "{from}",
+                        oninput: move |e| from.set(e.value()) }
+                    button { class: "cb-import-go", style: "{PRIMARY}", disabled: from().trim().is_empty(),
+                        onclick: move |_| {
+                            let given = from().trim().to_owned();
+                            let is_url = given.starts_with("http://") || given.starts_with("https://");
+                            let import = crate::service::Import {
+                                url: is_url.then(|| given.clone()),
+                                text: (!is_url).then(|| given.clone()),
+                                path: None,
+                                save: true,
+                            };
+                            spawn(async move {
+                                let got = async {
+                                    let c = crate::client::client().await.map_err(|e| e.to_string())?;
+                                    c.import(import).await.map_err(|e| architect::vox_into_app(e).to_string())
+                                }.await;
+                                match got {
+                                    Ok(done) => {
+                                        problem.set(None);
+                                        from.set(String::new());
+                                        importing.set(false);
+                                        picked.set(Some(done.path));
+                                        bump();
+                                    }
+                                    Err(e) => problem.set(Some(e)),
+                                }
+                            });
+                        },
+                        "Import" }
+                }
             }
             if let Some(p) = problem() {
                 div { class: "cb-problem", style: "padding: 6px 16px; color: var(--destructive);", "{p}" }
             }
             div { style: "flex: 1; min-height: 0; overflow: auto; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 16px; padding: 12px 16px;",
+                if show_list {
                 div { class: "cb-list", style: "flex: 1 1 240px; max-width: 100%; display: flex; flex-direction: column; gap: 6px;",
                     if list.is_empty() {
                         div { style: "{MUTED} padding: 8px 0;",
@@ -253,16 +323,46 @@ pub fn CookbookView() -> Element {
                         }
                     }
                 }
-                div { class: "cb-detail", style: "flex: 3 1 340px; max-width: 100%; min-width: 0;",
+                }
+                if show_detail {
+                div { class: "cb-detail", style: "flex: 3 1 340px; max-width: 100%; min-width: 0; display: flex; flex-direction: column; gap: 10px;",
+                    if phone {
+                        button { class: "cb-back-to-list", style: "{BUTTON} align-self: flex-start;",
+                            onclick: move |_| picked.set(None), "‹ All recipes" }
+                    }
                     if let Some(r) = recipe() {
                         RecipeCard { key: "{r.path}", recipe: r.clone(), path: Some(r.path) }
                     } else {
                         div { style: "{MUTED} padding: 8px 0;", "Pick a recipe to read it." }
                     }
                 }
+                }
             }
         }
     }
+}
+
+/// Below this a pane is a phone's: one thing at a time.
+const WIDE: f64 = 760.0;
+
+/// The width of the view's box, measured again while mounted (Blitz
+/// fires no resize), as the Calendar's and Mealplan's views do.
+fn use_width(mounted: Signal<Option<std::rc::Rc<MountedData>>>) -> Signal<Option<f64>> {
+    let mut width = use_signal(|| None);
+    use_future(move || async move {
+        loop {
+            if let Some(m) = mounted.peek().clone()
+                && let Ok(r) = m.get_client_rect().await
+            {
+                let w = Some(r.size.width);
+                if *width.peek() != w {
+                    width.set(w);
+                }
+            }
+            futures_timer::Delay::new(Duration::from_millis(400)).await;
+        }
+    });
+    width
 }
 
 /// A new recipe's first text.
@@ -352,8 +452,8 @@ pub fn RecipeCard(recipe: Recipe, path: Option<String>) -> Element {
                             span { style: "min-width: 72px; font-variant-numeric: tabular-nums; font-weight: 600;",
                                 "{ing.qty_display.clone().unwrap_or_default()} {ing.unit}" }
                             span {
-                                if ing.is_recipe_ref { "↪ " }
                                 "{ing.name}"
+                                if ing.is_recipe_ref { span { style: "{MUTED}", " (a recipe)" } }
                                 if ing.optional { span { style: "{MUTED}", " (optional)" } }
                                 if let Some(n) = &ing.note { span { style: "{MUTED}", " — {n}" } }
                             }
@@ -398,7 +498,7 @@ fn StepRow(n: usize, step: CookStep, name: String) -> Element {
         div { class: "cb-step", style: "display: flex; gap: 10px;",
             span { style: "min-width: 22px; font-weight: 700; {MUTED}", "{n}" }
             div { style: "display: flex; flex-direction: column; gap: 4px; flex: 1;",
-                span { style: "line-height: 1.45;", "{step.text}" }
+                span { style: "line-height: 1.45;", "{as_read(&step.text)}" }
                 for note in step.notes.iter() {
                     span { style: "font-size: 12px; {MUTED}", "{note}" }
                 }
@@ -411,7 +511,7 @@ fn StepRow(n: usize, step: CookStep, name: String) -> Element {
                                 rsx! {
                                     button { key: "{ti}", class: "cb-timer", style: "{BUTTON} min-height: 26px; font-size: 12px;",
                                         onclick: move |_| spawn_action("COOKBOOK_TIMER", json!({ "seconds": seconds, "label": label.clone() })),
-                                        "⏱ {clock(seconds)}" }
+                                        "Timer {clock(seconds)}" }
                                 }
                             }
                         }
@@ -482,13 +582,12 @@ fn Cook(recipe: Recipe) -> Element {
                     for (i, ing) in recipe.ingredients.iter().enumerate() {
                         {
                             let got = have().contains(&i);
-                            let mark = if got { "☑" } else { "☐" };
                             let deco = if got { "line-through" } else { "none" };
                             rsx! {
                                 button { key: "{i}", class: "cb-gather",
                                     style: "text-align: left; display: flex; gap: 10px; align-items: center; min-height: 40px; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--foreground); font-size: 16px; cursor: pointer; text-decoration: {deco};",
                                     onclick: move |_| { let mut h = have.write(); if let Some(at) = h.iter().position(|x| *x == i) { h.remove(at); } else { h.push(i); } },
-                                    span { "{mark}" }
+                                    Tick { on: got }
                                     span { style: "font-weight: 600; min-width: 80px;", "{ing.qty_display.clone().unwrap_or_default()} {ing.unit}" }
                                     span { "{ing.name}" }
                                 }
@@ -497,7 +596,7 @@ fn Cook(recipe: Recipe) -> Element {
                     }
                 } else if let Some(step) = steps.get(p.saturating_sub(1)) {
                     if let Some(s) = &step.section { div { style: "{HEADING}", "{s}" } }
-                    div { class: "cb-cook-step", style: "font-size: 22px; line-height: 1.5;", "{step.text}" }
+                    div { class: "cb-cook-step", style: "font-size: 22px; line-height: 1.5;", "{as_read(&step.text)}" }
                     for note in step.notes.iter() { div { style: "{MUTED}", "{note}" } }
                     for (ti, t) in step.timers.iter().enumerate() {
                         {
@@ -530,6 +629,7 @@ fn Countdown(label: String, seconds: u32) -> Element {
     let shown = left().unwrap_or(seconds);
     let label_c = label.clone();
     let label_d = label.clone();
+    let label_s = label.clone();
     rsx! {
         div { class: "cb-countdown", style: "{CARD} display: flex; align-items: center; gap: 12px;",
             span { style: "font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums;", "{clock(shown)}" }
@@ -543,7 +643,8 @@ fn Countdown(label: String, seconds: u32) -> Element {
                         spawn(async move {
                             loop {
                                 futures_timer::Delay::new(Duration::from_secs(1)).await;
-                                let now = left.peek().unwrap_or(0);
+                                // Stopped: the loop ends with it.
+                                let Some(now) = *left.peek() else { break };
                                 if now <= 1 {
                                     left.set(Some(0));
                                     done(&label_d);
@@ -556,8 +657,42 @@ fn Countdown(label: String, seconds: u32) -> Element {
                     "Start" }
             } else if shown == 0 {
                 span { style: "font-weight: 700; color: var(--primary);", "Done" }
+            } else {
+                button { class: "cb-stop", style: "{BUTTON} min-height: 40px;",
+                    onclick: move |_| {
+                        left.set(None);
+                        stop(&label_s, seconds);
+                    },
+                    "Stop" }
             }
         }
+    }
+}
+
+/// A timer stopped by hand: its device notification taken back.
+fn stop(label: &str, seconds: u32) {
+    use architect_extensions::hostcall::HostRequest;
+    let Some(h) = crate::client::handle() else {
+        return;
+    };
+    let id = crate::actions::timer_id(label, u64::from(seconds));
+    spawn(async move {
+        let _ = h.host(HostRequest::CancelOsNotify { id }).await;
+    });
+}
+
+/// A checkbox drawn, not a glyph (a phone's fonts may have no ☐).
+#[component]
+fn Tick(on: bool) -> Element {
+    let fill = if on { "var(--primary)" } else { "transparent" };
+    let edge = if on {
+        "var(--primary)"
+    } else {
+        "var(--muted-foreground)"
+    };
+    rsx! {
+        span { class: "cb-tick", "data-on": "{on}",
+            style: "display: inline-block; flex: none; width: 16px; height: 16px; box-sizing: border-box; border-radius: 4px; border: 2px solid {edge}; background: {fill};" }
     }
 }
 
@@ -654,6 +789,14 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
+
+    #[test]
+    fn a_recipe_link_reads_as_its_name() {
+        assert_eq!(
+            as_read("Drizzle [[Hot Honey]]{3} over, with [[Slaw|the slaw]]."),
+            "Drizzle Hot Honey over, with the slaw."
+        );
+    }
 
     #[test]
     fn clocks_read_as_kitchen_timers() {

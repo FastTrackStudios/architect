@@ -21,6 +21,8 @@ the running app. Each extension's page says how it is built.
 | `COOKBOOK_RENAME` | mutating | `path`, `to` | the recipe at its new path |
 | `COOKBOOK_DELETE` | destructive | `path` | `{deleted}` |
 | `COOKBOOK_INGREDIENTS` | read-only | `portions: [{path, servings?}]` | `[{name, qty?, unit, display?, recipe, optional}]` |
+| `COOKBOOK_IMPORT` | mutating | `url?` or `text?`, `path?`, `save?` | `{path, source, recipe, saved, review, unplaced?}` |
+| `COOKBOOK_TIDY` | mutating | `folder?` | `{changed: [path]}` |
 | `COOKBOOK_BASE` | mutating | none | `{path, written, opened}` |
 | `COOKBOOK_OPEN` | read-only | `path?`, `view?` (`cookbook`, `cook`, `edit`), `servings?` | `{opened}` |
 | `COOKBOOK_TIMER` | read-only | `seconds` (1–86400), `label?` | `{id, seconds, notify: "os" \| "app"}` |

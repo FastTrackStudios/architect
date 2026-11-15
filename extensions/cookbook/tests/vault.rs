@@ -1,7 +1,8 @@
 //! The cookbook over a real vault on disk: its manifest declares the
 //! `.cook` file type, so its recipes are notes; `COOKBOOK_LIST`
 //! answers from the vault's index (as a browser's does), `COOKBOOK_GET`
-//! reads a file through the documents and a save is written to disk.
+//! reads a file through the documents, a save is written to disk, and
+//! `COOKBOOK_TIDY` moves Task's `>>` metadata into frontmatter.
 //!
 //! One test: the file type registry is the process's.
 
@@ -42,6 +43,10 @@ const RECIPES: &[(&str, &str)] = &[
     (
         "Lentil Soup.cook",
         "---\ntitle: Lentil Soup\nservings: 6\ncourse: lunch\n---\nSoften @onion{1} in @olive oil{2%tbsp}.\n",
+    ),
+    (
+        "Old Loaf.cook",
+        ">> title: Old Loaf\n>> servings: 1\n\nMix @flour{450%g}.\n",
     ),
 ];
 
@@ -90,7 +95,14 @@ async fn the_cookbook_over_a_vault_on_disk() {
 
     // From the index: every recipe, by name, with its properties.
     let all = run(&list, "COOKBOOK_LIST", Value::Null).await;
-    assert_eq!(all.as_array().unwrap().len(), 3, "{all}");
+    let names: Vec<&str> = all
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names.len(), 4, "{all}");
+    assert!(names.contains(&"Old Loaf"), "{all}");
     let pancakes = all
         .as_array()
         .unwrap()
@@ -120,5 +132,13 @@ async fn the_cookbook_over_a_vault_on_disk() {
             .contains("@bread{2%slices}")
     );
 
+    // Task's metadata, as frontmatter.
+    let tidy = run(&list, "COOKBOOK_TIDY", Value::Null).await;
+    assert_eq!(tidy["changed"], json!(["Cookbook/Old Loaf.cook"]), "{tidy}");
+    assert!(
+        std::fs::read_to_string(root.join("Cookbook/Old Loaf.cook"))
+            .unwrap()
+            .starts_with("---\n")
+    );
     scope.close().await;
 }
