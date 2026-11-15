@@ -843,6 +843,7 @@ impl FileTypeDecl {
 
     /// Makes its files notes, for the life of the process
     /// (`vault_proto::note_types::register_with`).
+    #[cfg(feature = "host")]
     pub fn register(&self) {
         vault_proto::note_types::register_with(
             &self.extension,
