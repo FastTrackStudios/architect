@@ -10,6 +10,9 @@ authors = ["FastTrackStudios"]
 
 [capabilities]
 actions = ["BASES_ROWS"]
+# The base's rows are the vault's notes: reading them is reading the
+# documents.
+reads = ["documents"]
 
 [[actions]]
 id = "SHOWCASE_CHART_COUNT"

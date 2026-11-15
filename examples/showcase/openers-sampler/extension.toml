@@ -13,6 +13,8 @@ authors = ["FastTrackStudios"]
 actions = ["VAULT_LIST", "VAULT_CREATE"]
 # host.open: a note, opened as a person would.
 reads = ["documents"]
+# A capture's note (VAULT_CREATE).
+writes = ["documents"]
 effect = "mutating"
 
 [[actions]]

@@ -12,6 +12,9 @@ authors = ["FastTrackStudios"]
 
 [capabilities]
 actions = ["BASES_ROWS", "TAGS_NOTES", "LINKS_BACK"]
+# The base's rows are the vault's notes: reading them is reading the
+# documents.
+reads = ["documents"]
 
 [[actions]]
 id = "SHOWCASE_DATAVIEW_QUERY"
