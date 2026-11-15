@@ -602,6 +602,22 @@ pub fn extract_refs(content: &str) -> Vec<Ref> {
 
 // ── Page-level parse ───────────────────────────────────────────────
 
+/// The note at `path` parsed: [`parse_page`], and for a note type whose
+/// body is not markdown (`vault_proto::note_types::body_is_markdown`)
+/// its body's `#…` read as no tags and its `- [ ]` as no tasks; its
+/// `[[links]]` and frontmatter stay.
+#[must_use]
+pub fn parse_note(path: &str, src: &str) -> ParsedPage {
+    let mut page = parse_page(src);
+    if !vault_proto::note_types::body_is_markdown(path) {
+        for b in &mut page.blocks {
+            b.refs.retain(|r| !matches!(r, Ref::Tag(_)));
+            b.list_task = None;
+        }
+    }
+    page
+}
+
 /// Walk markdown source line-by-line and produce a `ParsedPage`.
 ///
 /// State machine highlights:
@@ -994,6 +1010,35 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn a_text_bodied_note_type_has_no_inline_tags_but_keeps_its_links() {
+        vault_proto::note_types::register_with("zzcooktext", "recipe", false);
+        let src =
+            "---\ntags: [quick]\n---\nFry in a #pan{} with [[Hot Honey]]{3}.\n- [ ] not a task\n";
+        let tags = |p: &ParsedPage| -> Vec<String> {
+            p.blocks
+                .iter()
+                .flat_map(|b| &b.refs)
+                .filter_map(|r| match r {
+                    Ref::Tag(t) => Some(t.original.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let as_md = parse_note("R/Waffles.md", src);
+        assert!(!tags(&as_md).is_empty());
+        let as_text = parse_note("R/Waffles.zzcooktext", src);
+        assert!(tags(&as_text).is_empty());
+        assert!(as_text.blocks.iter().all(|b| b.list_task.is_none()));
+        assert!(
+            as_text
+                .blocks
+                .iter()
+                .flat_map(|b| &b.refs)
+                .any(|r| matches!(r, Ref::Link(_)))
+        );
     }
 
     #[test]

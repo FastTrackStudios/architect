@@ -150,7 +150,5 @@ pub fn name(vault: &str, path: &str) -> String {
 }
 
 fn is_note(path: &str) -> bool {
-    std::path::Path::new(path)
-        .extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("md"))
+    vault_proto::note_types::is_note_path(path)
 }

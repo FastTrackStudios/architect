@@ -2057,7 +2057,7 @@ pub fn normalize_link_target(raw: &str) -> String {
     let s = s.split('|').next().unwrap_or("");
     let s = s.split('#').next().unwrap_or("");
     let s = s.trim().trim_start_matches('/');
-    s.strip_suffix(".md").unwrap_or(s).to_string()
+    vault_proto::note_types::note_stem(s).to_string()
 }
 
 /// The link a value carries, if it is one: a `"[[Target]]"` string,

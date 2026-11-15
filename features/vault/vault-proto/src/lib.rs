@@ -47,6 +47,8 @@ pub mod grouping;
 #[cfg(feature = "vox")]
 pub mod index_sync;
 mod manifest;
+/// Which files are notes: `.md` and the types extensions declare.
+pub mod note_types;
 /// The `Notes` service: a node's notes, listed, read and written (a
 /// service on the wire: with `vox`).
 #[cfg(feature = "vox")]
