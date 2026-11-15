@@ -341,6 +341,57 @@ fn page_with(url: &str, bearer: Option<&str>, want: &str) -> String {
     }
 }
 
+/// A call to link `code`'s guest service (`ShareGuest`, `/s/<code>/_guest/…`)
+/// as `token` (empty: nobody): its status and body. A link's page is the
+/// web app's since #646; what the link holds is what this service answers.
+fn guest(node: &str, code: &str, method: &str, token: &str, path: Option<&str>) -> (u16, String) {
+    let mut body = serde_json::json!({ "code": code, "token": token });
+    if let Some(path) = path {
+        body["path"] = path.into();
+    }
+    http(
+        "POST",
+        &format!("{node}/s/{code}/_guest/{method}"),
+        None,
+        Some(&body.to_string()),
+    )
+}
+
+/// Wait until link `code` lists a note titled `want` (as `token`); the
+/// link as its guest service answers it.
+fn link_with(node: &str, code: &str, token: &str, want: &str) -> serde_json::Value {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let (status, body) = guest(node, code, "link", token, None);
+        let link: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
+        let listed = link["notes"]
+            .as_array()
+            .is_some_and(|notes| notes.iter().any(|n| n["title"] == want));
+        if status == 200 && listed {
+            return link;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "link {code} never listed `{want}`; last {status}: {}",
+            body.chars().take(400).collect::<String>()
+        );
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
+/// The titles of the notes `link` lists.
+fn titles(link: &serde_json::Value) -> Vec<String> {
+    link["notes"]
+        .as_array()
+        .map(|notes| {
+            notes
+                .iter()
+                .filter_map(|n| n["title"].as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 #[test]
 fn the_demo_stack_signs_in_serves_the_orgs_vault_and_each_share_audience() {
     let tmp = fresh_dir("demo");
@@ -416,46 +467,47 @@ fn the_demo_stack_signs_in_serves_the_orgs_vault_and_each_share_audience() {
     assert!(sign_in(&auth, "grace@local.test", "not-the-password").is_err());
 
     // Org only (`acme`, the vault's org): its member sees the vault through
-    // the node; another org's member and nobody are refused.
+    // the node; another org's member and nobody are refused, at the page
+    // and at the link's guest service alike.
     let org = format!("{node}/s/ksqx75iaaaaaaaad/");
-    page_with(&org, Some(&grace), "Tracklist");
+    page_with(&org, Some(&grace), "The album");
+    link_with(&node, "ksqx75iaaaaaaaad", &grace, "Tracklist");
     assert_eq!(http("GET", &org, Some(&alan), None).0, 403);
     assert_eq!(http("GET", &org, None, None).0, 401);
+    assert_eq!(guest(&node, "ksqx75iaaaaaaaad", "link", &alan, None).0, 403);
+    assert_eq!(guest(&node, "ksqx75iaaaaaaaad", "link", "", None).0, 401);
 
     // Public and anyone-with-the-link: everybody.
-    page_with(&format!("{node}/s/ksqx75iaaaaaaaab/"), None, "Modes");
-    page_with(
-        &format!("{node}/s/ksqx75iaaaaaaaac/"),
-        None,
-        "Blue Moon Walk",
-    );
+    page_with(&format!("{node}/s/ksqx75iaaaaaaaab/"), None, "Music notes");
+    link_with(&node, "ksqx75iaaaaaaaab", "", "Modes");
+    link_with(&node, "ksqx75iaaaaaaaac", "", "Blue Moon Walk");
 
     // Named audiences: each link holds its own parts only.
-    let violin = page_with(
-        &format!("{node}/s/ksqx75iaaaaaaaaf/"),
-        None,
+    let violin = titles(&link_with(
+        &node,
+        "ksqx75iaaaaaaaaf",
+        "",
         "Slow River (violin)",
+    ));
+    assert!(!violin.iter().any(|t| t.contains("(cello)")), "{violin:?}");
+    let cello = link_with(&node, "ksqx75iaaaaaaaag", "", "Amazing Grace (cello)");
+    assert!(
+        !titles(&cello).iter().any(|t| t.contains("(violin)")),
+        "{cello}"
     );
-    assert!(!violin.contains("(cello)"), "{violin}");
-    let cello = page_with(
-        &format!("{node}/s/ksqx75iaaaaaaaag/"),
-        None,
-        "Amazing Grace (cello)",
-    );
-    assert!(!cello.contains("(violin)"), "{cello}");
-    let cello_page = cello
-        .split("href=\"")
-        .filter_map(|s| s.split('"').next())
-        .find(|h| h.contains("cello") && h.starts_with("/s/ksqx75iaaaaaaaag/"))
-        .unwrap_or_else(|| panic!("no cello page linked: {cello}"))
+    let cello_note = cello["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|n| n["path"].as_str().filter(|p| p.contains("cello")))
+        .unwrap_or_else(|| panic!("no cello note listed: {cello}"))
         .to_owned();
     assert_eq!(
-        http("GET", &format!("{node}{cello_page}"), None, None).0,
+        guest(&node, "ksqx75iaaaaaaaag", "read", "", Some(&cello_note)).0,
         200
     );
-    let on_violin = cello_page.replace("ksqx75iaaaaaaaag", "ksqx75iaaaaaaaaf");
     assert_eq!(
-        http("GET", &format!("{node}{on_violin}"), None, None).0,
+        guest(&node, "ksqx75iaaaaaaaaf", "read", "", Some(&cello_note)).0,
         404
     );
 
