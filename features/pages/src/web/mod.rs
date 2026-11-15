@@ -41,12 +41,17 @@
 //!   has rendered.
 //! - **TypeScript actions** (#536): a `typescript` extension's actions run
 //!   in the same worker, one per run ([`WebPages::run_action`],
-//!   [`WebPages::register_actions`], `web/actions.rs`).
+//!   [`WebPages::register_actions`], `web/actions.rs`). In the web app's
+//!   extensions host they are its runner for the kind
+//!   (`runner::WebTsRunner`, feature `web-host`), every host call the
+//!   app's host service for the extension (`WebHost::through`).
 
 // Nothing is `Send` in a browser: everything here is on its one thread.
 #![allow(clippy::future_not_send)]
 
 mod actions;
+#[cfg(feature = "web-host")]
+pub mod runner;
 
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, VecDeque};

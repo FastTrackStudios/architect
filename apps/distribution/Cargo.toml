@@ -11,12 +11,17 @@ default = []
 # Its linked extensions' embed pages draw the fences they claim on the
 # node's share links and Sites (`Distribution::blocks`, #488): QuickJS.
 pages = ["architect-sites/pages"]
+# The showcase's packages it carries as a built-in registry (`showcase`,
+# #710): what the showcase vault's "Install all" installs, on a desk, a
+# phone and in the web app (#495).
+showcase = ["dep:include_dir"]
 
 [dependencies]
 architect = { workspace = true, features = ["settings"] }
 architect-extensions = { workspace = true, features = ["linked"] }
 serde_json = { workspace = true }
 tracing = { workspace = true }
+include_dir = { workspace = true, optional = true }
 # The default Architect app's own extensions (#368): its list.
 architect-projects = { workspace = true }
 architect-tasks = { workspace = true }
