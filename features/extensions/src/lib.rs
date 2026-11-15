@@ -43,6 +43,7 @@ pub mod contrib;
 pub mod device;
 pub mod documents;
 // The editor being typed in, for extensions (#312).
+pub mod disk;
 pub mod editor;
 pub mod events;
 pub mod hostcall;

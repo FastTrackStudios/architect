@@ -259,15 +259,31 @@ impl Extensions {
     ) -> Result<Preview, InstallError> {
         let (source, listing) = self.pick(id, req, extra)?;
         let root = self.installs().root().to_path_buf();
-        std::fs::create_dir_all(&root).map_err(|e| InstallError::Io(e.to_string()))?;
+        // A folder to fetch into where installs are the operating system's
+        // files; a browser's are not, and its sources hand files over.
+        let os = self.installs().disk().is_os();
         let staging = root.join(format!(".preview-{}", crate::install::slug(id)));
-        let _ = std::fs::remove_dir_all(&staging);
-        let fetched = source.fetch(&listing, &staging);
+        let fetched = if os {
+            std::fs::create_dir_all(&root).map_err(|e| InstallError::Io(e.to_string()))?;
+            let _ = std::fs::remove_dir_all(&staging);
+            source.fetch(&listing, &staging)
+        } else {
+            source.fetch_files(&listing)
+        };
         let mut signed_by = None;
         let read = fetched.and_then(|f| {
             let dir = match f {
                 crate::install::Fetched::Copied => staging.clone(),
                 crate::install::Fetched::Linked(dir) => dir,
+                crate::install::Fetched::Files(files) => {
+                    let text = files
+                        .iter()
+                        .find(|(p, _)| p == MANIFEST)
+                        .and_then(|(_, b)| std::str::from_utf8(b).ok())
+                        .ok_or_else(|| InstallError::Mismatch(format!("it has no {MANIFEST}")))?;
+                    return Manifest::parse(text)
+                        .map_err(|e| InstallError::Mismatch(e.to_string()));
+                }
                 // Opened (its signature checked) but not written: its
                 // manifest is read from the archive.
                 crate::install::Fetched::Archive(bytes) => {
@@ -285,7 +301,9 @@ impl Extensions {
                 .map_err(|e| InstallError::Io(format!("{}: {e}", path.display())))?;
             Manifest::parse(&text).map_err(|e| InstallError::Mismatch(e.to_string()))
         });
-        let _ = std::fs::remove_dir_all(&staging);
+        if os {
+            let _ = std::fs::remove_dir_all(&staging);
+        }
         let manifest = read?;
         let mut preview = self.preview_of(&manifest, &listing, &source.name());
         preview.signed_by = signed_by;
@@ -306,7 +324,8 @@ impl Extensions {
         let platform = self.host().platform();
         let cannot_run = crate::platform::not_here(&m.platforms, &platform)
             .map(|why| format!("{why}: not on {}", crate::platform::name(&platform)))
-            .or_else(|| listing.no_build_for(crate::index::host_targets()));
+            .or_else(|| listing.no_build_for(crate::index::host_targets()))
+            .or_else(|| crate::host::kind_cannot_run(m.kind, self.host().runs(m.kind), &platform));
         Preview {
             id: m.id.clone(),
             name: m.name.clone(),

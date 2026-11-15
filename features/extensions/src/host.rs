@@ -680,6 +680,36 @@ const fn effect(reach: Reach) -> Effect {
     }
 }
 
+/// Why this app does not run `kind` extensions on `platform`: the honest
+/// reason a person reads under "Can't run here" (#495).
+#[must_use]
+pub fn why_no_runner(kind: Kind, platform: &str) -> String {
+    match (kind, platform) {
+        (Kind::Luau, "web") => "a browser does not run Luau extensions yet: Luau is C++, which \
+                                this browser build has no runtime for (#812)"
+            .to_owned(),
+        (Kind::Process, "web") => {
+            "a browser does not start programs: process extensions run on a desk".to_owned()
+        }
+        (Kind::Wasm, "web") => {
+            "this browser build runs no WASI components yet: they need JSPI and a bundle \
+             transpiled for the browser (#495)"
+                .to_owned()
+        }
+        _ => format!("this app does not run {} extensions", kind.name()),
+    }
+}
+
+/// Why `kind` cannot run in a host on `platform` that `runs` it or not,
+/// for an install's preview: on the web, a kind with no runner (a browser
+/// cannot run everything a desk can), said before anything is installed;
+/// elsewhere `None` (a desk or a phone has a runner for each kind it
+/// lists; one without is a test's host or a load error to see).
+#[must_use]
+pub fn kind_cannot_run(kind: Kind, runs: bool, platform: &str) -> Option<String> {
+    (platform == "web" && !runs).then(|| why_no_runner(kind, platform))
+}
+
 /// Why an extension was not loaded (the last good one, if any, stays).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LoadError {
@@ -724,7 +754,7 @@ impl std::fmt::Display for LoadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Package(e) => e.fmt(f),
-            Self::NoRunner(kind) => write!(f, "this app does not run {} extensions", kind.name()),
+            Self::NoRunner(kind) => f.write_str(&why_no_runner(*kind, crate::platform::here())),
             Self::Start(why) => write!(f, "it did not start: {why}"),
             Self::Action { id, why } => write!(f, "{id}: {why}"),
             Self::ActionTaken(id) => write!(f, "{id} is another's action"),

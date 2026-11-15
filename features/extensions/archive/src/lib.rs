@@ -929,6 +929,35 @@ impl Verified {
         cannot_run(&self.index.platforms)
     }
 
+    /// Its files for the first of `targets` it has a build for, as
+    /// [`Self::extract_for`] would write them: each path from the package,
+    /// its bytes, and whether it is a program. What an app whose installs
+    /// are not the operating system's files writes (a browser's).
+    ///
+    /// # Errors
+    ///
+    /// [`ArchiveError::NoBuild`].
+    pub fn files_for(&self, targets: &[&str]) -> Result<Vec<(String, &[u8], bool)>, ArchiveError> {
+        let chosen =
+            pick_target(&self.index.platforms, targets).ok_or_else(|| ArchiveError::NoBuild {
+                host: targets.first().map_or_else(host_name, |t| (*t).to_owned()),
+                has: self.index.platforms.clone(),
+            })?;
+        let mut out = Vec::new();
+        for (path, bytes) in &self.files {
+            let (rel, program) = match platform_of(path) {
+                Some(triple) if Some(triple) == chosen => {
+                    let file = path.strip_prefix(&format!("bin/{triple}/")).unwrap_or(path);
+                    (format!("bin/{file}"), true)
+                }
+                Some(_) => continue,
+                None => (path.clone(), false),
+            };
+            out.push((rel, bytes.as_slice(), program));
+        }
+        Ok(out)
+    }
+
     /// Writes its files for this platform into `into`.
     ///
     /// # Errors
@@ -946,21 +975,9 @@ impl Verified {
     ///
     /// [`ArchiveError::NoBuild`], or a file could not be written.
     pub fn extract_for(&self, into: &Path, targets: &[&str]) -> Result<(), ArchiveError> {
-        let chosen =
-            pick_target(&self.index.platforms, targets).ok_or_else(|| ArchiveError::NoBuild {
-                host: targets.first().map_or_else(host_name, |t| (*t).to_owned()),
-                has: self.index.platforms.clone(),
-            })?;
+        let files = self.files_for(targets)?;
         std::fs::create_dir_all(into).map_err(io(into))?;
-        for (path, bytes) in &self.files {
-            let (rel, program) = match platform_of(path) {
-                Some(triple) if Some(triple) == chosen => {
-                    let file = path.strip_prefix(&format!("bin/{triple}/")).unwrap_or(path);
-                    (format!("bin/{file}"), true)
-                }
-                Some(_) => continue,
-                None => (path.clone(), false),
-            };
+        for (rel, bytes, program) in files {
             let dest = into.join(&rel);
             if let Some(parent) = dest.parent() {
                 std::fs::create_dir_all(parent).map_err(io(parent))?;

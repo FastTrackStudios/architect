@@ -86,6 +86,8 @@ struct File {
 
 struct Inner {
     path: Option<PathBuf>,
+    /// Where `path` is (the app's folder; a browser's storage).
+    disk: Arc<dyn crate::disk::Disk>,
     grants: Vec<Grant>,
     org: Option<String>,
     revision: u64,
@@ -146,6 +148,7 @@ impl Grants {
         Self {
             inner: Arc::new(Mutex::new(Inner {
                 path: None,
+                disk: Arc::new(crate::disk::OsDisk),
                 grants: Vec::new(),
                 org: None,
                 revision: 0,
@@ -157,8 +160,16 @@ impl Grants {
     /// is none (and is replaced on the next grant).
     #[must_use]
     pub fn open(path: impl Into<PathBuf>) -> Self {
+        Self::open_on(Arc::new(crate::disk::OsDisk), path)
+    }
+
+    /// [`Self::open`], kept in `path` of `disk` (a browser's storage,
+    /// `crate::disk::MemDisk`).
+    #[must_use]
+    pub fn open_on(disk: Arc<dyn crate::disk::Disk>, path: impl Into<PathBuf>) -> Self {
         let path = path.into();
-        let grants = std::fs::read_to_string(&path)
+        let grants = disk
+            .read_to_string(&path)
             .ok()
             .and_then(|t| serde_json::from_str::<File>(&t).ok())
             .map(|f| f.grants)
@@ -166,6 +177,7 @@ impl Grants {
         Self {
             inner: Arc::new(Mutex::new(Inner {
                 path: Some(path),
+                disk,
                 grants,
                 org: None,
                 revision: 0,
@@ -183,11 +195,8 @@ impl Grants {
         let file = File {
             grants: inner.grants.clone(),
         };
-        if let Some(dir) = path.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
         if let Ok(text) = serde_json::to_string_pretty(&file) {
-            let _ = std::fs::write(path, text);
+            let _ = inner.disk.write(path, text.as_bytes());
         }
     }
 
