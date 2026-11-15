@@ -42,7 +42,7 @@ use peniko::kurbo::{Affine, Point, Rect};
 use peniko::{Color, Fill};
 
 #[cfg(feature = "paint-ui")]
-pub use widget::{PaintMount, PaintPane, PaintWake, PaintWidget, shell_tokens};
+pub use widget::{PaintMount, PaintPane, PaintWake, PaintWidget, shell_tokens, view_input};
 
 use crate::ctx::{Geometry, ThemeTokens, ViewCtx, ViewInput};
 use crate::meter::percentile;

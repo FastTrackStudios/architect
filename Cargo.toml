@@ -60,6 +60,7 @@ members = [
     "features/extensions",
     "features/extensions/documents",
     "features/webview",
+    "features/process-view",
     "features/extensions/wasi-guest",
     "features/extensions/archive",
     "features/extensions/tests/wasi-hazards",
@@ -374,6 +375,7 @@ architect-scripting = { path = "features/scripting" }
 architect-extensions = { path = "features/extensions" }
 architect-documents = { path = "features/extensions/documents" }
 architect-webview = { path = "features/webview" }
+architect-process-view = { path = "features/process-view" }
 architect-extension-wasi = { path = "features/extensions/wasi-guest" }
 architect-extension-archive = { path = "features/extensions/archive" }
 architect-canvas = { path = "features/canvas" }

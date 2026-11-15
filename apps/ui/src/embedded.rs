@@ -60,6 +60,8 @@ pub fn kinds() -> ViewKinds {
     // Extensions' web views (#222): drawn by the native host with feature
     // `webview`, otherwise their panes say there is none.
     let _ = kinds.register(KindSpec::web());
+    #[cfg(all(feature = "process-views", target_os = "linux"))]
+    let _ = kinds.register(architect_process_view::kind_spec());
     kinds
 }
 
@@ -73,7 +75,8 @@ pub const PAINT_PANE: &str = "embed-paint";
 /// The views of the five.
 #[must_use]
 pub fn views() -> Vec<View> {
-    vec![
+    #[allow(unused_mut)]
+    let mut views = vec![
         View::new("embed.dioxus", "Dioxus", |_| rsx! { DioxusPane {} }),
         View::new("embed.luau", "Luau ImGui", |_| rsx! { LuauPane {} }).still(),
         View::new("embed.frame", "Frame surface", |_| rsx! { FramePane {} })
@@ -101,7 +104,10 @@ pub fn views() -> Vec<View> {
             |_| rsx! { crate::paint::PaintLabPane {} },
         )
         .drawn_by(PAINT),
-    ]
+    ];
+    #[cfg(all(feature = "process-views", target_os = "linux"))]
+    views.extend(crate::process_views::views());
+    views
 }
 
 /// The screenset's layout: three columns, Dioxus over Luau `ImGui` on the
@@ -448,6 +454,8 @@ fn shipped(args: &serde_json::Value) -> Result<serde_json::Value, String> {
 /// `LAB_PAINT_STATE`, the paint pane's.
 pub fn register(list: &ActionList, surfaces: &architect_a2ui::Surfaces) {
     crate::paint::register(list);
+    #[cfg(all(feature = "process-views", target_os = "linux"))]
+    crate::process_views::register(list);
     crate::note_editor::register(list);
     #[cfg(feature = "keyflow-lab")]
     crate::keyflow::register(list);

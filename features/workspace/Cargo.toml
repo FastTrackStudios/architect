@@ -35,6 +35,10 @@ actions = ["dep:architect", "dep:futures-channel"]
 ui = ["actions", "dep:dioxus", "dep:architect-theme", "architect-theme/dioxus", "dep:architect-shell", "architect-shell/ui", "dep:futures-timer", "dep:futures-util", "dep:lucide-dioxus", "architect-commands/ui"]
 # `APP_SHOT` (src/shot.rs): the window's document painted on the CPU to a PNG.
 native = ["ui", "dep:dioxus-native", "dep:blitz-shell", "dep:blitz-html", "dep:blitz-traits", "dep:dioxus-asset-resolver", "dep:blitz-dom", "dep:blitz-paint", "dep:anyrender", "dep:anyrender_vello_cpu", "dep:peniko", "dep:png"]
+# The main window's GPU device asks for dma-buf import where the driver
+# has it (Vulkan): what a process view's frames need
+# (`architect-process-view`, docs/content/architecture/process-views.md).
+external-textures = ["native"]
 hot-reload = ["native", "dioxus-native/hot-reload", "dep:dioxus-devtools"]
 # The interface as files (src/home.rs): layouts/<name>.json, keys.json,
 # watched, last-good with a .error beside a broken one, .state/ apart.

@@ -1,0 +1,65 @@
+[package]
+name = "architect-process-view"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Process views: another process's GPU pixels in a pane of the app's window (a shared dma-buf texture, or shared memory), with input, resizing, and a stopped view that restarts"
+
+# docs/content/architecture/process-views.md. A process view is a view
+# drawn by a program of its own (its own wgpu device, its own crash
+# domain, built and released in its own repo) and shown in a pane of
+# Architect's window. Linux only for now: the frames come over a shared
+# dma-buf texture (Vulkan external memory) or, where that can't be
+# imported, shared memory. macOS (IOSurface) and Windows (DXGI shared
+# handles) are designed, not built.
+#
+# The default set is the wire: the messages and the socket that carries
+# them, with the frames' file descriptors. `guest` is the program's side:
+# a `PaintView` served from a process (`guest::serve`). `host` is the
+# app's: the Blitz widget that draws the frames and the pane around it
+# (`ProcessViewPane`), with the view's liveness. `demo` is the guest
+# binary the lab shows (`process-view-demo`).
+
+[features]
+default = []
+# The program's side: its own wgpu device on the host's adapter, Vello,
+# and the frames it exports.
+guest = ["dep:wgpu", "dep:vello", "dep:anyrender_vello", "dep:ash", "dep:pollster", "dep:architect"]
+# The app's side: the custom widget and its pane (Blitz, Dioxus).
+host = ["dep:wgpu", "dep:ash", "architect-workspace/paint-ui", "dep:dioxus", "dep:blitz-dom", "dep:blitz-traits", "dep:dioxus-native-dom", "dep:anyrender", "dep:peniko", "dep:wgpu_context", "dep:futures-timer"]
+# The lab's demo scene (`demo::Orbits`); with `guest`, its program.
+demo = []
+
+[[bin]]
+name = "process-view-demo"
+path = "src/bin/process-view-demo.rs"
+required-features = ["demo", "guest"]
+
+[dependencies]
+architect-workspace = { workspace = true, features = ["paint"] }
+thiserror = { workspace = true }
+rustix = { version = "1", features = ["net", "fs", "mm", "event", "process"] }
+wgpu = { version = "30", optional = true }
+vello = { version = "0.11", optional = true }
+anyrender_vello = { version = "0.15", optional = true }
+ash = { version = "0.38", optional = true }
+pollster = { version = "0.4", optional = true }
+dioxus = { workspace = true, optional = true }
+blitz-dom = { workspace = true, optional = true, features = ["custom-widget"] }
+blitz-traits = { workspace = true, optional = true }
+dioxus-native-dom = { workspace = true, optional = true }
+anyrender = { workspace = true, optional = true }
+peniko = { workspace = true, optional = true }
+wgpu_context = { version = "0.10", optional = true }
+futures-timer = { workspace = true, optional = true }
+architect = { workspace = true, optional = true, features = ["action-list"] }
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
+
+[dev-dependencies]
+pollster = "0.4"

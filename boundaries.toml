@@ -105,6 +105,17 @@ layer = "L0"
 note = "the paint kind's model: anyrender and peniko, no Dioxus or Blitz"
 
 [[row]]
+package = "architect-process-view"
+layer = "L0"
+note = "process views' wire: messages and the socket pair; no GPU, no Dioxus"
+
+[[row]]
+package = "architect-process-view"
+features = ["host"]
+layer = "L4"
+note = "the pane and Blitz widget that draw a program's frames"
+
+[[row]]
 package = "architect-shell"
 layer = "L0"
 
