@@ -75,7 +75,7 @@ pub const HOST_FUNCTIONS: &[&str] = &[
 pub const EXT_FUNCTIONS: &[&str] = &["contribute", "state", "clear"];
 
 /// A JSON value's type, in Luau's words.
-fn type_name(v: &Value) -> &'static str {
+const fn type_name(v: &Value) -> &'static str {
     match v {
         Value::Null => "nil",
         Value::Bool(_) => "boolean",
@@ -99,7 +99,7 @@ impl Args<'_> {
     fn bad(&self, i: usize, expected: &str) -> String {
         format!(
             "bad argument #{} to '{}' ({expected} expected, got {})",
-            i + 1,
+            i.saturating_add(1),
             self.name,
             type_name(self.at(i))
         )
@@ -354,7 +354,8 @@ pub fn raw_request(request: Value) -> Result<HostRequest, String> {
     lenient(request).map_err(|e| format!("not a host request: {e}"))
 }
 
-/// `ext.<name>(args…)` for `manifest`'s extension, on `contributions`:
+/// `ext.<name>(args…)` for `manifest`'s extension, on `contributions`.
+///
 /// `contribute(table)` puts what it adds at run time (checked as its
 /// manifest's tables are) and answers the diff; `state{…}` writes its
 /// runtime state; `clear(key?)` takes it off and answers how many went.
@@ -416,7 +417,7 @@ mod tests {
         for name in HOST_FUNCTIONS {
             let args = match *name {
                 "edit_document" => vec![json!("a.md"), json!([]), json!(null)],
-                "decorate_editor" => vec![json!({})],
+                "decorate_editor" | "query_vault" => vec![json!({})],
                 "decorate" => vec![json!({"kind": "file", "id": "a"}), json!({"icon": "star"})],
                 "fetch" => vec![json!("https://example.com")],
                 "surface_bank" => vec![json!("s"), json!(1)],
@@ -428,7 +429,6 @@ mod tests {
                 "subscribe" => vec![json!({"on": "doc.saved", "action": "A"})],
                 "watch_documents" => vec![json!({"action": "A"})],
                 "edit_editor" => vec![json!({"changes": []})],
-                "query_vault" => vec![json!({})],
                 "pick" | "org" | "selection" | "editor" | "clipboard_read" | "events"
                 | "targets" | "surfaces" | "ports" | "list_documents" => vec![],
                 "window" => vec![json!("prefs"), json!(true), json!(null)],

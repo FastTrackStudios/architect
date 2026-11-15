@@ -692,8 +692,9 @@ pub fn why_no_runner(kind: Kind, platform: &str) -> String {
     }
 }
 
-/// Why `kind` cannot run in a host on `platform` that `runs` it or not,
-/// for an install's preview: on the web, a kind with no runner (a browser
+/// Why `kind` cannot run in a host on `platform` that `runs` it or not.
+///
+/// For an install's preview: on the web, a kind with no runner (a browser
 /// cannot run everything a desk can), said before anything is installed;
 /// elsewhere `None` (a desk or a phone has a runner for each kind it
 /// lists; one without is a test's host or a load error to see).

@@ -1,5 +1,6 @@
-//! What a script's `actions` and `state` globals do, apart from Luau
-//! (feature `bindings`, wasm-clean): which actions a run sees, what
+//! What a script's `actions` and `state` globals do, apart from Luau.
+//!
+//! Feature `bindings`, wasm-clean: which actions a run sees, what
 //! `actions.list` and `actions.describe` give, why one is refused, and a
 //! run's error as a [`ScriptError`].
 //!

@@ -1,6 +1,7 @@
-//! The extension showcase's packages the app carries (#710): the Luau,
-//! TypeScript and data packages the showcase vault (`apps/ui/showcase-vault`)
-//! names, as a registry compiled into the build
+//! The extension showcase's packages the app carries (#710).
+//!
+//! The Luau, TypeScript and data packages the showcase vault
+//! (`apps/ui/showcase-vault`) names, as a registry compiled into the build
 //! (`architect_extensions::bundled::BundledSource`). The desk and phone app
 //! (`apps/ui/src/showcase.rs`) and the web app (`apps/web/src/app/extensions.rs`)
 //! offer them with the vault's **Install all**, through the one consent
