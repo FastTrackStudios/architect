@@ -138,14 +138,6 @@ pub struct Backend {
     /// instant lookups from both sync (dispatcher blocking pool) and
     /// async contexts.
     collab: Arc<std::sync::RwLock<HashMap<Uuid, (String, String)>>>,
-    /// Extra roots scanned for `.cook` recipes when building base rows:
-    /// `vault_id → root`. Recipes live under the wiki root, outside the
-    /// vault this backend serves, so without this a `.base` filtering
-    /// `type: recipe` matches nothing. Read-only and used by
-    /// [`VaultSync::base_views`] alone — recipes are not part of the
-    /// manifest, are never synced through here, and stay owned by the
-    /// `cookbook` service. Empty by default.
-    recipe_roots: Arc<HashMap<String, PathBuf>>,
     /// Asked before every caller write — see [`crate::write_guard`].
     /// Unset allows everything, which is what a desktop vault wants.
     /// Shared across clones, like the roots: the server hands clones of
@@ -378,22 +370,9 @@ impl Backend {
             channels: Arc::new(RwLock::new(HashMap::new())),
             changes: architect::PubSub::sliding(256),
             collab: Arc::new(std::sync::RwLock::new(HashMap::new())),
-            recipe_roots: Arc::new(HashMap::new()),
             guard: Arc::new(std::sync::OnceLock::new()),
             plain_files: PlainFiles::default(),
         }
-    }
-
-    /// Register the roots holding each vault's `.cook` recipes — in
-    /// practice the org's wiki root, whose `Cookbook/` subtree the
-    /// `cookbook` service owns. Recipes found there become base rows
-    /// stamped `type: recipe`, so a `.base` can list and filter the
-    /// cookbook alongside ordinary notes. Without this, recipes are
-    /// invisible to bases; nothing else about the backend changes.
-    #[must_use]
-    pub fn with_recipe_roots(mut self, roots: HashMap<String, PathBuf>) -> Self {
-        self.recipe_roots = Arc::new(roots);
-        self
     }
 
     /// Ask `guard` before every write a caller makes. Every clone sees
@@ -1085,7 +1064,7 @@ impl VaultSync for Backend {
             .map_err(|e| VaultSyncError::Internal(format!("base parse: {e}")))?;
 
         // Every page → an executor row (frontmatter parsed once).
-        let mut rows: Vec<crate::bases::BaseRow> = vault
+        let rows: Vec<crate::bases::BaseRow> = vault
             .pages
             .iter()
             .map(|p| {
@@ -1101,27 +1080,6 @@ impl VaultSync for Backend {
                 )
             })
             .collect();
-
-        // …plus the cookbook, which lives outside this vault root. Rows
-        // keep the `.cook` extension so the client can route a click to
-        // cook mode instead of the note viewer.
-        if let Some(recipe_root) = self.recipe_roots.get(vault_id) {
-            rows.extend(
-                crate::cook::scan_cook_files(recipe_root)
-                    .into_iter()
-                    .map(|c| {
-                        crate::bases::BaseRow::from_parts_full(
-                            Uuid::new_v4(),
-                            &c.basename,
-                            &c.rel_path,
-                            &c.folder,
-                            "cook",
-                            &crate::cook::cook_frontmatter_json(&c.raw),
-                            &[],
-                        )
-                    }),
-            );
-        }
 
         // Run + project each view.
         let views = parsed
@@ -2867,74 +2825,5 @@ mod tests {
             .unwrap();
         let out = String::from_utf8(b.get_file("v1", "bare.md").unwrap().0).unwrap();
         assert_eq!(out, "---\nfolder: \"[[Inbox]]\"\n---\njust text\n");
-    }
-
-    /// A `.base` filtering `type: recipe` should list the cookbook —
-    /// which lives under the wiki root, not the vault root. Before
-    /// `with_recipe_roots` these rows didn't exist and the view came
-    /// back empty.
-    #[test]
-    fn base_views_include_recipes_from_the_wiki_root() {
-        let vault_dir = tempfile::tempdir().unwrap();
-        let wiki_dir = tempfile::tempdir().unwrap();
-
-        std::fs::write(
-            vault_dir.path().join("Cookbook.base"),
-            "filters:\n  and:\n    - 'type == \"recipe\"'\n\
-             views:\n  - name: All recipes\n    type: table\n    order: [title, servings]\n",
-        )
-        .unwrap();
-        // A vault note that must NOT show up — proves the filter runs
-        // rather than everything being swept in.
-        std::fs::write(
-            vault_dir.path().join("note.md"),
-            "---\ntype: meal\ntitle: Tuesday\n---\nbody\n",
-        )
-        .unwrap();
-
-        std::fs::create_dir_all(wiki_dir.path().join("Knowledge/Cookbook")).unwrap();
-        std::fs::write(
-            wiki_dir.path().join("Knowledge/Cookbook/oatmeal.cook"),
-            ">> title: Oatmeal\n>> servings: 1\n\nStir @oats{50%g}.\n",
-        )
-        .unwrap();
-
-        let mut roots = HashMap::new();
-        roots.insert("v1".to_string(), vault_dir.path().to_path_buf());
-        let mut recipe_roots = HashMap::new();
-        recipe_roots.insert("v1".to_string(), wiki_dir.path().to_path_buf());
-        let backend = Backend::with_roots(roots).with_recipe_roots(recipe_roots);
-
-        let views = backend.base_views("v1", "Cookbook.base").unwrap();
-        assert_eq!(views.len(), 1, "one view declared");
-        let rows: Vec<_> = views[0].groups.iter().flat_map(|g| &g.rows).collect();
-        assert_eq!(
-            rows.len(),
-            1,
-            "the meal note must not match a recipe filter"
-        );
-        assert_eq!(rows[0].title, "Oatmeal");
-        assert_eq!(
-            rows[0].path, "Knowledge/Cookbook/oatmeal.cook",
-            "path stays the recipe's own, so a click can open cook mode"
-        );
-        assert_eq!(rows[0].cells, vec!["Oatmeal".to_string(), "1".to_string()]);
-    }
-
-    /// The default backend has no recipe roots, so nothing changes for
-    /// vaults that never register one.
-    #[test]
-    fn base_views_without_recipe_roots_see_only_vault_pages() {
-        let (_tmp, b) = make_backend();
-        b.put_file(
-            "v1",
-            "Recipes.base",
-            b"filters:\n  and:\n    - 'type == \"recipe\"'\nviews:\n  - name: All\n    type: table\n    order: [title]\n".to_vec(),
-            IfMatch::CreateOnly,
-        )
-        .unwrap();
-        let views = b.base_views("v1", "Recipes.base").unwrap();
-        let rows: usize = views[0].groups.iter().map(|g| g.rows.len()).sum();
-        assert_eq!(rows, 0);
     }
 }

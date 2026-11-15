@@ -76,7 +76,6 @@
 /// The `.base` parser and evaluator: `vault_query`'s (wasm-clean).
 pub use vault_query::bases;
 pub mod blocks;
-pub mod cook;
 /// Grouping rows by a value, `vault_proto::grouping` (wasm-clean, so the
 /// navigator's model can use it on every target).
 pub use vault_proto::grouping;
