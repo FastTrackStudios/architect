@@ -46,6 +46,7 @@ mod publish;
 mod screen;
 mod setlists;
 mod settings;
+pub mod showcase;
 mod surfaces;
 mod theme;
 mod vault;

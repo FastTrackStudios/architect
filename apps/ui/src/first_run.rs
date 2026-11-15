@@ -91,6 +91,11 @@ pub fn FirstRun(on_open: Callback<()>) -> Element {
                     span { style: label, "Explore the demo vault" }
                     span { style: "{about}", "Made-up notes, projects, bases and a journal to try things on." }
                 }
+                button { "data-testid": "first-run-showcase", style: "{row}",
+                    onclick: move |_| choose.call(crate::vaults::showcase()),
+                    span { style: label, "Explore the extension showcase" }
+                    span { style: "{about}", "A note per extension capability, and the showcase extensions to install in one go." }
+                }
                 div { style: "height: 1px; background: {t.rule}; margin: 6px 0;" }
                 // Optional: the sheet, over the welcome (#188).
                 if let Some(accounts) = signed_in_ui {

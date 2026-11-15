@@ -965,7 +965,11 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         let wasi = if sandbox { wasi_counter(&root) } else { None };
         // `EXT_CLONE` puts its copies beside the development ones.
         let mut extensions = Extensions::new(host, Installs::new(root.join("extensions")))
-            .with_dev_root(root.join("dev"));
+            .with_dev_root(root.join("dev"))
+            // The showcase's Luau, TypeScript and data packages, a registry
+            // the app carries (#710): what the showcase vault's "Install
+            // all" takes, on the desk and on a phone, with no network.
+            .with_source(crate::showcase::source());
         // A lab built from a checkout clones its built-ins' crates from it
         // (EXT_CLONE of lab.board, `architect_extensions::source`).
         if let Some(checkout) = checkout() {

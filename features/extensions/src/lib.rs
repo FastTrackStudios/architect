@@ -74,6 +74,8 @@ pub mod actions_manage;
 #[cfg(feature = "host")]
 pub mod browse;
 #[cfg(feature = "host")]
+pub mod bundled;
+#[cfg(feature = "host")]
 pub mod check;
 #[cfg(feature = "host")]
 pub mod clone;
