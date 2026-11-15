@@ -27,7 +27,8 @@ use architect::action::{ActionCaller, ActionError, ActionList, ActionMeta, Effec
 use facet::Facet;
 use serde_json::{Value, json};
 
-use crate::luau::{Limits, Report, Runtime, detail};
+use crate::bindings::detail;
+use crate::luau::{Limits, Report, Runtime};
 use crate::{Library, LibraryError, Scope, Script, Transactions};
 
 /// How many runs may be under way at once, scripts run by scripts

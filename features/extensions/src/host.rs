@@ -467,7 +467,7 @@ mod luau_ext {
     use architect_scripting::luau::mlua::{self, Lua, LuaSerdeExt as _, Value as LuaValue};
     use architect_scripting::luau::{Module, raise};
 
-    use crate::contrib::{Contribution, Contributions, StateWrite};
+    use crate::contrib::Contributions;
     use crate::manifest::Manifest;
 
     /// `ext`: `id`; `contribute(table)` puts what it adds at run time (in
@@ -500,40 +500,26 @@ mod luau_ext {
         fn install(&self, lua: &Lua) -> mlua::Result<LuaValue> {
             let t = lua.create_table()?;
             t.set("id", self.manifest.id.clone())?;
-            let (m, c) = (self.manifest.clone(), self.contributions.clone());
-            t.set(
-                "contribute",
-                lua.create_function(move |lua, value: LuaValue| {
-                    let added: Contribution = lua.from_value(value)?;
-                    let views = m.view_ids();
-                    added
-                        .check(&m.rules(&views))
-                        .map_err(|e| raise(lua, e.to_string()))?;
-                    let diff = c
-                        .put_runtime(&m.id, added)
-                        .ok_or_else(|| raise(lua, format!("{} is not loaded", m.id)))?;
-                    lua.to_value(&diff)
-                })?,
-            )?;
-            let (id, c) = (self.manifest.id.clone(), self.contributions.clone());
-            t.set(
-                "state",
-                lua.create_function(move |lua, value: LuaValue| {
-                    let mut write: StateWrite = lua.from_value(value)?;
-                    write.source = format!("ext:{id}");
-                    let applied = c
-                        .set_state(write, super::now_ms())
-                        .map_err(|e| raise(lua, e.to_string()))?;
-                    lua.to_value(&applied)
-                })?,
-            )?;
-            let (id, c) = (self.manifest.id.clone(), self.contributions.clone());
-            t.set(
-                "clear",
-                lua.create_function(move |_, key: Option<String>| {
-                    Ok(c.clear_state(&format!("ext:{id}"), key.as_deref()))
-                })?,
-            )?;
+            // Each the one implementation a browser's Luau calls too
+            // (`crate::luau_calls::ext_call`).
+            for name in crate::luau_calls::EXT_FUNCTIONS {
+                let (m, c) = (self.manifest.clone(), self.contributions.clone());
+                t.set(
+                    *name,
+                    lua.create_function(move |lua, args: mlua::MultiValue| {
+                        let args = args
+                            .into_iter()
+                            .map(|v| match v {
+                                LuaValue::Nil => Ok(serde_json::Value::Null),
+                                v => lua.from_value(v),
+                            })
+                            .collect::<mlua::Result<Vec<_>>>()?;
+                        let out = crate::luau_calls::ext_call(&m, &c, name, &args, super::now_ms())
+                            .map_err(|e| raise(lua, e))?;
+                        lua.to_value(&out)
+                    })?,
+                )?;
+            }
             Ok(LuaValue::Table(t))
         }
     }
@@ -615,7 +601,11 @@ pub fn capped_error(mut error: String) -> String {
 }
 
 /// An action's arguments as JSON: nothing is `null`.
-fn json_args(id: &str, args: &[u8]) -> Result<Value, ActionError> {
+///
+/// # Errors
+///
+/// They are not JSON: [`ActionError::BadArgs`].
+pub fn json_args(id: &str, args: &[u8]) -> Result<Value, ActionError> {
     if args.iter().all(u8::is_ascii_whitespace) {
         return Ok(Value::Null);
     }
@@ -685,8 +675,10 @@ const fn effect(reach: Reach) -> Effect {
 #[must_use]
 pub fn why_no_runner(kind: Kind, platform: &str) -> String {
     match (kind, platform) {
-        (Kind::Luau, "web") => "a browser does not run Luau extensions yet: Luau is C++, which \
-                                this browser build has no runtime for (#812)"
+        // The web app runs them (`architect_pages::web::luau`) when its
+        // bundle carries Luau (`luau-web`, scripts/vendor-luau-web.sh).
+        (Kind::Luau, "web") => "this page has no Luau runtime: the app's bundle does not carry \
+                                luau-web (#812)"
             .to_owned(),
         (Kind::Process, "web") => {
             "a browser does not start programs: process extensions run on a desk".to_owned()

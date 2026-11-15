@@ -73,12 +73,13 @@
 //! Each function but `call` raises the host's refusal as the script's
 //! error (`refused (actions): …`), which `pcall` catches.
 
-use architect_scripting::luau::mlua::{self, Lua, LuaSerdeExt as _, Value as LuaValue};
+use architect_scripting::luau::mlua::{self, Lua, LuaSerdeExt as _, MultiValue, Value as LuaValue};
 use architect_scripting::luau::{Module, raise};
 use serde_json::{Value, json};
 
 use crate::hostapi::ExtensionApi;
-use crate::hostcall::{HostAnswer, HostRequest};
+use crate::hostcall::HostAnswer;
+use crate::luau_calls::{HOST_FUNCTIONS, host_request, raw_request};
 
 /// The `host` global, acting for whoever ran the script.
 pub struct HostModule {
@@ -99,17 +100,9 @@ fn json_of(lua: &Lua, value: LuaValue) -> mlua::Result<Value> {
     }
 }
 
-/// Request `op` from a table of its fields (`nil`: the defaults).
-fn request_of(lua: &Lua, op: &str, fields: Option<LuaValue>) -> mlua::Result<HostRequest> {
-    let mut v = fields.map_or(Ok(Value::Null), |f| json_of(lua, f))?;
-    if v.is_null() {
-        v = json!({});
-    }
-    let Value::Object(map) = &mut v else {
-        return Err(mlua::Error::runtime(format!("{op}: a table of its fields")));
-    };
-    map.insert("op".to_owned(), Value::String(op.to_owned()));
-    serde_json::from_value(v).map_err(|e| mlua::Error::runtime(format!("{op}: {e}")))
+/// A call's arguments as JSON, in place (`nil` → `null`).
+fn args_of(lua: &Lua, args: MultiValue) -> mlua::Result<Vec<Value>> {
+    args.into_iter().map(|v| json_of(lua, v)).collect()
 }
 
 impl Module for HostModule {
@@ -124,278 +117,28 @@ impl Module for HostModule {
     fn install(&self, lua: &Lua) -> mlua::Result<LuaValue> {
         let t = lua.create_table()?;
         t.set("id", self.api.id().to_owned())?;
-        // `name(args…)` → one request, its value or the refusal raised.
-        macro_rules! op {
-            ($name:literal, $args:ty, |$lua:ident, $a:ident| $make:expr) => {{
-                let api = self.api.clone();
-                t.set(
-                    $name,
-                    lua.create_async_function(move |$lua, $a: $args| {
-                        let api = api.clone();
-                        let request: mlua::Result<HostRequest> = $make;
-                        async move {
-                            let request = request?;
-                            match api.call(request).await {
-                                // `null` (nothing set, a cancel) is `nil`.
-                                Ok(Value::Null) => Ok(LuaValue::Nil),
-                                Ok(v) => $lua.to_value(&v),
-                                Err(e) => Err(raise(&$lua, e.to_string())),
-                            }
+        // `name(args…)` → one request (`crate::luau_calls`, the one
+        // mapping a browser's Luau uses too), its value or the refusal
+        // raised.
+        for name in HOST_FUNCTIONS {
+            let api = self.api.clone();
+            t.set(
+                *name,
+                lua.create_async_function(move |lua, args: MultiValue| {
+                    let api = api.clone();
+                    let request = args_of(&lua, args)
+                        .and_then(|args| host_request(name, &args).map_err(|e| raise(&lua, e)));
+                    async move {
+                        match api.call(request?).await {
+                            // `null` (nothing set, a cancel) is `nil`.
+                            Ok(Value::Null) => Ok(LuaValue::Nil),
+                            Ok(v) => lua.to_value(&v),
+                            Err(e) => Err(raise(&lua, e.to_string())),
                         }
-                    })?,
-                )?;
-            }};
+                    }
+                })?,
+            )?;
         }
-        op!("run", (String, Option<LuaValue>), |lua, a| {
-            let (action, args) = a;
-            args.map_or(Ok(Value::Null), |v| json_of(&lua, v))
-                .map(|args| HostRequest::Run {
-                    action,
-                    args,
-                    ticket: None,
-                })
-        });
-        op!("org", (), |lua, _a| Ok(HostRequest::Org));
-        op!("selection", (), |lua, _a| Ok(HostRequest::Selection));
-        op!("open", String, |lua, a| Ok(HostRequest::Open { path: a }));
-        op!("read_document", String, |lua, a| Ok(
-            HostRequest::ReadDocument { path: a }
-        ));
-        op!("query_vault", LuaValue, |lua, a| request_of(
-            &lua,
-            "query_vault",
-            Some(a)
-        ));
-        op!("list_documents", Option<String>, |lua, a| Ok(
-            HostRequest::ListDocuments { under: a }
-        ));
-        op!("create_document", (String, Option<String>), |lua, a| Ok(
-            HostRequest::CreateDocument {
-                path: a.0,
-                text: a.1.unwrap_or_default(),
-            }
-        ));
-        op!(
-            "edit_document",
-            (String, LuaValue, Option<String>),
-            |lua, a| {
-                let (path, edits, name) = a;
-                json_of(&lua, edits).and_then(|edits| {
-                    serde_json::from_value(json!({
-                        "op": "edit_document", "path": path, "edits": edits, "name": name,
-                    }))
-                    .map_err(|e| mlua::Error::runtime(format!("edit_document: {e}")))
-                })
-            }
-        );
-        op!("rename_document", (String, String), |lua, a| Ok(
-            HostRequest::RenameDocument { path: a.0, to: a.1 }
-        ));
-        op!("move_document", (String, String), |lua, a| Ok(
-            HostRequest::MoveDocument {
-                path: a.0,
-                folder: a.1
-            }
-        ));
-        op!("delete_document", String, |lua, a| Ok(
-            HostRequest::DeleteDocument { path: a }
-        ));
-        op!("watch_documents", LuaValue, |lua, a| request_of(
-            &lua,
-            "watch_documents",
-            Some(a)
-        ));
-        // The editor being typed in (crate::editor).
-        op!("editor", (), |lua, _a| Ok(HostRequest::EditorState));
-        op!("edit_editor", LuaValue, |lua, a| request_of(
-            &lua,
-            "edit_editor",
-            Some(a)
-        ));
-        op!("decorate_editor", LuaValue, |lua, a| {
-            json_of(&lua, a).and_then(|decorations| {
-                // An empty Luau table reads as `{}`: none.
-                let decorations = if decorations == json!({}) {
-                    json!([])
-                } else {
-                    decorations
-                };
-                serde_json::from_value(json!({
-                    "op": "decorate_editor", "decorations": decorations,
-                }))
-                .map_err(|e| mlua::Error::runtime(format!("decorate_editor: {e}")))
-            })
-        });
-        op!("read_file", String, |lua, a| Ok(HostRequest::ReadFile {
-            path: a
-        }));
-        op!("write_file", (String, String), |lua, a| Ok(
-            HostRequest::WriteFile {
-                path: a.0,
-                text: a.1
-            }
-        ));
-        op!("setting", String, |lua, a| Ok(HostRequest::Setting {
-            key: a
-        }));
-        op!("set_setting", (String, LuaValue), |lua, a| json_of(
-            &lua, a.1
-        )
-        .map(|value| HostRequest::SetSetting { key: a.0, value }));
-        op!("data", String, |lua, a| Ok(HostRequest::Data { key: a }));
-        op!("set_data", (String, LuaValue), |lua, a| json_of(&lua, a.1)
-            .map(|v| HostRequest::SetData {
-                key: a.0,
-                value: (!v.is_null()).then_some(v),
-            }));
-        op!("log", (String, Option<String>), |lua, a| Ok(
-            HostRequest::Log {
-                text: a.0,
-                level: a.1
-            }
-        ));
-        op!("service", (String, String, Option<LuaValue>), |lua, a| {
-            let (service, method, args) = a;
-            args.map_or(Ok(Value::Null), |v| json_of(&lua, v))
-                .map(|args| HostRequest::Service {
-                    service,
-                    method,
-                    args,
-                })
-        });
-        op!("point", String, |lua, a| Ok(HostRequest::Point {
-            point: a
-        }));
-        op!(
-            "window",
-            (String, Option<bool>, Option<LuaValue>),
-            |lua, a| {
-                let (id, open, state) = a;
-                state
-                    .map_or(Ok(Value::Null), |v| json_of(&lua, v))
-                    .map(|state| HostRequest::Window {
-                        id,
-                        open: open.unwrap_or(true),
-                        state,
-                    })
-            }
-        );
-        op!(
-            "notify",
-            (String, Option<String>, Option<String>),
-            |lua, a| Ok(HostRequest::Notify {
-                text: a.0,
-                kind: a.1,
-                title: a.2
-            })
-        );
-        op!("clipboard_read", (), |lua, _a| Ok(
-            HostRequest::ClipboardRead
-        ));
-        op!("clipboard_write", String, |lua, a| Ok(
-            HostRequest::ClipboardWrite { text: a }
-        ));
-        op!("pick", Option<LuaValue>, |lua, a| request_of(
-            &lua, "pick", a
-        ));
-        op!("prompt", LuaValue, |lua, a| request_of(
-            &lua,
-            "prompt",
-            Some(a)
-        ));
-        op!("menu", LuaValue, |lua, a| request_of(&lua, "menu", Some(a)));
-        op!("subscribe", LuaValue, |lua, a| request_of(
-            &lua,
-            "subscribe",
-            Some(a)
-        ));
-        op!("unsubscribe", String, |lua, a| Ok(
-            HostRequest::Unsubscribe { key: a }
-        ));
-        op!("events", (), |lua, _a| Ok(HostRequest::Events));
-        op!("ports", Option<String>, |lua, a| Ok(HostRequest::Ports {
-            kind: a
-        }));
-        op!("open_port", (String, String, Option<u16>), |lua, a| Ok(
-            HostRequest::OpenPort {
-                kind: a.0,
-                name: a.1,
-                listen: a.2
-            }
-        ));
-        op!("port_send", (String, LuaValue), |lua, a| {
-            let (port, message) = a;
-            json_of(&lua, message).map(|message| HostRequest::PortSend { port, message })
-        });
-        op!("port_receive", (String, Option<u32>), |lua, a| Ok(
-            HostRequest::PortReceive {
-                port: a.0,
-                max: a.1
-            }
-        ));
-        op!("close_port", String, |lua, a| Ok(HostRequest::ClosePort {
-            port: a
-        }));
-        op!("targets", (), |lua, _a| Ok(HostRequest::Targets));
-        op!("surfaces", (), |lua, _a| Ok(HostRequest::Surfaces));
-        op!("surface_bank", (String, u32), |lua, a| Ok(
-            HostRequest::SurfaceBank {
-                surface: a.0,
-                bank: a.1
-            }
-        ));
-        // `fetch(url, options?)` or `fetch({url = …, …})`.
-        op!("fetch", (LuaValue, Option<LuaValue>), |lua, a| {
-            let (first, options) = a;
-            match first {
-                LuaValue::String(url) => {
-                    let url = url.to_str().map(|u| u.to_string()).unwrap_or_default();
-                    options
-                        .map_or(Ok(Value::Null), |o| json_of(&lua, o))
-                        .and_then(|mut v| {
-                            if !v.is_object() {
-                                v = json!({});
-                            }
-                            if let Value::Object(map) = &mut v {
-                                map.insert("url".to_owned(), Value::String(url));
-                                map.insert("op".to_owned(), Value::String("fetch".to_owned()));
-                            }
-                            serde_json::from_value(v)
-                                .map_err(|e| mlua::Error::runtime(format!("fetch: {e}")))
-                        })
-                }
-                other => request_of(&lua, "fetch", Some(other)),
-            }
-        });
-        op!("read_body", (String, Option<u64>), |lua, a| Ok(
-            HostRequest::ReadBody {
-                stream: a.0,
-                max: a.1
-            }
-        ));
-        op!("close_body", String, |lua, a| Ok(HostRequest::CloseBody {
-            stream: a
-        }));
-        op!("secret", String, |lua, a| Ok(HostRequest::Secret {
-            name: a
-        }));
-        op!("ask_secret", String, |lua, a| Ok(HostRequest::AskSecret {
-            name: a
-        }));
-        op!("store_secret", (String, String), |lua, a| {
-            let (name, value) = a;
-            Ok(HostRequest::StoreSecret { name, value })
-        });
-        op!("decorate", (LuaValue, Option<LuaValue>), |lua, a| {
-            let (target, decoration) = a;
-            json_of(&lua, target).and_then(|target| {
-                let decoration = decoration.map_or(Ok(Value::Null), |d| json_of(&lua, d))?;
-                serde_json::from_value(
-                    json!({ "op": "decorate", "target": target, "decoration": decoration }),
-                )
-                .map_err(|e| mlua::Error::runtime(format!("decorate: {e}")))
-            })
-        });
         // The answer as a table, never raised.
         let api = self.api.clone();
         t.set(
@@ -404,9 +147,11 @@ impl Module for HostModule {
                 let api = api.clone();
                 let request = json_of(&lua, request);
                 async move {
-                    let answer = match request.map(serde_json::from_value::<HostRequest>) {
+                    let answer = match request.map(raw_request) {
                         Ok(Ok(request)) => HostAnswer::from(api.call(request).await),
-                        Ok(Err(e)) => HostAnswer::Ok(json!({ "error": { "kind": "failed", "message": format!("not a host request: {e}") } })),
+                        Ok(Err(message)) => HostAnswer::Ok(
+                            json!({ "error": { "kind": "failed", "message": message } }),
+                        ),
                         Err(e) => return Err(e),
                     };
                     let value = serde_json::to_value(&answer).unwrap_or(Value::Null);
