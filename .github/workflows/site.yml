@@ -21,6 +21,7 @@ name: site
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths:
       - "apps/site/**"
       - "apps/web/**"
@@ -40,6 +41,9 @@ permissions:
 jobs:
   check:
     name: site check
+    # Opt-in (the `full-checks` label): not required, and slow; the
+    # release's web job builds the site anyway.
+    if: ${{ contains(github.event.pull_request.labels.*.name, 'full-checks') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
