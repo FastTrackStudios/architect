@@ -16,27 +16,65 @@ use crate::service::{CookbookError, RecipesClient};
 
 struct Held {
     handle: Option<Handle>,
+    // A browser's client is not `Send` (vox's runtime there is
+    // single-threaded): it is kept per thread, in [`LOCAL`].
+    #[cfg(not(target_family = "wasm"))]
     client: Option<RecipesClient>,
+    #[cfg(not(target_family = "wasm"))]
     scope: Option<Arc<architect::resource::Scope>>,
 }
 
 static HELD: Mutex<Held> = Mutex::new(Held {
     handle: None,
+    #[cfg(not(target_family = "wasm"))]
     client: None,
+    #[cfg(not(target_family = "wasm"))]
     scope: None,
 });
+
+#[cfg(target_family = "wasm")]
+thread_local! {
+    static LOCAL: std::cell::RefCell<Option<(RecipesClient, Arc<architect::resource::Scope>)>> =
+        const { std::cell::RefCell::new(None) };
+}
 
 fn held() -> std::sync::MutexGuard<'static, Held> {
     HELD.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// The client made last, if any.
+fn cached() -> Option<RecipesClient> {
+    #[cfg(not(target_family = "wasm"))]
+    {
+        held().client.clone()
+    }
+    #[cfg(target_family = "wasm")]
+    {
+        LOCAL.with(|l| l.borrow().as_ref().map(|(c, _)| c.clone()))
+    }
+}
+
+/// Keeps `client`, served for as long as `scope` lives (`None`: lets
+/// it go).
+fn keep(made: Option<(RecipesClient, Arc<architect::resource::Scope>)>) {
+    #[cfg(not(target_family = "wasm"))]
+    {
+        let mut h = held();
+        let (client, scope) = made.unzip();
+        h.client = client;
+        h.scope = scope;
+    }
+    #[cfg(target_family = "wasm")]
+    {
+        LOCAL.with(|l| *l.borrow_mut() = made);
+    }
+}
+
 /// The host this copy was built against: the client is made over it
 /// when first asked for.
 pub fn connect(handle: Handle) {
-    let mut h = held();
-    h.handle = Some(handle);
-    h.client = None;
-    h.scope = None;
+    held().handle = Some(handle);
+    keep(None);
 }
 
 /// The host's handle, for what is not the service's (opening a view, a
@@ -98,21 +136,15 @@ pub async fn serve(
 ///
 /// The cookbook is not running, or the service could not be served.
 pub async fn client() -> Result<RecipesClient, CookbookError> {
-    let handle = {
-        let h = held();
-        if let Some(c) = &h.client {
-            return Ok(c.clone());
-        }
-        h.handle
-            .clone()
-            .ok_or_else(|| CookbookError::Failed("the cookbook is not running".into()))?
-    };
+    if let Some(c) = cached() {
+        return Ok(c);
+    }
+    let handle = held()
+        .handle
+        .clone()
+        .ok_or_else(|| CookbookError::Failed("the cookbook is not running".into()))?;
     let scope = architect::resource::Scope::new();
     let client = serve(Files::Host(handle), &scope).await?;
-    {
-        let mut h = held();
-        h.client = Some(client.clone());
-        h.scope = Some(scope);
-    }
+    keep(Some((client.clone(), scope)));
     Ok(client)
 }

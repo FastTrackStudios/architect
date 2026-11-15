@@ -738,7 +738,7 @@ pub const LAB_CONFIG_ENV: &str = "ARCHITECT_LAB_CONFIG_DIR";
 ///
 /// The person's vaults, opened or made on first run; compiled in (#368):
 /// Projects, Tasks, the Time Tracker, the Calendar, Day Plans, Threads,
-/// Notify and Files. Each runs alone; together a project's page shows its tasks and
+/// the Cookbook, Mealplan, Notify and Files. Each runs alone; together a project's page shows its tasks and
 /// their time, a task its timer, the calendar the tasks' days.
 ///
 /// A downstream build starts here and renames it (`.named("Studio")`), or
@@ -757,6 +757,10 @@ pub fn architect() -> Distribution {
         // Day Plans (#444): day templates, their rules, each day's plan,
         // drawn under the Calendar's events.
         .linked(&architect_dayplan::DayPlans)
+        // The Cookbook and Mealplan: recipes as Cooklang notes, the
+        // week's meals and the grocery list built from them.
+        .linked(&architect_cookbook::Cookbook)
+        .linked(&architect_mealplan::Mealplan)
         // Threads and Notify (#348): comments on anything; the bell.
         .linked(&architect_threads::Threads)
         .linked(&architect_notify::Notify)

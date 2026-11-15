@@ -23,6 +23,8 @@ architect-tasks = { workspace = true }
 architect-time-tracker = { workspace = true }
 architect-calendar = { workspace = true }
 architect-dayplan = { workspace = true }
+architect-cookbook = { workspace = true }
+architect-mealplan = { workspace = true }
 architect-threads = { workspace = true }
 architect-notify = { workspace = true }
 architect-files-extension = { workspace = true }
