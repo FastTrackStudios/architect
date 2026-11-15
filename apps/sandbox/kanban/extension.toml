@@ -1,0 +1,25 @@
+# Kanban-lite: the showcase's drag-and-drop example (#176; #710 U2). Its
+# board is drawn by its own process (src/main.rs) and shown in a pane;
+# cards drag between columns with pointer events, the press holding the
+# pointer across the whole board. Stands in for Obsidian's Kanban plugin.
+id = "lab.kanban"
+name = "Kanban-lite"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "A board whose cards drag between columns, drawn in another process."
+authors = ["FastTrackStudio"]
+
+[entry]
+path = "architect-sandbox-kanban"
+
+[[actions]]
+id = "LAB_KANBAN_STATE"
+name = "Kanban-lite: the board"
+description = "Each column's cards, in order."
+effect = "read_only"
+
+[[views]]
+id = "board"
+title = "Kanban-lite"
+icon = "columns-3"

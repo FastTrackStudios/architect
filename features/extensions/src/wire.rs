@@ -23,8 +23,9 @@ use facet::Facet;
 /// 4 an action's invocation (`ProcessExtension::run_in`) and what a
 /// process adds at run time ([`Update`], `ProcessExtension::updates`); 5
 /// a frame for every event ([`ANSWERED_WIRE`]); 6 a closed view's place
-/// given back ([`VIEWS_WIRE`]).
-pub const WIRE: u32 = 6;
+/// given back ([`VIEWS_WIRE`]); 7 rich input: pointer, touch, wheel,
+/// scroll and composition events ([`INPUT_WIRE`]).
+pub const WIRE: u32 = 7;
 
 /// The oldest wire a host still speaks: a process at 2 runs as before,
 /// its views themed through CSS only (it is never sent [`ThemeData`]).
@@ -56,6 +57,14 @@ pub const ANSWERED_WIRE: u32 = 5;
 /// opens at most [`MAX_VIEWS`] of its views over its connection's life,
 /// closed ones counted.
 pub const VIEWS_WIRE: u32 = 6;
+
+/// The first wire a process is sent rich input on.
+///
+/// That is [`EventData::Pointer`], [`EventData::Touch`],
+/// [`EventData::Wheel`], [`EventData::Scroll`] and
+/// [`EventData::Composition`]. An older process is sent none of them
+/// ([`EventData::since`]); it never had them, so nothing it does changes.
+pub const INPUT_WIRE: u32 = 7;
 
 /// The most views one process extension shows at once (each is a thread
 /// in the process). One more is refused with an error that says so;
@@ -280,10 +289,263 @@ pub enum EventData {
     Form(String),
     /// `focus`, `blur`, `focusin`, `focusout`.
     Focus,
+    /// `pointer*` (wire 7 on).
+    Pointer(PointerData),
+    /// `touchstart`, `touchmove`, `touchend`, `touchcancel` (wire 7 on).
+    Touch(TouchData),
+    /// `wheel` (wire 7 on).
+    Wheel(WheelData),
+    /// `scroll`: where the element it happened on is scrolled to now
+    /// (wire 7 on).
+    Scroll(ScrollData),
+    /// `compositionstart`, `compositionupdate`, `compositionend`: the
+    /// text being composed by an input method, or the text it committed
+    /// (wire 7 on).
+    Composition(String),
+}
+
+impl EventData {
+    /// The first wire it is sent on.
+    #[must_use]
+    pub const fn since(&self) -> u32 {
+        match self {
+            Self::Mouse(_) | Self::Key(_) | Self::Form(_) | Self::Focus => WIRE_MIN,
+            Self::Pointer(_)
+            | Self::Touch(_)
+            | Self::Wheel(_)
+            | Self::Scroll(_)
+            | Self::Composition(_) => INPUT_WIRE,
+        }
+    }
+}
+
+/// What an event named `name` carries, by its name alone (#176 H4).
+///
+/// The kind follows the name, not the DOM event's class: a browser sends
+/// `click`, `auxclick` and `contextmenu` as `PointerEvent`s, and a Dioxus
+/// `onclick` must be given mouse data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DataKind {
+    Mouse,
+    Pointer,
+    Touch,
+    Wheel,
+    Scroll,
+    Composition,
+    Key,
+    Form,
+    Focus,
+}
+
+/// The kind of data an event named `name` carries.
+#[must_use]
+pub fn kind_of(name: &str) -> DataKind {
+    match name {
+        "wheel" => DataKind::Wheel,
+        "scroll" => DataKind::Scroll,
+        "keydown" | "keyup" | "keypress" => DataKind::Key,
+        "input" | "change" => DataKind::Form,
+        "focus" | "blur" | "focusin" | "focusout" => DataKind::Focus,
+        n if n.starts_with("pointer") => DataKind::Pointer,
+        n if n.starts_with("touch") => DataKind::Touch,
+        n if n.starts_with("composition") => DataKind::Composition,
+        _ => DataKind::Mouse,
+    }
+}
+
+/// A pointer event: where, and which pointer (`PointerEvent`'s fields).
+#[derive(Clone, Debug, Default, PartialEq, Facet)]
+pub struct PointerData {
+    pub at: Pointer,
+    /// The pointer's id: the mouse is 1, a pen 2, a finger 10 and up.
+    pub pointer_id: i32,
+    /// `mouse`, `pen` or `touch`.
+    pub pointer_type: String,
+    pub is_primary: bool,
+    /// 0 to 1; 0.5 for a mouse with a button held.
+    pub pressure: f32,
+    /// Degrees, -90 to 90.
+    pub tilt_x: i32,
+    pub tilt_y: i32,
+    /// Degrees, 0 to 359.
+    pub twist: i32,
+}
+
+/// A touch event: every finger down, and those that changed.
+#[derive(Clone, Debug, Default, PartialEq, Facet)]
+pub struct TouchData {
+    pub touches: Vec<TouchPoint>,
+    pub changed: Vec<TouchPoint>,
+    pub mods: Mods,
+}
+
+/// One finger, in CSS pixels.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Facet)]
+pub struct TouchPoint {
+    pub id: i32,
+    pub client_x: f64,
+    pub client_y: f64,
+    pub page_x: f64,
+    pub page_y: f64,
+    pub screen_x: f64,
+    pub screen_y: f64,
+    /// 0 to 1.
+    pub force: f64,
+}
+
+/// A wheel's turn, or a trackpad's swipe, signed as the web's: a
+/// positive `delta_y` scrolls down.
+#[derive(Clone, Debug, Default, PartialEq, Facet)]
+pub struct WheelData {
+    pub at: Pointer,
+    pub delta_x: f64,
+    pub delta_y: f64,
+    /// 0 pixels, 1 lines (the web's `deltaMode`; pages are sent as lines).
+    pub delta_mode: u8,
+}
+
+/// Where an element is scrolled to, in CSS pixels.
+#[derive(Clone, Debug, Default, PartialEq, Facet)]
+pub struct ScrollData {
+    pub top: f64,
+    pub left: f64,
+    pub width: i32,
+    pub height: i32,
+    pub client_width: i32,
+    pub client_height: i32,
+}
+
+/// Whether events named `name` come so fast that only the latest of a run
+/// matters (the rest are [`Coalescer`]ed): moves, wheels, scrolls and a
+/// composition's updates.
+#[must_use]
+pub fn coalesces(name: &str) -> bool {
+    matches!(
+        name,
+        "pointermove"
+            | "mousemove"
+            | "touchmove"
+            | "wheel"
+            | "scroll"
+            | "compositionupdate"
+            // A scene's new size (`scene::RESIZE_EVENT`): a window dragged
+            // larger sends one each frame; only the last matters.
+            | "architect-resize"
+            // An embed's or an overlay's new input (`EMBED_EVENT`): a view
+            // scrolled or zoomed sends one a frame; only the last matters.
+            | "architect-embed"
+    )
+}
+
+/// Holds back the fast events ([`coalesces`]) while the view is still
+/// answering one, so a view that draws slower than the pointer moves is
+/// sent the latest move, not a queue of stale ones.
+///
+/// One event at a time is let through ([`Self::push`] while nothing is
+/// in flight); what arrives meanwhile waits for [`Self::answered`]. A
+/// run of fast events on one element under one name keeps only the last
+/// (a wheel's deltas are summed); any other event (a press, a key) sends
+/// what waits first, in order, so nothing is reordered or lost.
+/// The most fast events that wait for a busy view ([`Coalescer`]).
+pub const WAITING: usize = 64;
+
+#[derive(Debug, Default)]
+pub struct Coalescer {
+    waiting: Vec<ViewEvent>,
+    in_flight: usize,
+    /// How many were dropped as stale, for a benchmark.
+    pub merged: u64,
+}
+
+impl Coalescer {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// `event` arrived: what to send now (empty while it waits).
+    // A wheel's deltas are summed as floats: no overflow to guard.
+    #[allow(clippy::arithmetic_side_effects)]
+    pub fn push(&mut self, event: ViewEvent) -> Vec<ViewEvent> {
+        if !coalesces(&event.name) {
+            let mut out = std::mem::take(&mut self.waiting);
+            out.push(event);
+            self.in_flight = self.in_flight.saturating_add(out.len());
+            return out;
+        }
+        if self.in_flight == 0 && self.waiting.is_empty() {
+            self.in_flight = self.in_flight.saturating_add(1);
+            return vec![event];
+        }
+        // The latest waiting entry for this element and event, if any: a
+        // run of `pointermove` and `mousemove` interleaved still merges.
+        let same = self
+            .waiting
+            .iter()
+            .rposition(|w| w.element == event.element && w.name == event.name);
+        if let Some(last) = same.and_then(|i| self.waiting.get_mut(i)) {
+            let summed = match (&last.data, event.data) {
+                (EventData::Wheel(was), EventData::Wheel(mut now))
+                    if was.delta_mode == now.delta_mode =>
+                {
+                    now.delta_x += was.delta_x;
+                    now.delta_y += was.delta_y;
+                    EventData::Wheel(now)
+                }
+                // A wheel in other units waits as its own: its deltas
+                // can't be added to these.
+                (EventData::Wheel(_), EventData::Wheel(now)) => {
+                    self.waiting.push(ViewEvent {
+                        data: EventData::Wheel(now),
+                        ..event
+                    });
+                    self.cap();
+                    return Vec::new();
+                }
+                (_, data) => data,
+            };
+            last.data = summed;
+            last.bubbles = event.bubbles;
+            self.merged = self.merged.saturating_add(1);
+        } else {
+            self.waiting.push(event);
+            self.cap();
+        }
+        Vec::new()
+    }
+
+    /// The view answered one event: what to send now.
+    pub fn answered(&mut self) -> Vec<ViewEvent> {
+        self.in_flight = self.in_flight.saturating_sub(1);
+        if self.in_flight > 0 || self.waiting.is_empty() {
+            return Vec::new();
+        }
+        let out = std::mem::take(&mut self.waiting);
+        self.in_flight = self.in_flight.saturating_add(out.len());
+        out
+    }
+
+    /// At most [`WAITING`] wait: the oldest go first (each is a stale
+    /// move of some element).
+    fn cap(&mut self) {
+        let over = self.waiting.len().saturating_sub(WAITING);
+        if over > 0 {
+            self.waiting.drain(..over);
+            self.merged = self
+                .merged
+                .saturating_add(u64::try_from(over).unwrap_or(u64::MAX));
+        }
+    }
+
+    /// The view went: nothing is in flight now.
+    pub fn reset(&mut self) {
+        self.waiting.clear();
+        self.in_flight = 0;
+    }
 }
 
 /// Where a pointer was, in CSS pixels, and its buttons.
-#[derive(Clone, Debug, Default, PartialEq, Facet)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Facet)]
 pub struct Pointer {
     pub client_x: f64,
     pub client_y: f64,
@@ -341,5 +603,201 @@ mod forced_tests {
             LINK_FORCED,
             [("rel", "noopener noreferrer"), ("target", "_blank")]
         );
+    }
+}
+
+#[cfg(test)]
+mod kind_tests {
+    use super::{DataKind, kind_of};
+
+    #[test]
+    fn a_click_is_mouse_data_whatever_class_the_browser_sends() {
+        for name in [
+            "click",
+            "auxclick",
+            "contextmenu",
+            "dblclick",
+            "mousedown",
+            "mousemove",
+        ] {
+            assert_eq!(kind_of(name), DataKind::Mouse, "{name}");
+        }
+        for name in [
+            "pointerdown",
+            "pointermove",
+            "pointerup",
+            "pointercancel",
+            "pointerleave",
+        ] {
+            assert_eq!(kind_of(name), DataKind::Pointer, "{name}");
+        }
+        assert_eq!(kind_of("wheel"), DataKind::Wheel);
+        assert_eq!(kind_of("touchstart"), DataKind::Touch);
+        assert_eq!(kind_of("compositionend"), DataKind::Composition);
+        assert_eq!(kind_of("scroll"), DataKind::Scroll);
+        assert_eq!(kind_of("keydown"), DataKind::Key);
+        assert_eq!(kind_of("input"), DataKind::Form);
+        assert_eq!(kind_of("blur"), DataKind::Focus);
+    }
+}
+
+#[cfg(test)]
+mod coalescer_tests {
+    use super::{Coalescer, EventData, Pointer, PointerData, ViewEvent, WheelData};
+
+    fn ev(element: u64, name: &str, data: EventData) -> ViewEvent {
+        ViewEvent {
+            element,
+            name: name.to_owned(),
+            bubbles: true,
+            data,
+        }
+    }
+
+    fn mv(x: f64) -> ViewEvent {
+        ev(
+            1,
+            "pointermove",
+            EventData::Pointer(PointerData {
+                at: Pointer {
+                    client_x: x,
+                    ..Pointer::default()
+                },
+                ..PointerData::default()
+            }),
+        )
+    }
+
+    fn x(e: &ViewEvent) -> f64 {
+        match &e.data {
+            EventData::Pointer(p) => p.at.client_x,
+            _ => f64::NAN,
+        }
+    }
+
+    #[test]
+    fn moves_while_one_is_in_flight_wait_and_only_the_latest_is_sent() {
+        let mut c = Coalescer::new();
+        assert_eq!(c.push(mv(1.0)).len(), 1);
+        for i in 2..=10 {
+            assert!(c.push(mv(f64::from(i))).is_empty());
+        }
+        let sent = c.answered();
+        assert_eq!(sent.len(), 1);
+        assert!((x(&sent[0]) - 10.0).abs() < f64::EPSILON);
+        assert_eq!(c.merged, 8);
+        // Nothing left: the next answer sends nothing, the next move goes.
+        assert!(c.answered().is_empty());
+        assert_eq!(c.push(mv(11.0)).len(), 1);
+    }
+
+    #[test]
+    fn a_press_sends_what_waits_first_in_order() {
+        let mut c = Coalescer::new();
+        let _ = c.push(mv(1.0));
+        let _ = c.push(mv(2.0));
+        let up = ev(1, "pointerup", EventData::Pointer(PointerData::default()));
+        let sent = c.push(up);
+        assert_eq!(
+            sent.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            ["pointermove", "pointerup"]
+        );
+        assert!((x(&sent[0]) - 2.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn interleaved_pointer_and_mouse_moves_merge_and_the_queue_is_capped() {
+        let mut c = Coalescer::new();
+        let _ = c.push(mv(0.0));
+        for i in 1..=1000 {
+            let _ = c.push(mv(f64::from(i)));
+            let _ = c.push(ev(1, "mousemove", EventData::Mouse(Pointer::default())));
+        }
+        // One pointermove and one mousemove wait, not 2000.
+        let sent = c.answered();
+        assert_eq!(sent.len(), 2);
+        assert!((x(&sent[0]) - 1000.0).abs() < f64::EPSILON);
+        // Many elements at once: no more than WAITING wait.
+        let mut c = Coalescer::new();
+        let _ = c.push(mv(0.0));
+        for e in 0..500 {
+            let _ = c.push(ev(
+                e,
+                "pointermove",
+                EventData::Pointer(PointerData::default()),
+            ));
+        }
+        assert_eq!(c.answered().len(), super::WAITING);
+    }
+
+    #[test]
+    fn a_wheel_in_other_units_waits_as_its_own() {
+        let wheel = |dy: f64, mode: u8| {
+            ev(
+                2,
+                "wheel",
+                EventData::Wheel(WheelData {
+                    delta_y: dy,
+                    delta_mode: mode,
+                    ..WheelData::default()
+                }),
+            )
+        };
+        let mut c = Coalescer::new();
+        let _ = c.push(wheel(1.0, 0));
+        let _ = c.push(wheel(10.0, 0));
+        let _ = c.push(wheel(3.0, 1));
+        let sent = c.answered();
+        let dys: Vec<(f64, u8)> = sent
+            .iter()
+            .map(|e| match &e.data {
+                EventData::Wheel(w) => (w.delta_y, w.delta_mode),
+                _ => (f64::NAN, 9),
+            })
+            .collect();
+        assert_eq!(dys, [(10.0, 0), (3.0, 1)]);
+    }
+
+    #[test]
+    fn an_overlays_spaces_are_coalesced_and_dont_flush_moves() {
+        let embed = |n: u32| {
+            ev(
+                0,
+                super::EMBED_EVENT,
+                EventData::Form(format!("{{\"n\":{n}}}")),
+            )
+        };
+        let mut c = Coalescer::new();
+        let _ = c.push(mv(1.0));
+        let _ = c.push(mv(2.0));
+        for n in 0..50 {
+            assert!(c.push(embed(n)).is_empty(), "an embed flushed the moves");
+        }
+        let sent = c.answered();
+        assert_eq!(sent.len(), 2, "one move and one embed");
+        assert_eq!(sent[1].data, EventData::Form("{\"n\":49}".to_owned()));
+    }
+
+    #[test]
+    fn a_wheels_waiting_deltas_are_summed() {
+        let wheel = |dy: f64| {
+            ev(
+                2,
+                "wheel",
+                EventData::Wheel(WheelData {
+                    delta_y: dy,
+                    ..WheelData::default()
+                }),
+            )
+        };
+        let mut c = Coalescer::new();
+        let _ = c.push(wheel(10.0));
+        let _ = c.push(wheel(10.0));
+        let _ = c.push(wheel(5.0));
+        let sent = c.answered();
+        let EventData::Wheel(w) = &sent[0].data else {
+            panic!("not a wheel")
+        };
+        assert!((w.delta_y - 15.0).abs() < f64::EPSILON);
     }
 }

@@ -34,6 +34,9 @@ host = [
     # in-process server runs on; a browser's host serves it with
     # `spawn_local`.
     "dep:tokio",
+    # The vault's query service: the host holds its client
+    # (`Host::with_vault_query`), answering `query_vault`.
+    "dep:vault-proto",
     "dep:architect-scripting",
     "architect-scripting/luau",
     "dep:tracing",
@@ -78,6 +81,17 @@ linked = ["host", "linked-core"]
 # (`wasm32-unknown-unknown`), where `guest` (vox, tokio) does not build
 # (#495). The web app's host links it (`architect-web`).
 linked-core = ["dep:dioxus"]
+# Scenes in remote views (`scene`, #175): an element a view paints as an
+# anyrender scene, carried by two attributes (content by hash, then a
+# transform). The guest's `RemoteScene`, the host's widget, the browser's
+# canvas.
+scenes = ["dep:anyrender", "dep:peniko"]
+# A paint view (`linked::Builder::paint`, #591): a `PaintView` that
+# records a scene for its pane and takes the pane's input. Linked in with
+# `paint-ui` it is a Blitz widget in the pane (`architect_workspace::paint`);
+# served by `guest` it is a `scene::RemoteScene`.
+paint = ["scenes", "architect-workspace/paint"]
+paint-ui = ["paint", "linked", "architect-workspace/paint-ui"]
 ui = [
     "host",
     # The clipboard on iOS: the general pasteboard (src/hostui.rs).
@@ -122,6 +136,7 @@ process = [
 ]
 guest = [
     "vox",
+    "scenes",
     "dep:vox-core",
     "dep:vox-stream",
     "dep:tokio",
@@ -162,6 +177,7 @@ pulley = ["wasi", "wasmtime/pulley"]
 # DOM (see docs/content/architecture/extensions.md, "On the web").
 web = [
     "vox",
+    "scenes",
     "dep:base64",
     "dep:architect",
     "architect/action-list",
@@ -201,7 +217,7 @@ pickers = [
     "dep:block2",
     "dep:dispatch2",
 ]
-remote = ["process", "ui", "architect-theme/dioxus", "dep:blitz-dom", "dep:blitz-traits", "dep:dioxus-native-dom", "dep:futures-timer"]
+remote = ["process", "ui", "scenes", "architect-theme/dioxus", "dep:blitz-dom", "blitz-dom/custom-widget", "dep:blitz-traits", "dep:dioxus-native-dom", "dep:futures-timer"]
 
 [dependencies]
 # `[[share_layers]]` patterns and paths compared in one Unicode form (NFC).
@@ -236,6 +252,9 @@ architect-ui = { workspace = true, optional = true }
 # The view kinds an extension's views may name (the model, wasm-clean).
 architect-workspace = { workspace = true }
 facet = { workspace = true }
+# `VaultQueryClient`, which the host answers `query_vault` with (feature
+# `host`): the wire contract only, wasm-clean.
+vault-proto = { workspace = true, optional = true, features = ["vox"] }
 serde = { workspace = true }
 toml = { workspace = true }
 semver = "1"
@@ -271,6 +290,9 @@ vox-stream = { version = "0.10.0-rc.7", optional = true }
 thiserror = { workspace = true, optional = true }
 blitz-dom = { workspace = true, optional = true }
 blitz-traits = { workspace = true, optional = true }
+# A remote view's scenes (`scenes`): anyrender's commands as data.
+anyrender = { workspace = true, optional = true }
+peniko = { workspace = true, optional = true }
 dioxus-native-dom = { workspace = true, optional = true }
 dioxus-html = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["serialize"], optional = true }
 futures-timer = { workspace = true, optional = true }
@@ -299,6 +321,17 @@ web-sys = { version = "0.3", optional = true, features = [
     "KeyboardEvent",
     "Location",
     "MouseEvent",
+    "PointerEvent",
+    "WheelEvent",
+    "TouchEvent",
+    "TouchList",
+    "Touch",
+    "CompositionEvent",
+    "HtmlCanvasElement",
+    "CanvasRenderingContext2d",
+    "CanvasWindingRule",
+    "Path2d",
+    "Window",
     "Node",
     "NodeList",
     "Text",
@@ -307,6 +340,8 @@ web-sys = { version = "0.3", optional = true, features = [
 ] }
 
 [dev-dependencies]
+# tests/vault_query.rs: the vault's query engine, served in process.
+vault-query = { workspace = true }
 # tests/editor_view.rs: a linked extension's view holds the editor's
 # component, through architect's door (#512).
 architect-editor = { workspace = true, features = ["native", "lsp-stub"] }
@@ -316,7 +351,10 @@ sha2 = { workspace = true }
 hex = { workspace = true }
 # Its own host, so `cargo test --workspace` builds the tests with it; the
 # guest too, since the remote-view tests spawn themselves as one.
-architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked", "manager", "wasi", "net", "person-sync", "node"] }
+architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked", "manager", "wasi", "net", "person-sync", "node", "paint-ui"] }
+# tests/linked_paint.rs: a linked paint view's widget painted, as the
+# window's renderer does.
+blitz-paint = { workspace = true, features = ["custom-widget"] }
 # tests/wasi.rs: the WIT world read, to compare with the wire's types.
 wit-parser = "0.261"
 futures = "0.3"
@@ -332,7 +370,7 @@ architect-workspace = { workspace = true, features = ["home"] }
 dioxus-ssr = { workspace = true }
 # tests/host_gate.rs: a vox-served server behind a `PermissionsGate`, called
 # on an extension's behalf.
-architect = { workspace = true, features = ["action-list", "host", "connect"] }
+architect = { workspace = true, features = ["action-list", "host", "connect", "local"] }
 vox = { workspace = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 

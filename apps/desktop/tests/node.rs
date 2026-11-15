@@ -816,6 +816,7 @@ fn token_in(dir: &Path) -> String {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_signed_in_web_client_edits_a_note_live_on_the_org_lane() {
+    use architect_desktop::node::service::index_sync::VaultIndexSyncClient;
     use architect_desktop::node::service::notes::NotesClient;
     use crdt::sync::{DocSyncClient, SyncedDoc};
 
@@ -846,6 +847,51 @@ async fn a_signed_in_web_client_edits_a_note_live_on_the_org_lane() {
     let notes: NotesClient = web(&host, Some(alan.clone())).await;
     let listed = notes.list().await.unwrap();
     assert!(listed.iter().any(|n| n.path == "hello.md"), "{listed:?}");
+
+    // The vault index, synced to a browser: a snapshot, then a delta
+    // after a write brings the new note.
+    let index: VaultIndexSyncClient = web(&host, Some(alan.clone())).await;
+    let snap = index.snapshot("notes".to_owned()).await.unwrap();
+    let mut replica = vault::query::VaultIndex::from_bytes(&snap.bytes).unwrap();
+    assert_eq!(replica.epoch, snap.epoch);
+    assert!(replica.entries.contains_key("hello.md"), "{replica:?}");
+    notes
+        .create(
+            "notes".to_owned(),
+            "second.md".to_owned(),
+            "---\nstatus: new\n---\n# Second\n".to_owned(),
+        )
+        .await
+        .unwrap();
+    let mut caught_up = false;
+    for _ in 0..100 {
+        match index
+            .since(
+                "notes".to_owned(),
+                snap.epoch,
+                snap.access,
+                replica.revision,
+            )
+            .await
+            .unwrap()
+        {
+            Some(delta) => replica
+                .apply_interned(vault::query::IndexDelta::from_bytes(&delta.bytes).unwrap())
+                .unwrap(),
+            None => panic!("the same history and access: a delta, not a snapshot"),
+        }
+        if replica
+            .entries
+            .get("second.md")
+            .is_some_and(|e| e.props["status"] == "new")
+        {
+            caught_up = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(caught_up, "the delta brought the new note");
+    assert!(index.snapshot("nope".to_owned()).await.is_err());
 
     let sync: DocSyncClient = web(&host, Some(alan)).await;
     let doc_id = vault_proto::collab_doc_id("notes", "hello.md");
@@ -878,6 +924,11 @@ async fn a_signed_in_web_client_edits_a_note_live_on_the_org_lane() {
     // No session, or a session not in the org: refused.
     let anonymous: NotesClient = web(&host, None).await;
     assert!(anonymous.list().await.is_err());
+    let anonymous: VaultIndexSyncClient = web(&host, None).await;
+    assert!(
+        anonymous.snapshot("notes".to_owned()).await.is_err(),
+        "the index is a read"
+    );
     let ada_dir = tmp.path().join("ada-web");
     session_of(&origin, &ada_dir, "ada@local.test").await;
     let ada: NotesClient = web(&host, Some(token_in(&ada_dir))).await;

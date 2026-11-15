@@ -184,6 +184,18 @@ export interface Props {
   onKeyUp?: (event: PageEvent) => void;
   onFocus?: (event: PageEvent) => void;
   onBlur?: (event: PageEvent) => void;
+  onPointerDown?: (event: PageEvent) => void;
+  onPointerMove?: (event: PageEvent) => void;
+  onPointerUp?: (event: PageEvent) => void;
+  onPointerCancel?: (event: PageEvent) => void;
+  onTouchStart?: (event: PageEvent) => void;
+  onTouchMove?: (event: PageEvent) => void;
+  onTouchEnd?: (event: PageEvent) => void;
+  onWheel?: (event: PageEvent) => void;
+  onScroll?: (event: PageEvent) => void;
+  onCompositionStart?: (event: PageEvent) => void;
+  onCompositionUpdate?: (event: PageEvent) => void;
+  onCompositionEnd?: (event: PageEvent) => void;
   [attribute: string]: unknown;
 }
 

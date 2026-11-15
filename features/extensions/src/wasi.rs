@@ -2112,21 +2112,38 @@ const fn mods_to(m: wire::Mods) -> wit::Mods {
     }
 }
 
+const fn pointer_to(p: wire::Pointer) -> wit::Pointer {
+    wit::Pointer {
+        client_x: p.client_x,
+        client_y: p.client_y,
+        page_x: p.page_x,
+        page_y: p.page_y,
+        screen_x: p.screen_x,
+        screen_y: p.screen_y,
+        element_x: p.element_x,
+        element_y: p.element_y,
+        button: p.button,
+        buttons: p.buttons,
+        mods: mods_to(p.mods),
+    }
+}
+
+const fn touch_point_to(t: wire::TouchPoint) -> wit::TouchPoint {
+    wit::TouchPoint {
+        id: t.id,
+        client_x: t.client_x,
+        client_y: t.client_y,
+        page_x: t.page_x,
+        page_y: t.page_y,
+        screen_x: t.screen_x,
+        screen_y: t.screen_y,
+        force: t.force,
+    }
+}
+
 fn event_to(e: wire::ViewEvent) -> wit::ViewEvent {
     let data = match e.data {
-        wire::EventData::Mouse(p) => wit::EventData::Mouse(wit::Pointer {
-            client_x: p.client_x,
-            client_y: p.client_y,
-            page_x: p.page_x,
-            page_y: p.page_y,
-            screen_x: p.screen_x,
-            screen_y: p.screen_y,
-            element_x: p.element_x,
-            element_y: p.element_y,
-            button: p.button,
-            buttons: p.buttons,
-            mods: mods_to(p.mods),
-        }),
+        wire::EventData::Mouse(p) => wit::EventData::Mouse(pointer_to(p)),
         wire::EventData::Key(k) => wit::EventData::Key(wit::KeyData {
             key: k.key,
             code: k.code,
@@ -2137,6 +2154,36 @@ fn event_to(e: wire::ViewEvent) -> wit::ViewEvent {
         }),
         wire::EventData::Form(value) => wit::EventData::Form(value),
         wire::EventData::Focus => wit::EventData::Focus,
+        wire::EventData::Pointer(p) => wit::EventData::Pointer(wit::PointerData {
+            at: pointer_to(p.at),
+            pointer_id: p.pointer_id,
+            pointer_type: p.pointer_type,
+            is_primary: p.is_primary,
+            pressure: p.pressure,
+            tilt_x: p.tilt_x,
+            tilt_y: p.tilt_y,
+            twist: p.twist,
+        }),
+        wire::EventData::Touch(t) => wit::EventData::Touch(wit::TouchData {
+            touches: t.touches.into_iter().map(touch_point_to).collect(),
+            changed: t.changed.into_iter().map(touch_point_to).collect(),
+            mods: mods_to(t.mods),
+        }),
+        wire::EventData::Wheel(w) => wit::EventData::Wheel(wit::WheelData {
+            at: pointer_to(w.at),
+            delta_x: w.delta_x,
+            delta_y: w.delta_y,
+            delta_mode: w.delta_mode,
+        }),
+        wire::EventData::Scroll(s) => wit::EventData::Scroll(wit::ScrollData {
+            top: s.top,
+            left: s.left,
+            width: s.width,
+            height: s.height,
+            client_width: s.client_width,
+            client_height: s.client_height,
+        }),
+        wire::EventData::Composition(text) => wit::EventData::Composition(text),
     };
     wit::ViewEvent {
         element: e.element,

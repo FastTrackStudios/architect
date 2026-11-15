@@ -1013,6 +1013,57 @@ The same mechanism lets a first-party feature draw on the timeline (a
 lyrics lane, chord symbols over the sections) without the timeline
 knowing about it.
 
+**Two ways to draw one.** A Luau extension's overlay is a script
+(`[[overlays]] script`), drawn through `architect-canvas`
+(`features/canvas/src/layer.rs` `Overlays`, `OverlayDecl`; the view
+mounts `CanvasLayers`). Any extension with views of its own (a process's,
+a WASI component's, a linked one's) can instead name one of them
+(`draws`, #175):
+
+```toml
+[capabilities]
+over = ["session.arrange"]  # drawing over a view not its own: asked for in words
+
+[[views]]
+id = "marks"
+title = "Marks"
+
+[[overlays]]
+id = "marks"
+view = "session.arrange"   # the kind of view it draws over
+plane = "over"             # under | over | top
+draws = "marks"            # one of its [[views]]; or script = "…" (Luau), never both
+```
+
+Drawing over a view not its own (another extension's, or the app's own
+arrangement) is a capability: `capabilities.over` names the view kinds,
+the consent prompt says "Draw over the arrangement", the manifest is
+refused without it, and the host doesn't mount the layer until it is
+granted (`Host::view_overlays`, `Capabilities::may_draw_over`). An
+overlay's spaces reach it coalesced: a view scrolled or zoomed sends one
+update a frame, and only the latest waits while the overlay's view is
+busy.
+
+The view it draws over mounts `features/extensions/src/interface.rs`
+`ExtensionViewOverlays { view, plane, spaces }` at that plane, filling its
+box, with its coordinate spaces now (`features/extensions/src/overlay.rs`
+`OverlaySpaces`: size, time across, lanes down, scrolled). For each such
+overlay the host mounts the extension's view over the box, clipped to it,
+and passing the pointer through to the view
+(`remote::RemoteOverlay`, or the linked view itself). The view is handed
+the spaces as its embed input whenever they change: `overlay::spaces()`
+reads them, so it draws in the view's terms (a `scene::RemoteScene`
+filling its box, its coordinates the view's). A process that isn't
+running yet, or died, is simply absent; nothing is said over the view.
+The lab's arrangement (`apps/ui/src/arrange.rs`) mounts it beside its Luau
+layers. Test: `features/extensions/tests/remote_overlay.rs` (a mark on a
+lane at a time, following the view as it scrolls, a click let through).
+Not yet: a layer that claims regions to take the pointer there.
+
+An extension that needs to draw outside any one view declares `overlay`
+(`capabilities.ui`, above): its scenes then draw over the whole window,
+in window coordinates.
+
 ## What an extension costs
 
 Not everything should be one. Every extension pays for its boundary:
@@ -2546,7 +2597,10 @@ folder changes), then a distribution's compiled-in ones
 Bases (`features/bases`, [Bases](@/features/bases.md)) draws a base's
 table, cards and list itself; any other `type:` a base's view names is
 drawn by the extension that adds it, as an Obsidian plugin adds a Bases
-view. Task's calendar, kanban, gantt, heatmap and graph views become such
+view. A Bases running as a process (a development copy) holds that view
+inside its own remote view with `embedded::EmbeddedView`, its input the
+`BASE_VIEW_CLAIM` with the rows; the host draws it ([Remote
+views](@/features/remote-views.md), "Holding another extension's view"). Task's calendar, kanban, gantt, heatmap and graph views become such
 extensions (#350).
 
 ```toml
@@ -3143,7 +3197,7 @@ waiting (`Extensions::confirm_on`).
 | `EXT_DECORATIONS` | the icons and badges on rows and tabs, and who set each |
 | `EXT_INFO` | which copy runs, versions, pin, grants, what it may reach |
 
-## The app's interface: notifications, the clipboard, pickers, prompts, menus, badges
+## The app's interface: notifications, the clipboard, pickers, prompts, menus, badges, overlay
 
 What Templater, QuickAdd, Importer, Iconize and js_ReaScriptAPI need of
 the app's interface, as host-service calls
@@ -3154,7 +3208,7 @@ prompt says each in words):
 
 ```toml
 [capabilities]
-ui = ["notify", "clipboard", "pickers", "prompts", "menus", "badges"]
+ui = ["notify", "clipboard", "pickers", "prompts", "menus", "badges", "overlay"]
 ```
 
 | call | what it does | answer | needs |
@@ -3165,6 +3219,26 @@ ui = ["notify", "clipboard", "pickers", "prompts", "menus", "badges"]
 | `prompt {kind, title, message?, default?, placeholder?, choices?}` | asks for text (`text`), a yes or no (`confirm`), one of a list (`pick_one`) | the text, `true`/`false`, the choice's id; `null` when cancelled | `prompts` |
 | `menu {items, x?, y?}` | a context menu of its own items (`{id, label, icon?, shortcut?, disabled?, separator?}`) at a point in the window (none: its middle) | the id chosen, `null` when dismissed | `menus` |
 | `decorate {target, decoration?}` | an icon or badge (`{icon?, badge?, color?, tooltip?}`) on a file-tree row (`{kind: "file", id: <path>}`) or a tab (`{kind: "tab", id: <view kind or pane id>}`); none takes it off | `null` | `badges` |
+
+**`overlay`: drawing over the whole app.** It is not a call. It changes
+how the extension's views draw: the scenes its remote views paint
+(`features/extensions/src/scene.rs`) are not clipped to their panes, and
+draw over the whole window, above the other panes, its toolbars and its
+dialogs. The consent prompt says "Draw over the whole app, outside its
+own panes". The owner accepts the risk that comes with it, so an
+extension granted it could paint something that looks like the app's
+own prompt. Without it, a scene is clipped to its pane, so a view that
+draws past its box can't smear over the app by mistake (`scene::framed`;
+a linked paint view is clipped the same way, `PaintWidget`).
+
+How it's drawn: the host adds a widget filling the window, above the
+panes and taking no input (`scene::OverlayLayer`, `OverlayWidget`, put
+there by `remote::RemoteView` given `overlay`, which `interface`'s
+extension view reads from `Host::capabilities`). It draws each of the
+view's scenes at its element's place in the window. The element in the
+pane keeps its size and its input. Test:
+`apps/sandbox/sketch/tests/sketch.rs`
+`a_scene_is_clipped_to_its_pane_unless_it_may_draw_over_the_app`.
 
 `pick`, `prompt` and `menu` wait for the person: the call answers when
 they do. A path picked is one the extension may then read for the run (a
@@ -3660,6 +3734,141 @@ refused without `reads` / `writes`), `features/pages/tests/documents.rs`
 (a TSX and a Luau page on an app's own `Documents`),
 `features/extensions/tests/wasi_wit.rs` (the typed imports are the
 calls).
+
+## The vault's query service
+
+The vault keeps an index of its notes, as Obsidian's metadata cache is
+what Dataview, Tasks and Bases read (`features/vault/vault-query`,
+wasm-clean).
+
+**The index** (`vault_query::index`). One compact `Entry` per note: its
+title, frontmatter properties, inline tags, body links, headings and task
+lines, never its prose; and one per `.base` file, its YAML. An entry is
+capped (`MAX_PROPS`, `MAX_LIST`, `MAX_TEXT`, `MAX_VALUE`, `MAX_BASE`) and
+says when it was (`truncated`). Property keys, tags and link targets are
+shared strings, one per distinct text (`Interner`).
+
+`index::Builder` keeps it from a vault that changes (`NoteSource`), a
+note at a time. A note whose stamp moved and whose text changed gets a
+new entry, and each sync is an `IndexDelta` (entries put, paths gone).
+It reads `index::CHUNK` notes per hold of the vault's lock. When a write
+lands between two chunks, it reads again, waiting a little longer each
+time (`index::TRIES`), and never holds the lock for more than a chunk.
+
+- **Where it runs:** wherever the vault lives. A desk and a phone build
+  it over their own copy (`vault::actions::OpenVault` is a `NoteSource`,
+  its stamps hashes of each note's text; `vault_query::Built` keeps one).
+- **On the node:** the index is built from the vault's folder
+  (`vault::actions::query::DiskSource`). It holds no note's text, reads
+  only the files whose time or size moved, and is moved on by a watcher.
+  Each vault is built once, however many ask at once, and let go after
+  `INDEX_IDLE` with no one asking.
+- **In a browser:** a browser holds no vault, only the notes it opens and
+  a copy of the index. It gets the copy from the node's
+  `vault_proto::index_sync::VaultIndexSync` on the org lane: a
+  `snapshot`, then everything `since` a revision as one delta.
+- **What each reader gets:** the node filters every answer per caller
+  (`OrgLane::reads`: a `read` of `org/<id>/docs/<note>`, as
+  `OrgLane::opens` checks a write). A delta never names a path the caller
+  may not read. When nothing the caller may read changed, the answer
+  stays at its revision, so it cannot count edits to notes it cannot
+  read. Its `access` is a fingerprint of its rights (`OrgLane::read_key`,
+  its role); when that moves, `since` answers "take a snapshot".
+- **Histories:** each builder has a random `epoch`. A node started again
+  is another history, and `since` from an old one answers "take a
+  snapshot", as does a revision further back than the deltas kept
+  (`index::KEPT`). The first full build is no delta.
+- **On the wire:** JSON with a version (`v`, `index::WIRE`), the epoch,
+  short keys and empty fields left out (`VaultIndex::to_bytes`,
+  `IndexDelta::to_bytes`), at most `index::MAX_WIRE` bytes.
+- **Share guests** get no index yet; a guest's subset of it is #710 G1.
+
+**The engine** (`vault_query::QueryEngine`). It runs a base's view over
+the index: filters, formulas, sort and group-by (`vault_query::bases`,
+over `vault_proto::grouping`), never over a note's body. It is the one
+implementation of `vault_proto::query::VaultQuery`. Every client serves
+it in process (`architect::serve_local`) over its own index: a desk and a
+phone over their vault (`vault_query::Built`), a browser over its synced
+copy (`engine::Replica`). The node answers no queries, and full-text
+search over bodies is a separate service. `BASES_ROWS` is the same
+engine, through the same client (`architect_bases::actions::register`).
+
+- **It keeps no rows.** A query makes one per note from the index's
+  entries (sharing their properties), runs its view, builds the table
+  only for the rows its `limit` keeps (`bases::view_table_at_most`), and
+  lets the rest go. What a client holds between queries is its index.
+- **The answer is written once** (`QueryEngine::run_text`). Its hash is
+  that text's, and `revision` and `hash` go in front.
+- **Live:** a view hears the document events (`doc.saved`,
+  `doc.created`, `doc.renamed`, `doc.deleted`) and asks again with
+  `if_changed: <hash>`. When the index has not moved, the answer is
+  `{unchanged: true, revision, hash}`, with nothing run. After any edit,
+  even to a note the view does not show, the view runs again in full;
+  following each view's own notes is later work.
+
+**From an extension.** The host holds only the service's client, given
+with its documents in one call for one scope (`Host::set_vault`,
+`hostapi::VaultScope`): a share guest's host gets none, and
+`Host::set_documents` alone lets any client go. An extension asks with
+the host call `query_vault` (`HostRequest::QueryVault`: `{path? |
+source?, view?, if_changed?, limit?}`; `host.query_vault{…}` in Luau),
+which needs `reads = ["documents"]`, as the document calls and every
+`BASES_*` action do (`capabilities::BASES_ACTIONS`). Its answers are
+pages: `hostapi::QUERY_LIMIT` rows unless it asks for more, at most
+`hostapi::QUERY_LIMIT_MAX`. The answer has:
+
+- the base's views;
+- the view (`type`, `name`, `order`, `sort`, `groupBy`, `filters`,
+  `limit`, `options`);
+- its rows in groups (`{label, rows: [{path, name, values, formulas}]}`)
+  and `total`;
+- every column it could show, and its formulas and filters;
+- the index's `revision` and a `hash` of the answer.
+
+A row's `file.mtime` is its note's (RFC 3339). `file.ctime`, `file.size`
+and `file.backlinks` are not in the index yet.
+
+**The boundary.** The index, its builder, its sync and the engine are the
+core. Bases is an extension over them, using only what a third party
+could. It opens `.base` files, draws a base with its toolbar and view
+picker, adds table, cards and list as `[[base_views]]`, keeps the
+`BASES_*` actions, draws the fence, and provides `architect.bases` to
+other extensions. Reading and parsing a `.base` file, and writing one
+back, go through the document calls.
+
+**What it costs** on a generated vault of 10 000 notes, through the
+service's client, so each answer is serialized and read back as an
+extension gets it (`features/vault/vault/tests/query_bench.rs`, ignored:
+run it with `--release --ignored --nocapture`). The base has a filter, a
+formula, a sort and a group-by. The even vault is about a kilobyte a
+note; the skewed one has a note in a hundred with 120 properties and a
+long body, every note linking to one note, and most notes sharing one
+status.
+
+| | even | skewed |
+|---|---:|---:|
+| index built from an open vault | 66 ms | 96 ms |
+| a snapshot on the wire (JSON) | 257 B a note | 303 B a note |
+| a delta for one property set | 315 B | 320 B |
+| the index in memory, natively (entries and stamps) | 1059 B a note | 1190 B a note |
+| a browser's copy in memory, in V8 (wasm) | 611 B a note | |
+
+| query, through the client, p50 / p99 | even | skewed |
+|---|---:|---:|
+| every matching row (7 500 / 9 496 rows answered) | 97 / 129 ms | 159 / 428 ms |
+| `limit: 50`, an extension's page | 37 / 62 ms | 75 / 312 ms |
+| `if_changed`, nothing moved | 0.02 / 0.10 ms | 0.03 / 0.07 ms |
+| index sync after one edit | 10 / 13 ms | 13 / 17 ms |
+| `limit: 50` after one edit | 45 / 66 ms | 73 / 94 ms |
+| a save, with syncs and queries on two other threads | 0.02 / 0.04 ms | 0.02 / 0.45 ms |
+
+Measured 2026-11-14 on THEBATTLESHIP in release, beside other builds (the
+spread is theirs). A browser's copy is measured in V8 by
+`features/vault/vault-query/examples/index_memory.mjs` (built to wasm
+with `wasm-bindgen`). There a query over 10 000 notes peaks at about
+5 MiB while it runs and keeps nothing, at 41–57 ms. Before this, a query
+made every note a row under the vault's lock, every time; now a save
+waits on a sync for at most a chunk of notes, never on a query.
 
 ## The editor: commands, keys, decorations, slash rows
 

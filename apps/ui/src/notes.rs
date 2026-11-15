@@ -221,6 +221,47 @@ pub fn on_source(f: impl FnOnce(&architect_navigator::VaultSource) + Send + 'sta
     let _ = source();
 }
 
+/// The vault's query service over the app's vault: one engine
+/// (`vault::query::QueryEngine`) over the vault's index, kept a note at a
+/// time from the open vault (`vault::query::Built`), served in
+/// process (`architect::serve_local`) on a small runtime of its own. Its
+/// client is what the extension host holds (`Host::with_vault_query`).
+/// `None` until the app's vault is open, or when it cannot be served.
+#[cfg(any(
+    target_os = "macos",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "ios"
+))]
+pub fn vault_query() -> Option<vault_proto::query::VaultQueryClient> {
+    type Served = (
+        tokio::runtime::Runtime,
+        Arc<architect::resource::Scope>,
+        vault_proto::query::VaultQueryClient,
+    );
+    static SERVED: OnceLock<Option<Served>> = OnceLock::new();
+    let open = open_vault()?;
+    SERVED
+        .get_or_init(|| {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .thread_name("vault-query")
+                .enable_all()
+                .build()
+                .map_err(|e| tracing::warn!("the vault's query service: {e}"))
+                .ok()?;
+            let scope = architect::resource::Scope::new();
+            let engine = vault::query::QueryEngine::new(Arc::new(vault::query::Built::new(open)));
+            let client = rt
+                .block_on(architect::serve_local(engine, &scope).establish())
+                .map_err(|e| tracing::warn!("the vault's query service: {e}"))
+                .ok()?;
+            Some((rt, scope, client))
+        })
+        .as_ref()
+        .map(|(_, _, client)| client.clone())
+}
+
 /// The base view types the lab's extensions add, for `BASES_VIEW_TYPES`:
 /// filled from the extension host once it is up (`crate::extensions`).
 pub fn view_types() -> &'static ViewTypes {
@@ -253,7 +294,16 @@ pub fn register(list: &Arc<ActionList>) {
     let _ = vault::actions::register(list, &open);
     let _ = links::actions::register(list, &open);
     let _ = tag::actions::register(list, &open);
-    let _ = architect_bases::actions::register(list, &open, view_types());
+    // BASES_ROWS asks the same query service the extensions do.
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "ios"
+    ))]
+    if let Some(queries) = vault_query() {
+        let _ = architect_bases::actions::register(list, &open, view_types(), queries);
+    }
     crate::publish::register(list, &open);
     let shown = open;
     let seeded = env_either("ARCHITECT_VAULT_SEED", "ARCHITECT_LAB_SEED")

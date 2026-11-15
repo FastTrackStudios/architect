@@ -25,6 +25,9 @@ pub const DOCUMENTS: &str = "documents";
 /// …): an extension runs them only with `reads` (read-only ones) or
 /// `writes` (the rest) `= ["documents"]`, as the document calls.
 pub const VAULT_ACTIONS: &str = "VAULT_";
+/// The bases' actions (`BASES_ROWS`, `BASES_READ`, …): what notes a base
+/// finds, and the `.base` files. The documents too, as [`VAULT_ACTIONS`].
+pub const BASES_ACTIONS: &str = "BASES_";
 /// The images and lyrics files of a note its view draws (#669).
 ///
 /// Art, chart images and synced lyrics, read-only and size-capped
@@ -43,7 +46,7 @@ pub const WRITES: [&str; 2] = [DOCUMENTS, EDITOR];
 
 /// What of the app's interface an extension may use
 /// ([`Capabilities::ui`]).
-pub const UI: [&str; 6] = [NOTIFY, CLIPBOARD, PICKERS, PROMPTS, MENUS, BADGES];
+pub const UI: [&str; 7] = [NOTIFY, CLIPBOARD, PICKERS, PROMPTS, MENUS, BADGES, OVERLAY];
 /// Notifications (toasts).
 pub const NOTIFY: &str = "notify";
 /// The clipboard: read it and write it.
@@ -57,6 +60,12 @@ pub const PROMPTS: &str = "prompts";
 pub const MENUS: &str = "menus";
 /// Icons and badges on file-tree rows and tabs.
 pub const BADGES: &str = "badges";
+/// Drawing over the whole app.
+///
+/// Its views' scenes (`crate::scene`) are not clipped to their panes.
+/// Without it they are, so a view can't paint
+/// over the toolbar, a dialog or a prompt, by mistake or to fake one.
+pub const OVERLAY: &str = "overlay";
 
 /// What the host may do with an extension's languages past highlighting
 /// them ([`Capabilities::languages`]).
@@ -208,6 +217,18 @@ const fn reach_words(r: Reach) -> &'static str {
     }
 }
 
+/// A kind of view as a person reads it: the arrangement, the editor, or
+/// its name.
+fn view_words(kind: &str) -> String {
+    let last = kind.rsplit(['.', '/']).next().unwrap_or(kind);
+    match last {
+        "arrange" | "arrangement" => "the arrangement".to_owned(),
+        "editor" => "the editor".to_owned(),
+        "mixer" => "the mixer".to_owned(),
+        _ => format!("the {kind} view"),
+    }
+}
+
 fn ui_words(u: &str) -> String {
     match u {
         NOTIFY => "Show you notifications".to_owned(),
@@ -216,6 +237,7 @@ fn ui_words(u: &str) -> String {
         PROMPTS => "Ask you questions".to_owned(),
         MENUS => "Show menus of its own".to_owned(),
         BADGES => "Mark files and tabs with icons and badges".to_owned(),
+        OVERLAY => "Draw over the whole app, outside its own panes".to_owned(),
         other => format!("Use {other}"),
     }
 }
@@ -254,6 +276,7 @@ impl Capabilities {
             && self.ports.is_empty()
             && self.languages.is_empty()
             && self.device.is_empty()
+            && self.over.is_empty()
     }
 
     /// Everything it asks for, one line a thing, in the order a prompt
@@ -350,6 +373,13 @@ impl Capabilities {
                 kind: "device",
                 what: d.clone(),
                 says: crate::device::words(d),
+            });
+        }
+        for v in self.over.iter().filter(|v| !granted.over.contains(v)) {
+            out.push(Ask {
+                kind: "over",
+                what: v.clone(),
+                says: format!("Draw over {}", view_words(v)),
             });
         }
         for f in self
@@ -470,12 +500,19 @@ impl Capabilities {
                 .filter(|d| granted.device.contains(d))
                 .cloned()
                 .collect(),
+            // Drawing over another's view only as declared and granted.
+            over: self
+                .over
+                .iter()
+                .filter(|v| granted.over.contains(v))
+                .cloned()
+                .collect(),
         }
     }
 
     /// [`Self::may_run`] for an action of the app's, run from the
     /// extension (the host service's `run`, the actions it lists): past
-    /// that rule, a `VAULT_*` action ([`VAULT_ACTIONS`]) needs
+    /// that rule, a `VAULT_*` or `BASES_*` action ([`VAULT_ACTIONS`], [`BASES_ACTIONS`]) needs
     /// `reads = ["documents"]` (read-only) or `writes` (the rest). Kept
     /// apart from [`Self::may_run`], the rule a browser's favourites share.
     ///
@@ -492,7 +529,7 @@ impl Capabilities {
         // them is reading (or, past read-only, changing) the documents, so
         // they need what the document calls need, and the consent prompt
         // says so ("Read your documents").
-        if id.starts_with(VAULT_ACTIONS) {
+        if id.starts_with(VAULT_ACTIONS) || id.starts_with(BASES_ACTIONS) {
             let (needs, have, cap) = if effect == Reach::ReadOnly {
                 ("reads", self.may_read(DOCUMENTS), "reads.documents")
             } else {
@@ -557,6 +594,14 @@ impl Capabilities {
     #[must_use]
     pub fn may_use(&self, what: &str) -> bool {
         self.ui.iter().any(|u| u == what)
+    }
+
+    /// Whether it may draw a layer over views of kind `view` with a view
+    /// of its own (`[[overlays]] draws`): its own views always, another's
+    /// only as granted (`capabilities.over`).
+    #[must_use]
+    pub fn may_draw_over(&self, extension: &str, view: &str) -> bool {
+        view.starts_with(&format!("{extension}/")) || self.over.iter().any(|v| v == view)
     }
 
     /// Whether it may use the device's `entry` (`capabilities.device`:
@@ -634,6 +679,37 @@ mod tests {
         assert!(was.grows_from(&now).is_empty(), "less is covered");
         assert!(Capabilities::default().asks_nothing());
         assert!(!was.asks_nothing());
+    }
+
+    /// The owner's rule for #729: drawing over the whole app is a declared
+    /// capability, said in words, and only what was granted.
+    #[test]
+    fn drawing_over_the_app_is_asked_for_in_words_and_only_granted() {
+        let asks = Capabilities {
+            ui: vec![super::OVERLAY.to_owned()],
+            ..Capabilities::default()
+        };
+        let says: Vec<String> = asks.asks().into_iter().map(|a| a.says).collect();
+        assert_eq!(says, ["Draw over the whole app, outside its own panes"]);
+        assert!(
+            !asks
+                .within(&Capabilities::default())
+                .may_use(super::OVERLAY)
+        );
+        assert!(asks.within(&asks).may_use(super::OVERLAY));
+        let manifest = crate::manifest::Manifest::parse(
+            r#"id = "t.o"
+name = "O"
+version = "1.0.0"
+kind = "process"
+[entry]
+path = "o"
+[capabilities]
+ui = ["overlay"]
+"#,
+        )
+        .unwrap();
+        assert!(manifest.capabilities.may_use(super::OVERLAY));
     }
 
     #[test]
@@ -763,8 +839,17 @@ mod tests {
         let mut writer = reader;
         writer.writes = vec!["documents".to_owned()];
         assert_eq!(run(&writer, "VAULT_CREATE", Reach::Mutating), None);
-        // Other actions are as they were.
+        // A base's rows are the notes it finds: the documents too.
         let other = caps(&["BASES_"], Reach::ReadOnly, &[]);
-        assert_eq!(run(&other, "BASES_ROWS", Reach::ReadOnly), None);
+        assert_eq!(
+            run(&other, "BASES_ROWS", Reach::ReadOnly),
+            Some("reads.documents")
+        );
+        let base_reader = caps(&["BASES_"], Reach::Mutating, &["documents"]);
+        assert_eq!(run(&base_reader, "BASES_ROWS", Reach::ReadOnly), None);
+        assert_eq!(
+            run(&base_reader, "BASES_SET_SORT", Reach::Mutating),
+            Some("writes.documents")
+        );
     }
 }

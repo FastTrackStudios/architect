@@ -88,6 +88,9 @@ auth-proto = { workspace = true, features = ["vox"] }
 # lanes that move those between nodes.
 crdt = { workspace = true, features = ["vox"] }
 vault-live = { workspace = true }
+# The vault index for browsers on the org lane (`VaultIndexSync`), built
+# over each vault the node holds (`vault::query`).
+vault = { workspace = true, features = ["actions"] }
 # `actions`: `Notes` on the node's Action List (`NOTES_*`).
 vault-proto = { workspace = true, features = ["vox", "actions"] }
 vault-collab = { workspace = true }

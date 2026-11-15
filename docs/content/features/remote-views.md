@@ -93,6 +93,188 @@ dispatches the events that come back. When the frames stop (the process
 died or was unloaded), the view removes the sub-document, shows the
 placeholder, and follows the process when it restarts.
 
+## Input
+
+Every kind of input reaches the view's handlers (wire 7, `INPUT_WIRE` in
+`features/extensions/src/wire.rs`), in a process view, a WASI view
+(`features/extensions/wit/extension.wit` `event-data`), a TSX or Luau
+page (`features/pages/src/api.rs` `PageEvent`: `dx`, `dy`, `pointer_id`,
+`pointer_type`, `buttons`, `scroll_top`) and in a browser
+(`features/extensions/src/web.rs` `Pane`):
+
+| Handler | Carries |
+|---|---|
+| `onclick`, `onmouse*`, `oncontextmenu` | `Pointer`: where, buttons, modifiers |
+| `onpointerdown`, `onpointermove`, `onpointerup`, `onpointercancel`, `onpointerenter`… | `PointerData`: the pointer's id and type (`mouse`, `pen`, `touch`), pressure, tilt |
+| `ontouchstart`, `ontouchmove`, `ontouchend`, `ontouchcancel` | `TouchData`: every finger down, those that changed |
+| `onwheel` | `WheelData`, signed as the web's (a positive `delta_y` scrolls down; Blitz's own sign is winit's, the host turns it round) |
+| `onscroll` | `ScrollData`: where the element is scrolled to |
+| `oncompositionstart`, `oncompositionupdate`, `oncompositionend` | the text an input method is composing, then the text it committed |
+| `onkeydown`, `onkeyup`, `oninput`, `onfocus`, `onblur` | as before |
+
+- **A press holds the pointer.** After a `pointerdown`, the moves and the
+  release go to the element pressed, over it or not, as a touch is captured
+  on the web (in a browser, `web::Pane` calls `setPointerCapture`). A
+  drag-and-drop list works without knowing where the pointer went. Blitz
+  holds the pointer for custom widgets only, not for a sub-document, so a
+  release can happen where the view can't see it. The host then lets go
+  for it (`RemoteDocument::let_go`): when the pointer comes back, or leaves
+  the window, with no button held, and when the pane loses the focus. The
+  view gets a `pointercancel`, or a `pointerup` if it listens for no
+  cancel, so a drag is never left grabbed. A view that listens for
+  `pointermove`, but not `mousemove` or `touchmove`, owns its held moves:
+  the document doesn't select the text under a drag.
+- **Fast events are coalesced.** While the view has not yet answered an
+  event, the moves, wheels, scrolls and composition updates that follow
+  wait; a run of them on one element keeps only the latest (a wheel's
+  deltas are summed; a wheel in other units waits as its own), and any
+  other event sends what waits first, in order (`Coalescer`). At most 64
+  wait. A slow view gets the latest move, not a queue of stale ones.
+- **The data follows the event's name** (`wire::kind_of`): a browser
+  sends `click` and `contextmenu` as `PointerEvent`s, and they reach the
+  view as mouse data, as `onclick` needs.
+- **The input method.** A field in the view turns the window's IME on
+  when it takes the focus, with the caret area moved to where the pane is
+  in the window, and kept there as the pane moves; its clipboard is the
+  window's (`HostShell`). Focus leaving mid-composition ends it.
+- **Older processes.** A process at wire 6 or below is sent none of the
+  new kinds (`EventData::since`); it never had them.
+
+Measured (`cargo test -p architect-extensions --features "remote guest
+process wasi" --test remote_input round_trips -- --ignored --nocapture`;
+a debug build on THEBATTLESHIP, the host document headless):
+
+| Round trip | n | p50 | p99 |
+|---|---|---|---|
+| a key into a field, to its echo | 200 | 1.34 ms | 3.76 ms |
+| a held move, to its echo | 200 | 1.15 ms | 2.23 ms |
+| 500 rows in, then out | 40 | 3.84 ms | 6.63 ms |
+
+The target is 16 ms from key to echo in a local pane (a frame at 60 Hz).
+`REMOTE_BUDGET` (33 ms) marks a view busy past it, and a test holds the
+p99 of a key's and a held move's round trip under it
+(`round_trips_stay_inside_the_remote_budget`). 200 held moves sent before
+the view answered any reach it as a handful
+(`moves_while_the_view_is_busy_are_coalesced_to_the_latest`).
+
+## Holding another extension's view
+
+A remote view can hold another extension's view (`features/extensions/src/embedded.rs`).
+A development copy of Bases uses it to draw a third party's base view type
+inside its own view. The view renders a placeholder that names
+`<extension>/<view>` and carries the input that view is given, an
+`EmbedInput` (a base view's is `linked::BASE_VIEW_CLAIM` with its rows):
+
+```rust
+use architect_extensions::embedded::EmbeddedView;
+
+rsx! {
+    EmbeddedView {
+        extension: "lab.kanban",
+        view: "base.board",
+        input: EmbedInput { claim: BASE_VIEW_CLAIM.into(), source: String::new(), props: rows },
+        style: "height: 320px;",
+    }
+}
+```
+
+The host draws the named view over the placeholder's box, sized by it,
+clipped to it and to the pane, and in front of the holding view so it takes
+its own input. A linked view is drawn in the app's document; a process's or
+a WASI component's is a remote view of its own (`remote::RemoteDocument::embedded`
+lists the placeholders and their boxes, looked at after each frame and every
+`PLACE_EVERY`, so a held view follows a view that scrolls). The input
+reaches it as its `use_embed()`, again whenever the holder changes it. A
+held view runs as its own extension, with its own capabilities; the holder
+reaches nothing of it but its place and its input. At most 64 held views
+(`MAX_EMBEDDED`), each input at most 1 MB; a placeholder that names no view
+fails the holder, not the app. Test:
+`features/extensions/tests/remote_embedded.rs`. Not yet: a page view (TSX,
+Luau) held this way, and a held view inside a held view's own document
+(each is drawn by the host, one level deep is what's tested).
+
+## Scenes: painting in a remote view
+
+A view can draw an element as an anyrender scene instead of DOM (#175):
+a drawing, a canvas, a graph, an arrangement. The scene is recorded in
+the extension's process, in content space, and the app draws it in its
+own window's scene (Vello through Blitz on the desk, a `<canvas>` in a
+browser).
+
+```rust
+use architect_extensions::scene::{RemoteScene, Affine};
+
+rsx! {
+    RemoteScene {
+        content: strokes(),                 // Rc<Vec<RenderCommand>>, in content space
+        transform: camera().transform(),    // pan and zoom
+        onpointermove: move |e| { /* draw, or pan */ },
+        onwheel: move |e| { /* zoom */ },
+        onresize: move |size| { /* its size in the pane */ },
+    }
+}
+```
+
+- **What crosses.** Two attributes of the element, so the wire needs
+  nothing new and Dioxus's diffing decides what is sent. The content goes
+  the first time as `<hash>\n<json>` (a compact form of anyrender's commands: each path as SVG, each colour as RGBA bytes), and after
+  that as `<hash>` alone while both sides still hold it: each side keeps
+  the last 64 by the same rule (`SceneCache`). The transform is six
+  numbers. Panning and zooming change only the transform.
+- **Its size.** When the host lays the element out at a new size, it
+  sends `architect-resize`, which reaches the view as the element's
+  `input` (`RemoteScene`'s `onresize`).
+- **Input.** The element's handlers get pointer, wheel and key events in
+  its own coordinates, and a press holds the pointer (see Input above).
+- **A linked paint view as a process.** `linked::Builder::paint::<V>` (#591)
+  serves the same `PaintView` from a process copy: each frame it records
+  is a `RemoteScene`'s content, and the element's input comes back to it
+  as `ViewInput`s (`scene::remote_paint_root`).
+- **Within its pane, unless it may draw over the app.** A scene is
+  clipped to its element's box (`scene::framed`). An extension granted
+  `overlay` (`capabilities.ui`) has its scenes drawn over the whole
+  window instead, by a layer above the panes (`scene::OverlayLayer`;
+  [Extensions](@/architecture/extensions.md), "The app's interface").
+- **What the host accepts.** At most 4 MB per scene attribute
+  (`MAX_SCENE_BYTES`), 100,000 commands (`MAX_COMMANDS`), 1,000,000 path
+  elements, and finite numbers within ±10⁷. Layers are balanced: a pop
+  with nothing open is refused, nesting stops at 64 (`MAX_DEPTH`), and
+  layers left open are closed. Each side keeps at most 64 scenes and
+  32 MB of them (`SceneCache`, evicting by count and by bytes, by the
+  same rule on both sides). A scene past any of these fails the view,
+  not the app. The host decodes a frame's scenes on a thread of its own
+  before it applies the frame (`scene::predecode`), so a large one
+  doesn't stall the window.
+- **Pans don't resize.** A new transform or scene updates the element's
+  widget in place; only a new box tells the view its size, and the
+  resizes of a dragged window are coalesced like moves.
+- **Limits.** Glyph runs don't cross, because a font's bytes would have
+  to go with them, so draw text as paths. Images and a backend's own
+  paints don't cross either, and a gradient crosses as its first stop's
+  colour. A browser replays the scene with Canvas 2D
+  (`features/extensions/src/web_scene.rs`). A paint view in a process
+  re-sends its whole scene for every frame it records; a view that pans
+  a lot should use `RemoteScene` with a transform.
+
+The example is `apps/sandbox/sketch`: freehand drawing with pan and zoom,
+a link graph whose nodes drag (a paint view through `Builder::paint`),
+and a 50-track arrangement. It stands in for Excalidraw, Canvas and the
+graph view.
+
+Measured (`cargo test -p architect-sandbox-sketch --test sketch
+arrangement_budget -- --ignored --nocapture`; debug build, THEBATTLESHIP;
+50 tracks of 40 clips, 2,000 fills):
+
+| | |
+|---|---|
+| the first scene | 236,124 bytes (JSON) |
+| a frame of panning | 12 bytes |
+| a frame of the sketch's Shift-drag pan and wheel zoom | 30 bytes |
+| host: the scene decoded and checked, off the UI thread | 3.63 ms, once |
+| host: the scene built at its transform (p50 / p99) | 0.45 / 0.72 ms |
+| the window's scene recorded (p50 / p99) | 0.30 / 1.31 ms |
+| a pan's round trip, pointer to new frame (p50 / p99) | 1.53 / 4.97 ms |
+
 ## Tests to read
 
 - `features/extensions/tests/remote_view.rs` (the test binary starts itself
@@ -110,14 +292,43 @@ placeholder, and follows the process when it restarts.
   `dangerous_inner_html` is its sheet, any other element's still fails the
   view; `RemoteView` is keyed by extension and view, so a pane that goes on
   to another process view opens that one.
+- `features/extensions/tests/remote_input.rs`: a press holds the pointer
+  over another element; a release lost outside the pane is a cancel, or a
+  `pointerup` in a view with no cancel handler; a pointer that leaves with
+  no button held lets go; focus leaving mid-composition ends it; the round
+  trips stay inside `REMOTE_BUDGET`; 200
+  moves are coalesced to the latest; a finger is a touch and a touch
+  pointer; a wheel reaches the view and scrolls its list; an input method
+  composes into a field, the window's IME on and its caret area in window
+  coordinates. `features/pages/tests/js.rs`
+  `a_tsx_page_gets_pointer_wheel_and_composition_events`.
+- `features/extensions/tests/remote_embedded.rs`: a process view holds
+  another extension's view, drawn by that extension's own process at the
+  placeholder's place, taking its own clicks and redrawn with the
+  holder's new input; a placeholder naming no view fails the holder.
+- `features/extensions/web/test/rust-pane.test.mjs` (`just ext-pane-browser`):
+  `web::Pane` in headless Firefox gets a `click` and a `contextmenu` sent
+  as `PointerEvent`s and passes them on as mouse data
+  (`apps/sandbox/pane-events`).
+- `apps/sandbox/sketch/tests/sketch.rs`: a stroke drawn in the process is
+  in the window's scene; panning and zooming send the transform, not the
+  scene, and tell the view no new size; a graph node drags in a paint
+  view served by its process; a scene is clipped to its pane unless the
+  extension may draw over the app, where it lands at its window place;
+  an oversized, unbalanced or unknown scene fails the view, not the app;
+  a pan's round trip stays inside `REMOTE_BUDGET`.
+  `features/extensions/src/scene.rs` tests: a scene crosses once and then
+  by its hash; both sides forget the same scenes, by count and by bytes;
+  transforms round-trip; a stray pop, a scene too deep, too large or out
+  of range is refused; framing clips unless overlay.
 
 ## Status
 
 Done in architect on Unix desks; the sandbox runs the clicker. Not yet: a stdio
 transport, starting lazily and stopping when idle, handing state over on a
-reload, a host service extensions call back into, Windows; pointer, touch,
-wheel and scroll events, IME, images (the sub-document has no net provider,
-so not even a `data:` image loads), and an element and CSS allowlist (only raw
-HTML is refused today, except a `<style>`'s CSS).
+reload, a host service extensions call back into, Windows, `mounted`
+measurements, images (the sub-document has no net provider, so not even a
+`data:` image loads), and an element and CSS allowlist (only raw HTML is
+refused today, except a `<style>`'s CSS).
 
 - **Task** and **Studio** do not use it yet.

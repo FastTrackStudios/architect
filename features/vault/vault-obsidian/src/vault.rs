@@ -32,6 +32,18 @@ pub struct VaultPage {
     /// `mtime` snapshot from disk. Used to detect external edits on
     /// reload.
     pub mtime: std::time::SystemTime,
+    /// Moves on every time `raw` is set ([`next_generation`]): what the
+    /// vault index keeps a note's entry by (`vault_query::index`), so an
+    /// edit is never missed however fast it follows the last.
+    pub generation: u64,
+}
+
+/// A page generation no page has had: given to every page whose text is
+/// made or set ([`VaultPage::generation`]).
+#[must_use]
+pub fn next_generation() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 /// One `.base` file.
@@ -183,6 +195,7 @@ impl Vault {
         page.raw = new_raw.to_string();
         page.parsed = parse_page(new_raw);
         page.mtime = mtime;
+        page.generation = next_generation();
         Ok(())
     }
 
@@ -274,6 +287,7 @@ fn load_page(root: &Path, entry: &VaultEntry) -> Result<VaultPage, LoadError> {
         raw,
         parsed,
         mtime,
+        generation: next_generation(),
     })
 }
 

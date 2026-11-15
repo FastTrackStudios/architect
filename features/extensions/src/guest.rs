@@ -592,12 +592,183 @@ fn dispatch(vdom: &VirtualDom, event: ViewEvent) {
         EventData::Focus => Rc::new(PlatformEventData::new(Box::new(
             SerializedFocusData::default(),
         ))),
+        // A handler named for the mouse needs mouse data, whatever a
+        // host sent (a browser's `click` is a `PointerEvent`): a pointer's
+        // data there would panic dioxus-html's conversion.
+        EventData::Pointer(p)
+            if crate::wire::kind_of(&event.name) == crate::wire::DataKind::Mouse =>
+        {
+            Rc::new(PlatformEventData::new(Box::new(mouse(&p.at))))
+        }
+        EventData::Pointer(p) => Rc::new(PlatformEventData::new(Box::new(rich::pointer(&p)))),
+        EventData::Touch(t) => Rc::new(PlatformEventData::new(Box::new(rich::touch(&t)))),
+        EventData::Wheel(w) => Rc::new(PlatformEventData::new(Box::new(rich::wheel(&w)))),
+        EventData::Scroll(s) => Rc::new(PlatformEventData::new(Box::new(rich::scroll(&s)))),
+        EventData::Composition(text) => {
+            Rc::new(PlatformEventData::new(Box::new(rich::composition(&text))))
+        }
     };
+    // A scene's size, from its host, is its element's `input`.
+    #[cfg(feature = "scenes")]
+    let name = if event.name == crate::scene::RESIZE_EVENT {
+        "input"
+    } else {
+        event.name.as_str()
+    };
+    #[cfg(not(feature = "scenes"))]
+    let name = event.name.as_str();
     vdom.runtime().handle_event(
-        &event.name,
+        name,
         Event::new(data, event.bubbles),
         ElementId::from_raw(element),
     );
+}
+
+/// The rich input kinds (wire 7) as dioxus-html's serialised data. Their
+/// fields are private to dioxus-html, so each is built from its serde
+/// shape.
+mod rich {
+    use dioxus::html::{
+        SerializedCompositionData, SerializedPointerData, SerializedScrollData,
+        SerializedTouchData, SerializedWheelData,
+    };
+    use serde_json::{Value as Json, json};
+
+    use crate::wire::{Pointer, PointerData, ScrollData, TouchData, TouchPoint, WheelData};
+
+    fn point(p: &Pointer) -> Json {
+        json!({
+            "alt_key": p.mods.alt, "ctrl_key": p.mods.ctrl,
+            "meta_key": p.mods.meta, "shift_key": p.mods.shift,
+            "button": p.button, "buttons": p.buttons,
+            "client_x": p.client_x, "client_y": p.client_y,
+            "offset_x": p.element_x, "offset_y": p.element_y,
+            "page_x": p.page_x, "page_y": p.page_y,
+            "screen_x": p.screen_x, "screen_y": p.screen_y,
+        })
+    }
+
+    fn merged(mut base: Json, more: Json) -> Json {
+        if let (Some(b), Json::Object(m)) = (base.as_object_mut(), more) {
+            b.extend(m);
+        }
+        base
+    }
+
+    /// # Panics
+    ///
+    /// Never: the shape is dioxus-html's own (checked by its tests).
+    #[allow(clippy::expect_used)]
+    pub(super) fn pointer(p: &PointerData) -> SerializedPointerData {
+        let value = merged(
+            point(&p.at),
+            json!({
+                "pointer_id": p.pointer_id, "width": 1.0, "height": 1.0,
+                "pressure": p.pressure, "tangential_pressure": 0.0,
+                "tilt_x": p.tilt_x, "tilt_y": p.tilt_y, "twist": p.twist,
+                "pointer_type": p.pointer_type, "is_primary": p.is_primary,
+            }),
+        );
+        serde_json::from_value(value).expect("dioxus-html's pointer shape")
+    }
+
+    fn touch_point(t: &TouchPoint) -> Json {
+        json!({
+            "identifier": t.id,
+            "client_x": t.client_x, "client_y": t.client_y,
+            "page_x": t.page_x, "page_y": t.page_y,
+            "screen_x": t.screen_x, "screen_y": t.screen_y,
+            "force": t.force, "radius_x": 1.0, "radius_y": 1.0, "rotation_angle": 0.0,
+        })
+    }
+
+    #[allow(clippy::expect_used)]
+    pub(super) fn touch(t: &TouchData) -> SerializedTouchData {
+        let all: Vec<Json> = t.touches.iter().map(touch_point).collect();
+        let changed: Vec<Json> = t.changed.iter().map(touch_point).collect();
+        serde_json::from_value(json!({
+            "alt_key": t.mods.alt, "ctrl_key": t.mods.ctrl,
+            "meta_key": t.mods.meta, "shift_key": t.mods.shift,
+            "touches": &all, "changed_touches": changed, "target_touches": &all,
+        }))
+        .expect("dioxus-html's touch shape")
+    }
+
+    #[allow(clippy::expect_used)]
+    pub(super) fn wheel(w: &WheelData) -> SerializedWheelData {
+        let value = merged(
+            point(&w.at),
+            json!({
+                "delta_mode": w.delta_mode, "delta_x": w.delta_x,
+                "delta_y": w.delta_y, "delta_z": 0.0,
+            }),
+        );
+        serde_json::from_value(value).expect("dioxus-html's wheel shape")
+    }
+
+    pub(super) const fn scroll(s: &ScrollData) -> SerializedScrollData {
+        SerializedScrollData {
+            scroll_top: s.top,
+            scroll_left: s.left,
+            scroll_width: s.width,
+            scroll_height: s.height,
+            client_width: s.client_width,
+            client_height: s.client_height,
+        }
+    }
+
+    #[allow(clippy::expect_used)]
+    pub(super) fn composition(data: &str) -> SerializedCompositionData {
+        serde_json::from_value(json!({ "data": data })).expect("dioxus-html's composition shape")
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use dioxus::html::{HasPointerData, HasTouchData, HasWheelData};
+
+        use super::*;
+
+        #[test]
+        fn each_rich_kind_builds_from_its_shape() {
+            let at = Pointer {
+                element_x: 3.0,
+                element_y: 4.0,
+                buttons: 1,
+                ..Pointer::default()
+            };
+            let p = pointer(&PointerData {
+                at,
+                pointer_id: 11,
+                pointer_type: "touch".to_owned(),
+                is_primary: true,
+                pressure: 0.5,
+                ..PointerData::default()
+            });
+            assert_eq!(p.pointer_id(), 11);
+            assert_eq!(p.pointer_type(), "touch");
+            let t = touch(&TouchData {
+                touches: vec![TouchPoint {
+                    id: 1,
+                    ..TouchPoint::default()
+                }],
+                changed: vec![TouchPoint {
+                    id: 1,
+                    ..TouchPoint::default()
+                }],
+                ..TouchData::default()
+            });
+            assert_eq!(t.touches().len(), 1);
+            let w = wheel(&WheelData {
+                at,
+                delta_y: 120.0,
+                ..WheelData::default()
+            });
+            assert!(
+                matches!(w.delta(), dioxus::html::geometry::WheelDelta::Pixels(v) if (v.y - 120.0).abs() < f64::EPSILON)
+            );
+            let _ = composition("日本");
+        }
+    }
 }
 
 fn modifiers(m: Mods) -> Modifiers {
@@ -765,5 +936,55 @@ impl WriteMutations for WireWriter {
 
     fn remove(&mut self) {
         self.edits.push(Edit::Remove);
+    }
+}
+
+#[cfg(test)]
+mod click_tests {
+    use dioxus::html::{SerializedHtmlEventConverter, set_event_converter};
+    use dioxus::prelude::*;
+
+    use crate::wire::{Edit, EventData, Frame, PointerData as WirePointer, ViewEvent};
+
+    /// #720 H4: a browser sends `click` as a `PointerEvent`; a host
+    /// that passed it on as pointer data must not panic `onclick`.
+    #[test]
+    fn a_click_carrying_pointer_data_reaches_onclick() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static CLICKS: AtomicU32 = AtomicU32::new(0);
+        fn app() -> Element {
+            rsx! { button { onclick: move |e| {
+                let _ = e.client_coordinates();
+                CLICKS.fetch_add(1, Ordering::Relaxed);
+            }, "b" } }
+        }
+        set_event_converter(Box::new(SerializedHtmlEventConverter));
+        let mut vdom = VirtualDom::new(app);
+        let mut writer = super::WireWriter::default();
+        vdom.rebuild(&mut writer);
+        let id = match writer.take() {
+            // The node a handler was put on: the `PushId` before `Listen`.
+            Frame::Edits { edits } => edits
+                .windows(2)
+                .find_map(|w| match w {
+                    [Edit::PushId { id }, Edit::Listen { .. }] => Some(*id),
+                    _ => None,
+                })
+                .expect("the button's id"),
+            Frame::Failed(why) => panic!("{why}"),
+        };
+        super::dispatch(
+            &vdom,
+            ViewEvent {
+                element: id,
+                name: "click".to_owned(),
+                bubbles: true,
+                data: EventData::Pointer(WirePointer {
+                    pointer_type: "mouse".to_owned(),
+                    ..WirePointer::default()
+                }),
+            },
+        );
+        assert_eq!(CLICKS.load(Ordering::Relaxed), 1);
     }
 }

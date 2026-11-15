@@ -88,13 +88,24 @@ pub struct PageEvent {
     pub handler: u32,
     /// `click`, `input`, `keydown`…
     pub event: String,
-    /// An `input`'s value now.
+    /// An `input`'s value now; a composition's text.
     pub value: Option<String>,
     /// A key event's key (`Enter`, `a`).
     pub key: Option<String>,
     /// Where a pointer was, relative to the element.
     pub x: f64,
     pub y: f64,
+    /// A wheel's deltas (pixels; lines for a `delta_mode` of 1).
+    pub dx: f64,
+    pub dy: f64,
+    /// A scroll's position.
+    pub scroll_top: f64,
+    pub scroll_left: f64,
+    /// The pointer's id and kind (`mouse`, `pen`, `touch`), and the
+    /// buttons held.
+    pub pointer_id: i32,
+    pub pointer_type: Option<String>,
+    pub buttons: u16,
     pub alt: bool,
     pub ctrl: bool,
     pub meta: bool,

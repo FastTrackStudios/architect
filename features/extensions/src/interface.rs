@@ -1161,6 +1161,10 @@ pub fn ExtensionView(
     }
     #[cfg(all(feature = "remote", unix))]
     if let Some(processes) = try_use_context::<crate::process::Processes>() {
+        // Its scenes draw over the whole app only when it was granted that.
+        let overlay = host
+            .capabilities(&extension)
+            .is_some_and(|c| c.may_use(crate::capabilities::OVERLAY));
         // A remote document is sized by its box: a slot's is a bar's height.
         let remote = if fill {
             "flex: 1; min-height: 0; display: flex; flex-direction: column;"
@@ -1169,7 +1173,7 @@ pub fn ExtensionView(
         };
         return rsx! {
             div { style: "{remote}",
-                crate::remote::RemoteView { processes, extension, view }
+                crate::remote::RemoteView { processes, extension, view, overlay }
             }
         };
     }
@@ -1178,6 +1182,82 @@ pub fn ExtensionView(
             "{extension}'s view {view} is drawn by its process, which this app does not show."
         }
     }
+}
+
+/// The layers extensions draw with views of their own over a view of
+/// kind `view`, on `plane` (`[[overlays]] draws`, `crate::overlay`): mount
+/// it in the view, filling its box, where that plane goes (as
+/// `architect_canvas::ui::CanvasLayers` for Luau overlays), with the
+/// view's coordinate `spaces` now. Each layer covers the view's box,
+/// clipped to it, and passes the pointer through to the view.
+#[component]
+pub fn ExtensionViewOverlays(
+    view: String,
+    plane: String,
+    spaces: crate::overlay::OverlaySpaces,
+) -> Element {
+    let Some(ui) = try_use_context::<ExtensionUi>() else {
+        return rsx! {};
+    };
+    let _ = ui.revision();
+    let layers = ui.host().view_overlays(&view, &plane);
+    rsx! {
+        for o in layers {
+            div {
+                key: "{o.extension}/{o.id}",
+                class: "extension-view-overlay",
+                style: "position: absolute; left: 0; top: 0; right: 0; bottom: 0; \
+                        overflow: hidden; pointer-events: none;",
+                OverlayLayer { ui, overlay: o, over: view.clone(), spaces: spaces.clone() }
+            }
+        }
+    }
+}
+
+/// One overlay layer: its extension's view, linked in or remote.
+#[component]
+fn OverlayLayer(
+    ui: ExtensionUi,
+    overlay: crate::overlay::ViewOverlay,
+    over: String,
+    spaces: crate::overlay::OverlaySpaces,
+) -> Element {
+    let host = ui.host();
+    if let Some(root) = host.linked_view(&overlay.extension, &overlay.draws) {
+        let input = crate::contrib::EmbedInput {
+            claim: crate::overlay::claim(&over),
+            source: String::new(),
+            props: serde_json::to_value(&spaces).unwrap_or_default(),
+        };
+        return rsx! { LinkedOverlay { root, input } };
+    }
+    #[cfg(all(feature = "remote", unix))]
+    if let Some(processes) = try_use_context::<crate::process::Processes>() {
+        return rsx! {
+            crate::remote::RemoteOverlay {
+                processes,
+                extension: overlay.extension,
+                view: overlay.draws,
+                over,
+                spaces,
+            }
+        };
+    }
+    let _ = (over, spaces);
+    rsx! {}
+}
+
+/// A linked view drawn with an input of the host's: as an overlay (its
+/// `use_embed` is the view's spaces) or held in a remote view
+/// (`crate::embedded`).
+#[component]
+pub(crate) fn LinkedOverlay(root: fn() -> Element, input: crate::contrib::EmbedInput) -> Element {
+    let mut signal = use_signal(|| input.clone());
+    if *signal.peek() != input {
+        signal.set(input);
+    }
+    use_context_provider(|| crate::linked::EmbedContext(signal));
+    root()
 }
 
 /// A linked-in view's component, mounted.

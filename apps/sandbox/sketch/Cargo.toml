@@ -1,0 +1,42 @@
+[package]
+name = "architect-sandbox-sketch"
+description = "Sketch, the showcase's drawing example (#175, #176; #710 U3): freehand drawing with pan and zoom, a small link graph and a 50-track arrangement, each an anyrender scene drawn by an extension's own process. Stands in for Excalidraw, Canvas and the graph view."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[[bin]]
+name = "architect-sandbox-sketch"
+path = "src/main.rs"
+
+[dependencies]
+architect-extensions = { workspace = true, features = ["guest", "paint"] }
+architect-workspace = { workspace = true, features = ["paint"] }
+dioxus = { workspace = true }
+
+[dev-dependencies]
+# tests/sketch.rs: its views in a pane of a headless Blitz host.
+architect = { workspace = true, features = ["action-list"] }
+architect-extensions = { workspace = true, features = ["guest", "host", "process", "remote", "paint"] }
+futures = "0.3"
+tempfile = "3"
+blitz-dom = { workspace = true }
+blitz-paint = { workspace = true, features = ["custom-widget"] }
+blitz-traits = { workspace = true }
+dioxus-native-dom = { workspace = true }
+# tests/shots.rs: the showcase's screenshots, rendered on the CPU in the
+# app's built-in themes.
+architect-theme = { workspace = true, features = ["dioxus"] }
+anyrender = { workspace = true }
+anyrender_vello_cpu = { workspace = true }
+png = { workspace = true }
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../../workspace-hack" }

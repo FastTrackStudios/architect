@@ -151,6 +151,11 @@ fn the_worlds_types_are_the_wires() {
     same_variant(&w, wire::EventData::SHAPE, "event-data");
     same_record(&w, wire::ViewEvent::SHAPE, "view-event");
     same_record(&w, wire::Pointer::SHAPE, "pointer");
+    same_record(&w, wire::PointerData::SHAPE, "pointer-data");
+    same_record(&w, wire::TouchPoint::SHAPE, "touch-point");
+    same_record(&w, wire::TouchData::SHAPE, "touch-data");
+    same_record(&w, wire::WheelData::SHAPE, "wheel-data");
+    same_record(&w, wire::ScrollData::SHAPE, "scroll-data");
     same_record(&w, wire::KeyData::SHAPE, "key-data");
     same_record(&w, wire::Mods::SHAPE, "mods");
     same_record(&w, wire::ThemeData::SHAPE, "theme-data");

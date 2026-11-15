@@ -892,6 +892,7 @@ dependencies = [
  "url",
  "vault",
  "vault-doc",
+ "vault-proto",
 ]
 
 [[package]]
@@ -968,8 +969,10 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
  "vault",
  "vault-obsidian",
+ "vault-proto",
 ]
 
 [[package]]
@@ -1205,6 +1208,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "vault",
  "vault-collab",
  "vault-live",
  "vault-proto",
@@ -1340,6 +1344,7 @@ dependencies = [
 name = "architect-extensions"
 version = "0.1.0"
 dependencies = [
+ "anyrender",
  "architect",
  "architect-commands",
  "architect-documents",
@@ -1362,6 +1367,7 @@ dependencies = [
  "architect-workspace-hack",
  "base64 0.22.1",
  "blitz-dom",
+ "blitz-paint",
  "blitz-traits",
  "block2 0.6.2",
  "crdt",
@@ -1383,6 +1389,7 @@ dependencies = [
  "objc2-ui-kit",
  "objc2-uniform-type-identifiers",
  "objc2-user-notifications",
+ "peniko 0.6.1",
  "regex",
  "reqwest 0.12.28",
  "rfd",
@@ -1398,6 +1405,8 @@ dependencies = [
  "tracing",
  "unicode-normalization",
  "url",
+ "vault-proto",
+ "vault-query",
  "vox",
  "vox-core",
  "vox-stream",
@@ -1930,6 +1939,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-sandbox-kanban"
+version = "0.1.0"
+dependencies = [
+ "anyrender",
+ "anyrender_vello_cpu",
+ "architect",
+ "architect-extensions",
+ "architect-theme",
+ "architect-workspace-hack",
+ "blitz-dom",
+ "blitz-paint",
+ "blitz-traits",
+ "dioxus",
+ "dioxus-native-dom",
+ "futures",
+ "peniko 0.6.1",
+ "png 0.17.16",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "architect-sandbox-media"
 version = "0.1.0"
 dependencies = [
@@ -1942,6 +1973,38 @@ dependencies = [
  "dioxus",
  "facet",
  "futures-util",
+ "tempfile",
+]
+
+[[package]]
+name = "architect-sandbox-pane-events"
+version = "0.1.0"
+dependencies = [
+ "architect-extensions",
+ "architect-workspace-hack",
+ "js-sys",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
+name = "architect-sandbox-sketch"
+version = "0.1.0"
+dependencies = [
+ "anyrender",
+ "anyrender_vello_cpu",
+ "architect",
+ "architect-extensions",
+ "architect-theme",
+ "architect-workspace",
+ "architect-workspace-hack",
+ "blitz-dom",
+ "blitz-paint",
+ "blitz-traits",
+ "dioxus",
+ "dioxus-native-dom",
+ "futures",
+ "png 0.17.16",
  "tempfile",
 ]
 
@@ -19447,6 +19510,7 @@ dependencies = [
  "vault-live",
  "vault-obsidian",
  "vault-proto",
+ "vault-query",
 ]
 
 [[package]]
@@ -19527,6 +19591,7 @@ dependencies = [
  "tracing",
  "uuid",
  "vault-proto",
+ "vault-query",
  "walkdir",
 ]
 
@@ -19553,6 +19618,7 @@ dependencies = [
  "uuid",
  "vault-live",
  "vault-proto",
+ "vault-query",
  "walkdir",
 ]
 
@@ -19573,6 +19639,25 @@ dependencies = [
  "uuid",
  "vox",
  "vox-types",
+]
+
+[[package]]
+name = "vault-query"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-workspace-hack",
+ "chrono",
+ "facet",
+ "indexmap",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 2.0.20",
+ "uuid",
+ "vault-proto",
+ "wasm-bindgen",
 ]
 
 [[package]]

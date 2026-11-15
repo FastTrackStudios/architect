@@ -32,9 +32,20 @@
 //! sub-document scrolls. The embed's input reaches the view as
 //! [`crate::wire::EMBED_EVENT`], again whenever it changes.
 //!
-//! Not yet: pointer, touch, wheel and scroll events (Blitz scrolls the
-//! sub-document itself), IME, `mounted` measurements, the shell's
-//! components as named elements, the allowlist of elements and CSS.
+//! Input (#176): pointer, touch, wheel and scroll events, an input
+//! method's composition, keys and focus all reach the view's handlers
+//! ([`crate::wire::INPUT_WIRE`] on). A press holds the pointer: the
+//! moves and the release that follow go to the element pressed, over it
+//! or not ([`RemoteDocument`]'s implicit capture, as a touch is captured
+//! on the web). Fast events are coalesced while the view is still
+//! answering one ([`crate::wire::Coalescer`]). The view's document is
+//! given the window's input method and clipboard, its caret area moved
+//! to where the pane is ([`HostShell`]).
+//!
+//! Not yet: `mounted` measurements, the shell's components as named
+//! elements, the allowlist of elements and CSS; a release outside the
+//! pane reaches the view as a `pointercancel` when the pointer comes
+//! back (Blitz's own capture holds only custom widgets).
 
 // Dioxus is single-threaded: its tasks are not `Send`.
 #![allow(clippy::future_not_send)]
@@ -43,6 +54,7 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use architect_workspace::{Meters, ViewMeter};
@@ -52,9 +64,11 @@ use blitz_dom::{
     LocalName, Namespace, Node, NodeId, QualName, UserAgentStylesheet,
 };
 use blitz_traits::events::{
-    BlitzKeyEvent, BlitzPointerEvent, DomEvent, DomEventData, EventState, Location, Modifiers,
-    MouseEventButton, UiEvent,
+    BlitzImeEvent, BlitzKeyEvent, BlitzPointerEvent, BlitzPointerId, BlitzWheelDelta,
+    BlitzWheelEvent, DomEvent, DomEventData, EventState, Location, Modifiers, MouseEventButton,
+    UiEvent,
 };
+use blitz_traits::shell::{ClipboardError, ShellProvider};
 use dioxus::prelude::*;
 use dioxus_native_dom::NodeHandle;
 use futures::channel::mpsc;
@@ -62,7 +76,8 @@ use futures::{FutureExt as _, StreamExt as _};
 
 use crate::process::{Process, Processes, State};
 use crate::wire::{
-    ANSWERED_WIRE, Edit, EventData, Frame, KeyData, Mods, Pointer, Value, ViewEvent,
+    ANSWERED_WIRE, Coalescer, Edit, EventData, Frame, KeyData, Mods, Pointer, PointerData,
+    ScrollData, TouchData, TouchPoint, Value, ViewEvent, WheelData,
 };
 
 /// A process view's frame budget, from the event to its frame: two
@@ -71,6 +86,11 @@ pub const REMOTE_BUDGET: Duration = Duration::from_millis(33);
 
 /// At most this many edits in one frame.
 const MAX_EDITS: usize = 200_000;
+
+/// How often a pane's place in the window, and the boxes of the views
+/// it holds (`crate::embedded`), are looked at: an input method's caret
+/// and a held view follow a pane that moves or a view that scrolls.
+pub const PLACE_EVERY: Duration = Duration::from_millis(50);
 
 /// How often an embed's content height is looked at.
 pub const MEASURE_EVERY: Duration = Duration::from_millis(50);
@@ -86,6 +106,14 @@ const FIT_CSS: &str = "html, body { margin: 0 !important; height: auto !importan
 /// variables (`set_theme_css`). Without it a view that sets no colour of
 /// its own draws black in the user agent's serif on a dark theme.
 const BASE_CSS: &str = "html, body { margin: 0; padding: 0; }                         html, body, main { height: 100%; }                         body { color: var(--ink, var(--foreground)); font-size: 13px;                         font-family: var(--font, var(--default-font-family, var(--font-sans, system-ui, sans-serif))); }";
+
+/// Another extension's view a remote view holds, as its placeholder says.
+#[derive(Clone, Debug, Default)]
+struct Held {
+    key: u64,
+    view: Option<(String, String)>,
+    input: crate::contrib::EmbedInput,
+}
 
 /// The attribute that names a node's Dioxus element id, as Dioxus's own
 /// renderer marks it.
@@ -110,6 +138,29 @@ pub struct RemoteDocument {
     theme: NodeId,
     /// Whether it is sized to its content ([`Self::fit_content`]).
     fitted: bool,
+    /// The element a press is holding the pointer on, until its release.
+    held: Option<u64>,
+    /// Whether an input method is composing (a `compositionstart` was
+    /// sent and its end not yet).
+    composing: bool,
+    /// The scenes the view sent, by hash (#175).
+    scenes: crate::scene::SceneCache,
+    /// Scenes decoded off the UI thread before their frame is applied
+    /// (`scene::predecode`), by hash.
+    predecoded: HashMap<u64, Result<crate::scene::Commands, String>>,
+    /// Where its scenes draw over the whole app (`overlay` in
+    /// `capabilities.ui`, granted); clipped to their boxes when none.
+    overlay: Option<crate::scene::OverlayLayer>,
+    /// How many times its scenes told the view a new size.
+    resizes: Arc<std::sync::atomic::AtomicU64>,
+    /// Other extensions' views it holds (`crate::embedded`), by placeholder.
+    holds: HashMap<NodeId, Held>,
+    /// The next held view's key.
+    next_held: u64,
+    /// The elements it paints: their scene and transform now.
+    painted: HashMap<NodeId, Arc<Mutex<crate::scene::Painted>>>,
+    /// How many bytes of scenes and transforms it sent (for a benchmark).
+    scene_bytes: u64,
 }
 
 impl std::fmt::Debug for RemoteDocument {
@@ -167,7 +218,275 @@ impl RemoteDocument {
             events,
             theme,
             fitted: false,
+            held: None,
+            composing: false,
+            scenes: crate::scene::SceneCache::new(),
+            predecoded: HashMap::new(),
+            holds: HashMap::new(),
+            next_held: 1,
+            overlay: None,
+            resizes: Arc::default(),
+            painted: HashMap::new(),
+            scene_bytes: 0,
         }
+    }
+
+    /// Lets go of a held pointer the view will see no release for: a
+    /// `pointercancel` to the element held, or, when the view doesn't
+    /// listen for one, a `pointerup` (so a drag isn't left grabbed). An
+    /// input method's composition ends too. The host calls it when the
+    /// pane loses the focus or the window its pointer.
+    pub fn let_go(&mut self, at: Option<&BlitzPointerEvent>) {
+        if let Some(held) = self.held.take() {
+            let listens = |n: &str| self.listeners.get(n).copied().unwrap_or(0) > 0;
+            let name = if listens("pointercancel") {
+                Some("pointercancel")
+            } else if listens("pointerup") {
+                Some("pointerup")
+            } else {
+                None
+            };
+            if let Some(name) = name {
+                let data = at.map_or_else(PointerData::default, pointer_data);
+                let _ = self.events.unbounded_send(ViewEvent {
+                    element: held,
+                    name: name.to_owned(),
+                    bubbles: true,
+                    data: EventData::Pointer(data),
+                });
+            }
+        }
+        self.end_composition(None);
+    }
+
+    /// Ends an input method's composition the view heard start, at
+    /// `element` (or the root).
+    fn end_composition(&mut self, element: Option<u64>) {
+        if !self.composing {
+            return;
+        }
+        self.composing = false;
+        if self.listeners.get("compositionend").copied().unwrap_or(0) > 0 {
+            let _ = self.events.unbounded_send(ViewEvent {
+                element: element.unwrap_or(0),
+                name: "compositionend".to_owned(),
+                bubbles: true,
+                data: EventData::Composition(String::new()),
+            });
+        }
+    }
+
+    /// How many bytes of scene content and transforms the view has sent.
+    #[must_use]
+    pub const fn scene_bytes(&self) -> u64 {
+        self.scene_bytes
+    }
+
+    /// A placeholder's held view or its input changed (`crate::embedded`).
+    fn held_attr(&mut self, node: NodeId, name: &str, value: Option<&str>) -> Result<(), String> {
+        use crate::embedded::{INPUT_ATTR, MAX_EMBEDDED, MAX_INPUT_BYTES, VIEW_ATTR, split_view};
+        if !self.holds.contains_key(&node) {
+            if value.is_none() {
+                return Ok(());
+            }
+            if self.holds.len() >= MAX_EMBEDDED {
+                return Err(format!("it holds more than {MAX_EMBEDDED} views"));
+            }
+            let key = self.next_held;
+            self.next_held = self.next_held.saturating_add(1);
+            self.holds.insert(
+                node,
+                Held {
+                    key,
+                    ..Held::default()
+                },
+            );
+        }
+        let Some(held) = self.holds.get_mut(&node) else {
+            return Ok(());
+        };
+        if name == VIEW_ATTR {
+            held.view = match value {
+                Some(v) => Some(
+                    split_view(v)
+                        .map(|(e, w)| (e.to_owned(), w.to_owned()))
+                        .ok_or_else(|| format!("{v:?} names no view (<extension>/<view>)"))?,
+                ),
+                None => None,
+            };
+        } else if name == INPUT_ATTR {
+            held.input = match value {
+                Some(v) if v.len() > MAX_INPUT_BYTES => {
+                    return Err(format!(
+                        "a held view's input of {} bytes: past its limit of {MAX_INPUT_BYTES}",
+                        v.len()
+                    ));
+                }
+                Some(v) => serde_json::from_str(v)
+                    .map_err(|e| format!("a held view's input that isn't one: {e}"))?,
+                None => crate::contrib::EmbedInput::default(),
+            };
+        }
+        if held.view.is_none() && held.input == crate::contrib::EmbedInput::default() {
+            self.holds.remove(&node);
+        }
+        Ok(())
+    }
+
+    /// The other extensions' views it holds now, and where: each
+    /// placeholder's box in its view, scrolled (`crate::embedded`).
+    #[must_use]
+    pub fn embedded(&self) -> Vec<crate::embedded::Slot> {
+        let scroll = self.doc.viewport_scroll();
+        let mut out: Vec<crate::embedded::Slot> = self
+            .holds
+            .iter()
+            .filter_map(|(node, held)| {
+                let (extension, view) = held.view.clone()?;
+                let n = self.doc.get_node(*node)?;
+                let at = n.absolute_position(0.0, 0.0);
+                let size = n.final_layout().size;
+                #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+                Some(crate::embedded::Slot {
+                    key: held.key,
+                    extension,
+                    view,
+                    input: held.input.clone(),
+                    x: at.x - scroll.x as f32,
+                    y: at.y - scroll.y as f32,
+                    width: size.width,
+                    height: size.height,
+                })
+            })
+            .collect();
+        out.sort_by_key(|s| s.key);
+        out
+    }
+
+    /// Lets its scenes draw over the whole app (an extension granted
+    /// `overlay`), through `layer`, whose widget fills the window; with
+    /// none they are clipped to their boxes.
+    pub fn set_overlay(&mut self, layer: Option<crate::scene::OverlayLayer>) {
+        self.overlay = layer;
+    }
+
+    /// Puts its scenes where their elements are in the window, the pane
+    /// being at `pane` (CSS pixels): where an overlay draws them.
+    pub fn place_scenes(&mut self, pane: (f32, f32)) {
+        let Some(layer) = &self.overlay else { return };
+        let mut moved = false;
+        for (node, painted) in &self.painted {
+            let Some(n) = self.doc.get_node(*node) else {
+                continue;
+            };
+            let at = n.absolute_position(0.0, 0.0);
+            let origin = (f64::from(pane.0 + at.x), f64::from(pane.1 + at.y));
+            let mut p = painted.lock().unwrap_or_else(PoisonError::into_inner);
+            if p.origin != origin {
+                p.origin = origin;
+                moved = true;
+            }
+            drop(p);
+        }
+        if moved {
+            layer.touch();
+        }
+    }
+
+    /// How many times its scenes have told the view a new size.
+    #[must_use]
+    pub fn scene_resizes(&self) -> u64 {
+        self.resizes.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Scenes of the next frame, decoded already (off the UI thread,
+    /// `scene::predecode`).
+    pub fn predecoded(&mut self, decoded: Vec<(u64, Result<crate::scene::Commands, String>)>) {
+        self.predecoded.extend(decoded);
+    }
+
+    /// An element's scene (`scene::SCENE_ATTR`) or transform
+    /// (`scene::TRANSFORM_ATTR`) changed: it is drawn as a widget, its
+    /// state updated in place.
+    fn paint_attr(&mut self, node: NodeId, name: &str, value: Option<&str>) -> Result<(), String> {
+        use crate::scene::{Affine, SCENE_ATTR, parse_transform};
+        let len = value.map_or(0, str::len);
+        self.scene_bytes = self
+            .scene_bytes
+            .saturating_add(u64::try_from(len).unwrap_or(u64::MAX));
+        if name == SCENE_ATTR && value.is_none() {
+            if let Some(painted) = self.painted.remove(&node) {
+                if let Some(layer) = &self.overlay {
+                    layer.remove(&painted);
+                }
+                self.doc.remove_custom_widget(node);
+            }
+            return Ok(());
+        }
+        let commands = match (name == SCENE_ATTR, value) {
+            (true, Some(v)) => {
+                let predecoded = &mut self.predecoded;
+                Some(self.scenes.receive_with(v, |json| {
+                    let hash = crate::scene::split(v).map_or(0, |(h, _)| h);
+                    predecoded
+                        .remove(&hash)
+                        .unwrap_or_else(|| crate::scene::decode(json))
+                })?)
+            }
+            _ => None,
+        };
+        let transform =
+            (name != SCENE_ATTR).then(|| value.map_or(Affine::IDENTITY, parse_transform));
+        if let Some(painted) = self.painted.get(&node) {
+            let mut p = painted.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some(c) = commands {
+                p.commands = c;
+            }
+            if let Some(t) = transform {
+                p.transform = t;
+            }
+            p.dirty = true;
+            drop(p);
+            if let Some(layer) = &self.overlay {
+                layer.touch();
+            }
+            return Ok(());
+        }
+        let element = self.elements.get(&node).copied().unwrap_or(0);
+        let painted = Arc::new(Mutex::new(crate::scene::Painted {
+            commands: commands.unwrap_or_default(),
+            transform: transform.unwrap_or(Affine::IDENTITY),
+            element,
+            dirty: true,
+            origin: (0.0, 0.0),
+        }));
+        self.painted.insert(node, Arc::clone(&painted));
+        if let Some(layer) = &self.overlay {
+            layer.add(Arc::clone(&painted));
+        }
+        self.doc.set_custom_widget(
+            node,
+            Box::new(crate::scene::SceneWidget {
+                painted,
+                overlay: self.overlay.is_some(),
+                events: self.events.clone(),
+                resizes: Arc::clone(&self.resizes),
+                size: None,
+            }),
+        );
+        Ok(())
+    }
+
+    /// Gives the view the host window's input method, clipboard and
+    /// redraws ([`HostShell`]): a field in it can be composed into.
+    pub fn set_host_shell(&mut self, shell: HostShell) {
+        self.doc.set_shell_provider(Arc::new(shell));
+    }
+
+    /// The element a press holds the pointer on now, if any.
+    #[must_use]
+    pub const fn held(&self) -> Option<u64> {
+        self.held
     }
 
     /// Sizes it to its content, as an inline embed: the page as tall as
@@ -336,6 +655,13 @@ impl RemoteDocument {
         {
             self.ids.remove(&old);
         }
+        // A scene set before its element had an id: its size goes there now.
+        if let Some(painted) = self.painted.get(&node) {
+            painted
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .element = id;
+        }
     }
 
     /// Forgets the ids of `node` and everything below it.
@@ -347,6 +673,10 @@ impl RemoteDocument {
             }
             if let Some(id) = self.elements.remove(&n) {
                 self.ids.remove(&id);
+            }
+            self.holds.remove(&n);
+            if let (Some(painted), Some(layer)) = (self.painted.remove(&n), &self.overlay) {
+                layer.remove(&painted);
             }
         }
     }
@@ -467,6 +797,20 @@ impl RemoteDocument {
                 value,
             } => {
                 let (node, _) = self.top()?;
+                if name == crate::embedded::VIEW_ATTR || name == crate::embedded::INPUT_ATTR {
+                    let text = match &value {
+                        Value::Text(t) => Some(t.as_str()),
+                        _ => None,
+                    };
+                    return self.held_attr(node, &name, text);
+                }
+                if name == crate::scene::SCENE_ATTR || name == crate::scene::TRANSFORM_ATTR {
+                    let text = match &value {
+                        Value::Text(t) => Some(t.as_str()),
+                        _ => None,
+                    };
+                    return self.paint_attr(node, &name, text);
+                }
                 let value = match value {
                     Value::None => None,
                     Value::Bool(false) if name == "checked" => None,
@@ -549,11 +893,27 @@ impl Document for RemoteDocument {
     }
 
     fn handle_ui_event(&mut self, event: UiEvent) {
+        // A pointer that comes back, or leaves, with no button held lost
+        // its release where the view couldn't see it: what it held is
+        // let go.
+        if let UiEvent::PointerMove(p) | UiEvent::PointerLeave(p) = &event
+            && p.buttons.is_empty()
+            && self.held.is_some()
+        {
+            let p = p.clone();
+            self.let_go(Some(&p));
+        }
+        let releases = matches!(event, UiEvent::PointerUp(_) | UiEvent::PointerCancel(_));
         let forward = Forward {
             listeners: &self.listeners,
             events: &self.events,
+            held: &mut self.held,
+            composing: &mut self.composing,
         };
         EventDriver::new(&mut self.doc, forward).handle_ui_event(event);
+        if releases {
+            self.held = None;
+        }
     }
 }
 
@@ -561,6 +921,43 @@ impl Document for RemoteDocument {
 struct Forward<'a> {
     listeners: &'a HashMap<String, u32>,
     events: &'a mpsc::UnboundedSender<ViewEvent>,
+    held: &'a mut Option<u64>,
+    composing: &'a mut bool,
+}
+
+impl Forward<'_> {
+    fn listens(&self, name: &str) -> bool {
+        self.listeners.get(name).copied().unwrap_or(0) > 0
+    }
+
+    fn send(&self, element: u64, name: &str, bubbles: bool, data: EventData) {
+        if !self.listens(name) {
+            return;
+        }
+        // The extension bubbles it through its own tree.
+        let _ = self.events.unbounded_send(ViewEvent {
+            element,
+            name: name.to_owned(),
+            bubbles,
+            data,
+        });
+    }
+}
+
+/// Whether events named `name` go to the element a press holds while it
+/// is held, over it or not.
+fn captured(name: &str) -> bool {
+    matches!(
+        name,
+        "pointermove"
+            | "pointerup"
+            | "pointercancel"
+            | "mousemove"
+            | "mouseup"
+            | "touchmove"
+            | "touchend"
+            | "touchcancel"
+    )
 }
 
 impl EventHandler for Forward<'_> {
@@ -569,29 +966,190 @@ impl EventHandler for Forward<'_> {
         chain: &[NodeId],
         event: &mut DomEvent,
         doc: &mut dyn Document,
-        _: &mut EventState,
+        state: &mut EventState,
     ) {
         let name = event.name();
-        if self.listeners.get(name).copied().unwrap_or(0) == 0 {
+        // A view that drags with pointer events owns its held moves: the
+        // document's own default (selecting the text under them) would
+        // fight it. Only when it hears no mouse or touch moves, which a
+        // cancelled pointer move would not send.
+        if name == "pointermove"
+            && self.held.is_some()
+            && self.listens("pointermove")
+            && !self.listens("mousemove")
+            && !self.listens("touchmove")
+        {
+            state.prevent_default();
+        }
+        let target = {
+            let doc = doc.inner();
+            chain
+                .iter()
+                .find_map(|n| doc.get_node(*n).and_then(dioxus_id))
+        };
+        // A press holds the pointer on the element it landed on.
+        if name == "pointerdown" {
+            *self.held = target;
+        }
+        let target = match *self.held {
+            Some(held) if captured(name) => Some(held),
+            _ => target,
+        };
+        let Some(element) = target else {
+            return;
+        };
+        if let DomEventData::Ime(ime) = &event.data {
+            self.composition(element, ime);
+            return;
+        }
+        // Focus leaving mid-composition ends it: the field won't hear the
+        // rest.
+        if matches!(name, "blur" | "focusout") && *self.composing {
+            *self.composing = false;
+            self.send(
+                element,
+                "compositionend",
+                true,
+                EventData::Composition(String::new()),
+            );
+        }
+        if !self.listens(name) {
             return;
         }
         let Some(data) = event_data(&event.data) else {
             return;
         };
-        let doc = doc.inner();
-        let Some(element) = chain
-            .iter()
-            .find_map(|n| doc.get_node(*n).and_then(dioxus_id))
-        else {
+        self.send(element, name, event.bubbles, data);
+    }
+}
+
+impl Forward<'_> {
+    /// An input method's event, as the web's composition events.
+    fn composition(&mut self, element: u64, ime: &BlitzImeEvent) {
+        match ime {
+            BlitzImeEvent::Preedit(text, _) if !text.is_empty() => {
+                if !*self.composing {
+                    *self.composing = true;
+                    self.send(
+                        element,
+                        "compositionstart",
+                        true,
+                        EventData::Composition(String::new()),
+                    );
+                }
+                self.send(
+                    element,
+                    "compositionupdate",
+                    true,
+                    EventData::Composition(text.clone()),
+                );
+            }
+            BlitzImeEvent::Commit(text) => {
+                if !*self.composing {
+                    self.send(
+                        element,
+                        "compositionstart",
+                        true,
+                        EventData::Composition(String::new()),
+                    );
+                }
+                *self.composing = false;
+                self.send(
+                    element,
+                    "compositionend",
+                    true,
+                    EventData::Composition(text.clone()),
+                );
+            }
+            BlitzImeEvent::Disabled if *self.composing => {
+                *self.composing = false;
+                self.send(
+                    element,
+                    "compositionend",
+                    true,
+                    EventData::Composition(String::new()),
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The host window's shell, as a view's document sees it: its input
+/// method, clipboard and redraws, the caret area moved from the view's
+/// coordinates to the window's by where the pane is.
+#[derive(Clone)]
+pub struct HostShell {
+    window: Arc<dyn ShellProvider>,
+    /// Where the pane is in the window, CSS pixels, and the view's last
+    /// caret area while its input method is on (in its own pixels).
+    state: Arc<Mutex<ShellState>>,
+}
+
+#[derive(Default)]
+struct ShellState {
+    at: (f32, f32),
+    caret: Option<(f32, f32, f32, f32)>,
+}
+
+impl HostShell {
+    /// The window's `shell`, for a pane at `x`, `y`.
+    #[must_use]
+    pub fn new(window: Arc<dyn ShellProvider>, x: f32, y: f32) -> Self {
+        Self {
+            window,
+            state: Arc::new(Mutex::new(ShellState {
+                at: (x, y),
+                caret: None,
+            })),
+        }
+    }
+
+    /// The pane is at `x`, `y` now: a caret the input method shows moves
+    /// with it.
+    pub fn moved(&self, x: f32, y: f32) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if state.at == (x, y) {
             return;
+        }
+        state.at = (x, y);
+        if let Some((cx, cy, w, h)) = state.caret {
+            self.window.set_ime_cursor_area(cx + x, cy + y, w, h);
+        }
+    }
+}
+
+impl ShellProvider for HostShell {
+    fn request_redraw(&self) {
+        self.window.request_redraw();
+    }
+
+    fn set_ime_enabled(&self, is_enabled: bool) {
+        if !is_enabled {
+            self.state
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .caret = None;
+        }
+        self.window.set_ime_enabled(is_enabled);
+    }
+
+    fn set_ime_cursor_area(&self, x: f32, y: f32, width: f32, height: f32) {
+        let (dx, dy) = {
+            let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            state.caret = Some((x, y, width, height));
+            state.at
         };
-        // The extension bubbles it through its own tree.
-        let _ = self.events.unbounded_send(ViewEvent {
-            element,
-            name: name.to_owned(),
-            bubbles: event.bubbles,
-            data,
-        });
+        self.window
+            .set_ime_cursor_area(x + dx, y + dy, width, height);
+    }
+
+    fn request_clipboard_text(&self) -> Result<(), ClipboardError> {
+        self.window.request_clipboard_text()
+    }
+
+    fn set_clipboard_text(&self, text: String) -> Result<(), ClipboardError> {
+        self.window.set_clipboard_text(text)
     }
 }
 
@@ -647,6 +1205,90 @@ fn key(k: &BlitzKeyEvent) -> KeyData {
     }
 }
 
+fn pointer_data(p: &BlitzPointerEvent) -> PointerData {
+    let (pointer_id, pointer_type) = match p.id {
+        BlitzPointerId::Mouse => (1, "mouse"),
+        BlitzPointerId::Pen => (2, "pen"),
+        BlitzPointerId::Finger(n) => (
+            i32::try_from(n).unwrap_or(i32::MAX - 10).saturating_add(10),
+            "touch",
+        ),
+    };
+    PointerData {
+        at: pointer(p),
+        pointer_id,
+        pointer_type: pointer_type.to_owned(),
+        is_primary: p.is_primary,
+        #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+        pressure: p.details.pressure as f32,
+        tilt_x: p.details.tilt_x.into(),
+        tilt_y: p.details.tilt_y.into(),
+        twist: p.details.twist.into(),
+    }
+}
+
+fn touch_point(p: &BlitzPointerEvent) -> TouchPoint {
+    let id = match p.id {
+        BlitzPointerId::Finger(n) => i32::try_from(n).unwrap_or(i32::MAX),
+        BlitzPointerId::Mouse | BlitzPointerId::Pen => 0,
+    };
+    TouchPoint {
+        id,
+        client_x: p.coords.client_x.into(),
+        client_y: p.coords.client_y.into(),
+        page_x: p.coords.page_x.into(),
+        page_y: p.coords.page_y.into(),
+        screen_x: p.coords.screen_x.into(),
+        screen_y: p.coords.screen_y.into(),
+        force: p.details.pressure,
+    }
+}
+
+fn touch_data(p: &BlitzPointerEvent, ended: bool) -> TouchData {
+    let mut touches: Vec<TouchPoint> = p
+        .active_pointers
+        .borrow()
+        .iter()
+        .filter(|a| a.is_finger() && (!ended || a.id != p.id))
+        .map(touch_point)
+        .collect();
+    if !ended && !touches.iter().any(|t| t.id == touch_point(p).id) {
+        touches.push(touch_point(p));
+    }
+    TouchData {
+        touches,
+        changed: vec![touch_point(p)],
+        mods: mods(p.mods),
+    }
+}
+
+fn wheel_data(w: &BlitzWheelEvent) -> WheelData {
+    // Blitz carries winit's sign (positive scrolls up); the wire, the
+    // web's (positive scrolls down), as a browser sends it.
+    let (delta_x, delta_y, delta_mode) = match w.delta {
+        BlitzWheelDelta::Pixels(x, y) => (-x, -y, 0),
+        BlitzWheelDelta::Lines(x, y) => (-x, -y, 1),
+    };
+    WheelData {
+        at: Pointer {
+            client_x: w.coords.client_x.into(),
+            client_y: w.coords.client_y.into(),
+            page_x: w.coords.page_x.into(),
+            page_y: w.coords.page_y.into(),
+            screen_x: w.coords.screen_x.into(),
+            screen_y: w.coords.screen_y.into(),
+            element_x: w.element.x.into(),
+            element_y: w.element.y.into(),
+            button: 0,
+            buttons: w.buttons.bits().into(),
+            mods: mods(w.mods),
+        },
+        delta_x,
+        delta_y,
+        delta_mode,
+    }
+}
+
 fn event_data(data: &DomEventData) -> Option<EventData> {
     match data {
         DomEventData::Click(p)
@@ -659,6 +1301,29 @@ fn event_data(data: &DomEventData) -> Option<EventData> {
         | DomEventData::MouseLeave(p)
         | DomEventData::MouseOver(p)
         | DomEventData::MouseOut(p) => Some(EventData::Mouse(pointer(p))),
+        DomEventData::PointerMove(p)
+        | DomEventData::PointerDown(p)
+        | DomEventData::PointerUp(p)
+        | DomEventData::PointerCancel(p)
+        | DomEventData::PointerEnter(p)
+        | DomEventData::PointerLeave(p)
+        | DomEventData::PointerOver(p)
+        | DomEventData::PointerOut(p) => Some(EventData::Pointer(pointer_data(p))),
+        DomEventData::TouchStart(p) | DomEventData::TouchMove(p) => {
+            Some(EventData::Touch(touch_data(p, false)))
+        }
+        DomEventData::TouchEnd(p) | DomEventData::TouchCancel(p) => {
+            Some(EventData::Touch(touch_data(p, true)))
+        }
+        DomEventData::Wheel(w) => Some(EventData::Wheel(wheel_data(w))),
+        DomEventData::Scroll(s) => Some(EventData::Scroll(ScrollData {
+            top: s.scroll_top,
+            left: s.scroll_left,
+            width: s.scroll_width,
+            height: s.scroll_height,
+            client_width: s.client_width,
+            client_height: s.client_height,
+        })),
         DomEventData::KeyPress(k) | DomEventData::KeyDown(k) | DomEventData::KeyUp(k) => {
             Some(EventData::Key(key(k)))
         }
@@ -667,7 +1332,7 @@ fn event_data(data: &DomEventData) -> Option<EventData> {
         | DomEventData::Blur(_)
         | DomEventData::FocusIn(_)
         | DomEventData::FocusOut(_) => Some(EventData::Focus),
-        _ => None,
+        DomEventData::Ime(_) | DomEventData::AppleStandardKeybinding(_) => None,
     }
 }
 
@@ -693,6 +1358,14 @@ async fn with_doc<R>(node: &NodeHandle, f: impl FnOnce(&mut BaseDocument, NodeId
         }
         futures_timer::Delay::new(Duration::from_millis(8)).await;
     }
+}
+
+/// Where `node` is in its window, CSS pixels.
+fn pane_at(doc: &BaseDocument, node: NodeId) -> (f32, f32) {
+    doc.get_node(node).map_or((0.0, 0.0), |n| {
+        let p = n.absolute_position(0.0, 0.0);
+        (p.x, p.y)
+    })
 }
 
 /// The view's document in `node`, to apply a frame to.
@@ -745,6 +1418,8 @@ async fn follow(
     theme: Option<Signal<String>>,
     mut timing: Timing,
     fit: Option<Fit>,
+    overlay: Option<crate::scene::OverlayLayer>,
+    mut slots: Signal<Vec<crate::embedded::Slot>>,
 ) {
     loop {
         let Some(process) = processes.get(&extension) else {
@@ -790,37 +1465,84 @@ async fn follow(
         };
         // The pane's events go through here, each one's time kept until
         // the frame that answers it.
-        let answered = process.hello().is_some_and(|h| h.wire >= ANSWERED_WIRE);
+        let wire = process.hello().map_or(crate::wire::WIRE_MIN, |h| h.wire);
+        let answered = wire >= ANSWERED_WIRE;
         let asked: Rc<RefCell<VecDeque<Instant>>> = Rc::default();
         let (events, mut proxied) = mpsc::unbounded::<ViewEvent>();
         // Each event asked, to the frame loop's watch for an overdue one.
         let (asking, mut was_asked) = mpsc::unbounded::<()>();
+        // Each frame, to the coalescer: the view answered one.
+        let (answer, mut answers) = mpsc::unbounded::<()>();
         let forwarding = {
             let (to, asked) = (session.events.clone(), Rc::clone(&asked));
             spawn(async move {
-                while let Some(event) = proxied.next().await {
-                    if answered {
-                        asked.borrow_mut().push_back(Instant::now());
-                        let _ = asking.unbounded_send(());
-                    }
-                    if to.unbounded_send(event).is_err() {
-                        return;
+                let mut coalescer = Coalescer::new();
+                loop {
+                    let ready = futures::select! {
+                        event = proxied.next() => match event {
+                            // What its wire can't carry, it never had.
+                            Some(event) if event.data.since() > wire => continue,
+                            // A view that answers nothing is sent all.
+                            Some(event) if !answered => vec![event],
+                            Some(event) => coalescer.push(event),
+                            None => return,
+                        },
+                        _ = answers.next() => coalescer.answered(),
+                    };
+                    for event in ready {
+                        if answered {
+                            asked.borrow_mut().push_back(Instant::now());
+                            let _ = asking.unbounded_send(());
+                        }
+                        if to.unbounded_send(event).is_err() {
+                            return;
+                        }
                     }
                 }
             })
         };
         let to_view = events.clone();
-        with_doc(&node, |doc, at| {
+        let shell = with_doc(&node, |doc, at| {
             let mut remote = RemoteDocument::new(events);
+            remote.set_overlay(overlay.clone());
             if let Some(css) = theme {
                 remote.set_theme_css(&css.peek());
             }
-            if fit.is_some() {
+            if fit.as_ref().is_some_and(|f| f.sized) {
                 remote.fit_content();
             }
+            let (x, y) = pane_at(doc, at);
+            let shell = HostShell::new(doc.shell_provider.clone(), x, y);
+            remote.set_host_shell(shell.clone());
             doc.set_sub_document(at, Box::new(remote));
+            shell
         })
         .await;
+        // Where the pane is, now and then: an input method's caret moves
+        // with the pane, not only when a frame comes.
+        let placing = {
+            let (node, shell) = (node.clone(), shell.clone());
+            spawn(async move {
+                loop {
+                    futures_timer::Delay::new(PLACE_EVERY).await;
+                    let (pane, held) = with_doc(&node, |doc, at| {
+                        let pane = pane_at(doc, at);
+                        let held = remote(doc, at).map(|r| {
+                            r.place_scenes(pane);
+                            r.embedded()
+                        });
+                        (pane, held)
+                    })
+                    .await;
+                    shell.moved(pane.0, pane.1);
+                    if let Some(held) = held
+                        && *slots.peek() != held
+                    {
+                        slots.set(held);
+                    }
+                }
+            })
+        };
         // An embed's input: now, and whenever it changes.
         if let Some(fit) = &fit {
             let _ = to_view.unbounded_send(embed_event(&fit.latest.borrow()));
@@ -832,17 +1554,36 @@ async fn follow(
         {
             let from = asked.borrow_mut().pop_front();
             let applying = Instant::now();
+            let _ = answer.unbounded_send(());
+            // Its scenes decoded off the UI thread first.
+            let (frame, decoded) = decode_scenes(frame).await;
             let applied = with_doc(&node, |doc, at| {
+                let (x, y) = pane_at(doc, at);
+                shell.moved(x, y);
                 let applied = remote(doc, at).map_or_else(
                     || Err("the view was unmounted".to_owned()),
-                    |r| r.apply(frame),
+                    |r| {
+                        r.predecoded(decoded);
+                        let applied = r.apply(frame);
+                        r.place_scenes((x, y));
+                        applied
+                    },
                 );
+                // The views it holds now (their boxes settle by the next
+                // look, `PLACE_EVERY`).
+                let held = remote(doc, at).map(|r| r.embedded());
                 // A frame no input asked for (a save, live data, a worker's
                 // news) still shows: the window is asked to draw again.
                 doc.shell_provider.request_redraw();
-                applied
+                (applied, held)
             })
             .await;
+            let (applied, held) = applied;
+            if let Some(held) = held
+                && *slots.peek() != held
+            {
+                slots.set(held);
+            }
             // From the event that asked; an older process's, its apply.
             match (answered, from) {
                 (true, Some(asked_at)) => {
@@ -866,6 +1607,10 @@ async fn follow(
             }
         }
         forwarding.cancel();
+        placing.cancel();
+        if !slots.peek().is_empty() {
+            slots.set(Vec::new());
+        }
         if let Some(fit) = &fit {
             fit.live.borrow_mut().take();
         }
@@ -905,6 +1650,44 @@ async fn follow(
             something_changes(Some(&process), &processes, &mut retry).await;
         }
     }
+}
+
+/// `frame`'s scenes decoded (`crate::scene::predecode`) on a thread of
+/// their own, so a large one can't stall the window; a frame with none
+/// is passed straight on.
+async fn decode_scenes(
+    frame: Frame,
+) -> (Frame, Vec<(u64, Result<crate::scene::Commands, String>)>) {
+    let has = matches!(&frame, Frame::Edits { edits } if edits.iter().any(|e| matches!(
+        e,
+        Edit::SetAttribute { name, value: Value::Text(v), .. }
+            if name == crate::scene::SCENE_ATTR && v.contains('\n')
+    )));
+    if !has {
+        return (frame, Vec::new());
+    }
+    let (to, from) = futures::channel::oneshot::channel();
+    let spawned = std::thread::Builder::new()
+        .name("scene decode".to_owned())
+        .spawn(move || {
+            let decoded = match &frame {
+                Frame::Edits { edits } => crate::scene::predecode(edits),
+                Frame::Failed(_) => Vec::new(),
+            };
+            let _ = to.send((frame, decoded));
+        });
+    if spawned.is_err() {
+        return (
+            Frame::Failed("its scenes could not be decoded".to_owned()),
+            Vec::new(),
+        );
+    }
+    from.await.unwrap_or_else(|_| {
+        (
+            Frame::Failed("its scenes could not be decoded".to_owned()),
+            Vec::new(),
+        )
+    })
 }
 
 /// Whether another process of `extension` has taken `process`'s place (a
@@ -957,8 +1740,17 @@ async fn next_frame(
 /// `architect_workspace::Meters` in context (when there are); while one
 /// runs past [`REMOTE_BUDGET`] the pane keeps its last frame, marked
 /// busy.
+///
+/// Its scenes (`crate::scene`) are clipped to their boxes unless
+/// `overlay`: the extension was granted `overlay` (`capabilities.ui`) and
+/// may draw over the whole app.
 #[component]
-pub fn RemoteView(processes: Processes, extension: String, view: String) -> Element {
+pub fn RemoteView(
+    processes: Processes,
+    extension: String,
+    view: String,
+    #[props(default)] overlay: bool,
+) -> Element {
     // Keyed by what it shows (a one-item list: a key on a lone node does
     // not remount it): a pane that goes on to another process view (one
     // tab replaced by the next in the same group) mounts that view, not
@@ -966,7 +1758,7 @@ pub fn RemoteView(processes: Processes, extension: String, view: String) -> Elem
     let key = format!("{extension}/{view}");
     rsx! {
         for key in [key] {
-            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: None, max_height: None }
+            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: None, max_height: None, overlay }
         }
     }
 }
@@ -986,7 +1778,66 @@ pub fn RemoteEmbed(
     let key = format!("{extension}/{view}");
     rsx! {
         for key in [key] {
-            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: Some(input), max_height: Some(max_height) }
+            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: Some(input), max_height: Some(max_height), overlay: false }
+        }
+    }
+}
+
+/// Extension `extension`'s view `view` as an overlay layer over another
+/// view (`[[overlays]] draws`, `crate::overlay`): filling its parent (the
+/// view's box), clipped to it, given `spaces` (the view's coordinates) as
+/// its input whenever they change. Mount it in a box that passes the
+/// pointer through (`pointer-events: none`) over the view.
+#[component]
+pub fn RemoteOverlay(
+    processes: Processes,
+    extension: String,
+    view: String,
+    /// The kind of view it draws over.
+    over: String,
+    spaces: crate::overlay::OverlaySpaces,
+) -> Element {
+    let input = crate::contrib::EmbedInput {
+        claim: crate::overlay::claim(&over),
+        source: String::new(),
+        props: serde_json::to_value(&spaces).unwrap_or_default(),
+    };
+    let mut signal = use_signal(|| input.clone());
+    if *signal.peek() != input {
+        signal.set(input);
+    }
+    let key = format!("{extension}/{view}");
+    rsx! {
+        for key in [key] {
+            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: Some(signal), max_height: None, overlay: false }
+        }
+    }
+}
+
+/// Another extension's view held in a remote view (`crate::embedded`):
+/// linked in, drawn in the app's document; a process's or a component's,
+/// as a remote view of its own, filling the box, given its input.
+#[component]
+fn HeldView(processes: Processes, slot: crate::embedded::Slot) -> Element {
+    let crate::embedded::Slot {
+        extension,
+        view,
+        input,
+        ..
+    } = slot;
+    if let Some(ui) = try_use_context::<crate::interface::ExtensionUi>()
+        && let Some(root) = ui.host().linked_view(&extension, &view)
+    {
+        return rsx! { crate::interface::LinkedOverlay { root, input } };
+    }
+    let mut signal = use_signal(|| input.clone());
+    if *signal.peek() != input {
+        signal.set(input);
+    }
+    let key = format!("{extension}/{view}");
+    rsx! {
+        for key in [key] {
+            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: Some(signal), max_height: None, overlay: false }
         }
     }
 }
@@ -997,6 +1848,8 @@ pub fn RemoteEmbed(
 struct Fit {
     latest: Rc<RefCell<crate::contrib::EmbedInput>>,
     live: Rc<RefCell<Option<mpsc::UnboundedSender<ViewEvent>>>>,
+    /// Sized to its content (an inline embed); an overlay fills its box.
+    sized: bool,
 }
 
 /// The [`crate::wire::EMBED_EVENT`] that carries `input`.
@@ -1041,6 +1894,7 @@ fn Mount(
     view: String,
     input: Option<Signal<crate::contrib::EmbedInput>>,
     max_height: Option<u32>,
+    overlay: bool,
 ) -> Element {
     let shown = use_signal(|| Shown::Waiting("Starting…".to_owned()));
     let busy = use_signal(|| false);
@@ -1066,6 +1920,7 @@ fn Mount(
     // measured.
     let fit = use_hook(|| {
         input.map(|i| Fit {
+            sized: max_height.is_some(),
             latest: Rc::new(RefCell::new(i.peek().clone())),
             live: Rc::default(),
         })
@@ -1106,6 +1961,16 @@ fn Mount(
             .await;
         });
     });
+    // Other extensions' views it holds, where their placeholders are.
+    let slots = use_signal(Vec::<crate::embedded::Slot>::new);
+    // A view that may draw over the whole app: its scenes' layer, drawn by
+    // a widget filling the window (`scene::OverlayLayer`).
+    let layer = use_hook(|| overlay.then(crate::scene::OverlayLayer::new));
+    let over = use_hook(|| {
+        layer
+            .as_ref()
+            .map(|l| dioxus_native_dom::CustomWidgetAttr::new(l.widget()))
+    });
     let follow_with = {
         let (processes, extension) = (processes.clone(), extension.clone());
         move |node: NodeHandle| {
@@ -1123,13 +1988,16 @@ fn Mount(
                         busy,
                     },
                     fit.clone(),
+                    layer.clone(),
+                    slots,
                 ));
-                if fit.is_some() {
+                if fit.as_ref().is_some_and(|f| f.sized) {
                     spawn(measure(node, height));
                 }
             }
         }
     };
+    let holding = processes.clone();
     let restart = {
         move |_| {
             if let Some(p) = processes.get(&extension)
@@ -1146,7 +2014,11 @@ fn Mount(
             let _ = retry_to.unbounded_send(());
         }
     };
+    // An overlay layer (`RemoteOverlay`) says nothing over the view it
+    // draws on while its process starts or is gone: it is simply absent.
+    let layer_only = input.is_some() && max_height.is_none();
     let placeholder = match shown() {
+        _ if layer_only => None,
         Shown::Live => None,
         Shown::Waiting(why) => Some((why, false)),
         Shown::Stopped(why) => Some((why, true)),
@@ -1158,10 +2030,26 @@ fn Mount(
         (Some(_), Some(_)) => "72px".to_owned(),
         (Some(max), None) => format!("{}px", embed_height(height(), max)),
     };
+    // A view that may draw over the whole app is not clipped by its pane.
+    let clip = if overlay { "visible" } else { "hidden" };
     rsx! {
-        div { style: "position: relative; width: 100%; height: {tall}; overflow: hidden;",
+        div { style: "position: relative; width: 100%; height: {tall}; overflow: {clip};",
             div {
                 style: "position: absolute; top: 0; left: 0; right: 0; bottom: 0;",
+                // The pane lost the focus (another pane, the window):
+                // whatever the view held is let go.
+                onblur: move |_| {
+                    if let Some(node) = node_at.peek().clone() {
+                        spawn(async move {
+                            with_doc(&node, |doc, at| {
+                                if let Some(r) = remote(doc, at) {
+                                    r.let_go(None);
+                                }
+                            })
+                            .await;
+                        });
+                    }
+                },
                 onmounted: move |e: MountedEvent| {
                     if !mounted() && let Some(node) = e.data().downcast::<NodeHandle>() {
                         mounted.set(true);
@@ -1170,7 +2058,27 @@ fn Mount(
                     }
                 },
             }
-            if busy() && placeholder.is_none() {
+            // The views it holds, each over its placeholder's box, in front
+            // of the view so they take their own input.
+            for slot in slots() {
+                div {
+                    key: "{slot.key}",
+                    class: "remote-view-held",
+                    style: "position: absolute; left: {slot.x}px; top: {slot.y}px; \
+                            width: {slot.width}px; height: {slot.height}px; overflow: hidden;",
+                    HeldView { processes: holding.clone(), slot: slot.clone() }
+                }
+            }
+            if let Some(over) = over {
+                // Over the whole window, above the panes; no input.
+                object {
+                    class: "remote-view-overlay",
+                    style: "position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; \
+                            pointer-events: none; z-index: 2147483647;",
+                    data: over,
+                }
+            }
+            if busy() && placeholder.is_none() && !layer_only {
                 architect_shell::BusyBadge {}
             }
             if let Some((why, stopped)) = placeholder {

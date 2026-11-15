@@ -99,6 +99,25 @@ pub enum HostRequest {
     ReadDocument {
         path: String,
     },
+    /// One view of a base run over the vault index (the vault's query
+    /// service, `vault_proto::query::VaultQuery`): a `.base` file's
+    /// (`path`) or a base's YAML (`source`); the first view unless `view`
+    /// names one; at most `limit` rows. Its views, the view, its rows in
+    /// groups, `total`, every column, formulas, filters, the index's
+    /// `revision` and the answer's `hash`; `{unchanged: true}` when that
+    /// hash is `if_changed`. Needs `reads = ["documents"]`.
+    QueryVault {
+        #[serde(default)]
+        path: Option<String>,
+        #[serde(default)]
+        source: Option<String>,
+        #[serde(default)]
+        view: Option<String>,
+        #[serde(default)]
+        if_changed: Option<String>,
+        #[serde(default)]
+        limit: Option<u32>,
+    },
     /// The app's documents (`crate::documents::Documents`), every one or
     /// those under folder `under`: `[DocInfo]`.
     ListDocuments {
@@ -732,6 +751,7 @@ impl HostRequest {
             Self::Selection => "selection",
             Self::Open { .. } => "open",
             Self::ReadDocument { .. } => "read_document",
+            Self::QueryVault { .. } => "query_vault",
             Self::ListDocuments { .. } => "list_documents",
             Self::CreateDocument { .. } => "create_document",
             Self::EditDocument { .. } => "edit_document",
@@ -949,6 +969,7 @@ pub fn check(
         HostRequest::Selection => ("reads", reads(SELECTION)),
         HostRequest::Open { .. }
         | HostRequest::ReadDocument { .. }
+        | HostRequest::QueryVault { .. }
         | HostRequest::ListDocuments { .. }
         | HostRequest::WatchDocuments { .. } => ("reads", reads(DOCUMENTS)),
         HostRequest::CreateDocument { .. }

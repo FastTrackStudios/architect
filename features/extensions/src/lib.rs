@@ -87,6 +87,7 @@ pub mod device_ios;
 pub mod doc;
 #[cfg(feature = "host")]
 pub mod docs_service;
+pub mod embedded;
 #[cfg(feature = "host")]
 pub mod embeds;
 #[cfg(feature = "host")]
@@ -133,8 +134,13 @@ pub mod manager;
 pub mod net;
 #[cfg(any(feature = "host", feature = "vox"))]
 pub mod node;
+pub mod overlay;
 #[cfg(all(feature = "pickers", target_os = "ios"))]
 pub(crate) mod pickers_ios;
+#[cfg(feature = "scenes")]
+pub mod scene;
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+mod web_scene;
 // Language servers through the host (#512): `Host::open_code`, the
 // `EDITOR_*` actions. Native only.
 #[cfg(all(feature = "lsp", not(target_family = "wasm")))]
