@@ -129,6 +129,8 @@ members = [
     "extensions/time-tracker",
     "extensions/dayplan",
     "extensions/calendar",
+    "extensions/cookbook",
+    "extensions/mealplan",
     "features/threads",
     "features/playhead",
     "features/notify",
@@ -193,6 +195,8 @@ architect-tasks = { path = "extensions/tasks" }
 architect-time-tracker = { path = "extensions/time-tracker" }
 architect-calendar = { path = "extensions/calendar" }
 architect-dayplan = { path = "extensions/dayplan" }
+architect-cookbook = { path = "extensions/cookbook" }
+architect-mealplan = { path = "extensions/mealplan" }
 # Threads (#348): comments on any entity, a built-in extension.
 architect-threads = { path = "features/threads" }
 architect-playhead = { path = "features/playhead", default-features = false }

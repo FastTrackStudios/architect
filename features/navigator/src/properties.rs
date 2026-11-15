@@ -94,7 +94,7 @@ fn unescape(s: &str) -> String {
 #[must_use]
 pub fn expand(op: &FileOp, files: &[NoteFile]) -> Vec<FileOp> {
     let mut out = Vec::new();
-    for f in files.iter().filter(|f| f.is_markdown()) {
+    for f in files.iter().filter(|f| f.is_note()) {
         match op {
             FileOp::RenamePropertyKey { from, to } => {
                 let (from_k, to_k) = (fold(from), fold(to));
@@ -274,7 +274,7 @@ impl PropertyTree {
                 });
             }
         }
-        let mut files: Vec<&NoteFile> = files.into_iter().filter(|f| f.is_markdown()).collect();
+        let mut files: Vec<&NoteFile> = files.into_iter().filter(|f| f.is_note()).collect();
         files.sort_by(|a, b| a.path.cmp(&b.path));
         for f in files {
             for node in tree.keys.values_mut() {

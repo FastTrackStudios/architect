@@ -159,7 +159,14 @@ pub fn note_from_markdown(path: &str, text: &str, created: Millis, modified: Mil
             }
         }
     }
-    let (words, tasks) = scan_body(body, &mut tags);
+    // A body that is not markdown (a declared type's, `body = "text"`)
+    // has no inline tags or tasks: its `#` and `- [ ]` are its own.
+    let (words, tasks) = if vault_proto::note_types::body_is_markdown(path) {
+        scan_body(body, &mut tags)
+    } else {
+        let (words, _) = scan_body(body, &mut Vec::new());
+        (words, TaskCounts::default())
+    };
     let named = FEATURE_IMAGE_PROPERTIES.iter().find_map(|key| {
         properties
             .iter()
@@ -180,8 +187,9 @@ pub fn note_from_markdown(path: &str, text: &str, created: Millis, modified: Mil
 }
 
 fn has_markdown_ext(path: &str) -> bool {
-    path.rsplit_once('.')
-        .is_some_and(|(_, e)| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown"))
+    path.rsplit_once('.').is_some_and(|(_, e)| {
+        e.eq_ignore_ascii_case("markdown") || vault_proto::note_types::is_note_extension(e)
+    })
 }
 
 /// A note's frontmatter block as it is written, and the body after it.
@@ -331,6 +339,15 @@ fn scan_body(body: &str, tags: &mut Vec<String>) -> (u32, TaskCounts) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_text_bodied_note_type_keeps_its_frontmatter_tags_only() {
+        vault_proto::note_types::register_with("zznavtext", "recipe", false);
+        let text = "---\ntags: [quick]\n---\nFry in a #pan{}.\n- [ ] not a task\n";
+        let n = note_from_markdown("R/Toast.zznavtext", text, 0, 0);
+        assert_eq!(n.tags, ["quick"]);
+        assert_eq!(n.tasks, Some(TaskCounts::default()));
+    }
 
     #[test]
     fn a_note_reads_its_frontmatter_tags_preview_words_and_tasks() {

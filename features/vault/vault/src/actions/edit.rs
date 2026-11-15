@@ -133,12 +133,10 @@ fn check_note_path(to: &str) -> Result<(), String> {
     let bad = to.is_empty()
         || to.starts_with('/')
         || to.split('/').any(|s| s.is_empty() || s == "." || s == "..")
-        || !Path::new(to)
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("md"));
+        || !vault_proto::note_types::is_note_path(to);
     if bad {
         return Err(format!(
-            "{to:?} is not a note's path (a vault path ending in .md)"
+            "{to:?} is not a note's path (a vault path ending in .md or a note file type)"
         ));
     }
     Ok(())
@@ -341,11 +339,7 @@ impl OpenVault {
     /// No file at `from`, `to` is taken or not inside the vault, or the
     /// move fails.
     pub fn move_file(&self, from: &str, to: &str) -> Result<Changes, String> {
-        let is_note = |p: &str| {
-            Path::new(p)
-                .extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("md"))
-        };
+        let is_note = vault_proto::note_types::is_note_path;
         if is_note(from) && is_note(to) {
             self.rename(from, to)?;
             return Ok(Changes::default());
@@ -605,7 +599,7 @@ impl OpenVault {
         let paths: Vec<String> = self.with(|v| {
             v.pages
                 .iter()
-                .filter(|p| p.rel_path.to_ascii_lowercase().ends_with(".md"))
+                .filter(|p| vault_proto::note_types::is_note_path(&p.rel_path))
                 .map(|p| p.rel_path.clone())
                 .collect()
         });

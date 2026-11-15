@@ -85,7 +85,7 @@ fn push_once(list: &mut Vec<String>, path: String) {
 }
 
 fn is_note(path: &str) -> bool {
-    path.to_ascii_lowercase().ends_with(".md")
+    vault_proto::note_types::is_note_path(path)
 }
 
 /// What `text` (a note, frontmatter and all) names, as written: link and
@@ -179,7 +179,7 @@ pub fn resolve(name: &str, from: &str, paths: &[String]) -> Option<String> {
             }
             let mut named = paths.iter().filter(|p| {
                 let base = p.rsplit('/').next().unwrap_or(p);
-                base == name || base.strip_suffix(".md") == Some(name)
+                base == name || (is_note(base) && vault_proto::note_types::note_stem(base) == name)
             });
             let one = named.next()?;
             named.next().is_none().then(|| one.clone())

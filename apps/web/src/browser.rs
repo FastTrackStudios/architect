@@ -208,6 +208,8 @@ pub fn run(distribution: architect_distribution::Distribution) {
             .unwrap_or_default();
         web_sys::console::error_1(&format!("architect-web panicked: {info}\n{stack}").into());
     }));
+    // `install` registers its linked extensions' note file types before
+    // any vault is read (the demo's is built before the host loads them).
     let dist = distribution.install();
     if let Ok(described) = serde_json::from_value::<Distribution>(dist.describe()) {
         DIST.with(|d| *d.borrow_mut() = described);

@@ -77,9 +77,7 @@ fn is_quiet() -> bool {
 
 /// Whether `path` is one of the vault's documents: a note.
 fn is_note(path: &str) -> bool {
-    std::path::Path::new(path)
-        .extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("md"))
+    vault_proto::note_types::is_note_path(path)
 }
 
 /// `path` under folder `from`, moved to folder `to`.
@@ -301,7 +299,7 @@ fn note_path(path: &str) -> Result<(), DocError> {
     }
     if !is_note(path) {
         return Err(DocError::Invalid(format!(
-            "{path:?} is not a note's path (a vault path ending in .md)"
+            "{path:?} is not a note's path (a vault path ending in .md or a note file type)"
         )));
     }
     Ok(())

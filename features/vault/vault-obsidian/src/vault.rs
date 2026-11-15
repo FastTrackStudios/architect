@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::obsidian_parse::{ParsedPage, parse_page, serialize_frontmatter};
+use crate::obsidian_parse::{ParsedPage, parse_note, serialize_frontmatter};
 use vault_live::bases::{self, ParsedBase};
 
 use crate::config::{ObsidianConfig, read_obsidian_config};
@@ -193,7 +193,7 @@ impl Vault {
             .and_then(|m| m.modified())
             .unwrap_or_else(|_| std::time::SystemTime::now());
         page.raw = new_raw.to_string();
-        page.parsed = parse_page(new_raw);
+        page.parsed = parse_note(rel_path, new_raw);
         page.mtime = mtime;
         page.generation = next_generation();
         Ok(())
@@ -275,7 +275,7 @@ fn read_own(root: &Path, entry: &VaultEntry) -> Result<String, LoadError> {
 
 fn load_page(root: &Path, entry: &VaultEntry) -> Result<VaultPage, LoadError> {
     let raw = read_own(root, entry)?;
-    let parsed = parse_page(&raw);
+    let parsed = parse_note(&entry.rel_path, &raw);
     let mtime = std::fs::metadata(&entry.abs_path)
         .and_then(|m| m.modified())
         .unwrap_or_else(|_| std::time::SystemTime::now());

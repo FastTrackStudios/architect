@@ -521,6 +521,14 @@ impl Distribution {
             fresh = true;
             self
         });
+        if fresh {
+            // Its extensions' note file types, before any vault is read: a
+            // vault opened before the host loads them would not see their
+            // files as notes (a `.cook` recipe).
+            for t in installed.file_types() {
+                t.register();
+            }
+        }
         if fresh && let Some(old) = &installed.adopts {
             let new = architect::settings::env_var(&installed.folder);
             let unset = std::env::var_os(&new).is_none_or(|v| v.is_empty());
@@ -600,6 +608,20 @@ impl Distribution {
             .into_iter()
             .filter_map(|e| Manifest::parse(e.manifest()).ok())
             .flat_map(|m| m.share_layers)
+            .collect()
+    }
+
+    /// Its compiled-in extensions' `[[file_types]]`: the file types that
+    /// are vault notes. [`Self::install`] registers them before any vault
+    /// is read (`vault_proto::note_types::register_with`), as the node
+    /// does before it serves; an app's extension host does again as it
+    /// loads each extension.
+    #[must_use]
+    pub fn file_types(&self) -> Vec<architect_extensions::contrib::FileTypeDecl> {
+        self.extensions()
+            .into_iter()
+            .filter_map(|e| Manifest::parse(e.manifest()).ok())
+            .flat_map(|m| m.contributes.file_types)
             .collect()
     }
 
@@ -737,8 +759,8 @@ pub const LAB_CONFIG_ENV: &str = "ARCHITECT_LAB_CONFIG_DIR";
 /// The Architect app, with architect's first-party extensions compiled in.
 ///
 /// The person's vaults, opened or made on first run; compiled in (#368):
-/// Projects, Tasks, the Time Tracker, the Calendar, Day Plans, Threads,
-/// Notify and Files. Each runs alone; together a project's page shows its tasks and
+/// Projects, Tasks, the Time Tracker, the Calendar, Day Plans, the Cookbook,
+/// Mealplan, Threads, Notify and Files. Each runs alone; together a project's page shows its tasks and
 /// their time, a task its timer, the calendar the tasks' days.
 ///
 /// A downstream build starts here and renames it (`.named("Studio")`), or
@@ -757,6 +779,9 @@ pub fn architect() -> Distribution {
         // Day Plans (#444): day templates, their rules, each day's plan,
         // drawn under the Calendar's events.
         .linked(&architect_dayplan::DayPlans)
+        // The Cookbook bundle: recipes in Cooklang, the week's meals and
+        // the grocery list built from them.
+        .bundle(cookbook())
         // Threads and Notify (#348): comments on anything; the bell.
         .linked(&architect_threads::Threads)
         .linked(&architect_notify::Notify)
@@ -792,6 +817,16 @@ pub fn project_management() -> Bundle {
         .member(&architect_projects::Projects)
         .member(&architect_tasks::Tasks)
         .member(&architect_time_tracker::TimeTracker)
+}
+
+/// The Cookbook bundle (#792): the Cookbook (recipes as Cooklang files)
+/// and Mealplan (the week's meals, the pantry, the grocery list), which
+/// reaches the Cookbook only through its service.
+#[must_use]
+pub fn cookbook() -> Bundle {
+    Bundle::new("cookbook", "Cookbook")
+        .member(&architect_cookbook::Cookbook)
+        .member(&architect_mealplan::Mealplan)
 }
 
 /// `extension`'s embed pages that claim a fence, its package written

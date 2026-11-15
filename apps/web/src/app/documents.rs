@@ -57,9 +57,7 @@ fn is_quiet(path: &str) -> bool {
 
 /// Whether `path` is one of the vault's documents: a note.
 fn is_note(path: &str) -> bool {
-    std::path::Path::new(path)
-        .extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("md"))
+    vault_proto::note_types::is_note_path(path)
 }
 
 /// The document event a source's event is, for the person's own edits:
