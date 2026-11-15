@@ -81,6 +81,7 @@ export type HostRequest =
   | { op: "selection" }
   | { op: "open"; path: string }
   | { op: "read_document"; path: string }
+  | { op: "query_vault"; path?: string; source?: string; view?: string; if_changed?: string; limit?: number }
   | { op: "list_documents"; under?: string | null }
   | { op: "create_document"; path: string; text?: string }
   | { op: "edit_document"; path: string; edits: DocEdit[]; name?: string | null }
@@ -164,6 +165,12 @@ export interface Architect {
   documents: {
     list(under?: string): Promise<DocInfo[]>;
     read(path: string): Promise<string>;
+    /**
+     * One view of a base run over the vault index: a `.base` file's
+     * (`path`) or a base's YAML (`source`); the first view unless `view`
+     * names one. `{unchanged: true}` when the answer's hash is `if_changed`.
+     */
+    query(options: Omit<Extract<HostRequest, { op: "query_vault" }>, "op">): Promise<Json>;
     create(path: string, text?: string): Promise<DocInfo>;
     edit(path: string, edits: DocEdit[], name?: string): Promise<string>;
     rename(path: string, to: string): Promise<DocInfo>;

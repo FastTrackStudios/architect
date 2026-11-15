@@ -159,6 +159,7 @@
     documents: {
       list: function (under) { return call({ op: "list_documents", under: under === undefined ? null : under }); },
       read: function (path) { return call({ op: "read_document", path: path }); },
+      query: function (options) { return call(Object.assign({ op: "query_vault" }, options || {})); },
       create: function (path, text) { return call({ op: "create_document", path: path, text: text || "" }); },
       edit: function (path, edits, name) { return call({ op: "edit_document", path: path, edits: edits, name: name === undefined ? null : name }); },
       rename: function (path, to) { return call({ op: "rename_document", path: path, to: to }); },

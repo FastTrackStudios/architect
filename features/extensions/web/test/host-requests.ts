@@ -11,6 +11,7 @@ export const requests: HostRequest[] = /* BEGIN */ [
   { "op": "selection" },
   { "op": "open", "path": "notes/a.md" },
   { "op": "read_document", "path": "notes/a.md" },
+  { "op": "query_vault", "path": "Projects.base", "view": "Table", "limit": 50 },
   { "op": "list_documents", "under": "notes" },
   { "op": "create_document", "path": "notes/b.md", "text": "hi" },
   { "op": "edit_document", "path": "notes/b.md", "edits": [{ "insert": { "at": 0, "text": "x" } }, { "append": { "text": "y" } }], "name": "Edit" },
