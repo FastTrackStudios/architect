@@ -22,8 +22,8 @@ Cooklang.
 title: Chicken and Waffles
 servings: 4
 course: dinner
-prep_time: 20 min
-cook_time: 30 min
+prep time: 20 min
+cook time: 30 min
 tags: [comfort, weekend]
 ---
 = Chicken
@@ -116,14 +116,43 @@ The layouts wrap: a phone's narrow pane stacks what a desk shows side by
 side. The views read in futures, never while drawing, and are drawn
 again when the cookbook changes and every few seconds while they show.
 
-## 4. Cookbook.base
+## 4. Importing
+
+`COOKBOOK_IMPORT` (`Recipes::import`) makes a recipe from elsewhere into
+Cooklang, a draft unless `save` is given:
+
+- **A page** (`url`): fetched through the host (`capabilities.hosts =
+  ["*"]`: the consent screen says it may read any site), its schema.org
+  Recipe read from the page's JSON-LD (`extensions/cookbook/src/moved/import/extract.rs`
+  `extract`: `@graph`s, lists, `HowToSection`s, ISO durations), and
+  written as Cooklang by Task's deterministic synthesizer
+  (`extensions/cookbook/src/moved/import/heuristic.rs`
+  `synthesize_heuristic`): each ingredient line parsed for its amount
+  and unit and placed where a step first names it, every one kept (the
+  ones it cannot place go in a last step, `unplaced` in the answer), the
+  recipe marked `import: needs-review`. A site that refuses programs
+  (403, 429, 503) is reported with what to do: save the page and import
+  its text. In a browser the page must allow the app's origin (CORS).
+- **A text** (`text`): a saved page's HTML (as above), or a `.cook` file
+  as it is, Task's `>> key: value` metadata moved into YAML frontmatter
+  (`extensions/cookbook/src/moved/import/formats.rs`
+  `arrows_to_frontmatter`).
+- `COOKBOOK_TIDY` does the same to `.cook` files already in the vault
+  (Task's cookbook copied in): each rewritten once, one undo step each,
+  so its title, servings and tags show in Bases and search.
+
+Task's LLM synthesis and its collection import (a listing page's
+recipes) do not come across: the first needs an API key the cookbook
+would hold, the second Task's CLI loop.
+
+## 5. Cookbook.base
 
 `COOKBOOK_BASE` writes `Cookbook/Cookbook.base`
 (`extensions/cookbook/templates/Cookbook.base`) when it is not there and
 opens it: every `.cook` file (`file.ext == "cook"`) as a table, as cards
 and grouped by course.
 
-## 5. Actions
+## 6. Actions
 
 See [Commands](@/reference/commands.md) for each one's arguments.
 
@@ -135,6 +164,8 @@ See [Commands](@/reference/commands.md) for each one's arguments.
 | `COOKBOOK_RENAME` | mutating | move a recipe |
 | `COOKBOOK_DELETE` | destructive | to the trash |
 | `COOKBOOK_INGREDIENTS` | read-only | what portions need |
+| `COOKBOOK_IMPORT` | mutating | a page or a text as Cooklang |
+| `COOKBOOK_TIDY` | mutating | `>>` metadata as frontmatter |
 | `COOKBOOK_BASE` | mutating | open Cookbook.base, writing it first |
 | `COOKBOOK_OPEN` | read-only | the cookbook, cook mode or the editor |
 | `COOKBOOK_TIMER` | read-only | a kitchen timer's notification |
@@ -149,4 +180,7 @@ and the app's MCP tools.
   refused; saving, renaming, deleting; index rows as summaries.
 - `extensions/cookbook/tests/host.rs`: linked into a host over the app's
   documents, every action through the host and the in-process service.
-- `extensions/cookbook/src/moved/parse.rs`: Task's parser tests.
+- `extensions/cookbook/src/moved/parse.rs`: Task's parser tests;
+  `extensions/cookbook/src/moved/import/heuristic.rs`: Task's
+  synthesizer tests; `extensions/cookbook/src/moved/import/extract.rs`:
+  a page's JSON-LD.

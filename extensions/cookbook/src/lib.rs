@@ -53,19 +53,22 @@ pub mod ui;
     clippy::match_bool,
     clippy::explicit_iter_loop,
     clippy::needless_collect,
-    clippy::assigning_clones
+    clippy::assigning_clones,
+    clippy::format_push_string
 )]
 mod moved {
+    pub mod import;
     pub mod model;
     pub mod parse;
     pub mod units;
     pub mod wiki;
 }
-pub use moved::{model, parse, units, wiki};
+pub use moved::{import, model, parse, units, wiki};
 
 pub use model::{CookStep, Ingredient, Recipe, RecipeTimer};
 pub use service::{
-    CookbookError, Needed, Portion, RecipeSummary, Recipes, RecipesClient, Save, Search,
+    CookbookError, Import, Imported, Needed, Portion, RecipeSummary, Recipes, RecipesClient, Save,
+    Search,
 };
 
 use architect_extensions::linked::{Builder, Extension};
@@ -108,6 +111,8 @@ impl Extension for Cookbook {
             .action("COOKBOOK_BASE", actions::base)
             .action("COOKBOOK_OPEN", actions::open)
             .action("COOKBOOK_TIMER", actions::timer)
+            .action("COOKBOOK_IMPORT", actions::import)
+            .action("COOKBOOK_TIDY", actions::tidy)
             .action("COOKBOOK_STARTED", |_| async {
                 Ok(json!({ "ready": true }))
             });

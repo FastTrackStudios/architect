@@ -219,6 +219,46 @@ impl Files {
         }
     }
 
+    /// The text of the page at `url`, through the host's `fetch`.
+    pub async fn fetch(&self, url: &str) -> Result<String, CookbookError> {
+        let Self::Host(h) = self else {
+            return Err(CookbookError::Failed("no network here".into()));
+        };
+        let mut headers = std::collections::BTreeMap::new();
+        headers.insert(
+            "Accept".to_owned(),
+            "text/html,application/xhtml+xml".to_owned(),
+        );
+        let v = h
+            .host(HostRequest::Fetch(architect_extensions::hostcall::Fetch {
+                url: url.to_owned(),
+                method: None,
+                headers,
+                body: None,
+                timeout_ms: Some(20_000),
+                max_bytes: Some(8 * 1024 * 1024),
+                stream: false,
+                binary: false,
+            }))
+            .await
+            .map_err(|e| CookbookError::Failed(format!("{url}: {e}")))?;
+        let status = v.get("status").and_then(Value::as_u64).unwrap_or(0);
+        if !(200..300).contains(&status) {
+            return Err(CookbookError::Failed(format!(
+                "{url} answered {status}{}",
+                if matches!(status, 403 | 429 | 503) {
+                    ": the site refuses programs; save the page and import its text"
+                } else {
+                    ""
+                }
+            )));
+        }
+        Ok(v.get("body")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned())
+    }
+
     /// Every Cooklang file's path (`.cook`), read from the documents.
     pub async fn paths(&self) -> Result<Vec<String>, CookbookError> {
         let all: Vec<String> = match self {

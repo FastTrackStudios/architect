@@ -113,6 +113,44 @@ pub struct Save {
     pub create: bool,
 }
 
+/// A recipe from somewhere else, made Cooklang.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Facet, Serialize, Deserialize)]
+pub struct Import {
+    /// A page: its schema.org Recipe, fetched through the host.
+    #[serde(default)]
+    pub url: Option<String>,
+    /// Or a recipe's text: a `.cook` file (`>>` metadata or YAML
+    /// frontmatter), or a page's HTML.
+    #[serde(default)]
+    pub text: Option<String>,
+    /// Where to write it; `<folder>/<its name>.cook` when unset.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Write it (refused when the path is taken); else only the draft.
+    #[serde(default)]
+    pub save: bool,
+}
+
+/// What an import made.
+#[derive(Debug, Clone, PartialEq, Facet, Serialize, Deserialize)]
+pub struct Imported {
+    /// Where it is, or would be, written.
+    pub path: String,
+    /// Its Cooklang.
+    pub source: String,
+    /// It parsed back.
+    pub recipe: Recipe,
+    /// Whether it was written.
+    pub saved: bool,
+    /// Made by the synthesizer from a page: worth a read
+    /// (`import: needs-review` in its frontmatter).
+    pub review: bool,
+    /// Ingredient lines the synthesizer could not place in a step (kept
+    /// in a last step to place by hand).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unplaced: Vec<String>,
+}
+
 /// Why the cookbook could not.
 #[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize, thiserror::Error)]
 #[repr(u8)]
@@ -150,6 +188,12 @@ pub trait Recipes {
     async fn delete(&self, path: String) -> Result<(), CookbookError>;
     /// What a set of portions needs, nested recipes cooked out, scaled.
     async fn ingredients(&self, portions: Vec<Portion>) -> Result<Vec<Needed>, CookbookError>;
+    /// A recipe from a page or a text, as Cooklang; written when asked.
+    async fn import(&self, import: Import) -> Result<Imported, CookbookError>;
+    /// Each `.cook` file under `folder` (every one when unset) whose
+    /// metadata is Cooklang's `>>` lines, rewritten with it as
+    /// frontmatter (the properties the vault reads): their paths.
+    async fn tidy(&self, folder: Option<String>) -> Result<Vec<String>, CookbookError>;
 }
 
 pub use prelude::*;

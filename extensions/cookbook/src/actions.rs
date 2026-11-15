@@ -8,7 +8,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use crate::client::{client, handle};
-use crate::service::{CookbookError, Portion, Save, Search};
+use crate::service::{CookbookError, Import, Portion, Save, Search};
 
 /// `args` as `T`; `null` as its default.
 fn args<T: DeserializeOwned + Default>(v: Value) -> Result<T, String> {
@@ -215,4 +215,22 @@ pub async fn timer(a: Value) -> Result<Value, String> {
             .await;
         Ok(json!({ "id": id, "seconds": seconds, "notify": "app" }))
     }
+}
+
+/// `COOKBOOK_IMPORT {url? | text?, path?, save?}`.
+pub async fn import(a: Value) -> Result<Value, String> {
+    let import: Import = args(a)?;
+    let c = client().await.map_err(|e| e.to_string())?;
+    out(c.import(import).await.map_err(architect::vox_into_app))
+}
+
+/// `COOKBOOK_TIDY {folder?}`.
+pub async fn tidy(a: Value) -> Result<Value, String> {
+    let folder = text(&a, "folder");
+    let c = client().await.map_err(|e| e.to_string())?;
+    out(c
+        .tidy(folder)
+        .await
+        .map_err(architect::vox_into_app)
+        .map(|changed| json!({ "changed": changed })))
 }
