@@ -100,6 +100,15 @@ pub fn use_web_extensions(app: &Arc<ActionList>) -> ExtensionUi {
         host = host.with_runner(architect_pages::web::runner::WebTsRunner::new(
             pages.clone(),
         ));
+        // Luau extensions: each run in a Web Worker on luau-web's Luau,
+        // fetched from the bundle's folder only when one runs; their
+        // globals answered by this host (#812).
+        if let Some(lib) = luau_lib() {
+            host = host.with_runner(architect_pages::web::luau::WebLuauRunner::new(
+                pages.clone(),
+                lib,
+            ));
+        }
         host = host.with_setting_values(values.clone());
         // Their data: kept in this browser per org; the demo keeps
         // nothing past the tab, as it says.
@@ -267,6 +276,17 @@ pub fn use_web_extensions(app: &Arc<ActionList>) -> ExtensionUi {
 
 /// Where this app keeps installs and grants: the org's (signed in), the
 /// showcase's (`/app/?showcase`), or nowhere past the tab (the demo).
+/// Where luau-web's `index.js` is: the bundle's folder of the app's code
+/// (`scripts/web-bundle.sh` copies apps/web/assets/luau-web there; the dev
+/// stack's public folder has it too), as an absolute URL a Web Worker
+/// started from a `blob:` can import. `None` where the page names no
+/// folder: Luau extensions say why they cannot run.
+fn luau_lib() -> Option<String> {
+    let dir = super::theme::assets()?;
+    let origin = web_sys::window()?.location().origin().ok()?;
+    Some(format!("{origin}{dir}luau-web/index.js"))
+}
+
 fn installs_scope(web: Option<&super::vault::WebVault>) -> Option<String> {
     match web.and_then(|w| w.org.as_ref()) {
         Some(org) => Some(org.slug()),

@@ -13,7 +13,8 @@
 #                   wasm and the JS wasm-bindgen writes beside it
 #                   (architect_web.js, snippets/: dioxus-web's
 #                   interpreter), its face (Inter-Variable.woff2, OFL:
-#                   Inter-OFL.txt). start.js imports from there and puts
+#                   Inter-OFL.txt), luau-web/ (Luau for extensions, #812).
+#                   start.js imports from there and puts
 #                   the folder on <html data-assets> for the app
 #   OUT/ROUTES.md   how a server must serve OUT (scripts/web-routes.md)
 #
@@ -151,6 +152,9 @@ else
     "$bindgen" --target web --no-typescript --out-dir "$stage" "$wasm"
 fi
 cp "$root/apps/web/assets/Inter-Variable.woff2" "$root/apps/web/assets/Inter-OFL.txt" "$stage/"
+# Luau for extensions (#812): luau-web, vendored (scripts/vendor-luau-web.sh),
+# fetched by the app only when a Luau extension runs.
+cp -r "$root/apps/web/assets/luau-web" "$stage/"
 if command -v sha256sum >/dev/null; then sum() { sha256sum; }; else sum() { shasum -a 256; }; fi
 hash="$( (cd "$stage" && find . -type f | LC_ALL=C sort | while read -r f; do printf '%s ' "$f"; sum < "$f"; done) | sum | cut -c1-12)"
 assets="/assets/app-$hash/"

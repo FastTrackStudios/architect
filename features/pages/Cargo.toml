@@ -52,7 +52,9 @@ web = [
 # The web app's runner for TypeScript extensions (`web::runner`, #495):
 # the extensions host's `Runner` for the kind in a browser, each run's
 # host calls the app's host service (`WebHost::through`).
-web-host = ["web", "architect-extensions/host"]
+# And for `kind = "luau"` (`web::luau`, #812): its globals answered with
+# `architect_scripting::bindings`, the one implementation a desk's uses.
+web-host = ["web", "architect-extensions/host", "dep:architect-scripting", "architect-scripting/bindings"]
 luau = ["runner"]
 # TypeScript actions (#536): a `typescript` extension's actions and hooks
 # as `.ts`/`.js` modules on the pages' QuickJS runtime, the extensions

@@ -51,6 +51,8 @@
 
 mod actions;
 #[cfg(feature = "web-host")]
+pub mod luau;
+#[cfg(feature = "web-host")]
 pub mod runner;
 
 use std::cell::{Cell, RefCell};
@@ -226,6 +228,12 @@ impl WebPages {
     pub fn with_limits(self, limits: Limits) -> Self {
         self.inner.limits.set(limits);
         self
+    }
+
+    /// Their limits (a TypeScript or Luau action's too).
+    #[must_use]
+    pub fn limits(&self) -> Limits {
+        self.inner.limits.get()
     }
 
     /// Where the pages' notifications (`notify`) go; else only their log.

@@ -151,7 +151,7 @@ A summary of `docs/content/guide/showcase.md` as of 2026-11-14; read the guide f
 | Capability | Desktop | Web | iOS |
 |---|---|---|---|
 | Linked (compiled-in) extension (R1, W1) | yes | yes, the distribution's linked ones | yes (same host; not shown) |
-| Luau installed at run time (R2) | yes | no (Luau is C++; #495) | yes (Simulator) |
+| Luau installed at run time (R2) | yes | yes: actions and hooks in Web Workers on luau-web (#812) | yes (Simulator) |
 | TSX page / TypeScript actions on QuickJS (R3, R7) | yes | sandbox lab only; the web app does not host installed ones (#495, #723, #736) | yes (QuickJS, interpreted) |
 | WASI component (R4) | built with `wasi` (#716); not captured | no (#495; needs JSPI) | built with Pulley (#716); not captured |
 | Process extension (R5) | yes | no, by nature | no, by nature |
@@ -166,4 +166,4 @@ A summary of `docs/content/guide/showcase.md` as of 2026-11-14; read the guide f
 | Node actions (H16) | yes; not shown | client exists; host not wired (#495) | same code; not shown |
 | Share-link guests run extensions (G1) | no | no | no |
 
-Rule of thumb: on the web today, only linked extensions run; on iOS, anything interpreted (Luau, QuickJS pages, WASM on Pulley, linked code) but no processes.
+Rule of thumb: on the web today, linked extensions, TypeScript actions and pages, and Luau actions and hooks run; on iOS, anything interpreted (Luau, QuickJS pages, WASM on Pulley, linked code) but no processes.

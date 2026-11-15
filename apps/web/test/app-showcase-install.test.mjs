@@ -4,11 +4,16 @@
 //
 // In `/app/?showcase`:
 // - the vault's needs (`.architect/extensions.toml`) are listed over it:
-//   the Recipe scaler (TypeScript) to install, the Luau ones "Can't run
-//   here" with why (#812);
-// - "Install all", then "Install" in the one consent prompt, installs the
-//   scaler from the registry the app carries, with no network, and it runs
-//   (the page's `data-extensions`);
+//   the Recipe scaler (TypeScript) and the Luau ones to install (#812:
+//   none says "Can't run here" any more);
+// - "Install all", then "Install" in the one consent prompt, installs them
+//   from the registry the app carries, with no network, and they run (the
+//   page's `data-extensions`);
+// - Luau actions run in Web Workers on luau-web's Luau, run as their
+//   extensions through the probe, each host call answered by the app's
+//   host service: the Timers sampler's tick (its data kept between runs,
+//   its status item), its primes counted in a worker, the Notify
+//   sampler's toast, Settings and theme's greeting;
 // - its "open" action (`SHOWCASE_RECIPES_OPEN`, run as the extension
 //   through the demo's probe, `?showcase&probe`) opens its TSX page as a
 //   pane, rendered in a Web Worker on the browser's engine and drawn in
@@ -40,7 +45,7 @@ const press = (b, label) => b.eval(`(() => { const all = [...document.querySelec
 /// The extensions running (the page's `data-extensions`).
 const running = async (b) => (await b.eval('document.documentElement.dataset.extensions || ""')).split(' ');
 
-test("/app/?showcase installs the showcase's TypeScript extension and draws its TSX page", { skip, timeout: 600000 }, async () => {
+test("/app/?showcase installs the showcase's extensions, runs its Luau ones and draws its TSX page", { skip, timeout: 600000 }, async () => {
   const f = await front();
   const shots = shotDir('showcase-install-shots');
   try {
@@ -53,8 +58,8 @@ test("/app/?showcase installs the showcase's TypeScript extension and draws its 
         // What the vault needs, over it.
         await until(() => shows(b, 'Install all'), 90000, 'the vault\'s needs and Install all');
         assert.ok(await shows(b, 'Recipe scaler'), 'the scaler is offered');
-        assert.ok(await shows(b, "Can't run here"), 'what cannot run here is listed');
-        assert.ok(await shows(b, '#812'), 'Luau says why, with its issue');
+        assert.ok(await shows(b, 'Timers sampler'), 'a Luau extension is offered');
+        assert.ok(!(await shows(b, '#812')), 'no Luau extension says it cannot run here');
         assert.ok(!(await running(b)).includes('showcase.recipes'), 'nothing runs before the yes');
         await b.shot(join(shots, `needs-desk-1280-${theme}.png`));
         // One consent for all of it.
@@ -71,6 +76,27 @@ test("/app/?showcase installs the showcase's TypeScript extension and draws its 
           await b.shot(join(shots, `failed-install-${theme}.png`));
           throw new Error(`${e.message}; the page says: ${JSON.stringify((await b.eval('document.body.innerText')).slice(0, 1500))}`);
         }
+        // Luau: the showcase's run, each action as its extension.
+        for (const id of ['showcase.timers', 'showcase.notify', 'showcase.dusk', 'showcase.chart']) {
+          assert.ok((await running(b)).includes(id), `${id} runs`);
+        }
+        const run = async (ext, action, args = {}) => String(await b.eval(`window.architectProbe(${JSON.stringify(ext)}, ${JSON.stringify(JSON.stringify({ op: 'run', action, args }))})`));
+        // Its data kept between runs (its `every` hook may tick too).
+        const first = Number((await run('showcase.timers', 'SHOWCASE_TIMERS_TICK')).match(/\d+/)?.[0]);
+        const second = Number((await run('showcase.timers', 'SHOWCASE_TIMERS_TICK')).match(/\d+/)?.[0]);
+        assert.ok(first >= 1 && second > first, `a tick counts on from the last (${first}, ${second})`);
+        await until(() => b.eval('/\\b\\d+ ticks?\\b/.test(document.body.innerText)'), 15000, 'its status item');
+        // Heavy work in its worker, then a toast.
+        assert.match(await run('showcase.timers', 'SHOWCASE_TIMERS_PRIMES', { n: 20000 }), /2262/);
+        await until(() => shows(b, '2262 primes below 20000'), 10000, 'the primes toast');
+        assert.match(await run('showcase.notify', 'SHOWCASE_NOTIFY_TOAST', { text: 'Luau in the browser' }), /Luau in the browser/);
+        await until(() => shows(b, 'Luau in the browser'), 10000, 'the toast');
+        assert.match(await run('showcase.dusk', 'SHOWCASE_DUSK_GREET'), /Hello/);
+        await b.shot(join(shots, `luau-desk-1280-${theme}.png`));
+        await b.size(390, 844);
+        await sleep(800);
+        await b.shot(join(shots, `luau-phone-390-${theme}.png`));
+        await b.size(1280, 900);
         // Its TSX page, from ⌘K, as a pane: a Web Worker renders it, the
         // app's document draws it (no frame).
         // On ⌘K, and opened by its own action, as the extension.

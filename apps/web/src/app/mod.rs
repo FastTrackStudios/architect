@@ -308,6 +308,12 @@ fn WebApp() -> Element {
             }
         }
     }
+    // The extensions' status items (their `[[status]]` and what their code
+    // sets with `ext.state`), after the app's own, as a desk shows them. A
+    // guest runs none (#805).
+    if let Some(ui) = ext_ui.as_ref() {
+        status.extend(ui.chrome().status);
+    }
     // A phone's demo: a strip over the top says so, the shell laid out
     // under it (as under a notch).
     let phone = screen().form() == shell::FormFactor::Phone;

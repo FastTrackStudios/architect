@@ -737,7 +737,14 @@ impl Stack {
             &public.join("favicon.svg"),
             &read(&self.root.join("apps/site/public/favicon.svg"))?,
         )?;
-        for face in ["Inter-Variable.woff2", "Inter-OFL.txt"] {
+        for face in [
+            "Inter-Variable.woff2",
+            "Inter-OFL.txt",
+            // Luau for extensions (#812, scripts/vendor-luau-web.sh).
+            "luau-web/index.js",
+            "luau-web/Luau.Web.Asyncify.js",
+            "luau-web/LICENSE",
+        ] {
             write(
                 &public.join(DEV_ASSETS.trim_start_matches('/')).join(face),
                 &read(&web.join("assets").join(face))?,

@@ -20,7 +20,7 @@ Each install's folder holds `installed.toml` (`features/extensions/src/install.r
 
 Where installs are kept is a `Disk` (`features/extensions/src/disk.rs`): the app's folder on a desk and a phone (`OsDisk`), the browser's storage in the web app (`MemDisk`, each change handed to a callback that keeps it). `Installs::with_disk` and `Grants::open_on` take one; a package installed on a `MemDisk` reads through it (`features/extensions/src/package.rs` `Files::Disk`, `Package::texts`). A source with no folder to write into hands its package over as files (`Source::fetch_files`, `Fetched::Files`; the built-in registry `BundledSource` always does). Test: `features/extensions/tests/browser_installs.rs`.
 
-What a platform has no runner for is "Can't run here" with why before anything installs (`features/extensions/src/host.rs` `why_no_runner`, `kind_cannot_run`): in a browser, Luau (#812), processes and WASI components.
+What a platform has no runner for is "Can't run here" with why before anything installs (`features/extensions/src/host.rs` `why_no_runner`, `kind_cannot_run`): in a browser, processes and WASI components (and Luau only when the bundle carries no luau-web).
 
 ## Development copies and hot reload
 
