@@ -25,6 +25,8 @@ vox = { workspace = true }
 facet = { workspace = true }
 # Cooklang, the recipes' language: the parser and its units.
 cooklang = "0.18"
+# Task's importer reads an ingredient line's amount and unit with it.
+ingredient = "0.3"
 dioxus = { workspace = true }
 futures-timer = { workspace = true }
 serde = { workspace = true }

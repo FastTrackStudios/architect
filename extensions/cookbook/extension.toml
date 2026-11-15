@@ -36,6 +36,8 @@ actions = ["VAULT_", "BASES_", "EXT_VIEW_OPEN"]
 # A toast when a timer is set or done; the device's notification when it
 # is done (iOS), even with the app in the background.
 ui = ["notify"]
+# COOKBOOK_IMPORT reads a recipe page from any site the person names.
+hosts = ["*"]
 device = ["notifications"]
 # Destructive: COOKBOOK_DELETE deletes a recipe (to the vault's trash).
 effect = "destructive"
@@ -84,7 +86,7 @@ max_height = 900
 
 [[actions]]
 id = "COOKBOOK_OPEN"
-name = "Cookbook: open"
+name = "Open the cookbook"
 description = "Opens the cookbook, or the recipe at `path` in cook mode (`view` cook: step by step, with its timers) or the editor (`view` edit: Cooklang with what it reads as beside it); `servings` scales what cook mode shows."
 group = "Cookbook"
 effect = "read_only"
@@ -92,7 +94,7 @@ params = '{"type":"object","properties":{"path":{"type":"string"},"view":{"type"
 
 [[actions]]
 id = "COOKBOOK_TIMER"
-name = "Cookbook: start a timer"
+name = "Start a timer"
 description = "A kitchen timer of `seconds` (1 to 86400) named `label`: the device's notification when it is done (on iOS, even with the app in the background); where there is none, a toast says it was set and cook mode counts it down."
 group = "Cookbook"
 effect = "read_only"
@@ -100,7 +102,7 @@ params = '{"type":"object","properties":{"seconds":{"type":"integer","minimum":1
 
 [[actions]]
 id = "COOKBOOK_LIST"
-name = "Cookbook: find recipes"
+name = "Find recipes"
 description = "The recipes, by name: each one's path, name, description, course, cuisine, servings, prepMinutes, cookMinutes, tags and source, from the vault's index. `text` (words in its name, description, tags, course or cuisine), `tag`, `course` and `ingredient` (one it uses) narrow it; `limit` caps it."
 group = "Cookbook"
 effect = "read_only"
@@ -108,7 +110,7 @@ params = '{"type":"object","properties":{"text":{"type":"string"},"tag":{"type":
 
 [[actions]]
 id = "COOKBOOK_GET"
-name = "Cookbook: read a recipe"
+name = "Read a recipe"
 description = "The recipe at `path`, parsed: name, servings, times, tags, its ingredients (name, qty, unit, qtyDisplay, note, optional, isRecipeRef), its steps (text, section, timers in seconds, the ingredients and cookware each uses, notes), its cookware and its Cooklang `source` as written. `servings` scales it: every quantity Cooklang does not pin."
 group = "Cookbook"
 effect = "read_only"
@@ -116,7 +118,7 @@ params = '{"type":"object","properties":{"path":{"type":"string"},"servings":{"t
 
 [[actions]]
 id = "COOKBOOK_SAVE"
-name = "Cookbook: save a recipe"
+name = "Save a recipe"
 description = "Writes Cooklang `source` (kept exactly as given) to `path`, or a new recipe named by `name` or its `title` in the cookbook's folder; `create` true refuses a path that is taken. Cooklang that does not parse is refused. One undo step. The recipe parsed back."
 group = "Cookbook"
 effect = "mutating"
@@ -124,7 +126,7 @@ params = '{"type":"object","properties":{"path":{"type":"string"},"name":{"type"
 
 [[actions]]
 id = "COOKBOOK_RENAME"
-name = "Cookbook: rename a recipe"
+name = "Rename a recipe"
 description = "Moves the recipe at `path` to `to` (`.cook` added when left off); links to it follow."
 group = "Cookbook"
 effect = "mutating"
@@ -132,7 +134,7 @@ params = '{"type":"object","properties":{"path":{"type":"string"},"to":{"type":"
 
 [[actions]]
 id = "COOKBOOK_DELETE"
-name = "Cookbook: delete a recipe"
+name = "Delete a recipe"
 description = "Deletes the recipe at `path` to the vault's trash."
 group = "Cookbook"
 effect = "destructive"
@@ -140,22 +142,38 @@ params = '{"type":"object","properties":{"path":{"type":"string"}},"required":["
 
 [[actions]]
 id = "COOKBOOK_INGREDIENTS"
-name = "Cookbook: ingredients for portions"
+name = "Ingredients for portions"
 description = "What `portions` ([{path, servings?}]) need: each ingredient's name, qty, unit, display (when not a number), the recipe it is for and whether it is optional, scaled; a recipe one calls for ([[Hot Honey]]{6}, @@./sauce{}) cooked out into its own ingredients. What Mealplan builds a grocery list from."
 group = "Cookbook"
 effect = "read_only"
 params = '{"type":"object","properties":{"portions":{"type":"array","items":{"type":"object","properties":{"path":{"type":"string"},"servings":{"type":"number"}},"required":["path"]}}},"required":["portions"]}'
 
 [[actions]]
+id = "COOKBOOK_IMPORT"
+name = "Import a recipe"
+description = "A recipe made Cooklang: from a page's `url` (its schema.org Recipe, fetched; every ingredient kept, placed in the step that names it or in a last step to place by hand, marked `import: needs-review`) or a recipe's `text` (a .cook file, Task's `>>` metadata moved into frontmatter; or a saved page's HTML). `save` true writes it to `path` (default: the cookbook's folder, by its name), refused when taken; else the draft only. Its path, source, the recipe parsed, and the lines left to place (`unplaced`)."
+group = "Cookbook"
+effect = "mutating"
+params = '{"type":"object","properties":{"url":{"type":"string"},"text":{"type":"string"},"path":{"type":"string"},"save":{"type":"boolean"}}}'
+
+[[actions]]
+id = "COOKBOOK_TIDY"
+name = "Metadata as frontmatter"
+description = "Rewrites each .cook file under `folder` (all when unset) whose metadata is Cooklang's `>> key: value` lines (Task's cookbook) with it as YAML frontmatter, which the vault reads as properties (Bases, search); the Cooklang stays. One undo step a file. The paths it changed."
+group = "Cookbook"
+effect = "mutating"
+params = '{"type":"object","properties":{"folder":{"type":"string"}}}'
+
+[[actions]]
 id = "COOKBOOK_BASE"
-name = "Cookbook: open as a base"
+name = "Open as a base"
 description = "Opens Cookbook/Cookbook.base (every recipe as a table, as cards and by course), writing it first when it is not there."
 group = "Cookbook"
 effect = "mutating"
 
 [[actions]]
 id = "COOKBOOK_STARTED"
-name = "Cookbook: started"
+name = "Cookbook started"
 description = "Called once the app has loaded it."
 group = "Cookbook"
 effect = "read_only"

@@ -43,6 +43,8 @@ static ANY: AtomicBool = AtomicBool::new(false);
 /// without a leading dot and in any case. The first registration of an
 /// extension wins; `md` (and an empty one) is never registered. Answers
 /// whether it was new.
+// Registering is what it is for: its answer is often not wanted.
+#[allow(clippy::must_use_candidate)]
 pub fn register(extension: &str, note_type: &str) -> bool {
     register_with(extension, note_type, true)
 }
