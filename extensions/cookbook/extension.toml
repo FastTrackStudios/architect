@@ -1,0 +1,128 @@
+# Cookbook (extensions/cookbook/src/lib.rs): Task's cookbook
+# (task:features/mealplan/cookbook) as an extension. One Rust value
+# (`Cookbook`, a linked::Extension) runs it two ways: the app links it in
+# as a built-in, and its program (src/main.rs) serves the same value as a
+# process, this manifest's [entry], when a development copy runs
+# (EXT_CLONE {"id":"cookbook"}).
+id = "cookbook"
+name = "Cookbook"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "Your recipes, in Cooklang: store, browse and search them, read one scaled to the people eating, edit it, import one from a page or a .cook file, and cook it step by step with timers. Each recipe is a .cook file in the vault, so it syncs, shows in Bases and travels by share link."
+authors = ["FastTrackStudio"]
+
+[entry]
+path = "architect-cookbook"
+
+# EXT_CLONE writes this crate to the development folder and builds its
+# program, which then overrides the linked copy under the same id.
+[source]
+git = "https://github.com/FastTrackStudios/architect"
+rev = "main"
+path = "extensions/cookbook"
+
+# Its API for others (`services.call("architect.cookbook", "get", …)`,
+# Handle::service): method `m` is its action COOKBOOK_<M>. Mealplan
+# reads recipes and their ingredients with `list`, `get` and
+# `ingredients`.
+[provides]
+"architect.cookbook" = "0.1.0"
+
+# It reaches the vault only through the host: its documents and index,
+# and the vault's and Bases' actions for its base.
+[capabilities]
+actions = ["VAULT_", "BASES_", "EXT_VIEW_OPEN"]
+# Destructive: COOKBOOK_DELETE deletes a recipe (to the vault's trash).
+effect = "destructive"
+reads = ["documents"]
+writes = ["documents"]
+
+# A Cooklang file is a vault note (it syncs, opens, shows in Bases as
+# `type: recipe`, travels by share link) while the Cookbook is loaded.
+[[file_types]]
+extension = "cook"
+name = "Recipe"
+icon = "chef-hat"
+note_type = "recipe"
+# Cooklang, not markdown: `#pan{}` is cookware, no tag; its [[links]]
+# (a recipe it calls for) are read.
+body = "text"
+
+[[actions]]
+id = "COOKBOOK_LIST"
+name = "Cookbook: find recipes"
+description = "The recipes, by name: each one's path, name, description, course, cuisine, servings, prepMinutes, cookMinutes, tags and source, from the vault's index. `text` (words in its name, description, tags, course or cuisine), `tag`, `course` and `ingredient` (one it uses) narrow it; `limit` caps it."
+group = "Cookbook"
+effect = "read_only"
+params = '{"type":"object","properties":{"text":{"type":"string"},"tag":{"type":"string"},"course":{"type":"string"},"ingredient":{"type":"string"},"limit":{"type":"integer","minimum":1}}}'
+
+[[actions]]
+id = "COOKBOOK_GET"
+name = "Cookbook: read a recipe"
+description = "The recipe at `path`, parsed: name, servings, times, tags, its ingredients (name, qty, unit, qtyDisplay, note, optional, isRecipeRef), its steps (text, section, timers in seconds, the ingredients and cookware each uses, notes), its cookware and its Cooklang `source` as written. `servings` scales it: every quantity Cooklang does not pin."
+group = "Cookbook"
+effect = "read_only"
+params = '{"type":"object","properties":{"path":{"type":"string"},"servings":{"type":"number","exclusiveMinimum":0}},"required":["path"]}'
+
+[[actions]]
+id = "COOKBOOK_SAVE"
+name = "Cookbook: save a recipe"
+description = "Writes Cooklang `source` (kept exactly as given) to `path`, or a new recipe named by `name` or its `title` in the cookbook's folder; `create` true refuses a path that is taken. Cooklang that does not parse is refused. One undo step. The recipe parsed back."
+group = "Cookbook"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"name":{"type":"string"},"source":{"type":"string"},"create":{"type":"boolean"}},"required":["source"]}'
+
+[[actions]]
+id = "COOKBOOK_RENAME"
+name = "Cookbook: rename a recipe"
+description = "Moves the recipe at `path` to `to` (`.cook` added when left off); links to it follow."
+group = "Cookbook"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"to":{"type":"string"}},"required":["path","to"]}'
+
+[[actions]]
+id = "COOKBOOK_DELETE"
+name = "Cookbook: delete a recipe"
+description = "Deletes the recipe at `path` to the vault's trash."
+group = "Cookbook"
+effect = "destructive"
+params = '{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}'
+
+[[actions]]
+id = "COOKBOOK_INGREDIENTS"
+name = "Cookbook: ingredients for portions"
+description = "What `portions` ([{path, servings?}]) need: each ingredient's name, qty, unit, display (when not a number), the recipe it is for and whether it is optional, scaled; a recipe one calls for ([[Hot Honey]]{6}, @@./sauce{}) cooked out into its own ingredients. What Mealplan builds a grocery list from."
+group = "Cookbook"
+effect = "read_only"
+params = '{"type":"object","properties":{"portions":{"type":"array","items":{"type":"object","properties":{"path":{"type":"string"},"servings":{"type":"number"}},"required":["path"]}}},"required":["portions"]}'
+
+[[actions]]
+id = "COOKBOOK_BASE"
+name = "Cookbook: open as a base"
+description = "Opens Cookbook/Cookbook.base (every recipe as a table, as cards and by course), writing it first when it is not there."
+group = "Cookbook"
+effect = "mutating"
+
+[[actions]]
+id = "COOKBOOK_STARTED"
+name = "Cookbook: started"
+description = "Called once the app has loaded it."
+group = "Cookbook"
+effect = "read_only"
+
+[[hooks]]
+on = "startup"
+action = "COOKBOOK_STARTED"
+
+[[sections]]
+id = "cookbook"
+title = "Cookbook"
+icon = "chef-hat"
+
+[[sections.settings]]
+key = "cookbook.folder"
+title = "Folder"
+description = "Where new recipes are written, and Cookbook.base."
+control = "text"
+default = "Cookbook"
