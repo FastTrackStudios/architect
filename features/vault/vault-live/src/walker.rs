@@ -82,7 +82,8 @@ pub fn walk_vault(root: &Path) -> Vec<VaultEntry> {
 /// lowering a copy of it. `None` for every file the vault does not load.
 fn classify(path: &Path) -> Option<VaultEntryKind> {
     let ext = path.extension()?.to_str()?;
-    if ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown") {
+    // A note: `.md`, `.markdown` or a file type an extension declared.
+    if ext.eq_ignore_ascii_case("markdown") || vault_proto::note_types::is_note_extension(ext) {
         Some(VaultEntryKind::Markdown)
     } else if ext.eq_ignore_ascii_case("base") {
         Some(VaultEntryKind::Base)

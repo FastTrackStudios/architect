@@ -183,10 +183,11 @@ impl NoteFile {
         }
     }
 
-    /// Whether it is a Markdown note.
+    /// Whether it is a note: `.md`, or a file type an extension declared
+    /// (`vault_proto::note_types`).
     #[must_use]
-    pub fn is_markdown(&self) -> bool {
-        self.extension().eq_ignore_ascii_case("md")
+    pub fn is_note(&self) -> bool {
+        vault_proto::note_types::is_note_extension(self.extension())
     }
 }
 

@@ -828,6 +828,10 @@ pub fn main(
             return ExitCode::from(70);
         }
     };
+    // Its linked extensions' note file types, before any vault is read.
+    for t in dist.file_types() {
+        vault_proto::note_types::register(&t.extension, &t.note_type);
+    }
     let blocks = dist.blocks(&config.data_dir.join("linked"));
     let layers = dist.share_layers();
     let islands = dist.islands();

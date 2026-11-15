@@ -755,6 +755,75 @@ impl NavigatorProviderDecl {
 /// (`architect_editor::Language::highlights_text`).
 pub type LanguageDecl = architect_editor::Language;
 
+/// A file type that is a note (`[[file_types]]`).
+///
+/// Files ending in `.{extension}` are vault notes like `.md` ones
+/// (optional YAML frontmatter, then a body of text), reading as `type:
+/// {note_type}` in the vault's index when their frontmatter names none.
+///
+/// The host registers it as the extension loads
+/// (`vault_proto::note_types::register`); it stays registered for the
+/// life of the process. Opening one is opening a note: an extension that
+/// draws its own view claims the `note_type` (`[[embeds]] note_types`,
+/// `[[openers]] files`).
+///
+/// ```toml
+/// [[file_types]]
+/// extension = "cook"   # without the dot, lower-case
+/// name = "Recipe"
+/// icon = "chef-hat"
+/// note_type = "recipe"
+/// ```
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct FileTypeDecl {
+    /// Its file extension, without the dot: lower-case letters, digits,
+    /// `-` and `_`; not one the vault already reads ([`RESERVED_FILE_TYPES`]).
+    pub extension: String,
+    /// What a person calls such a file.
+    pub name: String,
+    /// Its icon (a Lucide name).
+    pub icon: String,
+    /// The `type` property such a file reads as when its frontmatter has none.
+    pub note_type: String,
+}
+
+/// Extensions a `[[file_types]]` entry may not declare: the ones the vault
+/// already reads as its own.
+pub const RESERVED_FILE_TYPES: [&str; 4] = ["md", "markdown", "base", "canvas"];
+
+impl FileTypeDecl {
+    /// What is wrong with it, if anything.
+    ///
+    /// # Errors
+    ///
+    /// The first thing it gets wrong, as a sentence.
+    pub fn check(&self) -> Result<(), String> {
+        let e = &self.extension;
+        if e.is_empty() {
+            return Err("it needs an `extension` (without the dot)".to_owned());
+        }
+        if !e
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+        {
+            return Err(format!(
+                "extension {e:?}: lower-case letters, digits, `-` and `_` only, without the dot"
+            ));
+        }
+        if RESERVED_FILE_TYPES.contains(&e.as_str()) {
+            return Err(format!("extension {e:?} is the vault's own"));
+        }
+        if self.name.trim().is_empty() {
+            return Err("it needs a `name`".to_owned());
+        }
+        if self.note_type.trim().is_empty() {
+            return Err("it needs a `note_type`, the `type` its files read as".to_owned());
+        }
+        Ok(())
+    }
+}
+
 /// A context type's default screenset (`[[deck_templates]]`, #441).
 ///
 /// A deck is one context (a song, a project) shown in a screenset; a new
@@ -1095,6 +1164,10 @@ pub struct Contribution {
     /// args = ["--stdio"]
     /// ```
     pub languages: Vec<LanguageDecl>,
+    /// File types that are notes (`[[file_types]]`): see [`FileTypeDecl`].
+    /// The host registers them as it loads the extension
+    /// (`vault_proto::note_types`, `EXT_FILE_TYPES`).
+    pub file_types: Vec<FileTypeDecl>,
     /// Kinds of tab in the tab bar: scope tabs and custom tabs
     /// (`[[tab_kinds]]`).
     pub tab_kinds: Vec<TabKindDecl>,
@@ -1214,6 +1287,7 @@ impl Contribution {
                 d.context.clone()
             }),
             languages: join(&self.languages, &other.languages, |l| l.id.clone()),
+            file_types: join(&self.file_types, &other.file_types, |f| f.extension.clone()),
             tab_kinds: join(&self.tab_kinds, &other.tab_kinds, |k| k.id.clone()),
             capture_targets: join(&self.capture_targets, &other.capture_targets, |c| {
                 c.id.clone()
@@ -1276,6 +1350,11 @@ impl Contribution {
                 .map(|d| format!("deck_template:{}", d.context)),
         );
         out.extend(self.languages.iter().map(|l| format!("language:{}", l.id)));
+        out.extend(
+            self.file_types
+                .iter()
+                .map(|f| format!("file_type:{}", f.extension)),
+        );
         out.extend(self.tab_kinds.iter().map(|k| format!("tab_kind:{}", k.id)));
         out.extend(
             self.capture_targets
@@ -1356,6 +1435,7 @@ impl Contribution {
             self.navigator_providers.len(),
             self.deck_templates.len(),
             self.languages.len(),
+            self.file_types.len(),
             self.tab_kinds.len(),
             self.capture_targets.len(),
             self.key_bindings.len(),
@@ -1650,6 +1730,11 @@ impl Contribution {
             }
             if !language_ids.insert(l.id.as_str()) {
                 return refuse(what, "it is declared twice".to_owned());
+            }
+        }
+        for f in &self.file_types {
+            if let Err(why) = f.check() {
+                return refuse(format!("file type {}", f.extension), why);
             }
         }
         for k in &self.tab_kinds {
@@ -2495,6 +2580,17 @@ impl Contributions {
         self.all(|c| c.languages.clone())
             .into_iter()
             .filter(|l| seen.insert(l.item.id.clone()))
+            .collect()
+    }
+
+    /// Every file type an extension declares (`[[file_types]]`), in the
+    /// order its owner came; the first for an extension wins.
+    #[must_use]
+    pub fn file_types(&self) -> Vec<By<FileTypeDecl>> {
+        let mut seen = BTreeSet::new();
+        self.all(|c| c.file_types.clone())
+            .into_iter()
+            .filter(|f| seen.insert(f.item.extension.clone()))
             .collect()
     }
 

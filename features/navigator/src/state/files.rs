@@ -953,7 +953,7 @@ impl NavigatorState {
         let notes: Vec<&crate::source::NoteFile> = paths
             .iter()
             .filter_map(|p| self.all.file(p))
-            .filter(|f| f.is_markdown() && seen.insert(f.path.clone()))
+            .filter(|f| f.is_note() && seen.insert(f.path.clone()))
             .collect();
         if notes.len() < 2 {
             return Err("Merging takes two Markdown notes or more".to_owned());

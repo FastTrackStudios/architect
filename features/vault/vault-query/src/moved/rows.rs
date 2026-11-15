@@ -11,11 +11,12 @@ use crate::obsidian_parse::{ParsedPage, parse_page};
 
 /// Rows from `(vault-relative path, markdown)` pairs — for callers that
 /// hold note bytes rather than a filesystem vault (the MCP lane reads
-/// them through `VaultSync`). Non-`.md` paths are skipped.
+/// them through `VaultSync`). Paths that are not notes
+/// (`vault_proto::note_types::is_note_path`) are skipped.
 pub fn rows_from_markdown<'a>(files: impl IntoIterator<Item = (&'a str, &'a str)>) -> Vec<BaseRow> {
     files
         .into_iter()
-        .filter(|(path, _)| path.ends_with(".md"))
+        .filter(|(path, _)| vault_proto::note_types::is_note_path(path))
         .map(|(path, raw)| {
             let (folder, basename) = split_rel(path);
             row_of(path, &basename, &folder, &parse_page(raw))

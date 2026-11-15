@@ -19,6 +19,7 @@
 //! | `EXT_EMBEDS` | every inline embed and what it claims, or `{claim}`'s (`fence:kf`): which extension draws it, and how |
 //! | `EXT_PROJECT_TYPES` | every project type loaded extensions add (`[[project_types]]`), or `{id}`'s: its properties, template, folders, views and owner |
 //! | `EXT_LANGUAGES` | the editor's language registry (#512): the app's languages and every loaded extension's `[[languages]]`, or the one `{id}`, `{fence}` or `{path}` names: its file types, fences, grammar, highlights query, comment token, LSP server command and who registered it (`from`) |
+//! | `EXT_FILE_TYPES` | the file types that are vault notes: `md` and every declared one (`[[file_types]]`, `vault_proto::note_types`): its extension, name, icon, the `type` it reads as and who declared it (`from`) |
 //! | `EXT_CAPTURE_TARGETS` | every capture target loaded extensions add (`[[capture_targets]]`): its chips, tokens, action and owner |
 //! | `EXT_PALETTE` | the palette slot (#381): which extension's view draws each overlay (`[[palette_views]]`), the keys extensions bind (`[[keys]]`) and the palette's sources (`[[palette_sources]]`) |
 
@@ -123,6 +124,14 @@ static LANGUAGES: ActionMeta = meta(
      extension). \
      With `id`, `fence` (a code fence's name) or `path` (a file's), the one language it names \
      (`null` when none is registered).",
+);
+static FILE_TYPES: ActionMeta = meta(
+    "EXT_FILE_TYPES",
+    "Note file types",
+    "The file types that are the vault's notes: `md`, and each one loaded extensions declare \
+     (`[[file_types]]`) with its extension, name, icon, the `type` its files read as when their \
+     frontmatter has none, and the extension it is from (`from`). A type stays a note type \
+     after its extension is turned off (`registered`: in the vault's registry).",
 );
 static CAPTURE_TARGETS: ActionMeta = meta(
     "EXT_CAPTURE_TARGETS",
@@ -282,7 +291,8 @@ impl Extensions {
     /// Puts the contribution actions (`EXT_CONTRIBUTIONS`, `EXT_OPEN`,
     /// `EXT_VIEW_OPEN`, `EXT_STATE_SET`, `EXT_STATE_CLEAR`, `EXT_EMIT`,
     /// `EXT_ENABLE`, `EXT_DISABLE`, `EXT_EMBEDS`, `EXT_PROJECT_TYPES`,
-    /// `EXT_LANGUAGES`, `EXT_CAPTURE_TARGETS`) on the host's list.
+    /// `EXT_LANGUAGES`, `EXT_FILE_TYPES`, `EXT_CAPTURE_TARGETS`) on the
+    /// host's list.
     ///
     /// # Errors
     ///
@@ -491,6 +501,35 @@ impl Extensions {
                     |id| reg.project_type(&id).map_or(Value::Null, one),
                 );
                 Ok::<_, String>(RawJson::from(answer.to_string()))
+            },
+        )?;
+        let me = self.clone();
+        list.register_with(
+            &FILE_TYPES,
+            Effect::ReadOnly,
+            move |_: &ActionCaller, (): ()| {
+                let declared = me.host().contributions().file_types();
+                let registered = vault_proto::note_types::declared();
+                let mut all = vec![json!({
+                    "extension": vault_proto::note_types::MARKDOWN,
+                    "name": "Note",
+                    "icon": "file-text",
+                    "note_type": Value::Null,
+                    "from": "app",
+                    "registered": true,
+                })];
+                all.extend(declared.into_iter().map(|t| {
+                    let mut v = serde_json::to_value(&t.item).unwrap_or(Value::Null);
+                    if let Some(map) = v.as_object_mut() {
+                        map.insert("from".to_owned(), json!(t.owner));
+                        map.insert(
+                            "registered".to_owned(),
+                            json!(registered.iter().any(|r| r.extension == t.item.extension)),
+                        );
+                    }
+                    v
+                }));
+                Ok::<_, String>(RawJson::from(Value::Array(all).to_string()))
             },
         )?;
         let me = self.clone();

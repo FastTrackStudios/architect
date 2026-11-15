@@ -301,6 +301,11 @@ mod serve {
         ///
         /// Its node part does not load (a script that is not Luau).
         pub fn load(&self, package: &Package) -> Result<bool, LoadError> {
+            // Its note file types, whether or not it has a node part: the
+            // node's vaults read them as notes.
+            for t in &package.manifest.contributes.file_types {
+                vault_proto::note_types::register(&t.extension, &t.note_type);
+            }
             let Some(part) = package.manifest.node_part() else {
                 return Ok(false);
             };

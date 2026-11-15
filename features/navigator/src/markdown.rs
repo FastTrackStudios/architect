@@ -180,8 +180,9 @@ pub fn note_from_markdown(path: &str, text: &str, created: Millis, modified: Mil
 }
 
 fn has_markdown_ext(path: &str) -> bool {
-    path.rsplit_once('.')
-        .is_some_and(|(_, e)| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown"))
+    path.rsplit_once('.').is_some_and(|(_, e)| {
+        e.eq_ignore_ascii_case("markdown") || vault_proto::note_types::is_note_extension(e)
+    })
 }
 
 /// A note's frontmatter block as it is written, and the body after it.
