@@ -27,20 +27,7 @@ fn main() {
         .next()
         .unwrap_or_else(|| "Scripture/Songs.base".to_string());
 
-    // Recipes live under the wiki, not the vault, so a base filtering
-    // `type: recipe` needs the cookbook root registered too. Defaults
-    // to the sibling `wiki/Knowledge/` of the given vault root, which
-    // is the on-disk org layout.
-    let recipe_root = std::env::var("TASK_SERVER_WIKI_ROOT").map_or_else(
-        |_| {
-            root.parent()
-                .map_or_else(|| root.join("wiki/Knowledge"), |p| p.join("wiki/Knowledge"))
-        },
-        PathBuf::from,
-    );
-    let backend = Backend::single("default", root)
-        .expect("open backend")
-        .with_recipe_roots([("default".to_string(), recipe_root)].into_iter().collect());
+    let backend = Backend::single("default", root).expect("open backend");
     let views = backend.base_views("default", &base).expect("base_views");
 
     println!("base: {base} — {} view(s)\n", views.len());
