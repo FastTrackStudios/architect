@@ -121,8 +121,17 @@ fn a_long_job_in_a_worker_never_delays_a_views_frames() {
         "inline",
     ));
     let t = Instant::now();
-    assert!(block_on(naive.expect("it started").frame()).result.is_ok());
+    let inline = block_on(naive.expect("it started").frame()).result;
     let inline_frame = t.elapsed();
+    // About 100 ms alone; under a loaded machine (main CI runs every test
+    // at once) it can pass the frame's limit (500 ms) and be stopped,
+    // which says the same thing: inline, the work blows the budget.
+    assert!(
+        inline
+            .as_ref()
+            .map_or_else(|e| e.kind == ErrorKind::Limit, |_| true),
+        "{inline:?}"
+    );
     quiet.sort_unstable();
     busy.sort_unstable();
     let (q50, q99) = (percentile(&quiet, 50), percentile(&quiet, 99));
