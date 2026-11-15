@@ -1,0 +1,32 @@
+filters:
+  and:
+    - file.ext == "cook"
+views:
+  - type: table
+    name: Recipes
+    order:
+      - file.name
+      - course
+      - cuisine
+      - servings
+      - prep_time
+      - cook_time
+      - tags
+    sort:
+      - property: file.name
+        direction: ASC
+  - type: cards
+    name: Cards
+    order:
+      - file.name
+      - course
+      - tags
+  - type: table
+    name: By course
+    groupBy:
+      property: course
+      direction: ASC
+    order:
+      - file.name
+      - servings
+      - tags
