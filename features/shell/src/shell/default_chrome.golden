@@ -2,6 +2,9 @@ push 0
 element div None
 element div None
 element div None
+element div None
+attr style None "position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column;"
+append 1
 append 1
 append 1
 id 2
@@ -19,6 +22,12 @@ child 0
 id 4
 pop
 push 1
+child 0
+child 0
+child 0
+id 5
+pop
+push 1
 attr style None "position: relative; z-index: 0; width: 100%; height: 100%; overflow: hidden; display: flex; flex-direction: column; background: #09090b; color: #e4e4e7; font-family: Inter, -apple-system, 'SF Pro Text', system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;"
 listen pointerdown
 listen pointermove
@@ -28,36 +37,36 @@ listen click
 pop
 push 3
 element div None
-id 6
+id 7
 pop
-push 6
+push 7
 clone
-id 5
-push 5
+id 6
+push 6
 attr style None "position:absolute; left:0; top:0; width:1px; height:1px; opacity:0; pointer-events:none; animation: none;"
 pop
 element div None
-id 8
+id 9
 pop
-push 8
+push 9
 clone
-id 7
-push 7
+id 8
+push 8
 attr style None "position: relative; height: 40px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; padding: 0px 10px 0 50px; background: #17171b; border-bottom: 1px solid #2b2b31;"
 pop
-push 7
+push 8
 element span None
-id 10
+id 11
 pop
-push 10
+push 11
 clone
-id 9
-push 9
+id 10
+push 10
 attr style None "flex-shrink: 0; white-space: nowrap; font-size: 15px; font-weight: 700; letter-spacing: -0.01em; color: #e4e4e7;"
 pop
-push 9
+push 10
 text "Lab"
-id 11
+id 12
 append 1
 pop
 append 1
@@ -71,45 +80,45 @@ push 4
 element div None
 element div None
 append 1
-id 13
-pop
-push 13
-clone
-id 12
-push 12
-child 0
 id 14
 pop
-push 12
+push 14
+clone
+id 13
+push 13
+child 0
+id 15
+pop
+push 13
 attr style None "width: 44px; flex-shrink: 0; display: flex; flex-direction: column; background: #09090b;"
 pop
-push 14
+push 15
 attr style None "flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0; border-right: 1px solid #2b2b31;"
 pop
-push 14
+push 15
 element button None
 attr class None "lp tip-host"
 element span None
 attr class None "tip"
 attr style None "left: 40px; top: 5px;"
 append 1
-id 16
-pop
-push 16
-clone
-id 15
-push 15
-child 0
 id 17
 pop
-push 15
+push 17
+clone
+id 16
+push 16
+child 0
+id 18
+pop
+push 16
 attr aria-label None "Inbox"
 attr data-tab None "inbox"
 attr aria-current None "page"
 attr style None "position: relative; width: 32px; height: 32px; flex-shrink: 0; border: none; border-radius: 7px; background: rgba(45,212,191,0.14); display: flex; align-items: center; justify-content: center;"
 listen click
 pop
-push 17
+push 18
 element svg Some("http://www.w3.org/2000/svg")
 attr xmlns None "http://www.w3.org/2000/svg"
 attr viewBox None "0 0 24 24"
@@ -120,12 +129,12 @@ attr points None "22 12 16 12 14 15 10 15 8 12 2 12"
 element path Some("http://www.w3.org/2000/svg")
 attr d None "M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"
 append 2
-id 19
+id 20
 pop
-push 19
+push 20
 clone
-id 18
-push 18
+id 19
+push 19
 attr class None "none"
 attr style None "none"
 attr width None "18"
@@ -136,38 +145,38 @@ attr stroke-width None "2"
 pop
 before 1
 pop
-push 17
+push 18
 text "Inbox"
-id 20
+id 21
 append 1
 pop
-push 15
+push 16
 element span None
-id 22
+id 23
 pop
-push 22
+push 23
 clone
-id 21
-push 21
+id 22
+push 22
 attr style None "position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 3px; background: #2dd4bf;"
 pop
 append 1
 pop
-push 16
+push 17
 clone
-id 23
-push 23
-child 0
 id 24
+push 24
+child 0
+id 25
 pop
-push 23
+push 24
 attr aria-label None "Tasks"
 attr data-tab None "tasks"
 attr aria-current None "false"
 attr style None "position: relative; width: 32px; height: 32px; flex-shrink: 0; border: none; border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center;"
 listen click
 pop
-push 24
+push 25
 element svg Some("http://www.w3.org/2000/svg")
 attr xmlns None "http://www.w3.org/2000/svg"
 attr viewBox None "0 0 24 24"
@@ -176,12 +185,12 @@ attr stroke-linejoin None "round"
 element path Some("http://www.w3.org/2000/svg")
 attr d None "M20 6 9 17l-5-5"
 append 1
-id 26
+id 27
 pop
-push 26
+push 27
 clone
-id 25
-push 25
+id 26
+push 26
 attr class None "none"
 attr style None "none"
 attr width None "18"
@@ -192,9 +201,9 @@ attr stroke-width None "2"
 pop
 before 1
 pop
-push 24
+push 25
 text "Tasks"
-id 27
+id 28
 append 1
 pop
 append 2
@@ -202,56 +211,56 @@ pop
 element div None
 element div None
 append 1
-id 29
-pop
-push 29
-clone
-id 28
-push 28
-child 0
 id 30
 pop
-push 28
+push 30
+clone
+id 29
+push 29
+child 0
+id 31
+pop
+push 29
 attr style None "position: relative; width: 264px; flex-shrink: 0; overflow: hidden;"
 pop
-push 30
+push 31
 attr style None "position: absolute; top: 0; bottom: 0; left: 0; width: 264px; display: flex; flex-direction: column; background: #0e0e11;  padding-top: 0px; padding-left: 0px;"
 pop
-push 30
-element div None
-id 32
-pop
-push 32
-clone
-id 31
 push 31
+element div None
+id 33
+pop
+push 33
+clone
+id 32
+push 32
 attr style None "position: absolute; top: 0; bottom: 0; right: 0; width: 1px; background: #2b2b31;"
 pop
 element div None
 attr style None "flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: scroll;"
-id 34
+id 35
 pop
-push 34
+push 35
 clone
-id 33
-push 33
+id 34
+push 34
 element div None
 text "the left side"
 append 1
-id 36
+id 37
 pop
-push 36
+push 37
 clone
-id 35
+id 36
 append 1
 pop
 element div None
-id 38
+id 39
 pop
-push 38
+push 39
 clone
-id 37
-push 37
+id 38
+push 38
 attr style None "position: absolute; top: 0; right: -4px; width: 8px; height: 100%; cursor: col-resize; z-index: 5;"
 listen pointerdown
 pop
@@ -262,123 +271,126 @@ pop
 push 4
 attr style None "position: relative; left: 0px; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column;"
 pop
-push 4
+push 5
 element div None
 text "the page"
 append 1
-id 40
+id 41
 pop
-push 40
+push 41
 clone
-id 39
+id 40
+append 1
+pop
+push 4
 element div None
 element span None
 attr style None "flex: 1;"
 append 1
-id 42
-pop
-push 42
-clone
-id 41
-push 41
-child 0
 id 43
 pop
-push 41
+push 43
+clone
+id 42
+push 42
+child 0
+id 44
+pop
+push 42
 attr style None "height: 24px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; gap: 12px; padding: 0 10px; background: #17171b; border-top: 1px solid #2b2b31; color: #8f8f99; font-family: Inter, -apple-system, 'SF Pro Text', system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif; font-size: 11px; white-space: nowrap; overflow: hidden;"
 pop
-push 41
+push 42
 element div None
-id 45
+id 46
 pop
-push 45
+push 46
 clone
-id 44
-push 44
+id 45
+push 45
 attr class None ""
 attr title None "Every change is saved"
 attr style None "display: flex; align-items: center; gap: 5px; height: 18px; padding: 0 2px; border-radius: 4px; background: transparent; color: #8f8f99; font-weight: 500; cursor: default; flex-shrink: 0;"
 listen click
 pop
-push 44
-element span None
-id 47
-pop
-push 47
-clone
-id 46
-push 46
-text "Synced"
-id 48
-append 1
-pop
-append 1
-pop
 push 45
+element span None
+id 48
+pop
+push 48
 clone
+id 47
+push 47
+text "Synced"
 id 49
-push 49
+append 1
+pop
+append 1
+pop
+push 46
+clone
+id 50
+push 50
 attr class None ""
 attr title None ""
 attr style None "display: flex; align-items: center; gap: 5px; height: 18px; padding: 0 2px; border-radius: 4px; background: transparent; color: #8f8f99; font-weight: 500; cursor: default; flex-shrink: 0;"
 listen click
 pop
-push 49
-push 47
-clone
-id 50
 push 50
-text "3 online"
+push 48
+clone
 id 51
+push 51
+text "3 online"
+id 52
 append 1
 pop
 append 1
 pop
 append 2
 pop
-append 2
+append 1
 pop
 push 3
 element div None
 element div None
 append 1
-id 53
-pop
-push 53
-clone
-id 52
-push 52
-child 0
 id 54
 pop
-push 52
+push 54
+clone
+id 53
+push 53
+child 0
+id 55
+pop
+push 53
 attr style None "position: relative; width: 320px; flex-shrink: 0; overflow: hidden;"
 pop
-push 54
+push 55
 attr style None "position: absolute; top: 0; bottom: 0; right: 0; width: 320px; display: flex; flex-direction: column; overflow-y: scroll; background: #0e0e11;  padding-top: 0px; padding-right: 0px;"
 pop
-push 54
-element div None
-id 56
-pop
-push 56
-clone
-id 55
 push 55
+element div None
+id 57
+pop
+push 57
+clone
+id 56
+push 56
 attr style None "position: absolute; top: 0; bottom: 0; left: 0; width: 1px; background: #2b2b31;"
 pop
 element div None
 text "the details"
 append 1
-id 58
-pop
-push 58
-clone
-id 57
-push 38
-clone
 id 59
+pop
 push 59
+clone
+id 58
+push 39
+clone
+id 60
+push 60
 attr style None "position: absolute; top: 0; left: -4px; width: 8px; height: 100%; cursor: col-resize; z-index: 5;"
 listen pointerdown
 pop
@@ -391,24 +403,24 @@ element div None
 element button None
 attr class None "lp"
 append 1
-id 61
-pop
-push 61
-clone
-id 60
-push 60
-child 0
 id 62
 pop
-push 60
+push 62
+clone
+id 61
+push 61
+child 0
+id 63
+pop
+push 61
 attr style None "position: absolute; top: 0px; left: 12px; height: 40px; display: flex; align-items: center; z-index: 30;"
 pop
-push 62
+push 63
 attr aria-label None "Toggle the sidebar"
 attr style None "width: 28px; height: 28px; border: none; border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center;"
 listen click
 pop
-push 62
+push 63
 element svg Some("http://www.w3.org/2000/svg")
 attr xmlns None "http://www.w3.org/2000/svg"
 attr viewBox None "0 0 24 24"
@@ -423,12 +435,12 @@ attr rx None "2"
 element path Some("http://www.w3.org/2000/svg")
 attr d None "M9 3v18"
 append 2
-id 64
+id 65
 pop
-push 64
+push 65
 clone
-id 63
-push 63
+id 64
+push 64
 attr class None "none"
 attr style None "none"
 attr width None "17"
@@ -439,22 +451,22 @@ attr stroke-width None "2"
 pop
 append 1
 pop
-push 61
+push 62
 clone
-id 65
-push 65
-child 0
 id 66
-pop
-push 65
-attr style None "position: absolute; top: 0px; right: 12px; height: 40px; display: flex; align-items: center; z-index: 30;"
+push 66
+child 0
+id 67
 pop
 push 66
+attr style None "position: absolute; top: 0px; right: 12px; height: 40px; display: flex; align-items: center; z-index: 30;"
+pop
+push 67
 attr aria-label None "Toggle the details"
 attr style None "width: 28px; height: 28px; border: none; border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center;"
 listen click
 pop
-push 66
+push 67
 element svg Some("http://www.w3.org/2000/svg")
 attr xmlns None "http://www.w3.org/2000/svg"
 attr viewBox None "0 0 24 24"
@@ -469,12 +481,12 @@ attr rx None "2"
 element path Some("http://www.w3.org/2000/svg")
 attr d None "M15 3v18"
 append 2
-id 68
+id 69
 pop
-push 68
+push 69
 clone
-id 67
-push 67
+id 68
+push 68
 attr class None "none"
 attr style None "none"
 attr width None "17"
@@ -489,17 +501,23 @@ append 2
 pop
 push 2
 clone
-id 69
-push 69
-child 0
 id 70
-pop
-push 69
-child 0
+push 70
 child 0
 id 71
 pop
-push 69
+push 70
+child 0
+child 0
+id 72
+pop
+push 70
+child 0
+child 0
+child 0
+id 73
+pop
+push 70
 attr style None "position: relative; z-index: 0; width: 100%; height: 100%; overflow: hidden; display: flex; flex-direction: row; background: #09090b; color: #e4e4e7; font-family: Inter, -apple-system, 'SF Pro Text', system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;"
 listen pointerdown
 listen pointermove
@@ -507,65 +525,65 @@ listen pointerup
 listen pointercancel
 listen click
 pop
-push 70
-push 6
+push 71
+push 7
 clone
-id 72
-push 72
+id 74
+push 74
 attr style None "position:absolute; left:0; top:0; width:1px; height:1px; opacity:0; pointer-events:none; animation: none;"
 pop
 before 1
 pop
-push 70
+push 71
 attr style None "flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column;"
 pop
-push 71
+push 72
 attr style None "position: relative; left: 0px; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column;"
 pop
-push 71
-push 40
+push 73
+push 41
 clone
-id 73
+id 75
 append 1
 pop
-push 70
+push 71
 element div None
-id 75
-pop
-push 75
-clone
-id 74
-push 74
-attr style None "position: relative; z-index: 8; flex-shrink: 0; display: flex; flex-direction: column;"
-pop
-push 74
-element div None
-attr data-bar None "actions"
 id 77
 pop
 push 77
 clone
 id 76
 push 76
-attr style None "flex-shrink: 0; height: 48px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-around; padding: 0 12px 0px 12px; background: #09090b; border-top: 1px solid #2b2b31;"
-listen pointerdown
+attr style None "position: relative; z-index: 8; flex-shrink: 0; display: flex; flex-direction: column;"
 pop
 push 76
-element button None
-attr class None "lp"
+element div None
+attr data-bar None "actions"
 id 79
 pop
 push 79
 clone
 id 78
 push 78
+attr style None "flex-shrink: 0; height: 48px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-around; overflow-x: visible; gap: 0px; padding: 0 12px 0px 12px; background: #09090b; border-top: 1px solid #2b2b31;"
+listen pointerdown
+pop
+push 78
+element button None
+attr class None "lp"
+id 81
+pop
+push 81
+clone
+id 80
+push 80
 attr aria-label None "Undo"
 attr aria-disabled None "false"
 attr data-bar-item None "LAB_UNDO"
 attr style None "position: relative; width: 44px; height: 44px; flex-shrink: 0; padding: 0; border: none; border-radius: 12px; background: transparent; display: flex; align-items: center; justify-content: center; opacity: 1;"
 listen click
 pop
-push 78
+push 80
 element svg Some("http://www.w3.org/2000/svg")
 attr xmlns None "http://www.w3.org/2000/svg"
 attr viewBox None "0 0 24 24"
@@ -576,12 +594,12 @@ attr d None "M9 14 4 9l5-5"
 element path Some("http://www.w3.org/2000/svg")
 attr d None "M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"
 append 2
-id 81
+id 83
 pop
-push 81
+push 83
 clone
-id 80
-push 80
+id 82
+push 82
 attr class None "none"
 attr style None "none"
 attr width None "22"
@@ -597,41 +615,41 @@ pop
 element div None
 element div None
 append 1
-id 83
+id 85
 pop
-push 83
+push 85
 clone
-id 82
-push 82
-child 0
 id 84
+push 84
+child 0
+id 86
 pop
-push 82
+push 84
 attr style None "flex-shrink: 0; display: flex; align-items: flex-end; gap: 8px; padding: 8px 20px 30px 20px;"
 listen pointerdown
 pop
-push 84
+push 86
 attr style None "flex: 1; min-width: 0; height: 54px; box-sizing: border-box; display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 27px; background: #1a1a1f; border: 1px solid #2b2b31; box-shadow: 0 6px 20px rgba(0,0,0,0.35);"
 pop
-push 84
-element button None
-id 86
-pop
 push 86
+element button None
+id 88
+pop
+push 88
 clone
-id 85
-push 85
+id 87
+push 87
 attr aria-label None "Inbox"
 attr data-tab None "inbox"
 attr aria-current None "page"
 attr style None "position: relative; flex: 1 1 0; height: 46px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: none; border-radius: 23px; background: rgba(255,255,255,0.10); color: #e4e4e7; font-family: Inter, -apple-system, 'SF Pro Text', system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif; font-size: 11px; font-weight: 650;"
 listen click
 pop
-push 85
-push 19
-clone
-id 87
 push 87
+push 20
+clone
+id 89
+push 89
 attr class None "none"
 attr style None "none"
 attr width None "22"
@@ -640,34 +658,34 @@ attr fill None "none"
 attr stroke None "#e4e4e7"
 attr stroke-width None "2"
 pop
-push 10
+push 11
 clone
-id 88
-push 88
+id 90
+push 90
 attr style None "position: absolute; top: 4px; right: 22%; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: #2dd4bf; color: #04201c; font-size: 11px; font-weight: 700;"
 pop
-push 88
+push 90
 text "3"
-id 89
+id 91
 append 1
 pop
 append 2
 pop
-push 86
+push 88
 clone
-id 90
-push 90
+id 92
+push 92
 attr aria-label None "Tasks"
 attr data-tab None "tasks"
 attr aria-current None "false"
 attr style None "position: relative; flex: 1 1 0; height: 46px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: none; border-radius: 23px; background: transparent; color: #8f8f99; font-family: Inter, -apple-system, 'SF Pro Text', system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif; font-size: 11px; font-weight: 650;"
 listen click
 pop
-push 90
-push 26
+push 92
+push 27
 clone
-id 91
-push 91
+id 93
+push 93
 attr class None "none"
 attr style None "none"
 attr width None "22"

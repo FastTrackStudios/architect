@@ -18,6 +18,10 @@ authors = ["FastTrackStudios"]
 # The vault's notes, through the app's own actions; it never deletes.
 actions = ["VAULT_LIST", "VAULT_READ", "VAULT_CREATE", "EXT_VIEW_OPEN"]
 effect = "mutating"
+# The vault's actions read the recipes and make the shopping list: the
+# documents (VAULT_*).
+reads = ["documents"]
+writes = ["documents"]
 ui = ["prompts", "notify"]
 
 [[actions]]

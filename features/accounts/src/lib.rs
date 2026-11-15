@@ -23,10 +23,10 @@
 //! - [`ui`] (feature `ui`): the shell's Account item with the switcher, and
 //!   the sign-in sheet with the devices.
 
-#[cfg(feature = "http")]
+#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 pub mod browser;
 mod model;
-#[cfg(feature = "http")]
+#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 pub mod redirect;
 mod secrets;
 mod store;

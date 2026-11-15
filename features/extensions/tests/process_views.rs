@@ -138,7 +138,7 @@ fn drew_tile(frame: &Frame) -> bool {
 
 #[test]
 fn more_than_64_views_at_once_closed_ones_given_back_and_a_clear_limit() {
-    assert_eq!((VIEWS_WIRE, WIRE), (6, 6));
+    assert_eq!((VIEWS_WIRE, WIRE), (6, 7));
     let dir = tempfile::tempdir().unwrap();
     let (host, processes) = host(dir.path());
     host.load(&package(dir.path()), Origin::Dev).unwrap();

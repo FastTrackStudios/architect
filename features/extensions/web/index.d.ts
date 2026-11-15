@@ -223,6 +223,7 @@ export interface HostRequests {
   selection: {};
   open: { path: string };
   read_document: { path: string };
+  query_vault: { path?: string | null; source?: string | null; view?: string | null; if_changed?: string | null; limit?: number | null };
   list_documents: { under?: string | null };
   create_document: { path: string; text: string };
   edit_document: { path: string; edits: DocEdit[]; name?: string | null };
