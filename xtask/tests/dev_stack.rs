@@ -3,7 +3,8 @@
 //! crate's own binary), with the binaries `DEV_STACK_BIN_*` names, on free
 //! ports in a temporary state folder. Nothing here needs devenv.
 //!
-//! - The demo seed: the node signs in to the local issuer with its iroh
+//! - The demo seed: the app's node (the app with no window, `dev run app
+//!   --headless`) signs in to the local issuer with its iroh
 //!   endpoint on loopback alone and no relay, a seeded member sees the
 //!   org's vault through the node, and each seeded share link lets in
 //!   exactly its audience.
@@ -24,7 +25,7 @@
 //! Run: `cargo xtask feature-tests --run --filter dev-stack`, or
 //! `cargo nextest run -p xtask --features stack-test --test dev_stack`.
 //! The binaries are built here unless `DEV_STACK_BIN_AUTH`,
-//! `DEV_STACK_BIN_NODE` and `DEV_STACK_BIN_MOCK_OAUTH` name them.
+//! `DEV_STACK_BIN_APP` and `DEV_STACK_BIN_MOCK_OAUTH` name them.
 
 #![allow(
     clippy::unwrap_used,
@@ -53,7 +54,8 @@ fn root() -> PathBuf {
 
 struct Bins {
     auth: PathBuf,
-    node: PathBuf,
+    /// The app, built without the window: its `serve`.
+    app: PathBuf,
     mock: PathBuf,
 }
 
@@ -62,12 +64,12 @@ fn bins() -> &'static Bins {
     static BINS: OnceLock<Bins> = OnceLock::new();
     BINS.get_or_init(|| {
         let named = |var: &str| std::env::var_os(var).map(PathBuf::from);
-        if let (Some(auth), Some(node), Some(mock)) = (
+        if let (Some(auth), Some(app), Some(mock)) = (
             named("DEV_STACK_BIN_AUTH"),
-            named("DEV_STACK_BIN_NODE"),
+            named("DEV_STACK_BIN_APP"),
             named("DEV_STACK_BIN_MOCK_OAUTH"),
         ) {
-            return Bins { auth, node, mock };
+            return Bins { auth, app, mock };
         }
         let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
         let build = |args: &[&str]| {
@@ -104,7 +106,7 @@ fn bins() -> &'static Bins {
             .join("debug");
         Bins {
             auth: target.join("auth-server"),
-            node: target.join("architect-desktop"),
+            app: target.join("architect-desktop"),
             mock: target.join("mock-oauth"),
         }
     })
@@ -269,7 +271,7 @@ impl Stack {
             ports: [
                 ("MOCK_OAUTH", free_port()),
                 ("AUTH", free_port()),
-                ("NODE", free_port()),
+                ("APP", free_port()),
                 ("WEB", free_port()),
                 ("SITE", free_port()),
             ],
@@ -303,7 +305,7 @@ impl Stack {
             .env("DEV_STACK_STATE", &self.state)
             .env("DEVENV_STATE", self.state.parent().unwrap())
             .env("DEV_STACK_BIN_AUTH", &bins.auth)
-            .env("DEV_STACK_BIN_NODE", &bins.node)
+            .env("DEV_STACK_BIN_APP", &bins.app)
             .env("DEV_STACK_BIN_MOCK_OAUTH", &bins.mock);
         for (name, port) in self.ports {
             c.env(format!("DEV_STACK_PORT_{name}"), port.to_string());
@@ -428,10 +430,11 @@ fn the_demo_stack_signs_in_serves_the_orgs_vault_and_each_share_audience() {
     assert_eq!(mode(&stack.state.join("auth/secret")), 0o600);
     assert_eq!(mode(&stack.state.join("fill.json")), 0o600);
 
-    stack.start(&mut procs, "node");
-    let node = stack.url("NODE");
+    // The app is the node: with no window here, the same binary's `serve`.
+    procs.spawn("app", stack.xtask(&["run", "app", "--headless"]));
+    let node = stack.url("APP");
     procs.wait(
-        "node",
+        "app",
         &format!("{node}/health"),
         Some(200),
         Duration::from_secs(120),
@@ -449,7 +452,7 @@ fn the_demo_stack_signs_in_serves_the_orgs_vault_and_each_share_audience() {
         assert!(
             Instant::now() < deadline,
             "the node never signed in: {code} {body}\n{}",
-            procs.tail("node")
+            procs.tail("app")
         );
         std::thread::sleep(Duration::from_millis(500));
     };

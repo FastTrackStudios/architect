@@ -14,10 +14,10 @@ public_dir = "dev/public"
 title = ""
 
 # The node's paths, on this origin as they are behind production's reverse
-# proxy (`scripts/web-routes.md`): the local stack's node, `dev-stack.toml`
-# `[ports] node` (a test in `xtask/src/dev/mod.rs` keeps these equal to
-# it; a run that moves the node with `DEV_STACK_PORT_NODE` has no node
-# here). WebSockets too (`/org/<slug>/vox`).
+# proxy (`scripts/web-routes.md`): the local stack's app, which is its
+# node, `dev-stack.toml` `[ports] app` (a test in `xtask/src/dev/mod.rs`
+# keeps these equal to it; a run that moves the app with
+# `DEV_STACK_PORT_APP` has no node here). WebSockets too (`/org/<slug>/vox`).
 [[web.proxy]]
 backend = "http://127.0.0.1:7412/node"
 

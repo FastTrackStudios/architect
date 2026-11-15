@@ -1,12 +1,12 @@
 +++
 title = "The whole stack on your machine"
-description = "devenv up: the auth server, a headless node and the app, wired to each other and to nothing else; filled from a sanitised mirror of production on a credentialed machine and from the demo seed everywhere else."
+description = "devenv up: the auth server, the app (which is also the node) and the web app, wired to each other and to nothing else; filled from a sanitised mirror of production on a credentialed machine and from the demo seed everywhere else."
 weight = 74
 +++
 
 `devenv up` with no arguments starts everything Architect needs on one
-machine: an auth server, a headless node signed in to it, and the app
-signed in to both. Every process binds `127.0.0.1`, nothing names
+machine: an auth server, the app, which is also its node (as on anyone's
+machine) signed in to it, and the web app in front of that node. Every process binds `127.0.0.1`, nothing names
 production, and on a machine that holds an administrator's token the
 accounts and orgs are a sanitised copy of production's, so you can test
 with production's shape without touching it.
@@ -18,8 +18,8 @@ Keyflow (`scripts/run-it.sh` here):
 
 | Recipe | What it runs |
 | --- | --- |
-| `just dev` | Everything, rebuilt on save. With a Studio checkout beside this one (`../studio`, or `LOCAL_STACK_STUDIO_PATH`), **Studio's stack** with this checkout as its Architect: Studio's node with Studio's extensions linked in, on a copy of a real setlist vault and its share link, the issuer, the web app and the site (`studio:docs/local-stack.md`). Arguments go to Studio's (`keyflow=local`, `desktop=on`, `watch=off`). `just dev plain`: this repo's own stack below, all of it at once (`devenv up mock-oauth auth node app web site`): the desktop app's window and the web app, both under `dx serve` and rebuilt on a save, and the site with hot reload. |
-| `just demo` | The quickest look: the issuer, a node with a share link (Studio's when it is beside this one, else the demo seed's) and the web app in front of it, since a share link opens the web app as its guest (#646): `http://127.0.0.1:7413/s/ksqx75iaaaaaaaae/`. The node's own port answers the app's page too, but the app's script is the web app server's. Sign in as `ada@local.test`, password `development-password`. |
+| `just dev` | Everything, rebuilt on save. With a Studio checkout beside this one (`../studio`, or `LOCAL_STACK_STUDIO_PATH`), **Studio's stack** with this checkout as its Architect: Studio's node with Studio's extensions linked in, on a copy of a real setlist vault and its share link, the issuer, the web app and the site (`studio:docs/local-stack.md`). Arguments go to Studio's (`keyflow=local`, `desktop=on`, `watch=off`). `just dev plain`: this repo's own stack below, all of it at once (`devenv up mock-oauth auth app web site`): the desktop app's window, which is also the node, and the web app, both under `dx serve` and rebuilt on a save, and the site with hot reload. |
+| `just demo` | The quickest look: the issuer, a node with a share link (Studio's when it is beside this one; with `plain`, the demo seed's, served by the app, which is the node: `devenv up mock-oauth auth app web`) and the web app in front of it, since a share link opens the web app as its guest (#646): `http://127.0.0.1:7413/s/ksqx75iaaaaaaaae/`. The node's own port answers the app's page too, but the app's script is the web app server's. Sign in as `ada@local.test`, password `development-password`. |
 | `just website` | The public site alone (`apps/site`: landing, download, changelog, extensions, docs) with hot reload, on 7414. `just docs-serve` still serves `docs/content` alone. |
 | `just phone` | Studio's running stack's node on this tailnet over HTTPS (`tailscale serve`, never funnel), for a phone. |
 
@@ -46,20 +46,24 @@ in this order, each waiting for the one before it to answer:
 | --- | --- | --- | --- |
 | `mock-oauth` | 7410 | | The stand-in for GitHub, Google and TONE3000 (`apps/mock-oauth`): the auth server's social buttons work with nobody's credentials. |
 | `auth` | 7411 | `mock-oauth` | The auth server (`apps/auth-server`): SQLite on disk under the stack's state, a secret of its own generated on its first start, filled as below. |
-| `node` | 7412 | `auth` | `architect-desktop serve`, built without the window: signed in to the local auth server, hosting the fill's org and a vault of the demo's content, `ARCHITECT_IROH=local`, files in a local folder. |
-| `app` | (a window) | `node` | The Architect app under `dx serve`: its issuer the local auth server, its orgs' node the local node (`ARCHITECT_ORG_HOST`), a folder of its own with its sessions in a file there (never the keychain), a scratch copy of the demo vault. |
-| `web` | 7413 | `auth` | Off by default (`devenv up web`; `just dev plain` starts it): the web app (`apps/web`) under `dx serve --platform web`, at `/app/` (`/app/?demo`: the app on the demo vault), its `config.json` naming the local issuer. Below. |
+| `app` | 7412, and a window | `auth` | The Architect app under `dx serve`, and in the same process its node, as on anyone's machine (`apps/desktop/src/app.rs` `start_node`): the node signed in to the local auth server, hosting the fill's org and a vault of the demo's content, `ARCHITECT_IROH=local`, files in a local folder, its HTTP face (`/health`, `/vox`, the org lane, share links) on 7412. The window's issuer is the local auth server, its orgs' node its own (`ARCHITECT_ORG_HOST`), a folder of its own with its sessions in a file there (never the keychain), a scratch copy of the demo vault. Ready once `/health` answers. |
+| `web` | 7413 | `auth` | The web app (`apps/web`) under `dx serve --platform web`, at `/app/` (`/app/?demo`: the app on the demo vault), its `config.json` naming the local issuer. Below. |
 | `site` | 7414 | | Off by default (`devenv up site`; `just dev plain` starts it): `apps/site`'s dev server, hot-reloaded; its `/app/…` links go to the web app's server. |
 
 The ports are `dev-stack.toml`'s, the one place to change them
 (`devenv.nix` reads them from there too). They stay clear of what a fleet
 machine runs: Teley on 8787, the collector on 4318, `just auth-dev` and
 `just web` on 8080, `just mock-oauth` on 4040. `DEV_STACK_PORT_AUTH` (and
-`_NODE`, `_MOCK_OAUTH`, `_WEB`, `_SITE`) moves one for a run.
+`_APP`, `_MOCK_OAUTH`, `_WEB`, `_SITE`) moves one for a run.
+
+There is no separate node process: the app is the node, and a server
+runs the same binary without the window (`architect-desktop serve`). The
+stack's test runs the app that way, with the same environment:
+`cargo xtask dev run app --headless`.
 
 Everything the stack keeps is under devenv's state, in
 `.devenv/state/stack/` (`$DEVENV_STATE/stack`): the auth database and its
-secret, the snapshot, the node's identity and data, the app's folder, and
+secret, the snapshot, the app's node's identity and data (`node/`), the app's folder, and
 `fill.json`, what was decided and why. The app's scratch vault is
 `.devenv/state/demo-vault`, as before.
 
@@ -68,7 +72,7 @@ age, the URLs to open and the development password.
 
 ### The web app, rebuilt on save
 
-`just dev plain` (or `devenv up web`) serves the web app at
+`devenv up` (and `just dev plain`) serves the web app at
 `http://127.0.0.1:7413/app/`, the demo at `/app/?demo`. dx builds
 `apps/web`'s program (`apps/web/src/main.rs`, which calls the same
 `start` the bundle's library does) in a debug profile, so the first
@@ -94,11 +98,11 @@ crate it uses is rebuilt in seconds and the page reloads.
   the client `architect` with this origin's `/auth/callback`, the scopes
   the app asks for and this origin for CORS (`auth_env`).
 - **The node's paths** (`/node`, `/org`, `/vox`, `/s`, `/_ext`) are sent
-  to the stack's node by dx's dev server (`apps/web/Dioxus.toml`
+  to the app's node by dx's dev server (`apps/web/Dioxus.toml`
   `[[web.proxy]]`), WebSockets too, as production's reverse proxy does:
   the signed-in page shows the node's status. The port there is
-  `dev-stack.toml`'s, kept equal by a test; a run that moves the node
-  with `DEV_STACK_PORT_NODE` has no node behind the web app.
+  `dev-stack.toml`'s, kept equal by a test; a run that moves the app
+  with `DEV_STACK_PORT_APP` has no node behind the web app.
 - **The release bundle is not built this way**: `scripts/web-bundle.sh`
   builds the library with the `web` profile and its own wasm-bindgen
   (`just web`), as before.
@@ -267,7 +271,7 @@ The one-off auth servers share the stack's code: `just auth-dev`,
 `just auth-dev-persistent` and `just auth-replay` are
 `cargo xtask dev auth` (one function writes the auth server's environment
 for all of them), on port 8080 with the published development secret.
-`cargo xtask dev env node` prints what the stack gives a process (no
+`cargo xtask dev env app` prints what the stack gives a process (no
 secret is in it: secrets are files).
 
 The stack's test, `xtask/tests/dev_stack.rs`, starts the same

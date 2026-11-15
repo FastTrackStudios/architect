@@ -76,17 +76,18 @@ const STRIPPED_PREFIXES: [&str; 4] = ["ARCHITECT_", "AUTH_", "AWS_", "MOCK_OAUTH
 pub enum Process {
     MockOauth,
     Auth,
-    Node,
+    /// The Architect app, which is also the stack's node: under
+    /// `dx serve` with its window, or (`--headless`) the same binary's
+    /// `serve`.
     App,
     Web,
     Site,
 }
 
 impl Process {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 5] = [
         Self::MockOauth,
         Self::Auth,
-        Self::Node,
         Self::App,
         Self::Web,
         Self::Site,
@@ -96,7 +97,6 @@ impl Process {
         match self {
             Self::MockOauth => "mock-oauth",
             Self::Auth => "auth",
-            Self::Node => "node",
             Self::App => "app",
             Self::Web => "web",
             Self::Site => "site",
@@ -108,7 +108,13 @@ impl Process {
 pub enum DevAction {
     /// Start one process of the stack, as `devenv up` does: guard, fill,
     /// then exec its binary with its environment.
-    Run { process: Process },
+    Run {
+        process: Process,
+        /// The app with no window: the same binary's `serve`, the same
+        /// environment (the stack's test; `devenv up` opens the window).
+        #[arg(long)]
+        headless: bool,
+    },
     /// Run the guard alone: what every process would be given, checked.
     Guard,
     /// Print the environment the stack gives a process (no secret is in
@@ -165,7 +171,7 @@ pub fn run_cli(action: DevAction) -> Result<(), String> {
     let env = |k: &str| std::env::var(k).ok();
     let stack = Stack::load(&env)?;
     match action {
-        DevAction::Run { process } => stack.run(process, &env),
+        DevAction::Run { process, headless } => stack.run(process, headless, &env),
         DevAction::Guard => {
             stack.guard()?;
             println!("dev guard: every process is local, nothing names production");
@@ -211,7 +217,7 @@ pub fn run_cli(action: DevAction) -> Result<(), String> {
             if !refused.is_empty() {
                 return Err(refusal_message(&refused));
             }
-            exec(stack.command(Process::Auth), &vars)
+            exec(stack.command(Process::Auth, false), &vars)
         }
     }
 }
@@ -226,7 +232,8 @@ struct StackFile {
 pub struct Ports {
     pub mock_oauth: u16,
     pub auth: u16,
-    pub node: u16,
+    /// The app's node: its HTTP face, share links, `/vox`, the org lane.
+    pub app: u16,
     pub web: u16,
     pub site: u16,
 }
@@ -273,7 +280,7 @@ impl Stack {
         for (name, port) in [
             ("MOCK_OAUTH", &mut ports.mock_oauth),
             ("AUTH", &mut ports.auth),
-            ("NODE", &mut ports.node),
+            ("APP", &mut ports.app),
             ("WEB", &mut ports.web),
             ("SITE", &mut ports.site),
         ] {
@@ -360,15 +367,17 @@ impl Stack {
                     web_port: Some(p.web),
                 })
             }
-            Process::Node => vec![
-                pair("ARCHITECT_NAME", "dev-node".to_owned()),
-                pair("ARCHITECT_BIND", format!("127.0.0.1:{}", p.node)),
+            // The app and its node (the same process): the node's settings
+            // first, then the window's.
+            Process::App => vec![
+                pair("ARCHITECT_NAME", "dev-app".to_owned()),
+                pair("ARCHITECT_BIND", format!("127.0.0.1:{}", p.app)),
                 pair("ARCHITECT_DATA_DIR", self.node_data().display().to_string()),
                 pair(
                     "ARCHITECT_VAULTS",
                     format!("{NODE_VAULT}=vaults/{NODE_VAULT}"),
                 ),
-                pair("ARCHITECT_ISSUER", auth),
+                pair("ARCHITECT_ISSUER", auth.clone()),
                 pair(
                     "ARCHITECT_SESSION_FILE",
                     self.session().display().to_string(),
@@ -394,10 +403,9 @@ impl Stack {
                 // A share link's page is the web app's (#646): served at
                 // `/app/` by the web app's dev server, beside the node.
                 pair("ARCHITECT_WEB_APP", "beside".to_owned()),
-            ],
-            Process::App => vec![
+                // The window: its issuer the local one, its orgs' node its own.
                 pair("ARCHITECT_AUTH_ISSUER", auth),
-                pair("ARCHITECT_ORG_HOST", Self::url(p.node)),
+                pair("ARCHITECT_ORG_HOST", Self::url(p.app)),
                 pair(
                     "ARCHITECT_SECRET_STORE",
                     format!(
@@ -447,7 +455,7 @@ impl Stack {
         }
     }
 
-    fn command(&self, process: Process) -> Command {
+    fn command(&self, process: Process, headless: bool) -> Command {
         let bin = |var: &str| std::env::var(var).ok().filter(|v| !v.is_empty());
         let cargo = |args: &[&str]| {
             let mut c = Command::new("cargo");
@@ -459,8 +467,9 @@ impl Stack {
                 .map_or_else(|| cargo(&["-p", "mock-oauth"]), Command::new),
             Process::Auth => bin("DEV_STACK_BIN_AUTH")
                 .map_or_else(|| cargo(&["-p", "auth-server"]), Command::new),
-            Process::Node => {
-                let mut c = bin("DEV_STACK_BIN_NODE").map_or_else(
+            // The same binary with no window: its `serve`.
+            Process::App if headless => {
+                let mut c = bin("DEV_STACK_BIN_APP").map_or_else(
                     || {
                         cargo(&[
                             "-p",
@@ -538,13 +547,20 @@ impl Stack {
     pub fn run(
         &self,
         process: Process,
+        headless: bool,
         env: &dyn Fn(&str) -> Option<String>,
     ) -> Result<(), String> {
+        if headless && process != Process::App {
+            return Err(format!(
+                "--headless is the app's (its node with no window), not {}'s",
+                process.name()
+            ));
+        }
         self.guard()?;
         private_dir(&self.state)?;
         let fill = match process {
             Process::Auth => Some(self.prepare_auth(env)?),
-            Process::Node => Some(self.prepare_node()?),
+            Process::App => Some(self.prepare_node()?),
             _ => self.read_fill().ok(),
         };
         match process {
@@ -557,7 +573,7 @@ impl Stack {
             let fill = fill.as_ref().ok_or("no fill")?;
             vars.extend(self.auth_fill_env(fill));
         }
-        exec(self.command(process), &vars)
+        exec(self.command(process, headless), &vars)
     }
 
     /// The auth database's seed or import, when it is new.
@@ -660,7 +676,7 @@ impl Stack {
         Ok(fill)
     }
 
-    /// The node's vault seeded, its session signed in.
+    /// The app's node: its vault seeded, its session signed in.
     fn prepare_node(&self) -> Result<Fill, String> {
         let fill = self
             .read_fill()
@@ -678,7 +694,7 @@ impl Stack {
         )?;
         write_private(&self.session(), token.as_bytes())?;
         println!(
-            "dev node: signed in as {} at {}, hosting org `{}` (iroh: local only)",
+            "dev app's node: signed in as {} at {}, hosting org `{}` (iroh: local only)",
             fill.node_email,
             Self::url(self.ports.auth),
             fill.node_org
@@ -763,7 +779,7 @@ impl Stack {
         [
             (Process::MockOauth, p.mock_oauth),
             (Process::Auth, p.auth),
-            (Process::Node, p.node),
+            (Process::App, p.app),
             (Process::Web, p.web),
             (Process::Site, p.site),
         ]
@@ -778,7 +794,7 @@ impl Stack {
         for (process, port) in [
             (Process::MockOauth, self.ports.mock_oauth),
             (Process::Auth, self.ports.auth),
-            (Process::Node, self.ports.node),
+            (Process::App, self.ports.app),
             (Process::Web, self.ports.web),
             (Process::Site, self.ports.site),
         ] {
@@ -805,7 +821,7 @@ impl Stack {
                     );
                 }
                 println!(
-                    "  the node signs in as {} and hosts `{}`",
+                    "  the app's node signs in as {} and hosts `{}`",
                     fill.node_email, fill.node_org
                 );
             }
@@ -818,14 +834,14 @@ impl Stack {
         );
         println!(
             "\nOpen:\n  the web app               {web}/app/ (the demo: {web}/app/?demo)\n  \
-             the site                  {site}/\n  the auth server's pages   {auth}/login\n  the node's status         \
+             the site                  {site}/\n  the auth server's pages   {auth}/login\n  the app's node status     \
              {node}/node/status (POST)\n  share links               {node}/s/<code>/ \
              (docs/content/guide/local-stack.md lists the seeded ones)\n  the app's Action List     \
              ARCHITECT_CONFIG_DIR={app} just app actions list",
             web = Self::url(self.ports.web),
             site = Self::url(self.ports.site),
             auth = Self::url(self.ports.auth),
-            node = Self::url(self.ports.node),
+            node = Self::url(self.ports.app),
             app = self.state.join("app").display(),
         );
     }
@@ -1408,7 +1424,7 @@ mod tests {
             .iter()
             .map(|p| p["backend"].as_str().unwrap())
             .collect();
-        let node = Stack::url(stack.ports.node);
+        let node = Stack::url(stack.ports.app);
         for path in ["/node", "/org", "/vox", "/s", "/_ext"] {
             assert!(
                 backends.contains(&format!("{node}{path}").as_str()),
@@ -1421,7 +1437,7 @@ mod tests {
     #[test]
     fn the_web_app_runs_under_dx_on_the_stacks_port_and_the_site_leads_to_it() {
         let stack = stack();
-        let command = stack.command(Process::Web);
+        let command = stack.command(Process::Web, false);
         assert_eq!(command.get_program(), "dx");
         let args: Vec<_> = command
             .get_args()
@@ -1467,8 +1483,38 @@ mod tests {
     }
 
     #[test]
+    fn the_app_is_the_stacks_node_with_its_window_or_headless() {
+        let stack = stack();
+        let env = stack.env_for(Process::App, None);
+        let get = |k: &str| env.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+        let own = Stack::url(stack.ports.app);
+        assert_eq!(
+            get("ARCHITECT_BIND"),
+            Some(format!("127.0.0.1:{}", stack.ports.app).as_str())
+        );
+        assert_eq!(get("ARCHITECT_ORG_HOST"), Some(own.as_str()));
+        assert!(get("ARCHITECT_SESSION_FILE").is_some() && get("ARCHITECT_VAULT").is_some());
+
+        let window = stack.command(Process::App, false);
+        assert_eq!(window.get_program(), "dx");
+        let args: Vec<_> = window
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(&args[..3], ["serve", "--platform", "desktop"]);
+
+        let headless = stack.command(Process::App, true);
+        let args: Vec<_> = headless
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(args.last().map(String::as_str), Some("serve"));
+        assert!(args.iter().any(|a| a == "architect-desktop"));
+    }
+
+    #[test]
     fn the_node_runs_local_iroh_and_signs_in_locally() {
-        let env = stack().env_for(Process::Node, None);
+        let env = stack().env_for(Process::App, None);
         let get = |k: &str| env.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
         assert_eq!(get("ARCHITECT_IROH"), Some("local"));
         assert!(

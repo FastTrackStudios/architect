@@ -13,11 +13,11 @@ default:
 # seed, no Studio). Arguments go to Studio's `just dev` (keyflow=local,
 # desktop=on, watch=off).
 
-# Everything locally, rebuilt on save: Studio's node with this Architect, issuer, web app, site (`plain`: Architect's own stack, the desktop app and the web app under dx serve, and the site)
+# Everything locally, rebuilt on save: Studio's node with this Architect, issuer, web app, site (`plain`: Architect's own stack, the desktop app (also the node) and the web app under dx serve, and the site)
 dev *ARGS:
     @bash scripts/run-it.sh dev {{ARGS}}
 
-# See it working, quickly: issuer + a node with a share link, no watchers (`plain`: Architect's demo seed)
+# See it working, quickly: issuer + a node with a share link, no watchers (`plain`: Architect's demo seed: the issuer, the app, which is the node, and the web app)
 demo *ARGS:
     @bash scripts/run-it.sh demo {{ARGS}}
 
