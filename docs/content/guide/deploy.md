@@ -57,6 +57,7 @@ where the node reads them, never values in the environment.
 | `ARCHITECT_VAULTS` | none | `id=path,…`: the vaults it holds (a relative path is under the data dir) |
 | `ARCHITECT_SITES` | none | `/mount=vault,…`: vaults published as Sites |
 | `ARCHITECT_EXTENSIONS` | `<data dir>/extensions` | installed extensions, a package folder each (`<id>/extension.toml`): the fences they claim are drawn on share links and Sites ([below](#blocks-extensions-draw)) |
+| `ARCHITECT_EXTENSION_SECRETS` | none | its extensions' node secrets, set by its operator: a folder with a file each, `<ext id>/<secret id>`, as sops-nix writes them; none: an org admin sets them on the org lane, kept in `<data dir>/extension-secrets.json` ([below](#extensions-node-actions)) |
 | `ARCHITECT_ISSUER` | none | the account server, `https://auth.fasttrackstudio.app` |
 | `ARCHITECT_SESSION_FILE` | none | a file holding the account's session token |
 | `ARCHITECT_ORG` | none | the org it offers the account while the account shares none |
@@ -303,6 +304,97 @@ host_org = "fasttrackstudio"
 enrol_at = "https://architect.fasttrackstudio.app"
 enrol_org = "fasttrackstudio"
 ```
+
+## Extensions' node actions
+
+The node does sync, access control and only what truly needs a server.
+The one place extension code runs on it is a **node action** (#583): an
+installed extension's action with `runs = "node"`, which holds a secret
+the org's devices must never have, such as a bank-link token exchange
+with the provider's client secret
+(`docs/content/architecture/extensions.md`, "Server-side parts on the
+node").
+
+At start the node loads the node part of each package under
+`ARCHITECT_EXTENSIONS` (`apps/desktop/src/node/mod.rs` `node_actions`):
+- its node actions;
+- the secrets they hold;
+- the hosts it may `fetch`.
+
+Nothing else of the extension runs there. With `ARCHITECT_HOST_ORG`, it
+serves them on the org lane as `NodeActions`
+(`apps/desktop/src/node/org.rs` `OrgLane::with_node_actions`):
+- a member lists them and runs one;
+- an admin sees which secrets are set.
+
+The app on a person's device runs a node action like any other action,
+through its signed-in account's org lane.
+
+**Secrets.** With `ARCHITECT_EXTENSION_SECRETS`, they are the operator's:
+a file each, `<dir>/<ext id>/<secret id>` (a final newline is dropped),
+read at start. Nothing on the lane sets one. Without it, an org admin
+sets each through `NodeActions::set_secret`. That call is insert-only:
+no call reads a value back.
+
+**Changing them.** The folder is read at start, so a deployment that adds,
+removes or bumps an extension restarts the node.
+
+### Extensions through Nix
+
+A NixOS deployment declares the extensions its node runs. Each is pinned by
+version, hash and signature, and fetched when the system is **built**. The
+server downloads nothing at run time, and an archive that is unsigned,
+unpinned or changed doesn't build.
+
+```nix
+# flake inputs: architect.url = "github:FastTrackStudios/architect/<rev>";
+{ architect, pkgs, ... }:
+{
+  imports = [ architect.nixosModules.architect-node ];
+  services.architect-node = {
+    enable = true;
+    environment.ARCHITECT_HOST_ORG = "fasttrackstudio";
+    extensions = [
+      (architect.lib.architectExtension {
+        inherit pkgs;
+        id = "showcase.bank-link";
+        version = "0.1.0";
+        registry = "https://example.org/registry"; # <registry>/archives/<id>-<version>.archext
+        hash = "sha256-…";                          # the archive's
+        publishers.Showcase = "RWQ…";               # minisign public keys
+        trustOrg = false;                           # true: also the FTS release key
+      })
+    ];
+    # Node actions' secrets, a file each: <dir>/<ext id>/<secret id>.
+    extensionSecrets = "/run/secrets/architect-extensions";
+  };
+}
+```
+
+- **`lib.architectExtension`** (`nix/node/extension.nix`) fetches the
+  archive. It takes `url`, or `registry` (`<registry>/archives/<id>-<version>.archext`),
+  or a path (`src`). It runs `archext install`
+  (`features/extensions/archive/src/bin/archext.rs`) on the archive. The
+  archive must match the pinned SHA-256. Its signature, index and files
+  are checked by the same `architect_extension_archive::open` every app
+  runs on an install, against `publishers` (and the FastTrackStudios key
+  with `trustOrg`). It must be the pinned id and version. Its files are
+  then unpacked into a store path, the package folder.
+- **`services.architect-node`** (`nix/node/module.nix`) runs the node.
+  Its extension folder (`ARCHITECT_EXTENSIONS`) is one store path linking
+  each extension by id: read-only, switched with the system's generation.
+  A change restarts the node. `package` and `binary` pick another
+  distribution's node (`studio-architect`).
+- **Checks** (`nix/tests/extensions.nix`, `nix flake check`):
+  - a node with the showcase's Bank link builds, its unit pointing at it;
+  - a wrong hash, a key not among the publishers, and an archive changed
+    after signing each fail the build, saying why.
+
+**The desktop.** `nix run github:FastTrackStudios/architect` (`nix/desktop`)
+installs nothing declared yet: a person installs extensions in the app,
+from a registry, with its consent prompt. The same store paths would
+serve a declared list once the app reads an extension folder from its
+environment. That isn't built.
 
 ## Share links
 

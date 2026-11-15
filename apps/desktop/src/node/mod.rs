@@ -641,6 +641,7 @@ pub async fn start_with_shell(
             .clone()
             .with_vaults(registry.clone(), catalog.clone(), notes)
             .with_shares(shares.clone())
+            .with_node_actions(node_actions(&config))
             .mount(host);
     }
     // A share link's guests (#629): `POST /s/<code>/_guest/<method>`,
@@ -1238,6 +1239,36 @@ async fn keep_site_built(
             Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
         }
     }
+}
+
+/// Installed extensions' node actions (#583): the node part of each
+/// package in [`Config::extensions_dir`], with the node's secrets from its
+/// operator's folder ([`Config::extension_secrets`]) or, with none, set by
+/// an org admin on the lane and kept in the data dir. Read once at start:
+/// a deployment that changes its extensions restarts the node.
+fn node_actions(config: &Config) -> architect_extensions::node::NodeHost {
+    let node = config.extension_secrets.as_ref().map_or_else(
+        || {
+            architect_extensions::node::NodeHost::new(Some(
+                config.data_dir.join("extension-secrets.json"),
+            ))
+        },
+        architect_extensions::node::NodeHost::with_operator_secrets,
+    );
+    let dir = config.extensions_dir();
+    let (loaded, skipped) = node.load_folder(&dir);
+    for (folder, why) in &skipped {
+        if !matches!(why, architect_extensions::node::Skipped::NoNodePart) {
+            tracing::warn!(folder = %folder.display(), ?why, "an extension's node part is not served");
+        }
+    }
+    tracing::info!(
+        extensions = %dir.display(),
+        node_actions = ?loaded,
+        operator_secrets = config.extension_secrets.is_some(),
+        "extensions' node actions"
+    );
+    node
 }
 
 #[cfg(test)]

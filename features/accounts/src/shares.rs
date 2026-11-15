@@ -48,6 +48,27 @@ fn query_value(s: &str) -> String {
 }
 
 impl Accounts {
+    /// The current org's lane (`/org/{slug}/vox`) on the node that hosts
+    /// it, signed in as the active account: where a service the org's
+    /// node serves is reached (`ShareLinks`, an extension's `NodeActions`).
+    /// Its host too.
+    ///
+    /// # Errors
+    ///
+    /// Signed out, in no org, or no node hosts it.
+    pub fn org_lane(&self) -> Result<(String, Endpoint), String> {
+        let (org, host) = self.org_and_host(None)?;
+        let token = self
+            .store()
+            .active_session()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "no account is signed in".to_owned())?
+            .token;
+        let endpoint =
+            Endpoint::url(crate::enrolment::lane(&host, &org.slug)).with_bearer(Some(token));
+        Ok((host, endpoint))
+    }
+
     async fn share_links(&self, host: Option<&str>) -> Result<(String, ShareLinksClient), String> {
         let (org, host) = self.org_and_host(host)?;
         let token = self
