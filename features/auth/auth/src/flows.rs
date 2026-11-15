@@ -4623,6 +4623,7 @@ pub mod email_password {
                 first_party,
                 rotate_refresh_tokens: false,
                 disabled: false,
+                issue_sessions: false,
             };
             let auth = ArchitectAuth::builder()
                 .secret("a-secret-at-least-32-bytes-long!!")
@@ -4898,6 +4899,7 @@ pub mod email_password {
                     first_party: true,
                     rotate_refresh_tokens: false,
                     disabled: false,
+                    issue_sessions: false,
                 })
                 .storage(MemoryStorage::default())
                 .build();
@@ -4940,6 +4942,7 @@ pub mod email_password {
                     first_party: true,
                     rotate_refresh_tokens: true,
                     disabled: false,
+                    issue_sessions: false,
                 })
                 .storage(storage)
                 .build()

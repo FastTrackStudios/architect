@@ -49,6 +49,8 @@ fn native_client(issue_sessions: bool) -> architect_auth::OidcClientConfig {
         ],
         public_client: true,
         skip_consent: true,
+        first_party: true,
+        rotate_refresh_tokens: true,
         disabled: false,
         issue_sessions,
     }
