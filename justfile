@@ -176,25 +176,29 @@ docs-serve PORT="4321":
 docs-check:
     cargo run -q -p xtask -- docs
 
-# Link this checkout's architect skill into Claude Code and Codex, for a
-# machine the fleet-skills sync doesn't reach. Replaces an existing
-# symlink; refuses to touch a real file or directory.
+# Link this checkout's agent skills (architect, architect-extensions) into
+# Claude Code and Codex, for a machine the fleet-skills sync doesn't reach.
+# Replaces an existing symlink; refuses to touch a real file or directory.
 skill-install:
     #!/usr/bin/env bash
     set -euo pipefail
-    src="$(pwd)/skills/architect"
+    skills=(architect architect-extensions)
     dirs=("$HOME/.claude/skills" "$HOME/.codex/skills")
     for dir in "${dirs[@]}"; do
-        if [ -e "$dir/architect" ] && [ ! -L "$dir/architect" ]; then
-            echo "$dir/architect exists and is not a symlink; move it aside first" >&2
-            exit 1
-        fi
+        for skill in "${skills[@]}"; do
+            if [ -e "$dir/$skill" ] && [ ! -L "$dir/$skill" ]; then
+                echo "$dir/$skill exists and is not a symlink; move it aside first" >&2
+                exit 1
+            fi
+        done
     done
     for dir in "${dirs[@]}"; do
-        dest="$dir/architect"
         mkdir -p "$dir"
-        ln -sfn "$src" "$dest"
-        echo "$dest -> $src"
+        for skill in "${skills[@]}"; do
+            src="$(pwd)/skills/$skill"
+            ln -sfn "$src" "$dir/$skill"
+            echo "$dir/$skill -> $src"
+        done
     done
 
 # Repoint every architect-owned git dep in a consumer at ONE tag.

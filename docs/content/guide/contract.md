@@ -235,7 +235,10 @@ natively and the HTTP face writes it as JSON through `facet-json`. No
   `String` key (a slug the caller picks) works too; a duplicate is
   `RepoError::Conflict`.
 - Keep a method to four parameters or fewer; put more in one wire
-  struct.
+  struct. vox sends a method's arguments as one tuple, and facet
+  implements its trait for tuples of at most four (its `tuples-12`
+  feature is off), so a fifth fails to compile with a trait-bound error
+  on the tuple, far from your trait.
 - Event payloads carry full state (`Upserted(row)`), never diffs, so a
   late or repeated event re-applies cleanly.
 - A large result (megabytes: an audio render, a state chunk) is better
