@@ -12,7 +12,14 @@ name: release
 #   a PR bumping nix/desktop/source.json (the flake's app)     job nix-bump
 #   Architect-macos-arm64.dmg + latest-macos.json            job macos (UNTESTED, off by default)
 #   the iOS app on TestFlight, noted in the release's notes   job ios (ios.yml; never blocks)
-#   SHA256SUMS (+ SHA256SUMS.minisig, the org key)           job sums
+#   SHA256SUMS (+ SHA256SUMS.minisig, the org key)           job sums,
+#     over ONLY the digests the build jobs report; then the draft is published
+#
+# The Release is a DRAFT until `sums` has signed it: every job that attaches
+# an asset reports its sha256 as a job output, and `sums` refuses an asset no
+# job reported, a missing one, or one whose digest changed after upload
+# (scripts/release-sums.sh). Only then is it published, so nothing reads a
+# release whose assets are not signed.
 #   @fasttrackstudio/architect(-cli) on npm (features/extensions/web)  jobs npm-pack, npm-publish
 #     (npm-publish inert until the NPM_TOKEN secret is set)
 #
@@ -28,8 +35,10 @@ jobs:
   release:
     # Reserved capacity: normal CI cannot occupy the release slots.
     runs-on: [self-hosted, thebattleship-release]
+    outputs:
+      digests: ${{ steps.draft.outputs.digests }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
@@ -39,10 +48,27 @@ jobs:
       - name: notes
         run: bash scripts/release-notes.sh notes "${GITHUB_REF_NAME}" > "$RUNNER_TEMP/notes.md"
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          name: ${{ github.ref_name }}
-          body_path: ${{ runner.temp }}/notes.md
+      # release-facts.json: whether this release migrates data (change files'
+      # `Data-Migration:` lines, .changes/README). Its digest goes to `sums`
+      # with every build job's: a consumer (infra's release bump) reads it
+      # from signed material, and a migrating release never deploys itself.
+      # The Release is created as a DRAFT: `sums` publishes it once signed.
+      - name: Draft release, facts
+        id: draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          facts="$RUNNER_TEMP/release-facts.json"
+          bash scripts/release-notes.sh facts "${GITHUB_REF_NAME}" > "$facts"
+          nix run --inputs-from . nixpkgs#jq -- . "$facts"
+          gh() { nix run --quiet --inputs-from . nixpkgs#gh -- "$@"; }
+          if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+              --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
+          fi
+          gh release upload "$GITHUB_REF_NAME" "$facts" --clobber --repo "$GITHUB_REPOSITORY"
+          { echo "digests<<EOF"; (cd "$RUNNER_TEMP" && sha256sum release-facts.json); echo "EOF"; } >> "$GITHUB_OUTPUT"
 
   # The Architect app, headless: `architect-desktop serve`, the always-on
   # node (apps/desktop/src/node). A tag publishes its image to GHCR and
@@ -60,6 +86,8 @@ jobs:
   # org's package settings, or the cluster cannot pull it.
   node:
     needs: release
+    outputs:
+      digests: ${{ steps.attach.outputs.digests }}
     runs-on: [self-hosted, thebattleship-release]
     timeout-minutes: 120
     permissions:
@@ -70,7 +98,7 @@ jobs:
       # is named explicitly everywhere.
       CONTAINERS_REGISTRIES_CONF: /dev/null
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -143,6 +171,7 @@ jobs:
           rm -f "$REGISTRY_AUTH_FILE"
 
       - name: Attach the binary
+        id: attach
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BIN: ${{ steps.build.outputs.bin }}
@@ -154,6 +183,7 @@ jobs:
           tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/$name.tar.gz" "$name"
           (cd "$RUNNER_TEMP" && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
           gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/$name.tar.gz" "$RUNNER_TEMP/$name.tar.gz.sha256" --clobber
+          { echo "digests<<EOF"; (cd "$RUNNER_TEMP" && sha256sum "$name.tar.gz" "$name.tar.gz.sha256"); echo "EOF"; } >> "$GITHUB_OUTPUT"
 
   # The web front end: the site (apps/site, prerendered: the landing page,
   # /download, /changelog, /extensions) at /, the docs at /docs/ and the web
@@ -175,6 +205,8 @@ jobs:
   #   ghcr.io/fasttrackstudios/architect-web:<X.Y.Z> | sha-<short> | latest
   web:
     needs: release
+    outputs:
+      digests: ${{ steps.attach.outputs.digests }}
     runs-on: [self-hosted, thebattleship-release]
     timeout-minutes: 90
     permissions:
@@ -183,7 +215,7 @@ jobs:
     env:
       CONTAINERS_REGISTRIES_CONF: /dev/null
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -215,6 +247,17 @@ jobs:
           echo "tags=$tags" >> "$GITHUB_OUTPUT"
           echo "### architect-web image: \`$tags\`" >> "$GITHUB_STEP_SUMMARY"
 
+      # The site build finds this release while it is still a DRAFT, and
+      # only with a token (data.ts lists the releases with it): prove the
+      # token reaches the build inside the dev shell, or fail here, clearly.
+      - name: The token reaches the site build (devenv shell)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # shellcheck disable=SC2016 # expanded by the dev shell's bash, on purpose
+          devenv shell -- bash -c '[ -n "${GITHUB_TOKEN:-}" ]' \
+            || { echo "::error::GITHUB_TOKEN is not visible inside devenv shell: the site build could not find the draft release"; exit 1; }
+          echo "GITHUB_TOKEN is visible inside devenv shell"
       - name: Build the bundle
         id: build
         env:
@@ -261,6 +304,7 @@ jobs:
           rm -f "$REGISTRY_AUTH_FILE"
 
       - name: Attach the bundle
+        id: attach
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BUNDLE: ${{ steps.build.outputs.bundle }}
@@ -270,6 +314,7 @@ jobs:
           name="architect-web-$V"
           tar -C "$(dirname "$BUNDLE")" -czf "$RUNNER_TEMP/$name.tar.gz" "$(basename "$BUNDLE")"
           gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/$name.tar.gz" --clobber
+          { echo "digests<<EOF"; (cd "$RUNNER_TEMP" && sha256sum "$name.tar.gz"); echo "EOF"; } >> "$GITHUB_OUTPUT"
 
   # The desktop app for Linux: an AppImage (scripts/desktop/linux.sh: the
   # Nix-built binary with its libraries, nothing pointing at /nix/store,
@@ -277,12 +322,14 @@ jobs:
   # manifest: the version, the AppImage's URL on this release, its sha256.
   linux:
     needs: release
+    outputs:
+      digests: ${{ steps.attach.outputs.digests }}
     runs-on: [self-hosted, thebattleship-release]
     timeout-minutes: 120
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
 
@@ -305,6 +352,7 @@ jobs:
           ARCHITECT_BUILD_REV: ${{ github.sha }}
 
       - name: Manifest and attach
+        id: attach
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OUT: ${{ steps.build.outputs.out }}
@@ -317,6 +365,7 @@ jobs:
             "${GITHUB_REF_NAME#v}" "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$app" "$sha" > latest-linux.json
           cat latest-linux.json
           gh release upload "$GITHUB_REF_NAME" "$app" latest-linux.json --clobber --repo "$GITHUB_REPOSITORY"
+          { echo "digests<<EOF"; sha256sum "$app" latest-linux.json; echo "EOF"; } >> "$GITHUB_OUTPUT"
           echo "### Linux: \`$app\` (glibc floor $(cat "$app-glibc-floor.txt"))" >> "$GITHUB_STEP_SUMMARY"
 
   # The flake's architect-desktop wraps the release's AppImage
@@ -326,7 +375,8 @@ jobs:
   # the highest release, never a push to main, and never a failed release:
   # anything that goes wrong is a warning.
   nix-bump:
-    needs: linux
+    # After `sums`: a draft's assets have no public download URL.
+    needs: sums
     runs-on: [self-hosted, thebattleship-release]
     timeout-minutes: 15
     continue-on-error: true
@@ -334,7 +384,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: main
           fetch-depth: 0
@@ -379,6 +429,8 @@ jobs:
   # other jobs.
   macos:
     needs: release
+    outputs:
+      digests: ${{ steps.attach.outputs.digests }}
     if: ${{ vars.ARCHITECT_MACOS_RELEASE == 'true' }}
     runs-on: [self-hosted, macOS, airlock]
     timeout-minutes: 240
@@ -386,7 +438,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           clean: false
           persist-credentials: false
@@ -406,6 +458,7 @@ jobs:
           echo "out=$OUT_DIR" >> "$GITHUB_OUTPUT"
 
       - name: Manifest and attach
+        id: attach
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OUT: ${{ steps.build.outputs.out }}
@@ -418,6 +471,7 @@ jobs:
           printf '{\n  "version": "%s",\n  "dmg": "https://github.com/%s/releases/download/%s/%s",\n  "sha256": "%s"\n}\n' \
             "${GITHUB_REF_NAME#v}" "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$app" "$sha" > latest-macos.json
           gh release upload "$GITHUB_REF_NAME" "$app" latest-macos.json --clobber --repo "$GITHUB_REPOSITORY"
+          { echo "digests<<EOF"; shasum -a 256 "$app" latest-macos.json; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
   # The Architect app (apps/mobile) to TestFlight on airlock: ios.yml,
   # also dispatchable for an existing tag (`gh workflow run ios.yml -f
@@ -430,16 +484,19 @@ jobs:
     if: ${{ vars.ARCHITECT_IOS_RELEASE != 'false' }}
     uses: ./.github/workflows/ios.yml
 
-  # SHA256SUMS over every asset the release carries, signed with the org's
-  # minisign key (the one Task's and Studio's updaters pin) when the
-  # tag-only `release-signing` environment has FTS_RELEASE_MINISIGN_KEY;
-  # without it the sums go out unsigned, with a warning. Runs last: after
-  # `web` (the sums cover the web bundle, and /download links SHA256SUMS
-  # by name, shown once it is up) and after the Mac job too when that one
-  # is on (and whether it passed or not).
+  # SHA256SUMS over exactly the assets the build jobs above report (their
+  # `digests` outputs), signed with the org's minisign key (the one Task's
+  # and Studio's updaters and infra's release bump pin), then the draft is
+  # PUBLISHED. scripts/release-sums.sh refuses an asset on the Release that
+  # no job reported, a missing one, or one whose digest changed after its
+  # job uploaded it: the build window is long, and anyone with write (or any
+  # step with contents: write) could otherwise get an asset signed. Runs
+  # after `web` and `linux`, and after the Mac job when that one is on.
+  # The key is in the tag-only `release-signing` environment; minisign, gh
+  # and jq come from the flake's locked nixpkgs.
   sums:
-    needs: [node, web, linux, macos]
-    if: ${{ !cancelled() && needs.node.result == 'success' && needs.web.result == 'success' && needs.linux.result == 'success' }}
+    needs: [release, node, web, linux, macos]
+    if: ${{ !cancelled() && needs.release.result == 'success' && needs.node.result == 'success' && needs.web.result == 'success' && needs.linux.result == 'success' }}
     runs-on: [self-hosted, thebattleship-release]
     environment: release-signing
     permissions:
@@ -449,32 +506,30 @@ jobs:
       # RELEASE_SIGNING_KEY): nothing is signed with any other key.
       ORG_RELEASE_KEY: RWRh9Gk9qaStQMhku4THMidEYrQsmAEsm2dDprUkZxShEtqfIcroM8Od
     steps:
-      - name: Sum and sign
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The tags: Latest only for the highest stable one.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Sum the reported assets, sign, publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MINISIGN_KEY: ${{ secrets.FTS_RELEASE_MINISIGN_KEY }}
+          EXPECTED: |
+            ${{ needs.release.outputs.digests }}
+            ${{ needs.node.outputs.digests }}
+            ${{ needs.web.outputs.digests }}
+            ${{ needs.linux.outputs.digests }}
+            ${{ needs.macos.result == 'success' && needs.macos.outputs.digests || '' }}
         run: |
           set -euo pipefail
-          gh() { nix run --quiet nixpkgs#gh -- "$@"; }
-          dir="$RUNNER_TEMP/assets"
-          rm -rf "$dir" && mkdir -p "$dir" && cd "$dir"
-          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber
-          rm -f SHA256SUMS SHA256SUMS.minisig ./*.sha256
-          sha256sum -- * > SHA256SUMS
-          cat SHA256SUMS
-          assets=(SHA256SUMS)
-          if [ -n "$MINISIGN_KEY" ]; then
-            minisign() { nix run --quiet nixpkgs#minisign -- "$@"; }
-            key="$RUNNER_TEMP/release.key"
-            ( umask 077; printf '%s\n' "$MINISIGN_KEY" > "$key" )
-            minisign -S -s "$key" -m SHA256SUMS -x SHA256SUMS.minisig -t "architect $GITHUB_REF_NAME SHA256SUMS"
-            rm -f "$key"
-            minisign -V -P "$ORG_RELEASE_KEY" -m SHA256SUMS -x SHA256SUMS.minisig
-            assets+=(SHA256SUMS.minisig)
-          else
-            echo "::warning::release-signing has no FTS_RELEASE_MINISIGN_KEY: SHA256SUMS goes out unsigned"
-          fi
-          gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+          printf '%s\n' "$EXPECTED" | sed 's/^[[:space:]]*//; /^$/d' > "$RUNNER_TEMP/expected"
+          # The Mac job is continue-on-error: what it uploaded without
+          # reporting is deleted, not signed (scripts/release-publish.sh).
+          nix shell --quiet --inputs-from . nixpkgs#gh nixpkgs#jq nixpkgs#minisign --command \
+            bash scripts/release-publish.sh run "$GITHUB_REF_NAME" "$RUNNER_TEMP/expected" \
+              --optional Architect-macos-arm64.dmg --optional latest-macos.json
+          echo "### $GITHUB_REF_NAME: signed and published (scripts/release-publish.sh)" >> "$GITHUB_STEP_SUMMARY"
 
   # @fasttrackstudio/architect (the runtime, no dependencies) and
   # @fasttrackstudio/architect-cli (build-web, with jco), from

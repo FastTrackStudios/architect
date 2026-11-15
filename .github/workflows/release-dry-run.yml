@@ -1,0 +1,51 @@
+# The release MECHANICS against a throwaway draft (scripts/release-dry-run.sh):
+# the same scripts/release-publish.sh release.yml's `sums` runs, on a release
+# named dry-run-<run id> that is never a `v*` tag, never Latest, and deleted
+# with its tag at the end. Cases: an injected asset refused, the Mac job's
+# unreported .dmg deleted, publishing only the draft, a re-run changing
+# nothing. On every PR that touches the mechanics (a fork's PR gets no
+# write token and is skipped), and by hand. Hosted runner, the workflow's
+# own token: no secret.
+name: release-dry-run
+
+on:
+  pull_request:
+    paths:
+      - scripts/release-publish.sh
+      - scripts/release-sums.sh
+      - scripts/release-dry-run.sh
+      - .github/workflows/release.yml
+      - .github/workflows/release-dry-run.yml
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-dry-run-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  dry-run:
+    name: Release mechanics on a throwaway draft
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: minisign 0.12 (pinned)
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/minisign.tgz" https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz
+          echo "9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73  $RUNNER_TEMP/minisign.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/minisign.tgz" -C "$RUNNER_TEMP" --warning=no-unknown-keyword minisign-linux/x86_64/minisign
+          echo "$RUNNER_TEMP/minisign-linux/x86_64" >> "$GITHUB_PATH"
+      - name: scripts/release-dry-run.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN_TARGET: ${{ github.event.pull_request.base.sha || github.sha }}
+        run: bash scripts/release-dry-run.sh

@@ -8,6 +8,18 @@
 #                                              origin/main) since its newest tag
 #   scripts/release-notes.sh next [REV]        the next semver version for REV
 #                                              (default origin/main)
+#   scripts/release-notes.sh facts [TAG|REV]   release-facts.json: whether the
+#                                              release migrates data
+#
+# A DATA MIGRATION is declared by a line in a change file's body:
+#
+#   Data-Migration: <what changes in stored data, and whether it can be undone>
+#
+# (any bump level; a release whose change files carry one is a migrating
+# release). The notes list them first, under "Data migration", and `facts`
+# writes them as JSON; release.yml attaches that as release-facts.json, which
+# the signed SHA256SUMS covers, so a consumer (infra's release bump) reads
+# it from signed material: a migrating release never deploys itself.
 #
 # A release's notes are the change files ADDED between the previous tag and
 # the tagged commit, read at that commit, in the order their PRs merged,
@@ -96,9 +108,30 @@ checked_files() { # <prev> <sha>
     printf '%s\n' "$files"
 }
 
+# "<file>: <text>" for each Data-Migration: line of a release's change files.
+data_migrations() { # <prev> <sha>
+    local files f
+    files="$(checked_files "$1" "$2")"
+    [ -n "$files" ] || return 0
+    while read -r f; do
+        git show "$2:$f" | awk 'c >= 2 { print; next } $0 == "---" { c++ }' \
+            | sed -n 's/^[[:space:]]*Data-Migration:[[:space:]]*//p' \
+            | while read -r line; do printf '%s: %s\n' "$(basename "$f" .md)" "$line"; done
+    done <<<"$files"
+}
+
 render_notes() { # <prev> <sha>
-    local prev="$1" sha="$2" files f group title out any=0
+    local prev="$1" sha="$2" files f group title out any=0 migrations
     files="$(checked_files "$prev" "$sha")"
+    migrations="$(data_migrations "$prev" "$sha")"
+    if [ -n "$migrations" ]; then
+        echo "### Data migration"
+        echo
+        echo "This release changes stored data; rolling back the binary does not undo it."
+        echo
+        printf '%s\n' "$migrations" | sed 's/^/- /'
+        echo
+    fi
     for group in major minor patch; do
         [ -n "$files" ] || break
         case "$group" in
@@ -140,6 +173,25 @@ cmd_notes() { # [TAG|REV]
     fi
 }
 
+cmd_facts() { # [TAG|REV]
+    local r="${1:-origin/main}" sha prev migrations tag
+    sha="$(resolve "$r")"
+    if [[ "$r" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && git rev-parse -q --verify "refs/tags/$r" >/dev/null; then
+        prev="$(last_tag "$sha^")"; tag="$r"
+    else
+        prev="$(last_tag "$sha")"; tag="$r"
+    fi
+    migrations="$(data_migrations "$prev" "$sha")"
+    printf '%s' "$migrations" | awk -v repo="${FACTS_REPO:-architect}" -v tag="$tag" '
+        function esc(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); gsub(/\t/, " ", s); return s }
+        { m[++n] = $0 }
+        END {
+            printf "{\"repo\":\"%s\",\"tag\":\"%s\",\"data_migration\":%s,\"migrations\":[", repo, tag, (n ? "true" : "false")
+            for (i = 1; i <= n; i++) printf "%s\"%s\"", (i > 1 ? "," : ""), esc(m[i])
+            print "]}"
+        }'
+}
+
 cmd_next() { # [REV]
     local sha prev files f b max=none x y z
     sha="$(resolve "${1:-origin/main}")"
@@ -172,5 +224,6 @@ cmd_next() { # [REV]
 case "${1:-}" in
     notes) shift; cmd_notes "$@" ;;
     next) shift; cmd_next "$@" ;;
-    *) die "usage: release-notes.sh notes [TAG|REV] | next [REV]" ;;
+    facts) shift; cmd_facts "$@" ;;
+    *) die "usage: release-notes.sh notes [TAG|REV] | next [REV] | facts [TAG|REV]" ;;
 esac
