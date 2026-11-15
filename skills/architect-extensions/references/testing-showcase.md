@@ -17,7 +17,7 @@ All from `justfile`:
 
 | Recipe | What it does |
 |---|---|
-| `just showcase` | the app (the standard distribution) on a fresh scratch copy of `apps/ui/showcase-vault`, every folder in `examples/showcase` loaded as a development copy (`scripts/showcase.sh`); `just showcase plain` runs Architect's own app |
+| `just showcase` | the app (the standard distribution) on a fresh scratch copy of `apps/ui/showcase-vault`, every showcase extension loaded as a development copy (`scripts/showcase.sh`: `examples/showcase`, the sandbox's Luau, process and WASI extensions, the example counter and the web view board, built first); `just showcase plain` runs Architect's own app. Without it, the app's first run offers "Explore the extension showcase" (`apps/ui/src/vaults.rs` `showcase`), whose **Install all** takes the Luau, TypeScript and data ones from the app itself (`apps/ui/src/showcase.rs`) |
 | `just showcase-shots` | desktop screenshots: an isolated Loft session per width, light and dark, into `target/showcase/desktop/` (`scripts/showcase-shots.sh`); first arg `plain` or `standard`, then vault paths or actions |
 | `just showcase-web-shots` | the release web bundle in headless Firefox (`apps/web/test/app-showcase.test.mjs`), shots into `target/showcase/web/` |
 | `just showcase-publish` | copies `target/showcase/<platform>` onto the `media` branch under `710-showcase/`; `PUSH=1` pushes |

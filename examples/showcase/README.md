@@ -27,6 +27,12 @@ The first run builds the standard distribution, which takes several
 minutes; the script says so and shows cargo's progress before the app
 opens.
 
+Without the script, the app carries the showcase too: its first run offers
+**Explore the extension showcase** (on the desk and on iOS), and the vault's
+**Install all** installs the Luau, TypeScript and data packages here and
+the sandbox's Luau ones from a registry built into the app
+(`apps/ui/src/showcase.rs`), through one consent prompt, with no network.
+
 The vault names all of them in `apps/ui/showcase-vault/.architect/extensions.toml`
 (the format of "What a project needs"): opened anywhere, it lists what is
 missing, with **Install all**. On the desk every one is loaded, so nothing

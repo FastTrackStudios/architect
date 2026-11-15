@@ -16,6 +16,32 @@ const KEPT: &str = "vaults.json";
 static DEMO: include_dir::Dir<'static> =
     include_dir::include_dir!("$CARGO_MANIFEST_DIR/demo-vault");
 
+/// The extension showcase's vault (#710), as built into the app: a note
+/// per capability, and `.architect/extensions.toml` naming the showcase
+/// extensions ("Install all" takes them from `crate::showcase::source`).
+static SHOWCASE: include_dir::Dir<'static> =
+    include_dir::include_dir!("$CARGO_MANIFEST_DIR/showcase-vault");
+
+#[cfg(test)]
+pub(crate) static SHOWCASE_FOR_TESTS: &include_dir::Dir<'static> = &SHOWCASE;
+
+/// The showcase vault, written into the app's folder the first time
+/// (`<app dir>/Showcase`): where the first run's "Explore the showcase"
+/// opens.
+///
+/// # Errors
+///
+/// The app has no folder, or a file cannot be written.
+pub fn showcase() -> std::io::Result<PathBuf> {
+    let app = crate::app_dir().ok_or_else(|| std::io::Error::other("the app has no folder"))?;
+    let dir = app.join("Showcase");
+    if !dir.exists() {
+        std::fs::create_dir_all(&dir)?;
+        SHOWCASE.extract(&dir)?;
+    }
+    Ok(dir)
+}
+
 /// The vault the app opened last, while its folder is there.
 ///
 /// A vault in the app's folder is kept relative to it, and one kept
