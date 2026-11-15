@@ -282,6 +282,7 @@ impl Disk for MemDisk {
             .filter_map(child)
             .filter(|n| !n.is_empty())
             .collect();
+        drop(mem);
         Ok(names.into_iter().collect())
     }
 
@@ -337,7 +338,7 @@ impl Disk for MemDisk {
                     .files
                     .iter()
                     .filter(|(p, _)| under(&f, p))
-                    .map(|(p, b)| (format!("{t}{}", &p[f.len()..]), b.clone()))
+                    .map(|(p, b)| (format!("{t}{}", p.get(f.len()..).unwrap_or("")), b.clone()))
                     .collect();
                 mem.files.retain(|p, _| !under(&f, p));
                 mem.files.extend(moved);
@@ -345,13 +346,14 @@ impl Disk for MemDisk {
                     .dirs
                     .iter()
                     .filter(|d| *d == &f || under(&f, d))
-                    .map(|d| format!("{t}{}", &d[f.len()..]))
+                    .map(|d| format!("{t}{}", d.get(f.len()..).unwrap_or("")))
                     .collect();
                 mem.dirs.retain(|d| d != &f && !under(&f, d));
                 mem.dirs.extend(dirs);
             } else {
                 return Err(not_found(from));
             }
+            drop(mem);
         }
         self.changed();
         Ok(())
