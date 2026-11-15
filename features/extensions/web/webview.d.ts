@@ -108,6 +108,13 @@ export type HostRequest =
   | { op: "prompt"; kind: "text" | "confirm" | "pick_one" | "secret"; title: string; message?: string; default?: string; placeholder?: string; choices?: Choice[] }
   | { op: "menu"; items: MenuItem[]; x?: number; y?: number }
   | { op: "decorate"; target: { kind: string; id: string }; decoration?: Json }
+  | { op: "os_notify"; title: string; id?: string; body?: string; at_ms?: number; after_s?: number }
+  | { op: "cancel_os_notify"; id: string }
+  | { op: "capture"; kind?: "photo" }
+  | { op: "photos"; limit?: number; since_ms?: number }
+  | { op: "photo_file"; id: string }
+  | { op: "health_read"; type: string; from_ms: number; to_ms: number; sum?: boolean }
+  | { op: "health_write"; type: string; value: number; start_ms?: number; end_ms?: number }
   | { op: "subscribe"; on?: string; every?: string; at?: string; action?: string; script?: string; function?: string }
   | { op: "unsubscribe"; key: string }
   | { op: "events" }
