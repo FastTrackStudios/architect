@@ -39,6 +39,7 @@ pub mod files;
 pub mod groceries;
 pub mod model;
 pub mod service;
+pub mod ui;
 pub mod units;
 
 pub use service::{
@@ -68,7 +69,10 @@ impl Extension for Mealplan {
 
     fn build(&self, ext: &mut Builder) {
         client::connect(ext.handle());
-        ext.action("MEALPLAN_WEEK", actions::week)
+        ext.view("week", ui::WeekView)
+            .view("pantry", ui::PantryView)
+            .view("groceries", ui::GroceriesView)
+            .action("MEALPLAN_WEEK", actions::week)
             .action("MEALPLAN_MEALS", actions::meals)
             .action("MEALPLAN_PLAN", actions::plan)
             .action("MEALPLAN_UNPLAN", actions::unplan)
@@ -81,7 +85,9 @@ impl Extension for Mealplan {
             .action("MEALPLAN_SUBSTITUTE", actions::substitute)
             .action("MEALPLAN_UNSUBSTITUTE", actions::unsubstitute)
             .action("MEALPLAN_GROCERIES", actions::groceries)
+            .action("MEALPLAN_GROCERY_LIST", actions::grocery_list)
             .action("MEALPLAN_CHECK", actions::check)
+            .action("MEALPLAN_OPEN", actions::open)
             .action("MEALPLAN_CAN_COOK", actions::can_cook)
             .action("MEALPLAN_STARTED", |_| async {
                 Ok(json!({ "ready": true }))
