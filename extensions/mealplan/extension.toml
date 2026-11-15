@@ -1,0 +1,215 @@
+# Mealplan (extensions/mealplan/src/lib.rs): Task's meal planning
+# (task:features/mealplan/mealplan, task:features/mealplan/pantry) as an
+# extension. One Rust value (`Mealplan`, a linked::Extension) runs it two
+# ways: the app links it in as a built-in, and its program (src/main.rs)
+# serves the same value as a process, this manifest's [entry], when a
+# development copy runs (EXT_CLONE {"id":"mealplan"}).
+id = "mealplan"
+name = "Mealplan"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "Plan the week's meals from your Cookbook, keep a pantry and your substitutions, and get the grocery list made for you: every planned recipe's ingredients, scaled and added up, less what is in the pantry, grouped by aisle as a checklist note. Plans, pantry items and lists are notes in the vault, so they sync, show in Bases and travel by share link."
+authors = ["FastTrackStudios"]
+
+[entry]
+path = "architect-mealplan"
+
+# EXT_CLONE writes this crate to the development folder and builds its
+# program, which then overrides the linked copy under the same id.
+[source]
+git = "https://github.com/FastTrackStudios/architect"
+rev = "main"
+path = "extensions/mealplan"
+
+# Its API for others (`services.call("architect.mealplan", "week", …)`,
+# Handle::service): method `m` is its action MEALPLAN_<M>.
+[provides]
+"architect.mealplan" = "0.1.0"
+
+# The recipes: their names for the week and their ingredients, scaled
+# and with nested recipes cooked out, for the grocery list. It does not
+# load without a Cookbook.
+[requires]
+"architect.cookbook" = "^0.1"
+
+# Day Plans and the Calendar, when they are installed: MEALPLAN_SCHEDULE
+# gives a day's meal block the recipe (DAYPLAN_ASSIGN, kind recipe) or
+# makes the meal an event. Not [requires]: Mealplan runs without them.
+[uses]
+"architect.dayplan" = "^0.1"
+"architect.calendar" = "^0.1"
+
+# It reaches the vault only through the host: its documents and index.
+[capabilities]
+actions = ["VAULT_", "BASES_", "EXT_VIEW_OPEN"]
+# Destructive: MEALPLAN_REMOVE_ITEM deletes a pantry item's note.
+effect = "destructive"
+reads = ["documents"]
+writes = ["documents"]
+
+[[actions]]
+id = "MEALPLAN_WEEK"
+name = "Mealplan: the week"
+description = "The meals planned for the week of `week` (2026-W47) or of `date` (YYYY-MM-DD; this week by default): its note's path, and each day (date, weekday) with its meals (date, meal: breakfast, lunch, dinner or snack, recipe: a .cook file's vault path, name, servings, note, event)."
+group = "Mealplan"
+effect = "read_only"
+params = '{"type":"object","properties":{"week":{"type":"string"},"date":{"type":"string"}}}'
+
+[[actions]]
+id = "MEALPLAN_MEALS"
+name = "Mealplan: meals in a range"
+description = "Every meal planned on `from`..`to` (YYYY-MM-DD, `to` exclusive; at most 62 days; the coming week by default), by date and meal."
+group = "Mealplan"
+effect = "read_only"
+params = '{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"}}}'
+
+[[actions]]
+id = "MEALPLAN_PLAN"
+name = "Mealplan: plan a meal"
+description = "Plans recipe `recipe` (a .cook file's path or a recipe's name) for `meal` (breakfast, lunch, dinner, snack; dinner by default) on `date` (today by default), for `servings` (mealplan.servings by default), with a `note`. Written to the week's note, Meal plans/<YYYY-Www>.md. One undo step. The week."
+group = "Mealplan"
+effect = "mutating"
+params = '{"type":"object","properties":{"date":{"type":"string"},"meal":{"type":"string","enum":["breakfast","lunch","dinner","snack"]},"recipe":{"type":"string"},"servings":{"type":"number","exclusiveMinimum":0},"note":{"type":"string"}},"required":["recipe"]}'
+
+[[actions]]
+id = "MEALPLAN_UNPLAN"
+name = "Mealplan: unplan a meal"
+description = "Takes `date`'s `meal` off the plan (`recipe` says which when it has more than one), and its calendar event with it. One undo step. The week."
+group = "Mealplan"
+effect = "mutating"
+params = '{"type":"object","properties":{"date":{"type":"string"},"meal":{"type":"string"},"recipe":{"type":"string"}},"required":["date","meal"]}'
+
+[[actions]]
+id = "MEALPLAN_MOVE_MEAL"
+name = "Mealplan: move a meal"
+description = "Moves `date`'s `meal` (`recipe` says which when it has more than one) to `to_date` and `to_meal` (each its own by default), across weeks too; its calendar event follows. The week it went to."
+group = "Mealplan"
+effect = "mutating"
+params = '{"type":"object","properties":{"date":{"type":"string"},"meal":{"type":"string"},"recipe":{"type":"string"},"to_date":{"type":"string"},"to_meal":{"type":"string"}},"required":["date","meal"]}'
+
+[[actions]]
+id = "MEALPLAN_SCHEDULE"
+name = "Mealplan: put a meal on the day"
+description = "Task's `meal schedule`: gives `date`'s `meal` (`recipe` says which) the day's meal block in Day Plans (`block`, else the meal block named like the meal; DAYPLAN_ASSIGN, kind recipe), and makes it a Calendar event at `time` (HH:MM; 08:00, 12:30, 18:30, 15:00 by meal) when `event` is true or there is no block for it. Says which."
+group = "Mealplan"
+effect = "mutating"
+params = '{"type":"object","properties":{"date":{"type":"string"},"meal":{"type":"string"},"recipe":{"type":"string"},"block":{"type":"string"},"time":{"type":"string"},"event":{"type":"boolean"}},"required":["date","meal"]}'
+
+[[actions]]
+id = "MEALPLAN_PANTRY"
+name = "Mealplan: the pantry"
+description = "The pantry's items (Pantry/<Item>.md), by name: each one's path, name, qty, unit, aisle, staple, min, expires, aliases, and whether it is low (a staple under its min) or expired. `text` (in its name or aliases), `aisle`, `low` and `expired` narrow it."
+group = "Mealplan"
+effect = "read_only"
+params = '{"type":"object","properties":{"text":{"type":"string"},"aisle":{"type":"string"},"low":{"type":"boolean"},"expired":{"type":"boolean"}}}'
+
+[[actions]]
+id = "MEALPLAN_STOCK"
+name = "Mealplan: set or add stock"
+description = "Sets pantry item `name`'s stock to `qty` or adds `add` to it (in `unit`, converted to the item's own when they differ), making the item when there is none; sets `unit`, `aisle`, `staple`, `min` (a staple under it goes on the list), `expires` (YYYY-MM-DD, empty to clear) and `aliases` when given. One undo step. The item."
+group = "Mealplan"
+effect = "mutating"
+params = '{"type":"object","properties":{"name":{"type":"string"},"qty":{"type":"number"},"add":{"type":"number"},"unit":{"type":"string"},"aisle":{"type":"string"},"staple":{"type":"boolean"},"min":{"type":"number"},"expires":{"type":"string"},"aliases":{"type":"array","items":{"type":"string"}}},"required":["name"]}'
+
+[[actions]]
+id = "MEALPLAN_REMOVE_ITEM"
+name = "Mealplan: remove a pantry item"
+description = "Deletes pantry item `name`'s note (to the vault's trash)."
+group = "Mealplan"
+effect = "destructive"
+params = '{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}'
+
+[[actions]]
+id = "MEALPLAN_SUBSTITUTIONS"
+name = "Mealplan: substitutions"
+description = "The substitutions (Pantry/Substitutions.md): each one's from, to, ratio (of `to` for one of `from`), always (the list always buys `to` instead) and note. One that is not `always` is used when the pantry has enough of `to`."
+group = "Mealplan"
+effect = "read_only"
+
+[[actions]]
+id = "MEALPLAN_SUBSTITUTE"
+name = "Mealplan: add a substitution"
+description = "Adds, or changes, substitution `from` → `to` with `ratio` (1 by default), `always` and `note`. One undo step. The substitutions."
+group = "Mealplan"
+effect = "mutating"
+params = '{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"},"ratio":{"type":"number","exclusiveMinimum":0},"always":{"type":"boolean"},"note":{"type":"string"}},"required":["from","to"]}'
+
+[[actions]]
+id = "MEALPLAN_UNSUBSTITUTE"
+name = "Mealplan: remove a substitution"
+description = "Removes substitution `from` → `to` (every one from `from` when `to` is not given). The substitutions."
+group = "Mealplan"
+effect = "mutating"
+params = '{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"}},"required":["from"]}'
+
+[[actions]]
+id = "MEALPLAN_GROCERIES"
+name = "Mealplan: build the grocery list"
+description = "Builds, or refreshes, the grocery list for `week` (2026-W47), `date`'s week, or `from`..`to` (this week by default): every planned meal's recipe's ingredients from the Cookbook, scaled to its servings, nested recipes cooked out, added up with units converted, less the pantry (expired stock does not count), with substitutions applied, plus staples under their min, grouped by aisle. Written as a checklist note, Groceries/<week>.md; ticked items, and lines added by hand, are kept. One undo step. Its path, sections, items, what was substituted and the note's text."
+group = "Mealplan"
+effect = "mutating"
+params = '{"type":"object","properties":{"week":{"type":"string"},"date":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"}}}'
+
+[[actions]]
+id = "MEALPLAN_CHECK"
+name = "Mealplan: tick a grocery item"
+description = "Ticks item `item` (its name, or the line's text) on the grocery list of `week` (or `path`; this week's by default), or unticks it with `checked` false. `bought` true also adds its quantity to the pantry (Task's mark-purchased); without it the tick never touches stock (mark-have). One undo step. The list."
+group = "Mealplan"
+effect = "mutating"
+params = '{"type":"object","properties":{"week":{"type":"string"},"path":{"type":"string"},"item":{"type":"string"},"checked":{"type":"boolean"},"bought":{"type":"boolean"}},"required":["item"]}'
+
+[[actions]]
+id = "MEALPLAN_CAN_COOK"
+name = "Mealplan: can I cook it?"
+description = "Task's `recipe can-cook`: whether the pantry has what recipe `recipe` (path or name) needs for `servings` (its own by default), substitutions counted: what it has, what is missing and how much."
+group = "Mealplan"
+effect = "read_only"
+params = '{"type":"object","properties":{"recipe":{"type":"string"},"servings":{"type":"number","exclusiveMinimum":0}},"required":["recipe"]}'
+
+[[actions]]
+id = "MEALPLAN_STARTED"
+name = "Mealplan: started"
+description = "Called once the app has loaded it."
+group = "Mealplan"
+effect = "read_only"
+
+[[hooks]]
+on = "startup"
+action = "MEALPLAN_STARTED"
+
+[[sections]]
+id = "mealplan"
+title = "Mealplan"
+icon = "utensils"
+
+[[sections.settings]]
+key = "mealplan.plans_folder"
+title = "Meal plans folder"
+description = "Where each week's plan is kept, as <YYYY-Www>.md."
+control = "text"
+default = "Meal plans"
+
+[[sections.settings]]
+key = "mealplan.pantry_folder"
+title = "Pantry folder"
+description = "Where the pantry's items and Substitutions.md are kept."
+control = "text"
+default = "Pantry"
+
+[[sections.settings]]
+key = "mealplan.groceries_folder"
+title = "Groceries folder"
+description = "Where the grocery lists are written."
+control = "text"
+default = "Groceries"
+
+[[sections.settings]]
+key = "mealplan.servings"
+title = "Servings"
+description = "How many a meal is planned for unless you say."
+control = "stepper"
+default = 2
+min = 1.0
+max = 24.0
+step = 1.0
