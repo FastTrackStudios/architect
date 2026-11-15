@@ -9,7 +9,9 @@ use crate::files::{Files, Listed, is_recipe_path, text_of};
 use crate::model::Recipe;
 use crate::parse::parse_cook;
 use crate::scale::scaled;
-use crate::service::{CookbookError, Needed, Portion, RecipeSummary, Recipes, Save, Search};
+use crate::service::{
+    CookbookError, Import, Imported, Needed, Portion, RecipeSummary, Recipes, Save, Search,
+};
 
 /// Where new recipes go unless `cookbook.folder` says otherwise.
 pub const FOLDER: &str = "Cookbook";
@@ -228,6 +230,87 @@ impl Recipes for Backend {
             todo.extend(nested.into_iter().rev());
         }
         Ok(out)
+    }
+
+    async fn import(&self, import: Import) -> Result<Imported, CookbookError> {
+        use crate::import::{coverage::coverage, extract::extract, formats, synthesize_heuristic};
+        let (source, review, unplaced) = if let Some(url) = import
+            .url
+            .as_deref()
+            .map(str::trim)
+            .filter(|u| !u.is_empty())
+        {
+            let html = self.files.fetch(url).await?;
+            let found = extract(&html, url).map_err(CookbookError::Invalid)?;
+            let source = synthesize_heuristic(&found);
+            let unplaced = coverage(&found, &source).unmatched;
+            (source, true, unplaced)
+        } else if let Some(text) = import.text.as_deref().filter(|t| !t.trim().is_empty()) {
+            let lower = text.to_ascii_lowercase();
+            if lower.contains("application/ld+json") {
+                let found = extract(text, "").map_err(CookbookError::Invalid)?;
+                let source = synthesize_heuristic(&found);
+                let unplaced = coverage(&found, &source).unmatched;
+                (source, true, unplaced)
+            } else {
+                (formats::arrows_to_frontmatter(text), false, Vec::new())
+            }
+        } else {
+            return Err(CookbookError::Invalid(
+                "give a page's `url` or a recipe's `text`".into(),
+            ));
+        };
+        let probe = crate::parse::check("Recipe.cook", &source).map_err(CookbookError::Invalid)?;
+        if probe.ingredients.is_empty() && probe.cook_steps.is_empty() {
+            return Err(CookbookError::Invalid(
+                "no ingredients or steps Cooklang reads".into(),
+            ));
+        }
+        let path = match import
+            .path
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+        {
+            Some(p) => p.to_owned(),
+            None => format!("{}/{}.cook", self.folder().await, file_name(&probe.name)),
+        };
+        let recipe = crate::parse::check(&path, &source).map_err(CookbookError::Invalid)?;
+        if import.save {
+            self.files.create(&path, &source).await?;
+        }
+        Ok(Imported {
+            path,
+            source,
+            recipe,
+            saved: import.save,
+            review,
+            unplaced,
+        })
+    }
+
+    async fn tidy(&self, folder: Option<String>) -> Result<Vec<String>, CookbookError> {
+        let under = folder
+            .map(|f| f.trim().trim_matches('/').to_owned())
+            .filter(|f| !f.is_empty());
+        let mut changed = Vec::new();
+        for p in self.files.paths().await? {
+            if under
+                .as_deref()
+                .is_some_and(|u| !p.starts_with(&format!("{u}/")))
+            {
+                continue;
+            }
+            let text = self.files.read(&p).await?;
+            let tidy = crate::import::formats::arrows_to_frontmatter(&text);
+            if tidy != text && crate::parse::check(&p, &tidy).is_ok() {
+                self.files
+                    .replace(&p, &tidy, "Cookbook: metadata as frontmatter")
+                    .await?;
+                changed.push(p);
+            }
+        }
+        Ok(changed)
     }
 }
 
@@ -541,6 +624,42 @@ mod tests {
             }])),
             Err(CookbookError::Invalid(_))
         ));
+    }
+
+    #[test]
+    fn imports_tasks_cook_files_and_pages_and_tidies_metadata() {
+        let b = book();
+        let got = block(b.import(Import {
+            text: Some(">> title: Sourdough Loaf\n>> servings: 1\n\nMix @flour{450%g} with @water{330%g}.\n".into()),
+            save: true,
+            ..Import::default()
+        }))
+        .unwrap();
+        assert_eq!(got.path, "Cookbook/Sourdough Loaf.cook");
+        assert!(got.source.starts_with("---\n"));
+        assert!(!got.review);
+        assert_eq!(block(b.get(got.path, None)).unwrap().ingredients.len(), 2);
+
+        let page = r#"<script type="application/ld+json">{"@type":"Recipe","name":"Toast","recipeYield":"2","recipeIngredient":["2 slices bread","1 tbsp butter"],"recipeInstructions":"Toast the bread.\nButter it."}</script>"#;
+        let draft = block(b.import(Import {
+            text: Some(page.into()),
+            ..Import::default()
+        }))
+        .unwrap();
+        assert!(draft.review && !draft.saved);
+        assert_eq!(draft.recipe.name, "Toast");
+        assert_eq!(draft.recipe.ingredients.len(), 2, "{}", draft.source);
+        assert!(
+            block(b.get("Cookbook/Toast.cook".into(), None)).is_err(),
+            "a draft is not written"
+        );
+
+        let old = Backend::new(Files::memory([(
+            "Cookbook/Old.cook",
+            ">> servings: 2\n\nBoil @egg{2}.\n",
+        )]));
+        assert_eq!(block(old.tidy(None)).unwrap(), ["Cookbook/Old.cook"]);
+        assert!(block(old.tidy(None)).unwrap().is_empty(), "twice is once");
     }
 
     #[test]

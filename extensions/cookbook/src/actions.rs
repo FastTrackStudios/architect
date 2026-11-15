@@ -8,7 +8,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use crate::client::{client, handle};
-use crate::service::{CookbookError, Portion, Save, Search};
+use crate::service::{CookbookError, Import, Portion, Save, Search};
 
 /// `args` as `T`; `null` as its default.
 fn args<T: DeserializeOwned + Default>(v: Value) -> Result<T, String> {
@@ -174,16 +174,7 @@ pub async fn timer(a: Value) -> Result<Value, String> {
         .ok_or("give `seconds`, 1 to 86400")?;
     let label = text(&a, "label").unwrap_or_else(|| "Timer".to_owned());
     let h = handle().ok_or("the cookbook is not running")?;
-    let id: String = format!("timer-{label}-{seconds}")
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect();
+    let id = timer_id(&label, seconds);
     let os = h
         .host(HostRequest::OsNotify(
             architect_extensions::device::OsNotification {
@@ -215,4 +206,38 @@ pub async fn timer(a: Value) -> Result<Value, String> {
             .await;
         Ok(json!({ "id": id, "seconds": seconds, "notify": "app" }))
     }
+}
+
+/// `COOKBOOK_IMPORT {url? | text?, path?, save?}`.
+pub async fn import(a: Value) -> Result<Value, String> {
+    let import: Import = args(a)?;
+    let c = client().await.map_err(|e| e.to_string())?;
+    out(c.import(import).await.map_err(architect::vox_into_app))
+}
+
+/// `COOKBOOK_TIDY {folder?}`.
+pub async fn tidy(a: Value) -> Result<Value, String> {
+    let folder = text(&a, "folder");
+    let c = client().await.map_err(|e| e.to_string())?;
+    out(c
+        .tidy(folder)
+        .await
+        .map_err(architect::vox_into_app)
+        .map(|changed| json!({ "changed": changed })))
+}
+
+/// The id of the timer `label` of `seconds`: its device notification's,
+/// so Stop can take it back.
+#[must_use]
+pub fn timer_id(label: &str, seconds: u64) -> String {
+    format!("timer-{label}-{seconds}")
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect()
 }
