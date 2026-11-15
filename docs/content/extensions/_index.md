@@ -5,6 +5,10 @@ weight = 19
 sort_by = "weight"
 +++
 
+Writing one of your own: [Writing an extension](@/extensions/authoring.md)
+walks through every runtime, the manifest, the host API, install and
+testing, and links to the rest.
+
 Architect's own extensions live in this repo under `extensions/`, one
 crate each, so they can be moved to a repo of their own later. They are
 the app's features and the showcase of how an extension is built

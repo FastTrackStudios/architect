@@ -222,6 +222,41 @@ code as a path plus a symbol, never a line number.
 Not in CI: `just lint` (clippy with `--all-features`),
 `just ui-css-check`, `just auth-e2e` and the UI snapshot tests.
 
+## 7. Feature-gated tests
+
+Main runs `cargo nextest run --workspace`, which builds each member with
+the features the workspace unifies, so a test that needs more never
+builds there, and nothing says so. `cargo xtask feature-tests`
+(`xtask/src/feature_tests.rs`, in the PR's fast checks) resolves that
+build and finds every test it leaves out: a `[[test]]` whose
+`required-features` it lacks, or a test behind a false
+`cfg(…feature…)` (a file's `#![cfg(…)]`, a `mod x;` under `#[cfg(…)]`,
+an inline `mod tests`, a `#[test]` fn with its own `#[cfg(…)]`). Each
+must be run by a pass or named by a skip in `feature-tests.toml`:
+
+```toml
+[[pass]]                         # one more `cargo nextest run`
+name = "webview-desk"
+packages = ["architect-webview"]
+features = ["architect-webview/desk"]
+# env = { ARCHITECT_WASI_REQUIRED = "1" }  # set for this pass
+# workspace = true   # build --workspace with the features, run only `packages`
+
+[[skip]]                         # or why it never runs in CI
+package = "architect-extensions"
+file = "tests/some_test.rs"      # relative to the package
+reason = "needs real hardware"
+```
+
+It also fails on a pass that runs nothing the workspace run does not, and
+on a skip that no longer names a gated test. `workspace = true` is for a
+member high in the graph, where `-p` alone would rebuild everything under
+it with other features. `--list` shows every gated test and what runs
+it; `--run` runs every pass (`just test` does), `--filter <expr>` narrows
+it. Each pass is also linted with `cargo clippy`, so its feature set must
+lint clean. Not seen, by design: `#[cfg(feature)]` on an inline module
+other than `tests`, `#[cfg_attr(…, test)]`, and tests made by macros.
+
 ## Where to read more
 
 - [Testing strata](@/architecture/testing.md): the layers, the bridge,

@@ -250,7 +250,7 @@ feature crate with a passing test.
 | `apps/ui` | The app's UI (`architect-app`), its tour and the demo vault |
 | `apps/sandbox` | The dev sandbox: the app on made-up data, the example extensions (Board, Clicker, WASI Counter, the registry's), the guide scenarios, goldens and films |
 | `apps/auth-server`, `apps/mock-oauth` | The identity server, and a mock OAuth provider for its tests |
-| `skills/architect` | The agent skill |
+| `skills/architect`, `skills/architect-extensions` | The agent skills: the framework, and writing an extension |
 | `xtask` | `cargo xtask`: `feature new`, `boundaries`, `docs`, `tags`, `fleet-bump` |
 
 ## Documentation
@@ -271,10 +271,11 @@ feature crate with a passing test.
 
 `skills/architect/` is the skill agents load to build on architect: the
 rules, an API map and recipes, with every repo path checked by
-`cargo xtask docs`. The fleet's skill sync vendors it from each release
-tag; in this repo `.claude/skills/architect` links to it, and
-`just skill-install` links this checkout's copy into `~/.claude/skills`
-and `~/.codex/skills`. `AGENTS.md` holds the repo's
+`cargo xtask docs`. `skills/architect-extensions/` is its companion for
+writing, installing, testing and reviewing an extension. The fleet's skill
+sync vendors both from each release tag; in this repo `.claude/skills/`
+links to them, and `just skill-install` links this checkout's copies into
+`~/.claude/skills` and `~/.codex/skills`. `AGENTS.md` holds the repo's
 rules for agents: what a PR updates and how docs cite code.
 
 ## When not to use it
@@ -294,7 +295,8 @@ rules for agents: what a PR updates and how docs cite code.
 `devenv shell` (or direnv, through `.envrc`), then `just check`, `just test` and `just docs-check`; CI
 runs the full suite on every push to `main` (`.github/workflows/checks.yml`).
 A PR that adds, renames or removes public API or a feature flag updates
-`skills/architect/` in the same PR.
+`skills/architect/` (and `skills/architect-extensions/` when it touches
+extensions) in the same PR.
 
 ## License
 

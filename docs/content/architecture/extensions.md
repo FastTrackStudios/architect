@@ -759,7 +759,7 @@ demo's probe extension (`/app/?demo&probe` only).
 **The vault's query service in the browser** (#495, #710's data model).
 Queries run in the page, over the vault index, with the one engine
 (`vault_query::QueryEngine`) served there (`architect::serve_local`); the
-extension host holds only its client (`Host::set_vault_query`), so
+extension host holds only its client (`Host::set_vault`), so
 `query_vault` answers as on a desk (`apps/web/src/app/index_sync.rs`):
 
 - **Signed in**, the index is the node's (`VaultIndexSync` on the org
@@ -3760,9 +3760,15 @@ transport gets the same check, and calls a `DocumentStore` and a
 `DocumentsServer` over the app's `Documents` (`AsStore`), each
 extension's data (`FileData`) and its own gate (`HostGate`) with
 `architect::serve_local` on a runtime of its own, the same on the desk
-and iOS. A browser's host uses the same client over vox on the org
-lane, the node serving the same `DocumentsServer`; the demo serves it
-in wasm over `MemoryStore`. What is not wasm-clean is only below the
+and iOS. A browser's host does the same in the page today (`serve_local`
+in wasm, on `spawn_local`) over `WebDocuments`
+(`apps/web/src/app/documents.rs`): the signed-in web app's copy of the
+vault, whose creates and edits reach the node through `Notes::write`
+(rename, move and delete are the desktop's until the org lane has
+them); the demo is the same over its vault in memory. The rule stays
+one implementation: when the node serves `DocumentsServer` on the org
+lane, the browser's host swaps the transport under the same
+`DocumentsClient`, not the code. What is not wasm-clean is only below the
 stores: the vault on disk and the data files.
 
 **Extension data and settings persist.** `host.data`/`set_data` are a
