@@ -603,6 +603,19 @@ impl Distribution {
             .collect()
     }
 
+    /// Its compiled-in extensions' `[[file_types]]`: the file types that
+    /// are vault notes. The node registers them before it reads a vault
+    /// (`vault_proto::note_types::register`); an app's extension host does
+    /// as it loads each extension.
+    #[must_use]
+    pub fn file_types(&self) -> Vec<architect_extensions::contrib::FileTypeDecl> {
+        self.extensions()
+            .into_iter()
+            .filter_map(|e| Manifest::parse(e.manifest()).ok())
+            .flat_map(|m| m.contributes.file_types)
+            .collect()
+    }
+
     /// Its compiled-in extensions' `[[favourites]]`, each with the
     /// extension that declared it and what its capabilities let it run:
     /// the tabs a share page's phone shell (and the app's shell) shows

@@ -416,7 +416,7 @@ impl Backend {
         to: &str,
     ) -> Result<Vec<String>, VaultSyncError> {
         use crate::relink::{PageName, relink};
-        let is_md = |p: &str| p.to_ascii_lowercase().ends_with(".md");
+        let is_md = vault_proto::note_types::is_note_path;
         let (old, new) = (PageName::of(from), PageName::of(to));
         if !is_md(from) || !is_md(to) || old == new {
             return Ok(Vec::new());

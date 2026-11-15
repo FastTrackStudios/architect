@@ -56,8 +56,7 @@ impl DemoNotes {
 }
 
 fn indexed(path: &str) -> bool {
-    let lower = path.to_ascii_lowercase();
-    lower.ends_with(".md") || lower.ends_with(".base")
+    vault_proto::note_types::is_note_path(path) || path.to_ascii_lowercase().ends_with(".base")
 }
 
 impl NoteSource for DemoNotes {

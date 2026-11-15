@@ -286,7 +286,9 @@ pub(crate) fn is_markdown(path: &std::path::Path) -> bool {
     // extension to compare it was an allocation per event.
     path.extension()
         .and_then(|s| s.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown"))
+        .is_some_and(|ext| {
+            ext.eq_ignore_ascii_case("markdown") || vault_proto::note_types::is_note_extension(ext)
+        })
 }
 
 #[cfg(test)]

@@ -223,16 +223,15 @@ fn note_pane(path: &str) -> Pane {
     pane
 }
 
-/// Whether `path` is a markdown note (`.md`, any case).
+/// Whether `path` is a note (`.md` or a declared note file type, any case).
 fn is_note(path: &str) -> bool {
-    path.rsplit_once('.')
-        .is_some_and(|(_, e)| e.eq_ignore_ascii_case("md"))
+    vault_proto::note_types::is_note_path(path)
 }
 
-/// A note's tab title: its name without `.md`.
+/// A note's tab title: its name without its extension.
 fn title_of(path: &str) -> String {
     let name = path.rsplit('/').next().unwrap_or(path);
-    name.strip_suffix(".md").unwrap_or(name).to_owned()
+    vault_proto::note_types::note_stem(name).to_owned()
 }
 
 /// Opens `pane` at `target` in the main area: beside the note on show,

@@ -1968,6 +1968,11 @@ impl Host {
         }
         self.languages()
             .set(&manifest.id, declared.languages.clone());
+        // Its file types are vault notes from now on, for the process's
+        // life (a note stays a note when its extension is turned off).
+        for t in &declared.file_types {
+            t.register();
+        }
         for d in &mut declared.deck_templates {
             if d.layout_text.is_none()
                 && let Some(path) = &d.layout

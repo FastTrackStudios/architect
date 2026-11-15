@@ -40,6 +40,9 @@ architect-spaces = { workspace = true }
 # A share link guest's file URL parsed and normalised as the browser
 # does before it is fetched (`view_files::guest_file_url`, #673 L3).
 url = "2"
+# Which files are notes: `.md` and extensions' declared file types
+# (`vault_proto::note_types`, src/demo.rs, src/view_files.rs).
+vault-proto = { workspace = true, default-features = false }
 
 # The browser half runs on wasm32-unknown-unknown only; natively the crate
 # is its pure part (routes, config, views), which its tests cover.

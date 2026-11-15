@@ -1539,6 +1539,62 @@ window, a link's Ctrl- or Cmd-click goes there
 (`features/extensions/src/interface.rs` `ExtensionUi::open_link`,
 `link_press`); `EXT_OPEN` does it from the Action List.
 
+### File types
+
+An extension teaches the vault a file type without core code naming it:
+`[[file_types]]` declares an extension whose files are notes like `.md`
+ones.
+
+```toml
+[[file_types]]
+extension = "cook"     # without the dot, lower-case; not md, markdown, base or canvas
+name = "Recipe"
+icon = "chef-hat"
+note_type = "recipe"   # the `type` such a file reads as when its frontmatter has none
+body = "text"          # markdown (the default) or text: Cooklang's `#pan{}` is no tag
+```
+
+A note, to the vault, is optional YAML `---` frontmatter and then a body
+of text, so a declared file's frontmatter is its properties and the rest
+its text, and everything that handles notes handles it unchanged: the
+walkers, the open vault (`OpenVault`), its Loro document and sync, the
+vault index (where it reads as `type: recipe` unless its frontmatter
+says otherwise: `features/vault/vault-query/src/index.rs` `Entry::of_note`),
+Bases (`filters: type == "recipe"` finds it), the documents API
+(`read_document`, `edit_document`), the navigator and the web's notes.
+
+They all ask one registry, `features/vault/vault-proto/src/note_types.rs`
+(`is_note_path`, `is_note_extension`, `note_type_of`, `note_stem`;
+re-exported as `vault::note_types`), process-wide and wasm-clean. `md` is
+always in it. The extension host registers each declared type as it
+loads the manifest (`Host::load`, on a desk, a phone and the web);
+the node (`architect-desktop serve`) registers its distribution's linked
+extensions' types before it reads a vault
+(`apps/distribution/src/lib.rs` `Distribution::file_types`) and those of
+the extensions it loads (`features/extensions/src/node.rs`
+`NodeHost::load`). A type stays registered for the life of the process:
+its files stay notes when the extension is turned off. `EXT_FILE_TYPES`
+lists `md` and every declared type, with who declared it.
+
+**Its body.** A declared type's body is markdown unless it says `body =
+"text"`: then the vault reads only its frontmatter and its `[[links]]`,
+not its inline `#tags`, task lines or headings, because the `#` and `-`
+of another language mean something else (Cooklang's `#pan{}` is
+cookware). One function parses a note by its path for everyone who reads
+one: `features/vault/vault-query/src/moved/obsidian_parse.rs` `parse_note`
+(over `vault_proto::note_types::body_is_markdown`).
+
+The web app registers its distribution's types before it builds a vault
+(`apps/web/src/browser.rs` `run`), as the node does, so the demo's and
+the showcase's files are notes there before the extension host loads.
+
+Opening such a file opens a note. An extension that draws its own view
+for it claims its `note_type` as it would any note type's: `[[embeds]]
+note_types`, or an `[[openers]]` entry's `files`. The manifest check
+(`features/extensions/src/contrib.rs` `FileTypeDecl::check`) refuses an
+extension with a dot or a capital, one the vault reads as its own
+(`RESERVED_FILE_TYPES`), and an entry with no `name` or `note_type`.
+
 ### Hooks and the invocation
 
 A hook runs on an app event (`contrib::EVENTS`, or `changed:<topic>`

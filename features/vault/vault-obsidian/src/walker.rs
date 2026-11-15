@@ -103,7 +103,7 @@ fn classify(p: &Path) -> VaultEntryKind {
     // the extension of every file in the vault.
     let ext = p.extension().and_then(|e| e.to_str()).unwrap_or_default();
     let is = |want: &str| ext.eq_ignore_ascii_case(want);
-    if is("md") || is("markdown") {
+    if is("markdown") || vault_proto::note_types::is_note_extension(ext) {
         VaultEntryKind::Markdown
     } else if is("base") {
         VaultEntryKind::Base
