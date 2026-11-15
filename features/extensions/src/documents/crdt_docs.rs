@@ -28,6 +28,8 @@ pub struct CrdtDocuments {
 }
 
 #[derive(Default)]
+// The undo step is Luau's and pages' (not in a browser).
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
 struct Inner {
     /// None: any path is one.
     spaces: BTreeSet<String>,
@@ -40,6 +42,8 @@ struct Inner {
 
 /// One run's step across documents.
 #[derive(Default)]
+// The undo step is Luau's and pages' (not in a browser).
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
 struct Step {
     name: String,
     /// Documents whose own history has the step open.
@@ -412,6 +416,8 @@ impl Documents for CrdtDocuments {
 /// history holds the step while it runs; taken back, its edits are
 /// undone, what it made is removed, what it deleted and renamed is put
 /// back.
+// Luau and pages' undo; no Luau in a browser (#495).
+#[cfg(not(target_family = "wasm"))]
 impl architect_scripting::Transactions for CrdtDocuments {
     fn begin(&self, name: &str) -> bool {
         let mut inner = self.lock();

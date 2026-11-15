@@ -402,7 +402,8 @@ impl Host {
             Some(d) => Arc::new(AsStore(d)),
             None => Arc::new(NoDocuments),
         };
-        let data = FileData::new(self.data_root(), self.memory_data()).with_store(self.data_store());
+        let data =
+            FileData::new(self.data_root(), self.memory_data()).with_store(self.data_store());
         let server = svc::DocumentsServer::from_arcs(
             docs,
             Arc::new(data),
