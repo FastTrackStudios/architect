@@ -99,6 +99,10 @@ blitz-traits = { workspace = true }
 name = "documents"
 required-features = ["documents"]
 
+[[test]]
+name = "note_file_types"
+required-features = ["documents"]
+
 [lib]
 doctest = false
 

@@ -198,11 +198,11 @@ pub fn files_of<'a>(
         }
         NavTarget::Tag(tag) if tag == TAGGED => index
             .files()
-            .filter(|f| f.is_markdown() && !f.tags.is_empty())
+            .filter(|f| f.is_note() && !f.tags.is_empty())
             .collect(),
         NavTarget::Tag(tag) if tag == UNTAGGED => index
             .files()
-            .filter(|f| f.is_markdown() && f.tags.is_empty())
+            .filter(|f| f.is_note() && f.tags.is_empty())
             .collect(),
         NavTarget::Tag(tag) => index.files().filter(|f| has_tag(f, tag)).collect(),
         NavTarget::Property { key, value } => {
@@ -210,7 +210,7 @@ pub fn files_of<'a>(
             let keys = NavigatorSettings::list(&settings.property_keys);
             index
                 .files()
-                .filter(|f| f.is_markdown())
+                .filter(|f| f.is_note())
                 .filter(|f| {
                     if key == properties::ROOT {
                         below && keys.iter().any(|k| properties::lists(f, k, None, true))
@@ -329,7 +329,7 @@ pub fn rows(index: &VaultIndex, cx: &ListContext<'_>) -> Vec<ListRow> {
         Grouping::None if s.sort == SortOption::Manual => {
             let key = &s.manual_sort_property;
             let (md, other): (Vec<&NoteFile>, Vec<&NoteFile>) =
-                rest.into_iter().partition(|f| f.is_markdown());
+                rest.into_iter().partition(|f| f.is_note());
             let (ranked, unsorted): (Vec<&NoteFile>, Vec<&NoteFile>) =
                 md.into_iter().partition(|f| rank(f, key).is_some());
             if !pinned.is_empty() && !ranked.is_empty() {
@@ -828,12 +828,12 @@ pub fn drawing_kind(f: &NoteFile) -> Option<&'static str> {
     let path = f.path.to_ascii_lowercase();
     if path.ends_with(".excalidraw.md")
         || path.ends_with(".excalidraw")
-        || (f.is_markdown() && f.get("excalidraw-plugin").is_some())
+        || (f.is_note() && f.get("excalidraw-plugin").is_some())
     {
         return Some("EXCALIDRAW");
     }
     if f.extension().eq_ignore_ascii_case("tldr")
-        || (f.is_markdown() && f.get("tldraw-file") == Some(&PropertyValue::Bool(true)))
+        || (f.is_note() && f.get("tldraw-file") == Some(&PropertyValue::Bool(true)))
     {
         return Some("TLDRAW");
     }
@@ -1097,7 +1097,7 @@ fn compare(
         SortOption::FilenameDesc => natural_cmp(b.file_name(), a.file_name()),
         SortOption::Manual => {
             let key = &s.manual_sort_property;
-            let class = |f: &NoteFile| match (f.is_markdown(), rank(f, key)) {
+            let class = |f: &NoteFile| match (f.is_note(), rank(f, key)) {
                 (true, Some(_)) => 0,
                 (true, None) => 1,
                 (false, _) => 2,

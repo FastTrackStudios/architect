@@ -76,16 +76,17 @@ pub struct File {
 }
 
 impl File {
-    /// Its text, when it is a note or another text file the app reads
-    /// (`.md`, `.base`, `.canvas`, `.svg`).
+    /// Its text, when it is a note (`.md` or a declared note file type) or
+    /// another text file the app reads (`.base`, `.canvas`, `.svg`).
     #[must_use]
     pub fn text(&self) -> Option<&'static str> {
         let ext = ext(self.path);
-        ["md", "base", "canvas", "svg"]
-            .iter()
-            .any(|t| ext.eq_ignore_ascii_case(t))
-            .then(|| std::str::from_utf8(self.bytes).ok())
-            .flatten()
+        (vault_proto::note_types::is_note_extension(ext)
+            || ["base", "canvas", "svg"]
+                .iter()
+                .any(|t| ext.eq_ignore_ascii_case(t)))
+        .then(|| std::str::from_utf8(self.bytes).ok())
+        .flatten()
     }
 
     /// Its media type, when it is an image or a PDF the view draws from a

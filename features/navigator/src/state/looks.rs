@@ -293,7 +293,7 @@ impl NavigatorState {
             && self
                 .index
                 .file(path)
-                .is_some_and(crate::source::NoteFile::is_markdown)
+                .is_some_and(crate::source::NoteFile::is_note)
         {
             let field = match what {
                 Paint::Icon => &self.settings.frontmatter_icon_field,

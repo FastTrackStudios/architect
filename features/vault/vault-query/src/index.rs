@@ -33,7 +33,7 @@ use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::obsidian_parse::{ParsedPage, parse_page};
+use crate::obsidian_parse::{ParsedPage, parse_note};
 
 /// The wire form's version.
 pub const WIRE: u32 = 1;
@@ -200,6 +200,15 @@ impl Entry {
             }
             props.insert(names.get(&k), v);
         }
+        // A file type an extension declared reads as its `type` when its
+        // frontmatter names none (`vault_proto::note_types`).
+        if let Some(note_type) = vault_proto::note_types::note_type_of(path)
+            && !props.keys().any(|k| &**k == "type")
+            && props.len() < MAX_PROPS
+        {
+            props.insert(names.get("type"), Value::String(note_type));
+            props.sort_keys();
+        }
         let name = crate::rows::split_rel(path).1;
         let heading_title = headings
             .iter()
@@ -227,7 +236,7 @@ impl Entry {
     /// A note's entry from its markdown.
     #[must_use]
     pub fn of_markdown(path: &str, mtime: u64, markdown: &str, names: &mut Interner) -> Self {
-        Self::of_note(path, mtime, &parse_page(markdown), names)
+        Self::of_note(path, mtime, &parse_note(path, markdown), names)
     }
 
     /// A `.base` file's entry.
@@ -943,6 +952,28 @@ mod tests {
         assert!(!e.props.contains_key("big") && e.props.contains_key("ok"));
         assert_eq!(e.headings[0].1.chars().count(), MAX_TEXT);
         assert!(!Entry::of_markdown("B.md", 0, "# B\n", &mut Interner::default()).truncated);
+    }
+
+    #[test]
+    fn a_declared_file_type_reads_as_its_type_unless_its_frontmatter_says() {
+        let cook = "---\nservings: 4\n---\nMix @flour{200%g}.\n";
+        let before = Entry::of_markdown("R/Pancakes.vqcook", 0, cook, &mut Interner::default());
+        assert!(!before.props.contains_key("type"));
+        vault_proto::note_types::register("vqcook", "recipe");
+        let e = Entry::of_markdown("R/Pancakes.vqcook", 0, cook, &mut Interner::default());
+        assert_eq!(e.props["type"], "recipe");
+        assert_eq!(e.props["servings"], 4);
+        let keys: Vec<&str> = e.props.keys().map(|k| &**k).collect();
+        assert_eq!(keys, ["servings", "type"], "sorted, as a row has them");
+        let own = Entry::of_markdown(
+            "R/Waffles.vqcook",
+            0,
+            "---\ntype: breakfast\n---\nx\n",
+            &mut Interner::default(),
+        );
+        assert_eq!(own.props["type"], "breakfast");
+        let md = Entry::of_markdown("R/Notes.md", 0, "x\n", &mut Interner::default());
+        assert!(!md.props.contains_key("type"));
         assert!(Entry::of_base("big.base", 0, &"#".repeat(MAX_BASE + 1)).truncated);
     }
 

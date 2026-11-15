@@ -109,7 +109,7 @@ impl TagTree {
     /// (`extractFileTagsFromRawTags`).
     #[must_use]
     pub fn build<'a>(files: impl IntoIterator<Item = &'a NoteFile>) -> Self {
-        let mut files: Vec<&NoteFile> = files.into_iter().filter(|f| f.is_markdown()).collect();
+        let mut files: Vec<&NoteFile> = files.into_iter().filter(|f| f.is_note()).collect();
         files.sort_by(|a, b| a.path.cmp(&b.path));
         let mut tree = Self::default();
         for f in files {

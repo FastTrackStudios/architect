@@ -521,6 +521,14 @@ impl Distribution {
             fresh = true;
             self
         });
+        if fresh {
+            // Its extensions' note file types, before any vault is read: a
+            // vault opened before the host loads them would not see their
+            // files as notes (a `.cook` recipe).
+            for t in installed.file_types() {
+                t.register();
+            }
+        }
         if fresh && let Some(old) = &installed.adopts {
             let new = architect::settings::env_var(&installed.folder);
             let unset = std::env::var_os(&new).is_none_or(|v| v.is_empty());
@@ -600,6 +608,20 @@ impl Distribution {
             .into_iter()
             .filter_map(|e| Manifest::parse(e.manifest()).ok())
             .flat_map(|m| m.share_layers)
+            .collect()
+    }
+
+    /// Its compiled-in extensions' `[[file_types]]`: the file types that
+    /// are vault notes. [`Self::install`] registers them before any vault
+    /// is read (`vault_proto::note_types::register_with`), as the node
+    /// does before it serves; an app's extension host does again as it
+    /// loads each extension.
+    #[must_use]
+    pub fn file_types(&self) -> Vec<architect_extensions::contrib::FileTypeDecl> {
+        self.extensions()
+            .into_iter()
+            .filter_map(|e| Manifest::parse(e.manifest()).ok())
+            .flat_map(|m| m.contributes.file_types)
             .collect()
     }
 
