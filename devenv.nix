@@ -68,7 +68,8 @@ in
   env.LD_LIBRARY_PATH = lib.makeLibraryPath (common ++ linux ++ [ pkgs.stdenv.cc.cc.lib ]);
 
   # `devenv up`: the whole stack on this machine (#541,
-  # docs/content/guide/local-stack.md), each process started by
+  # docs/content/guide/local-stack.md): mock-oauth, the auth server, the
+  # app (which is also the node) and the web app, each started by
   # `cargo xtask dev run <process>` (xtask/src/dev), which runs the guard
   # (nothing may name production or leave loopback), decides the fill (a
   # sanitised mirror of production on a machine with an admin token, the
@@ -100,43 +101,34 @@ in
     after = [ "devenv:processes:mock-oauth" ];
     ready.exec = "${curl} -sf -o /dev/null ${url "auth"}/health";
   };
-  # The headless node (`architect-desktop serve`, built without the window)
-  # signed in to that auth server, hosting the fill's org and its vault,
-  # `ARCHITECT_IROH=local`: no relay, no lookup, loopback only.
-  processes.node = {
-    exec = "${xdev} node";
-    after = [ "devenv:processes:auth" ];
-    ready.exec = "${curl} -sf -o /dev/null ${url "node"}/health";
-  };
-  # The Architect app (apps/desktop) under the fleet's dx, its issuer the
-  # local auth server and its orgs' node the local node, with a folder of
-  # its own (its sessions a file there, never the keychain), on a scratch
-  # copy of the demo vault
-  # (`just vault-reset`). Without Rust hot-patching: it builds a different
-  # ("fat") binary from `dx build`, and dx calls it experimental. rsx hot
-  # reload stays.
+  # The Architect app (apps/desktop) under the fleet's dx, and in the same
+  # process its node, as on anyone's machine: signed in to that auth
+  # server, hosting the fill's org and its vault, `ARCHITECT_IROH=local`
+  # (no relay, no lookup, loopback only), its HTTP face (`/health`, `/vox`,
+  # the org lane, share links) on the stack's `app` port. The window's
+  # issuer is the local auth server and its orgs' node its own, with a
+  # folder of its own (its sessions a file there, never the keychain), on
+  # a scratch copy of the demo vault (`just vault-reset`). Without Rust
+  # hot-patching: it builds a different ("fat") binary from `dx build`,
+  # and dx calls it experimental. rsx hot reload stays.
   processes.app = {
     exec = "${xdev} app";
-    after = [ "devenv:processes:node" ];
+    after = [ "devenv:processes:auth" ];
     env = config.fleet.telemetry.processEnv;
-    # Ready only while the built app itself runs, not while dx is still
-    # compiling it. dx launches it from target/dx/architect-desktop/… (the
-    # [p] keeps pgrep from matching this probe's own command line).
+    # Ready once the built app's node answers, not while dx is still
+    # compiling it.
     ready = {
-      exec = "${pkgs.procps}/bin/pgrep -f 'target/dx/architect-deskto[p]/' >/dev/null";
+      exec = "${curl} -sf -o /dev/null ${url "app"}/health";
       period = 2;
-      failure_threshold = 2;
     };
   };
-  # Off by default (`just dev plain` starts both): `devenv up web`, the
-  # web app (apps/web) under `dx serve --platform web`, rebuilt on a save,
-  # its issuer the local one, `/app/?demo` the app on the demo vault; and
-  # `devenv up site`, apps/site's dev server, whose `/app/…` links lead to
-  # the web app's.
+  # The web app (apps/web) under `dx serve --platform web`, rebuilt on a
+  # save, its issuer the local one, its node's paths (`/vox`, `/org`, `/s`,
+  # …) proxied to the app's node (apps/web/Dioxus.toml), `/app/?demo` the
+  # app on the demo vault.
   processes.web = {
     exec = "${xdev} web";
     after = [ "devenv:processes:auth" ];
-    start.enable = false;
     # Up once dx serves the built app's page (while it builds, dx answers
     # with its own "building" page, which names no `id="app"`).
     ready = {
@@ -144,6 +136,8 @@ in
       period = 2;
     };
   };
+  # Off by default (`just dev plain` starts it): `devenv up site`,
+  # apps/site's dev server, whose `/app/…` links lead to the web app's.
   processes.site = {
     exec = "${xdev} site";
     start.enable = false;

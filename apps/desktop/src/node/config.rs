@@ -1,22 +1,30 @@
-//! What a node is told: a TOML file, then the environment over it.
+//! What a node is told: its defaults, a TOML file over them, then the
+//! environment over both.
 //!
-//! `architect-desktop serve --config <file>` (or `$ARCHITECT_CONFIG`)
-//! reads the file; every `ARCHITECT_*` variable below then wins over the
-//! file's value, so a container sets what differs per deployment and
-//! mounts the rest. Secrets are never values here: the account's session
-//! and the MCP bearer are **files** a secret is mounted at.
+//! The app runs its node in the window and without it (`serve`) from the
+//! same configuration; only the defaults differ ([`Config::load_with`]).
+//! In the window they suit a person's machine ([`app_defaults`]): HTTP on
+//! loopback, its state in the app's folder, its platform the machine's.
+//! Run with `serve`, they are the server's in the table below.
 //!
-//! | Variable | File key | Default | What |
+//! `--config <file>` (or `$ARCHITECT_CONFIG`) names the file; every
+//! `ARCHITECT_*` variable below then wins over the file's value, so a
+//! container sets what differs per deployment and mounts the rest.
+//! Secrets are never values here: the account's session and the MCP
+//! bearer are **files** a secret is mounted at.
+//!
+//! | Variable | File key | Default (`serve`) | What |
 //! |---|---|---|---|
 //! | `ARCHITECT_NAME` | `name` | `architect` | the device's name on the account |
-//! | `ARCHITECT_BIND` | `bind` | `0.0.0.0:8080` | HTTP: `/health`, Sites, `/mcp`, the HTTP face, `/vox` |
-//! | `ARCHITECT_DATA_DIR` | `data_dir` | `architect-data` | the node's state: its iroh key, device id, documents, built sites |
+//! | `ARCHITECT_PLATFORM` | `platform` | `server` | the device's platform on the account (in the window: the machine's, `linux`, `macos`, `windows`) |
+//! | `ARCHITECT_BIND` | `bind` | `0.0.0.0:8080` | HTTP: `/health`, Sites, `/mcp`, the HTTP face, `/vox` (in the window: `127.0.0.1:7420`, or any free loopback port when that one is taken) |
+//! | `ARCHITECT_DATA_DIR` | `data_dir` | `architect-data` | the node's state: its iroh key, device id, documents, built sites (in the window: `<app dir>/node`) |
 //! | `ARCHITECT_VAULTS` | `[vaults]` | none | `id=path,…`: the vaults it holds (a relative path is under the data dir) |
 //! | `ARCHITECT_SITES` | `[sites]` | none | `/mount=vault,…`: vaults published as Sites |
 //! | `ARCHITECT_EXTENSIONS` | `extensions` | `<data dir>/extensions` | installed extensions, a package folder each (`<id>/extension.toml`): the fences they claim are drawn on share links and Sites (a relative path is under the data dir) |
 //! | `ARCHITECT_EXTENSION_SECRETS` | `extension_secrets` | none | its extensions' node secrets, set by its operator: a folder with a file each, `<ext id>/<secret id>` (as sops-nix writes them); none: an org admin sets them on the org lane (`NodeActions::set_secret`), kept in `<data dir>/extension-secrets.json`. The node runs installed extensions' node actions (`runs = "node"`, #583) on its org lane with them |
 //! | `ARCHITECT_ISSUER` | `issuer` | none | the account server (`https://auth.fasttrackstudio.app`) |
-//! | `ARCHITECT_SESSION_FILE` | `session_file` | none | a file holding the account's session token |
+//! | `ARCHITECT_SESSION_FILE` | `session_file` | none | a file holding the account's session token (in the window, with neither this nor `issuer` set: the app's signed-in account) |
 //! | `ARCHITECT_ORG` | `org` | none | the org (slug) it offers the account when the account shares none yet |
 //! | `ARCHITECT_HOST_ORG` | `host_org` | none | an issuer org (slug) of the session's: the node serves its enrolment lane, `/org/{slug}/vox`, and its vaults are that org's |
 //! | `ARCHITECT_LANE_RECHECK_SECS` | `lane_recheck_secs` | `30` | on the org lane, how long a person's bearer is trusted before the issuer is asked again, and how often an open note's live session checks it still is: signed out, expired or removed from the org, the session ends within about twice this |
@@ -85,6 +93,7 @@ pub enum Placement {
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub name: String,
+    pub platform: String,
     pub bind: String,
     pub data_dir: PathBuf,
     pub vaults: BTreeMap<String, PathBuf>,
@@ -231,6 +240,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             name: "architect".to_owned(),
+            platform: "server".to_owned(),
             bind: "0.0.0.0:8080".to_owned(),
             data_dir: PathBuf::from("architect-data"),
             vaults: BTreeMap::new(),
@@ -293,6 +303,31 @@ pub enum ConfigError {
     },
     #[error("{var}: {why}")]
     Env { var: &'static str, why: String },
+    #[error("the defaults: {0}")]
+    Defaults(String),
+}
+
+/// Where the window's node listens unless told otherwise: loopback, so
+/// nothing off the machine reaches it until the person says so.
+pub const APP_BIND: &str = "127.0.0.1:7420";
+
+/// The window's defaults, under [`Config::load_with`].
+///
+/// The device named `name` with the machine's platform, HTTP on loopback
+/// ([`APP_BIND`]), its state in `<app_dir>/node`. Everything public (Sites, share links'
+/// web app, a bind off loopback, an org it hosts) stays off until the
+/// configuration turns it on, as on a server.
+#[must_use]
+pub fn app_defaults(app_dir: &Path, name: &str) -> toml::Table {
+    let mut table = toml::Table::new();
+    table.insert("name".to_owned(), name.into());
+    table.insert("platform".to_owned(), std::env::consts::OS.into());
+    table.insert("bind".to_owned(), APP_BIND.into());
+    table.insert(
+        "data_dir".to_owned(),
+        app_dir.join("node").display().to_string().into(),
+    );
+    table
 }
 
 impl Config {
@@ -305,13 +340,50 @@ impl Config {
         file: Option<&Path>,
         env: impl Fn(&str) -> Option<String>,
     ) -> Result<Self, ConfigError> {
-        let mut config = match file {
-            Some(path) => Self::from_file(path)?,
-            None => Self::default(),
-        };
+        Self::load_with(toml::Table::new(), file, env)
+    }
+
+    /// [`load`](Self::load) over `defaults` instead of the server's: each
+    /// key `defaults` sets (a file key) holds unless the file or the
+    /// environment sets it ([`app_defaults`]: the window's).
+    ///
+    /// # Errors
+    ///
+    /// As [`load`](Self::load); `defaults` not this shape is
+    /// [`ConfigError::Defaults`].
+    pub fn load_with(
+        defaults: toml::Table,
+        file: Option<&Path>,
+        env: impl Fn(&str) -> Option<String>,
+    ) -> Result<Self, ConfigError> {
+        let mut table = defaults;
+        if let Some(path) = file {
+            table.extend(Self::table_of(path)?);
+        }
+        let mut config: Self =
+            toml::Value::Table(table)
+                .try_into()
+                .map_err(|source| match file {
+                    Some(path) => ConfigError::Parse {
+                        path: path.to_owned(),
+                        source: Box::new(source),
+                    },
+                    None => ConfigError::Defaults(source.to_string()),
+                })?;
         config.apply_env(env)?;
         config.check_store()?;
         Ok(config)
+    }
+
+    fn table_of(path: &Path) -> Result<toml::Table, ConfigError> {
+        let text = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
+            path: path.to_owned(),
+            source,
+        })?;
+        toml::from_str(&text).map_err(|source| ConfigError::Parse {
+            path: path.to_owned(),
+            source: Box::new(source),
+        })
     }
 
     /// Refuse a store budget that would refuse every write: a limit of
@@ -360,6 +432,9 @@ impl Config {
         let get = |var: &str| env(var).filter(|v| !v.trim().is_empty());
         if let Some(v) = get("ARCHITECT_NAME") {
             self.name = v;
+        }
+        if let Some(v) = get("ARCHITECT_PLATFORM") {
+            self.platform = v;
         }
         if let Some(v) = get("ARCHITECT_BIND") {
             self.bind = v;
@@ -628,6 +703,37 @@ mod tests {
             Some(PathBuf::from("architect-data/vaults/notes"))
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_windows_defaults_hold_unless_the_file_or_environment_says_otherwise() {
+        let app = Path::new("/home/someone/.config/architect");
+        let none = |_: &str| None;
+        let config = Config::load_with(app_defaults(app, "laptop"), None, none).ok();
+        let config = config.as_ref();
+        assert_eq!(config.map(|c| c.bind.as_str()), Some(APP_BIND));
+        assert_eq!(config.map(|c| c.name.as_str()), Some("laptop"));
+        assert_eq!(
+            config.map(|c| c.platform.as_str()),
+            Some(std::env::consts::OS)
+        );
+        assert_eq!(config.map(|c| c.data_dir.clone()), Some(app.join("node")));
+        assert!(config.is_some_and(|c| c.sites.is_empty() && c.host_org.is_none()));
+
+        let dir = std::env::temp_dir().join(format!("node-app-config-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).ok();
+        let file = dir.join("architect.toml");
+        std::fs::write(&file, "name = \"from-file\"\n").ok();
+        let env = |var: &str| (var == "ARCHITECT_PLATFORM").then(|| "server".to_owned());
+        let config = Config::load_with(app_defaults(app, "laptop"), Some(&file), env).ok();
+        let config = config.as_ref();
+        assert_eq!(config.map(|c| c.name.as_str()), Some("from-file"));
+        assert_eq!(config.map(|c| c.platform.as_str()), Some("server"));
+        assert_eq!(config.map(|c| c.bind.as_str()), Some(APP_BIND));
+        std::fs::remove_dir_all(&dir).ok();
+
+        let served = Config::load(None, none).ok();
+        assert_eq!(served.map(|c| c.platform), Some("server".to_owned()));
     }
 
     #[test]

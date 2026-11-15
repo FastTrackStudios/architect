@@ -1,11 +1,13 @@
 +++
 title = "Deploy: Architect, headless"
-description = "architect-desktop serve: the Architect app run with no window as an always-on node, a sync peer for the org's vaults that serves Sites, share links, MCP and the HTTP face, released as a pure-Nix OCI image."
+description = "architect-desktop serve: the Architect app, which is its node, run with no window on a server: an always-on node, a sync peer for the org's vaults that serves Sites, share links, MCP and the HTTP face, released as a pure-Nix OCI image."
 weight = 75
 +++
 
-There is no separate Architect server. A deployed "server" is the Architect
-app run headless: the same app and the same node, with no window. The desktop
+There is no separate Architect server, and no separate node to install. The
+Architect app is its node: on a person's machine the window runs it in the
+same process, so installing the app is all it takes. A deployed "server" is
+the same app run headless: the same node, with no window. The desktop
 and mobile apps are peers. The account server only introduces them (accounts,
 orgs, the device address book and pairing, [devices](@/architecture/devices.md)).
 A headless Architect is one more device among them, the one that is always
@@ -27,13 +29,32 @@ binary and one version. Built with `--no-default-features --features vox`
 and no GPU libraries in the image. `node-wasi` adds Wasmtime, so installed
 WASI components draw a Site's blocks ([below](#blocks-extensions-draw)). The desktop build is unchanged.
 
+### In the window
+
+The desktop app starts the same node when its window opens
+(`apps/desktop/src/app.rs` `start_node`), once per running app (a second
+launch brings the first forward). It reads the same configuration
+(`$ARCHITECT_CONFIG`, then `ARCHITECT_*`) over defaults for a person's
+machine (`apps/desktop/src/node/config.rs` `app_defaults`):
+
+| | In the window | `serve` |
+| --- | --- | --- |
+| HTTP (`ARCHITECT_BIND`) | `127.0.0.1:7420`, or a free loopback port when that one is taken | `0.0.0.0:8080` |
+| State (`ARCHITECT_DATA_DIR`) | `<app dir>/node` | `architect-data` |
+| The device's platform (`ARCHITECT_PLATFORM`) | the machine's (`linux`, `macos`, `windows`) | `server` |
+| On the account as | the session file when set, else the app's signed-in account (its keychain) | the session file |
+
+Everything public (Sites, an org it hosts, `ARCHITECT_WEB_APP`, a bind
+off loopback) stays off until the configuration turns it on, as on a
+server. The sandbox runs no node; iOS does not start it yet (#820).
+
 ## What it does
 
 `apps/desktop/src/node/mod.rs` `start`:
 
 | | |
 | --- | --- |
-| **On the account** | With an issuer and a session it registers itself in the account's address book as a `server` device at its iroh endpoint, offers its org (`ARCHITECT_ORG`) if the account shares none yet, and lets the account's other devices in (`architect_devices::account::pass`). It runs again every five minutes, and on every sweep until another device is on the account. |
+| **On the account** | With an issuer and a session it registers itself in the account's address book as a device of its platform (`ARCHITECT_PLATFORM`: `server` for `serve`, the machine's in the window) at its iroh endpoint, offers its org (`ARCHITECT_ORG`) if the account shares none yet, and lets the account's other devices in (`architect_devices::account::pass`). It runs again every five minutes, and on every sweep until another device is on the account. |
 | **In an issuer org** | With `ARCHITECT_HOST_ORG` it hosts the org's enrolments and its vaults for signed-in web clients (below); with `ARCHITECT_ENROL_AT` it enrols itself in an org another node hosts. Its vaults are that org's. |
 | **Its lanes over iroh** | The node's documents (`crdt::p2p::node_router`: `DocSync` and `DocPeer`), served to the devices its `Admission` lets in. A revoked device's connections close (`architect_devices::serve`). |
 | **A sync peer for the vaults** | Each markdown file of each vault is a document (`vault_collab::VaultCollab`, written behind to the file; an edit on disk is merged in). `apps/desktop/src/node/catalog.rs` `VaultCatalog` names them on the peer lane. With each peer it dials, the node keeps a live `DocSync` bridge per note (below), so an edit reaches the others within a second. Every `ARCHITECT_SWEEP_SECS` it also sweeps each peer (`crdt::peer::pull_with`), the fallback for what a bridge missed. |

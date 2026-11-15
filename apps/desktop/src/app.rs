@@ -358,6 +358,10 @@ pub fn run(distribution: Distribution) -> ExitCode {
         return ExitCode::SUCCESS;
     }
     let _ = dist.adopt_folder();
+    // One running app is one node: it starts here, after the one instance
+    // is claimed, and runs for as long as the app does (in the menu bar
+    // too, with the window closed).
+    start_node(dist);
     let (w, h) = first_device().size().unwrap_or((1280.0, 820.0));
     let window = WindowAttributes::default()
         .with_title(dist.name())
@@ -380,6 +384,102 @@ pub fn run(distribution: Distribution) -> ExitCode {
     let window = window.with_decorations(false);
     architect_workspace::native::launch_with_fonts(Window, window, architect_app::FONTS);
     ExitCode::SUCCESS
+}
+
+/// The app's node (`crate::node`), started in this process: the same
+/// `start_parts` as `serve`, from the same configuration (`$ARCHITECT_CONFIG`,
+/// then `ARCHITECT_*`) over the window's defaults
+/// (`node::config::app_defaults`: loopback HTTP, its state in
+/// `<app dir>/node`). On the account as the app's signed-in account unless
+/// the configuration names a session file. Not in the sandbox (made-up
+/// data), nor on iOS yet (#820).
+fn start_node(dist: &'static Distribution) {
+    if dist.is_sandbox() || cfg!(target_os = "ios") {
+        return;
+    }
+    let dir = dist.app_dir_or_temp();
+    let file = std::env::var_os("ARCHITECT_CONFIG").map(PathBuf::from);
+    let mut config = match crate::node::Config::load_with(
+        crate::node::config::app_defaults(&dir, &device_name(dist)),
+        file.as_deref(),
+        |var| std::env::var(var).ok(),
+    ) {
+        Ok(config) => config,
+        Err(error) => {
+            tracing::warn!(%error, "the node's configuration: the app runs without its node");
+            return;
+        }
+    };
+    // The default port taken (another app's node): any free loopback one.
+    if config.bind == crate::node::config::APP_BIND
+        && std::net::TcpListener::bind(&config.bind).is_err()
+    {
+        tracing::info!(taken = %config.bind, "the node's port is taken: a free loopback one");
+        "127.0.0.1:0".clone_into(&mut config.bind);
+    }
+    let parts = crate::node::Parts::of(dist, &config).with_account(signed_in_account(dir));
+    let spawned = std::thread::Builder::new()
+        .name("architect-node".to_owned())
+        .spawn(move || {
+            let runtime = match tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_name("architect-node")
+                .build()
+            {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    tracing::warn!(%error, "the node's runtime: the app runs without its node");
+                    return;
+                }
+            };
+            runtime.block_on(async move {
+                match crate::node::start_parts(config, parts).await {
+                    Ok(running) => {
+                        tracing::info!(
+                            endpoint = %running.endpoint_id(),
+                            http = %running.http,
+                            "the app's node is up"
+                        );
+                        // Until the process ends, with the app.
+                        std::future::pending::<()>().await;
+                        drop(running);
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "the app's node did not start: the app runs without it");
+                    }
+                }
+            });
+        });
+    if let Err(error) = spawned {
+        tracing::warn!(%error, "the node's thread: the app runs without its node");
+    }
+}
+
+/// The device's name on the account: the machine's, else the app's.
+fn device_name(dist: &Distribution) -> String {
+    ["HOSTNAME", "COMPUTERNAME"]
+        .into_iter()
+        .find_map(|var| std::env::var(var).ok())
+        .or_else(|| {
+            std::fs::read_to_string("/etc/hostname")
+                .ok()
+                .map(|s| s.trim().to_owned())
+        })
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| dist.name().to_owned())
+}
+
+/// The app's active account, read again at each use from its folder and
+/// its secret store (the keychain in a release build), as the window's
+/// accounts keep them: its issuer and session, unless it must sign in again.
+fn signed_in_account(dir: PathBuf) -> crate::node::AccountSource {
+    let secrets = architect_accounts::secret_store(architect_accounts::DEFAULT_SERVICE, &dir);
+    crate::node::AccountSource::new(move || {
+        let store = architect_accounts::AccountStore::open(&dir, secrets.clone());
+        let account = store.active().filter(|a| !a.needs_sign_in)?;
+        let session = store.active_session().ok()??;
+        Some((account.issuer, session.token))
+    })
 }
 
 /// `<app> links register`: this binary opens the app's links

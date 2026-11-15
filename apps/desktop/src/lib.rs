@@ -14,12 +14,16 @@
 //! - `architect-desktop actions … --headless` starts that for one command.
 //! - `architect-desktop mcp [--headless]` is MCP on stdio for a model:
 //!   bridged onto the running lab's socket, or over a headless one.
-//! - `architect-desktop serve` is the app as an always-on node, with no
-//!   window and nothing drawn: [`node`]. It holds the org's vaults as a
-//!   sync peer over iroh, signs in to the account as one more device, and
-//!   serves Sites, MCP, the HTTP face and same-origin vox. Built with
-//!   `--no-default-features` (no `gui`), the binary is that alone, with no
-//!   Blitz, wgpu or wayland in it: the server image (`flake.nix`).
+//! - The app is its node ([`node`]): the window starts it in-process
+//!   (`start_node`), with defaults for a person's machine (HTTP on
+//!   loopback, on the account as the app's signed-in account). It holds
+//!   vaults as a sync peer over iroh, is a device on the account, and
+//!   serves the HTTP face and same-origin vox; Sites, share links and MCP
+//!   when configured.
+//! - `architect-desktop serve` is the same node with no window and nothing
+//!   drawn: what a server runs. Built with `--no-default-features` (no
+//!   `gui`), the binary is that alone, with no Blitz, wgpu or wayland in
+//!   it: the server image (`flake.nix`).
 
 #[cfg(feature = "gui")]
 mod app;

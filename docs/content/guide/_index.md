@@ -75,6 +75,7 @@ at the larger code that does the same thing for real
 ## On your machine
 
 [The whole stack on your machine](@/guide/local-stack.md): `devenv up`
-starts the auth server, a headless node and the app, wired to each other
+starts the auth server, the app (which is also its node) and the web
+app, wired to each other
 and to nothing else, filled from a sanitised mirror of production on a
 credentialed machine and from the demo seed everywhere else.

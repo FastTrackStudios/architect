@@ -4,8 +4,8 @@ description = "architect-devices — this device on the account, an org's enroll
 weight = 58
 +++
 
-Every node (a phone, a laptop, an org's server, an engine) serves its lanes
-over iroh, where the QUIC handshake proves the caller's endpoint id
+Every running app is a node (a phone, a laptop, an org's server, which is
+the same app with no window, an engine) and serves its lanes over iroh, where the QUIC handshake proves the caller's endpoint id
 (`Principal::Host`). Which endpoints a node lets in, and what each may do,
 used to be decided four ways in Task (`task:apps/server/src/account_devices.rs`,
 `task:apps/server/src/device_enrollment.rs`, `task:crates/ui/src/device_pairing.rs`,
