@@ -132,3 +132,87 @@ pub async fn base(_: Value) -> Result<Value, String> {
     let opened = run("BASES_OPEN", json!({ "path": path })).await?;
     Ok(json!({ "path": path, "written": !exists, "opened": opened.get("opened") }))
 }
+
+/// `COOKBOOK_OPEN {path?, view?, servings?}`: opens the cookbook, or the
+/// recipe at `path` in it, in cook mode (`view` cook) or the editor
+/// (`view` edit).
+pub async fn open(a: Value) -> Result<Value, String> {
+    let view = text(&a, "view").unwrap_or_else(|| "cookbook".to_owned());
+    if !matches!(view.as_str(), "cookbook" | "cook" | "edit") {
+        return Err(format!("view {view:?}: cookbook, cook or edit"));
+    }
+    if let Some(path) = text(&a, "path") {
+        let c = client().await.map_err(|e| e.to_string())?;
+        let r = c
+            .get(path.clone(), None)
+            .await
+            .map_err(|e| architect::vox_into_app(e).to_string())?;
+        crate::ui::set_open(crate::ui::Open {
+            path: Some(path),
+            source: r.source,
+            servings: number(&a, "servings"),
+        });
+    } else if view != "cookbook" {
+        return Err("give the recipe's `path`".into());
+    }
+    run(
+        "EXT_VIEW_OPEN",
+        json!({ "extension": crate::ID, "view": view }),
+    )
+    .await?;
+    Ok(json!({ "opened": view }))
+}
+
+/// `COOKBOOK_TIMER {seconds, label?}`: a kitchen timer: the device's
+/// notification when it is done (`after_s`), else a toast when it is
+/// set, and its id to cancel it with.
+pub async fn timer(a: Value) -> Result<Value, String> {
+    let seconds = a
+        .get("seconds")
+        .and_then(Value::as_u64)
+        .filter(|s| *s > 0 && *s <= 24 * 3600)
+        .ok_or("give `seconds`, 1 to 86400")?;
+    let label = text(&a, "label").unwrap_or_else(|| "Timer".to_owned());
+    let h = handle().ok_or("the cookbook is not running")?;
+    let id: String = format!("timer-{label}-{seconds}")
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let os = h
+        .host(HostRequest::OsNotify(
+            architect_extensions::device::OsNotification {
+                id: Some(id.clone()),
+                title: format!("{label}: done"),
+                body: Some(format!(
+                    "{} is up.",
+                    crate::ui::clock(u32::try_from(seconds).unwrap_or(u32::MAX))
+                )),
+                at_ms: None,
+                after_s: Some(seconds),
+            },
+        ))
+        .await;
+    if os.is_ok() {
+        Ok(json!({ "id": id, "seconds": seconds, "notify": "os" }))
+    } else {
+        // No device notifications here (a desk, a browser): say it
+        // was set; the view counts it down.
+        let _ = h
+            .host(HostRequest::Notify {
+                text: format!(
+                    "{label}: {} timer set",
+                    crate::ui::clock(u32::try_from(seconds).unwrap_or(u32::MAX))
+                ),
+                kind: None,
+                title: None,
+            })
+            .await;
+        Ok(json!({ "id": id, "seconds": seconds, "notify": "app" }))
+    }
+}

@@ -29,6 +29,7 @@ pub mod client;
 pub mod files;
 pub mod scale;
 pub mod service;
+pub mod ui;
 
 // Task's cookbook (`task:features/mealplan/cookbook`), moved as it was
 // under the lints that repository relaxes: byte offsets into Cooklang
@@ -94,13 +95,19 @@ impl Extension for Cookbook {
 
     fn build(&self, ext: &mut Builder) {
         client::connect(ext.handle());
-        ext.action("COOKBOOK_LIST", actions::list)
+        ext.view("cookbook", ui::CookbookView)
+            .view("cook", ui::CookView)
+            .view("edit", ui::EditView)
+            .view("recipe", ui::RecipeEmbed)
+            .action("COOKBOOK_LIST", actions::list)
             .action("COOKBOOK_GET", actions::get)
             .action("COOKBOOK_SAVE", actions::save)
             .action("COOKBOOK_RENAME", actions::rename)
             .action("COOKBOOK_DELETE", actions::delete)
             .action("COOKBOOK_INGREDIENTS", actions::ingredients)
             .action("COOKBOOK_BASE", actions::base)
+            .action("COOKBOOK_OPEN", actions::open)
+            .action("COOKBOOK_TIMER", actions::timer)
             .action("COOKBOOK_STARTED", |_| async {
                 Ok(json!({ "ready": true }))
             });
