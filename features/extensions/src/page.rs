@@ -502,7 +502,18 @@ fn answer(browse: &Browse, s: State, asking: &Asking, scope: Option<Scope>) {
 }
 
 /// `work` on a thread of its own, its answer awaited: what reads files,
+/// fetches or installs never runs on the window's thread. A browser has
+/// one thread, and no files to wait on there (its installs are in memory,
+/// `crate::disk::MemDisk`): it runs now.
+#[cfg(target_family = "wasm")]
+#[allow(clippy::unused_async)]
+async fn off_thread<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+    Some(work())
+}
+
+/// `work` on a thread of its own, its answer awaited: what reads files,
 /// fetches or installs never runs on the window's thread.
+#[cfg(not(target_family = "wasm"))]
 async fn off_thread<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Option<T> {
     let (tx, rx) = futures::channel::oneshot::channel();
     std::thread::Builder::new()

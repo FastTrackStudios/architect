@@ -64,7 +64,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 # An image of the link's, its URL parsed and normalised before it is fetched.
 url = "2"
 # Which distribution runs, and what it compiles in (#491).
-architect-distribution = { workspace = true }
+architect-distribution = { workspace = true, features = ["showcase"] }
 # First-party extensions the app ships, on by default (#368, #375).
 architect-projects = { workspace = true }
 # Files (#347): the org's projects and libraries, a built-in extension, and

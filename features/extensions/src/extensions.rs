@@ -536,7 +536,7 @@ impl Extensions {
             .into_iter()
             .filter(Install::is_extension)
         {
-            match Package::read(&install.dir) {
+            match self.inner.installs.package(&install) {
                 Ok(p) => add(p, Origin::Installed),
                 Err(e) => failed.push(Event::Failed {
                     id: install.id,
@@ -759,10 +759,20 @@ impl Extensions {
         let mut planned = self.settled(requirements, planned, extra);
         // A copy here that cannot run here (a process on a phone, a
         // platform it leaves out) says so, not "no registry has it".
+        let platform = self.inner.host.platform();
         for (r, missing) in &mut planned.missing {
             if *missing == crate::project::Missing::NotFound {
                 if let Some(why) = self.inner.host.why_not_here(&r.id) {
                     *missing = crate::project::Missing::CannotRun(why);
+                }
+            }
+            // A kind this app has no runner for, in words where the
+            // platform says why (a browser, #495), not the kind's name.
+            if let crate::project::Missing::CannotRun(kind) = missing {
+                if let Some(why) = Kind::parse(kind)
+                    .and_then(|k| crate::host::kind_cannot_run(k, false, &platform))
+                {
+                    *kind = why;
                 }
             }
         }

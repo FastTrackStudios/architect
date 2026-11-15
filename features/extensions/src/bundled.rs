@@ -81,7 +81,14 @@ impl Source for BundledSource {
         })
     }
 
-    fn fetch(&self, listing: &Listing, into: &Path) -> Result<Fetched, InstallError> {
+    fn fetch(&self, listing: &Listing, _: &Path) -> Result<Fetched, InstallError> {
+        self.fetch_files(listing)
+    }
+
+    /// Its files as the build carries them: [`crate::install::Installs`]
+    /// writes them (checking each stays inside the package) wherever it
+    /// keeps installs, a folder or a browser's storage.
+    fn fetch_files(&self, listing: &Listing) -> Result<Fetched, InstallError> {
         let Location::Path(folder) = &listing.location else {
             return Err(InstallError::NotFound(listing.id.clone()));
         };
@@ -90,25 +97,13 @@ impl Source for BundledSource {
             .iter()
             .find(|p| &p.folder == folder)
             .ok_or_else(|| InstallError::NotFound(format!("{} in {}", listing.id, self.name)))?;
-        for (path, bytes) in &package.files {
-            // A path of the build's own, but checked as any: no `..`, no root.
-            if !Path::new(path)
-                .components()
-                .all(|c| matches!(c, std::path::Component::Normal(_)))
-            {
-                return Err(InstallError::Mismatch(format!(
-                    "{path}: not inside the package"
-                )));
-            }
-            let at = into.join(path);
-            if let Some(dir) = at.parent() {
-                std::fs::create_dir_all(dir)
-                    .map_err(|e| InstallError::Io(format!("{}: {e}", dir.display())))?;
-            }
-            std::fs::write(&at, bytes)
-                .map_err(|e| InstallError::Io(format!("{}: {e}", at.display())))?;
-        }
-        Ok(Fetched::Copied)
+        Ok(Fetched::Files(
+            package
+                .files
+                .iter()
+                .map(|(path, bytes)| (path.clone(), bytes.to_vec()))
+                .collect(),
+        ))
     }
 }
 
@@ -142,11 +137,14 @@ mod tests {
         );
         assert_eq!(l.location, Location::Path("hello".into()));
         let tmp = tempfile::tempdir().unwrap();
-        assert!(matches!(
-            source.fetch(l, tmp.path()).unwrap(),
-            Fetched::Copied
-        ));
-        assert!(tmp.path().join("themes/a.json").is_file());
+        let Fetched::Files(files) = source.fetch(l, tmp.path()).unwrap() else {
+            panic!("handed over as files");
+        };
+        assert!(
+            files
+                .iter()
+                .any(|(p, b)| p == "themes/a.json" && b == b"{}")
+        );
     }
 
     #[test]
@@ -160,7 +158,17 @@ mod tests {
         );
         let l = source.index().unwrap().listings.remove(0);
         let tmp = tempfile::tempdir().unwrap();
-        assert!(source.fetch(&l, &tmp.path().join("in")).is_err());
+        let installs = crate::install::Installs::new(tmp.path().join("in"));
+        assert!(installs.install(&source, &l).is_err());
         assert!(!tmp.path().join("x").exists());
+        // In a browser's storage too.
+        let disk = std::sync::Arc::new(crate::disk::MemDisk::new());
+        let installs = crate::install::Installs::new("/in").with_disk(disk.clone());
+        assert!(installs.install(&source, &l).is_err());
+        assert!(
+            disk.files().keys().all(|k| k.starts_with("in/")),
+            "{:?}",
+            disk.files().keys()
+        );
     }
 }

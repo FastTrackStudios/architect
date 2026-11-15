@@ -11,6 +11,13 @@
 //! page, their views into the workspace's kinds (`ExtensionUi::views`),
 //! drawn as Dioxus components in the app's own document.
 //!
+//! Installed extensions run here too (#495): the showcase's, from the
+//! registry the distribution carries, kept in this browser's storage
+//! (`super::installs`), TypeScript ones in Web Workers
+//! (`architect_pages::web::runner::WebTsRunner`), their TSX pages drawn in
+//! the app's document. Luau does not run in a browser yet (#812): those
+//! are listed as "Can't run here", with why.
+//!
 //! What a browser does not do here: nothing is installed from a folder
 //! (there is none), no thread runs the host's clock or hears its events
 //! (hooks fire from the app's events only where something raises them),
@@ -27,10 +34,6 @@ use architect_extensions::interface::{ExtensionUi, use_extension_ui};
 use architect_extensions::linked::Extension;
 use architect_extensions::ui::use_extension_sections;
 use dioxus::prelude::*;
-
-/// Where the host keeps installs: a name only (a browser has no folder;
-/// reading it finds nothing).
-const INSTALLS: &str = "/architect/extensions";
 
 /// The extensions every browser build links beside the distribution's:
 /// the core a browser runs, the Command Palette and the theme picker
@@ -61,6 +64,15 @@ pub fn use_web_extensions(app: &Arc<ActionList>) -> ExtensionUi {
     // browser by the page).
     let values = architect_extensions::ui::use_page_setting_values();
     let web = try_use_context::<super::vault::WebVault>();
+    // Pages in Web Workers: the installed extensions' TSX pages and
+    // TypeScript actions, in the app's theme.
+    let pages = use_hook(|| {
+        let pages = architect_pages::web::WebPages::new();
+        if let Some(store) = &themes {
+            pages.set_theme(theme_snapshot(store));
+        }
+        pages
+    });
     use_hook(|| {
         APP_RUNTIME.with(|r| *r.borrow_mut() = Some(dioxus::core::Runtime::current()));
     });
@@ -73,9 +85,30 @@ pub fn use_web_extensions(app: &Arc<ActionList>) -> ExtensionUi {
         if let Some(store) = &themes {
             host = host.with_themes(store.clone());
         }
-        // Consent in this tab, none given: an installed extension reaches
-        // nothing until a person grants it (built-ins are not narrowed).
-        host = host.with_grants(architect_extensions::consent::Grants::in_memory());
+        // Installs and grants in this browser's storage (the org's, the
+        // showcase's), or this tab's alone (the demo's): none given at
+        // first, so an installed extension reaches nothing until a person
+        // grants it (built-ins are not narrowed).
+        let disk: Arc<dyn architect_extensions::disk::Disk> =
+            Arc::new(super::installs::disk(installs_scope(web.as_ref())));
+        host = host.with_grants(architect_extensions::consent::Grants::open_on(
+            Arc::clone(&disk),
+            super::installs::GRANTS,
+        ));
+        // TypeScript extensions: their actions and hooks in Web Workers,
+        // their host calls this host's service.
+        host = host.with_runner(architect_pages::web::runner::WebTsRunner::new(
+            pages.clone(),
+        ));
+        // Luau extensions: each run in a Web Worker on luau-web's Luau,
+        // fetched from the bundle's folder only when one runs; their
+        // globals answered by this host (#812).
+        if let Some(lib) = luau_lib() {
+            host = host.with_runner(architect_pages::web::luau::WebLuauRunner::new(
+                pages.clone(),
+                lib,
+            ));
+        }
         host = host.with_setting_values(values.clone());
         // Their data: kept in this browser per org; the demo keeps
         // nothing past the tab, as it says.
@@ -90,7 +123,13 @@ pub fn use_web_extensions(app: &Arc<ActionList>) -> ExtensionUi {
         }
         host.set_app_list((**app).clone());
         host.forward_actions_to(app);
-        let mut extensions = Extensions::new(host, Installs::new(INSTALLS));
+        let mut extensions = Extensions::new(
+            host,
+            Installs::new(super::installs::INSTALLS).with_disk(disk),
+        )
+        // The showcase's packages the distribution carries, as on a desk:
+        // what the showcase vault's "Install all" installs, no network.
+        .with_source(architect_distribution::showcase::source());
         let mut linked = architect_distribution::current()
             .map(architect_distribution::Distribution::extensions)
             .unwrap_or_default();
@@ -112,23 +151,48 @@ pub fn use_web_extensions(app: &Arc<ActionList>) -> ExtensionUi {
             }
         }
         mark_loaded(&extensions.host().ids());
+        // Again on each load and unload (an install, a removal), after the
+        // host is done with it.
+        let host = extensions.host().clone();
+        extensions.host().on_event(move |_| {
+            let host = host.clone();
+            wasm_bindgen_futures::spawn_local(async move { mark_loaded(&host.ids()) });
+        });
         extensions
     });
     // Scheduled hooks (`every`, `at`) and idle background extensions'
     // stops: what `Host::run_clock`'s thread does on a desk, on the page's
-    // timer here.
+    // timer here; and the theme to the pages when it moves.
     {
         let host = extensions.host().clone();
+        let (pages, themes) = (pages.clone(), themes.clone());
         use_future(move || {
-            let host = host.clone();
+            let (host, pages, themes) = (host.clone(), pages.clone(), themes.clone());
             async move {
+                let mut seen = themes.as_ref().map(architect_theme::ThemeStore::revision);
                 loop {
                     futures_timer::Delay::new(std::time::Duration::from_secs(1)).await;
                     let _ = host.tick();
+                    if let Some(store) = &themes {
+                        let now = Some(store.revision());
+                        if now != seen {
+                            seen = now;
+                            pages.set_theme(theme_snapshot(store));
+                        }
+                    }
                 }
             }
         });
     }
+    // What installs (the vault's needs banner, the prompt) and the pages
+    // of installed extensions are drawn with.
+    use_context_provider(|| architect_extensions::browse::Browse::new(extensions.clone()));
+    use_context_provider(|| super::installs::PageHost {
+        pages: pages.clone(),
+        extensions: extensions.clone(),
+        list: Arc::clone(&list),
+    });
+    use_context_provider(super::installs::view_pages);
     // The web vault as their documents, and the person's own edits as
     // `doc.*` on the app's list, where the host hears them (#495 H1, H2).
     use_hook(|| {
@@ -208,6 +272,47 @@ pub fn use_web_extensions(app: &Arc<ActionList>) -> ExtensionUi {
         }
     });
     use_extension_ui(extensions.host().clone(), Arc::clone(app))
+}
+
+/// Where this app keeps installs and grants: the org's (signed in), the
+/// showcase's (`/app/?showcase`), or nowhere past the tab (the demo).
+/// Where luau-web's `index.js` is: the bundle's folder of the app's code
+/// (`scripts/web-bundle.sh` copies apps/web/assets/luau-web there; the dev
+/// stack's public folder has it too), as an absolute URL a Web Worker
+/// started from a `blob:` can import. `None` where the page names no
+/// folder: Luau extensions say why they cannot run.
+fn luau_lib() -> Option<String> {
+    let dir = super::theme::assets()?;
+    let origin = web_sys::window()?.location().origin().ok()?;
+    Some(format!("{origin}{dir}luau-web/index.js"))
+}
+
+fn installs_scope(web: Option<&super::vault::WebVault>) -> Option<String> {
+    match web.and_then(|w| w.org.as_ref()) {
+        Some(org) => Some(org.slug()),
+        None => {
+            (crate::demo::chosen() == crate::demo::Vault::Showcase).then(|| "showcase".to_owned())
+        }
+    }
+}
+
+/// The app's theme as a page reads it.
+fn theme_snapshot(store: &architect_theme::ThemeStore) -> architect_pages::api::ThemeSnapshot {
+    let theme = store.current();
+    architect_pages::api::ThemeSnapshot {
+        id: theme.id().to_owned(),
+        scheme: theme.scheme().as_str().to_owned(),
+        // A key that moves, compared, never ordered: it may wrap.
+        revision: u32::try_from(store.revision() & u64::from(u32::MAX)).unwrap_or_default(),
+        tokens: theme
+            .tokens()
+            .iter()
+            .map(|(name, value)| architect_pages::api::ThemeToken {
+                name: name.clone(),
+                value: value.clone(),
+            })
+            .collect(),
+    }
 }
 
 /// Why an extension did not load, on the browser's console (the web app

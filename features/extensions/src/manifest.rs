@@ -92,6 +92,20 @@ impl Kind {
         }
     }
 
+    /// The kind named `name` ([`Self::name`]'s words), if one is.
+    #[must_use]
+    pub fn parse(name: &str) -> Option<Self> {
+        [
+            Self::Data,
+            Self::Luau,
+            Self::TypeScript,
+            Self::Wasm,
+            Self::Process,
+        ]
+        .into_iter()
+        .find(|k| k.name() == name)
+    }
+
     /// Whether it carries code: what a project can need and a phone may
     /// not run (a process).
     #[must_use]

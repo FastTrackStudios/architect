@@ -86,8 +86,13 @@ architect-media = { workspace = true, features = ["ui"] }
 # The distribution's linked extensions (#495, W1): which ones
 # (`architect_distribution::current`, set by `run`), and the host that runs
 # them here as on a desk (src/app/extensions.rs; no Luau in a browser).
-architect-distribution = { workspace = true }
-architect-extensions = { workspace = true, features = ["ui", "linked", "crdt"] }
+architect-distribution = { workspace = true, features = ["showcase"] }
+# `page`: the vault's needs and the consent prompt, the desk's components
+# (src/app/installs.rs).
+architect-extensions = { workspace = true, features = ["ui", "linked", "crdt", "page"] }
+# Installed extensions' TSX pages and TypeScript actions in Web Workers,
+# the host's runner for the kind (#495, src/app/installs.rs).
+architect-pages = { workspace = true, features = ["web-host"] }
 architect-theme-picker = { workspace = true }
 # The vault's query service, run in the page over the vault index (#495,
 # #710): the one implementation, `QueryEngine`, its index synced from the

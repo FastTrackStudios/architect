@@ -48,19 +48,17 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use architect::action::{ActionCaller, ActionInfo, ActionList, Effect};
+use architect::action::{ActionCaller, ActionList};
 use mlua::{Lua, LuaSerdeExt, MultiValue, Value as LuaValue};
 use serde_json::{Value, json};
 
+use crate::bindings::{CHUNK, as_script, kind_name, located, refusal};
 use crate::vm::{self, Cancel, Dispatch, Guard, Stop, Wake};
 use crate::{ErrorKind, ScriptError, Transactions};
 
 /// The Luau binding a [`Module`] is written against: this one, so its
 /// version is the runtime's.
 pub use mlua;
-
-/// The chunk name a script's errors are reported under (`script:3: …`).
-const CHUNK: &str = "script";
 
 /// How far a run may go.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -146,27 +144,7 @@ impl Report {
     }
 }
 
-const fn kind_name(kind: ErrorKind) -> &'static str {
-    match kind {
-        ErrorKind::Syntax => "syntax",
-        ErrorKind::Runtime => "runtime",
-        ErrorKind::Action => "action",
-        ErrorKind::Limit => "limit",
-    }
-}
-
-const fn effect_name(effect: Effect) -> &'static str {
-    match effect {
-        Effect::ReadOnly => "read_only",
-        Effect::Mutating => "mutating",
-        Effect::Destructive => "destructive",
-    }
-}
-
-/// What a run may reach, past what its caller may: `Err(why)` for an
-/// action it may not see or run. An extension's capabilities (the action
-/// namespaces it named, the most it may change) are one.
-pub type Gate = Arc<dyn Fn(&ActionInfo) -> Result<(), String> + Send + Sync>;
+pub use crate::bindings::Gate;
 
 /// What a script reaches as a global, and by `require`, past the
 /// runtime's own: `ImGui`, `Canvas`.
@@ -558,36 +536,25 @@ impl Runtime {
         table.set(
             "list",
             lua.create_function(move |lua, filter: Option<String>| {
-                let filter = filter.map(|f| f.to_lowercase());
-                let found: Vec<Value> = visible(&list, &who, gate.as_ref())
-                    .iter()
-                    .filter(|i| filter.as_deref().is_none_or(|f| matches(i, f)))
-                    .map(summary)
-                    .collect();
-                to_lua(lua, &Value::Array(found))
+                let found = crate::bindings::list(&list, &who, gate.as_ref(), filter.as_deref());
+                to_lua(lua, &found)
             })?,
         )?;
         let (list, who, gate) = (self.list.clone(), caller.clone(), self.gate.clone());
         table.set(
             "describe",
             lua.create_function(move |lua, id: String| {
-                let found = visible(&list, &who, gate.as_ref())
-                    .into_iter()
-                    .find(|i| i.id == id);
-                found.map_or(Ok(LuaValue::Nil), |info| to_lua(lua, &detail(&info)))
+                to_lua(
+                    lua,
+                    &crate::bindings::describe(&list, &who, gate.as_ref(), &id),
+                )
             })?,
         )?;
         let (list, who, gate) = (self.list.clone(), caller.clone(), self.gate.clone());
         table.set(
             "enabled",
             lua.create_function(move |_, id: String| {
-                let found = visible(&list, &who, gate.as_ref())
-                    .into_iter()
-                    .find(|i| i.id == id);
-                Ok(found.map_or_else(
-                    || (false, Some(format!("no action {id}"))),
-                    |i| (i.enabled, i.disabled_reason),
-                ))
+                Ok(crate::bindings::enabled(&list, &who, gate.as_ref(), &id))
             })?,
         )?;
         table.set("run", self.run_function(lua, caller, trace, false)?)?;
@@ -1001,75 +968,6 @@ fn log_function(lua: &Lua, trace: &Arc<Mutex<Trace>>) -> mlua::Result<mlua::Func
     })
 }
 
-/// Why a run will not run `id`: its gate keeps it out, or — for
-/// `state.query` — it changes the app.
-fn refusal(list: &ActionList, id: &str, read_only: bool, gate: Option<&Gate>) -> Option<String> {
-    let info = list.info(id)?;
-    if let Some(Err(why)) = gate.map(|g| g(&info)) {
-        return Some(format!("{id}: {why}"));
-    }
-    if !read_only {
-        return None;
-    }
-    (info.effect != Effect::ReadOnly).then(|| {
-        format!(
-            "{id} changes the app ({}): run it with actions.run",
-            effect_name(info.effect)
-        )
-    })
-}
-
-/// The actions `who` may run, and the gate lets through.
-fn visible(list: &ActionList, who: &ActionCaller, gate: Option<&Gate>) -> Vec<ActionInfo> {
-    let mut infos = who
-        .principal()
-        .map_or_else(|| list.infos(), |p| list.infos_for(p));
-    if let Some(gate) = gate {
-        infos.retain(|i| gate(i).is_ok());
-    }
-    infos
-}
-
-fn matches(info: &ActionInfo, filter: &str) -> bool {
-    [
-        &info.id,
-        &info.display_name,
-        &info.description,
-        &info.category,
-        &info.group,
-    ]
-    .iter()
-    .any(|field| field.to_lowercase().contains(filter))
-}
-
-/// One action, as `actions.list` gives it.
-pub(crate) fn summary(info: &ActionInfo) -> Value {
-    json!({
-        "id": info.id,
-        "name": info.display_name,
-        "description": info.description,
-        "category": info.category,
-        "group": info.group,
-        "effect": effect_name(info.effect),
-        "enabled": info.enabled,
-        "disabled_reason": info.disabled_reason,
-    })
-}
-
-/// One action with what it takes and gives, as `actions.describe` gives it.
-pub(crate) fn detail(info: &ActionInfo) -> Value {
-    let schema = |s: &Option<String>| {
-        s.as_deref()
-            .and_then(|s| serde_json::from_str::<Value>(s).ok())
-    };
-    let mut out = summary(info);
-    if let Value::Object(map) = &mut out {
-        map.insert("params".into(), schema(&info.params_schema).into());
-        map.insert("result".into(), schema(&info.result_schema).into());
-    }
-    out
-}
-
 /// JSON into Luau: `null` is `nil`, an array a sequence.
 pub(crate) fn to_lua(lua: &Lua, value: &Value) -> mlua::Result<LuaValue> {
     let options = mlua::serde::SerializeOptions::new()
@@ -1141,75 +1039,5 @@ fn fault_in(error: &mlua::Error) -> Option<&Fault> {
             fault_in(cause)
         }
         _ => None,
-    }
-}
-
-/// `script:3: attempt to …` as line 3 and its message; the traceback
-/// mlua adds after the first line is left out.
-fn located(kind: ErrorKind, message: &str) -> ScriptError {
-    let first = message.lines().next().unwrap_or_default();
-    let mut rest = first;
-    // A nested error repeats the prefix (`script:3: script:5: …`): the
-    // innermost line is where it happened.
-    let mut line = None;
-    while let Some((at, tail)) = rest
-        .strip_prefix(CHUNK)
-        .and_then(|r| r.strip_prefix(':'))
-        .and_then(|r| r.split_once(':'))
-        .and_then(|(n, tail)| n.parse::<u32>().ok().map(|n| (n, tail)))
-    {
-        line = Some(at);
-        rest = tail.trim_start();
-    }
-    ScriptError::new(kind, line, rest)
-}
-
-/// `caller` as a script's: its invocation's source is `Script`, the rest
-/// of it (and the principal) as it was.
-fn as_script(caller: &ActionCaller) -> ActionCaller {
-    let mut invocation = caller.invocation().cloned().unwrap_or_default();
-    invocation.source = architect::action::InvocationSource::Script;
-    caller.clone().with_invocation(invocation)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::located;
-
-    /// A script started from ⌘K runs its inner calls as a script: the
-    /// palette's press is not handed on, the principal and the rest stay.
-    #[test]
-    fn a_scripts_inner_calls_are_the_scripts_not_the_palettes() {
-        use architect::action::{ActionCaller, Invocation, InvocationSource, Principal};
-        let mut pressed = Invocation::new(InvocationSource::Palette);
-        pressed.pane = Some("p1".to_owned());
-        let person = ActionCaller::app().with_invocation(pressed);
-        let inner = super::as_script(&person);
-        let got = inner.invocation().expect("an invocation");
-        assert_eq!(got.source, InvocationSource::Script);
-        assert_eq!(got.pane.as_deref(), Some("p1"));
-        assert!(inner.principal().is_none());
-        // An untagged caller gets one; a principal stays.
-        assert_eq!(
-            super::as_script(&ActionCaller::app())
-                .invocation()
-                .map(|i| i.source),
-            Some(InvocationSource::Script)
-        );
-        let agent = ActionCaller::new(Principal::extension("acme".to_owned(), None));
-        assert!(super::as_script(&agent).principal().is_some());
-    }
-    use crate::ErrorKind;
-
-    #[test]
-    fn a_message_gives_up_its_line() {
-        let e = located(
-            ErrorKind::Runtime,
-            "script:3: attempt to add\nstack traceback:\n…",
-        );
-        assert_eq!(e.line, Some(3));
-        assert_eq!(e.message, "attempt to add");
-        let e = located(ErrorKind::Runtime, "boom");
-        assert_eq!((e.line, e.message.as_str()), (None, "boom"));
     }
 }

@@ -510,6 +510,9 @@ pub fn VaultPage() -> Element {
         } else if title_row.is_none() {
             PageBar { title: "Vault" }
         }
+        // What the vault needs (its `.architect/extensions.toml`): Install
+        // all, through one consent prompt (#495).
+        super::installs::VaultNeeds {}
         div { style: "flex: 1 1 0; min-height: 0; display: flex; position: relative;",
             WorkspaceView {
                 workspace,

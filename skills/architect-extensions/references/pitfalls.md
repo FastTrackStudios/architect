@@ -140,7 +140,7 @@ From `docs/content/architecture/embedded-views.md` ("Web views"):
 
 ### 17. Platform gaps you will hit
 
-- **Web**: only linked extensions run in the web app; installed Luau, pages and WASI wait on #495. Luau is C++ and never builds for the browser (`apps/web/src/app/extensions.rs`).
+- **Web**: the web app runs linked extensions, installed TypeScript actions and pages, and Luau actions and hooks (luau-web in Web Workers, #812); WASI waits on #495. mlua's Luau never builds for the browser: Luau code there must use only what `features/pages/src/web/luau_runtime.luau` gives (no live overlays or Luau pages), and a `worker.spawn` runs when first waited on (`apps/web/src/app/extensions.rs`).
 - **iOS**: no processes; WASM is interpreted by Pulley (lower-tested; a 64 MiB reservation with no guard); installed WASM rests on App Review guideline 2.5.2 (`cargo xtask dist ios --no-wasi` is the fallback build).
 - **Tooling**: the component tooling is young (WASI 0.3, async components, needs Wasmtime 46+); old WIT versions are kept forever, so design WIT changes as additions.
 - **Source:** `docs/content/architecture/extensions.md` ("On each platform", "Risks"); `docs/content/guide/showcase.md`.

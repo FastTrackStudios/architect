@@ -24,15 +24,15 @@ Docs: `docs/content/extensions/authoring.md` (the walkthrough), `docs/content/ar
 | Runtime | Selected by | Desktop | Web (`/app/`) | iOS | Node |
 |---|---|---|---|---|---|
 | Linked (Rust) | code: `Extensions::with_linked` | yes | yes (demo tested) | yes | no |
-| Luau | `kind = "luau"`, `script = "*.luau"` | yes | no (#495) | yes | node actions only |
-| Pages (TSX/JS, Luau, A2UI) | `[[views]] page = …` | QuickJS | Web Worker runner exists, no host yet (#495) | QuickJS | no |
+| Luau | `kind = "luau"`, `script = "*.luau"` | yes | Web Workers on luau-web, in the web app's host (#812) | yes | node actions only |
+| Pages (TSX/JS, Luau, A2UI) | `[[views]] page = …` | QuickJS | Web Workers, in the web app's host (TypeScript extensions' pages) | QuickJS | no |
 | TypeScript actions | `kind = "typescript"`, `script = "*.ts"` | QuickJS | runner exists, no host yet (#723, #736) | QuickJS (not shown) | no |
 | WASI component | `kind = "wasm"`, `[wasm] component` | Wasmtime + Cranelift | jco + Web Workers, no host yet (#495) | Wasmtime + Pulley | not yet |
 | Process | `kind = "process"`, `[entry] path` | yes | never | never | no |
 | Web view app | `[[views]] kind = "web"`, `src` | wry child (`--features webview`) | sandboxed iframe, mounted once #495 lands | WKWebView (`--features webview`) | no |
 | Node action | `[[actions]] runs = "node"` | forwards to the node | not wired yet (#495) | forwards to the node | runs it |
 
-The desktop and iOS share one host (`apps/ui/src/extensions.rs`). It adds `LuauRunner`, `TsRunner`, `ProcessRunner` and, with the `wasi` feature, `WasiRunner`. The web app's host is `apps/web/src/app/extensions.rs` `use_web_extensions`. On the web, `Host::new` runs only data extensions and linked extensions (`features/extensions/src/host.rs` `default_runners`).
+The desktop and iOS share one host (`apps/ui/src/extensions.rs`). It adds `LuauRunner`, `TsRunner`, `ProcessRunner` and, with the `wasi` feature, `WasiRunner`. The web app's host is `apps/web/src/app/extensions.rs` `use_web_extensions`. On the web, `Host::new` runs only data extensions and linked extensions (`features/extensions/src/host.rs` `default_runners`); the web app adds `WebTsRunner` and `WebLuauRunner` (`features/pages/src/web/runner.rs`, `features/pages/src/web/luau.rs`).
 
 A `kind = "data"` extension has no code: settings, presets, themes, keymaps and frame views. It runs everywhere. It is also the usual kind for a web view app, whose code runs only inside its view.
 
@@ -101,7 +101,7 @@ fn main() -> Result<(), GuestError> {
 **Where.**
 - Desktop: yes.
 - iOS: yes. Templater-lite ran on the Simulator.
-- Web: no. Luau is C++ and `wasm32-unknown-unknown` has no C++ library for it, so the browser host leaves its runner out (#495).
+- Web: yes, in the web app's host (#812). mlua's Luau does not build for `wasm32-unknown-unknown`, so the browser runs luau-web's emscripten build (`apps/web/assets/luau-web`, fetched only when a Luau extension runs; `scripts/vendor-luau-web.sh`) in a Web Worker per run: `features/pages/src/web/luau.rs` `WebLuauRunner`, its globals `features/pages/src/web/luau_runtime.luau`. Every global is a message the page answers with the one implementation the desk uses: `host.*` with `features/extensions/src/luau_calls.rs` `host_request` and the host service (`WebHost::through`), `ext.*` with `ext_call`, `actions.*` and `state.query` with `features/scripting/src/bindings.rs`. A call suspends the script (Asyncify), so no `Atomics.wait` and no cross-origin isolation. Limits are a TypeScript action's: 5 s to load, 500 ms of work between host calls, a worker's 300 s; past one the Web Worker ends. No step or memory cap. A worker runs when its owner first waits on it (`join`, `result`, `status`…), inside the run's Web Worker, and serves no messages. Without the bundle's luau-web the host has no runner and says why (`features/extensions/src/host.rs` `why_no_runner`).
 - Node: only as node actions (section 8).
 
 **Can't.**
@@ -150,7 +150,7 @@ The page API is defined once in Rust (`features/pages/src/api.rs` `PageHost`, `P
 
 **Where.**
 - Desktop and iOS: QuickJS. Templater-lite's page ran on the Simulator.
-- Browser: `features/pages/src/web/mod.rs` `WebPages` runs TSX/JS in a Web Worker on the browser's engine, with the same prelude and types, and draws through `features/extensions/src/web.rs` `Pane`. The web app has no host for installed extensions' pages yet (#495). The web lab runs them (`just sandbox-web`).
+- Browser: `features/pages/src/web/mod.rs` `WebPages` runs TSX/JS in a Web Worker on the browser's engine, with the same prelude and types, and draws through `features/extensions/src/web.rs` `Pane`. In the web app an installed extension's page view is drawn by `apps/web/src/app/installs.rs` `view_pages` (its host calls through `WebHost::through`); test: `apps/web/test/app-showcase-install.test.mjs`. The web lab runs them too (`just sandbox-web`).
 - Luau and A2UI pages don't run in a browser yet (#187).
 
 **Can't.**
@@ -194,7 +194,7 @@ export default function Templates() {
 **Where.**
 - Desktop: QuickJS. The Recipe scaler is shown.
 - iOS: the same runner on the shared `apps/ui` host, not shown.
-- Browser: `features/pages/src/web/actions.rs` `WebPages::register_actions` runs each action in its own Web Worker (no JSPI, so Safari works). The web lab runs it. The web app doesn't host installed extensions yet (#723, #736). Prompts and pickers aren't in the browser host yet.
+- Browser: `features/pages/src/web/actions.rs` `WebPages::register_actions` runs each action in its own Web Worker (no JSPI, so Safari works); the web lab runs it. In the extensions host it is `features/pages/src/web/runner.rs` `WebTsRunner` (feature `web-host`): the host's runner for the kind, its actions and hooks in Web Workers, every host call the app's host service for that extension (`features/extensions/src/web.rs` `WebHost::through`), so no second host. Prompts and pickers aren't in the browser host yet.
 
 **Can't.**
 - Import packages; bundle one into a file. No `fetch`, `fs`, `process` or Node globals.
@@ -433,7 +433,7 @@ local r = host.fetch(api .. "/item/public_token/exchange", {
 |---|---|---|
 | A first-party, user-facing feature | Linked (`linked::Extension`, plus a process copy via `[source]`) | It runs natively in every app with no boundary and can still be swapped for a dev copy (#272) |
 | A setting, theme, keymap or action preset, no logic | `kind = "data"` | No code means it runs everywhere |
-| A person's macro, conditional action, overlay or tool window | Luau | Interpreted, desktop and iOS; not in the browser yet (#495) |
+| A person's macro, conditional action, overlay or tool window | Luau | Interpreted, desktop and iOS; actions and hooks in the browser (#812), not overlays or pages |
 | A panel, list, form or dashboard view that can be edited live | A page (`page = "*.tsx"`) | Desktop and iOS on QuickJS, the browser on a Web Worker; not for dense or animated views |
 | Light logic with no Rust toolchain | `kind = "typescript"` | The same runtime as pages; interpreted, so not for heavy work |
 | Third-party code that needs real compute, sandboxed | WASI component | It runs on desktop, iOS (Pulley) and the browser (JSPI); no network of its own |

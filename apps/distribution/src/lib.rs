@@ -28,6 +28,9 @@
 //! The binary says which distribution it is once, first thing in `main`
 //! ([`Distribution::install`]); [`current`] reads it back.
 
+#[cfg(feature = "showcase")]
+pub mod showcase;
+
 use std::path::{Path, PathBuf};
 #[cfg(not(target_family = "wasm"))]
 use std::sync::Arc;

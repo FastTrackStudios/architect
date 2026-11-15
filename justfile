@@ -500,6 +500,16 @@ app-linked-extensions-test:
     devenv shell -- bash scripts/web-bundle.sh target/web-bundle
     ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-linked-extensions.test.mjs
 
+# The showcase's extensions installed in the web app (#495, #812):
+# `/app/?showcase` lists the vault's needs, "Install all" installs them from
+# the registry the app carries, its Luau actions run in Web Workers (a
+# tick, primes in a worker, toasts), the Recipe scaler's TSX page renders
+# in a Web Worker, and they run again after a reload. Firefox headless over BiDi; `SHOTS=<dir>`
+# keeps screenshots.
+app-showcase-install-test:
+    devenv shell -- bash scripts/web-bundle.sh target/web-bundle
+    ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-showcase-install.test.mjs
+
 # The document API, document events and kept data in the web app (#495
 # H1, H2, H4): the demo's probe extension (`/app/?demo&probe`) lists,
 # reads, creates, edits, renames and deletes the demo vault's notes, hears

@@ -43,6 +43,7 @@ pub mod contrib;
 pub mod device;
 pub mod documents;
 // The editor being typed in, for extensions (#312).
+pub mod disk;
 pub mod editor;
 pub mod events;
 pub mod hostcall;
@@ -118,6 +119,8 @@ pub mod interface;
 pub mod interop_actions;
 #[cfg(any(feature = "host", feature = "web"))]
 mod invocation;
+#[cfg(feature = "host")]
+pub mod luau_calls;
 /// An action's invocation, and its caller's, as the JSON an extension is
 /// handed (a WASI component's `invoke`, a TypeScript action's `ctx`).
 #[cfg(any(feature = "host", feature = "web"))]

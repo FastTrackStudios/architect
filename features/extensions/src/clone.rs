@@ -109,8 +109,8 @@ impl Extensions {
             std::fs::create_dir_all(&folder)?;
             match &package.files {
                 Files::Dir(dir) => copy_dir(dir, &folder)?,
-                Files::Embedded(files) => {
-                    for (path, text) in files {
+                Files::Embedded(_) | Files::Disk(_) => {
+                    for (path, text) in package.texts().unwrap_or_default() {
                         let to = folder.join(path);
                         if let Some(parent) = to.parent() {
                             std::fs::create_dir_all(parent)?;

@@ -31,19 +31,24 @@ use std::sync::{Mutex, PoisonError};
 
 use facet::Facet;
 
-#[cfg(feature = "luau")]
+// The runtime (mlua's Luau, C++) is native only: a browser runs Luau in a
+// Web Worker of its own (`architect_pages::web::luau`), calling `bindings`
+// for what its globals do.
+#[cfg(all(feature = "luau", not(target_family = "wasm")))]
 pub mod actions;
+#[cfg(feature = "bindings")]
+pub mod bindings;
 #[cfg(feature = "crdt")]
 pub mod history;
-#[cfg(feature = "luau")]
+#[cfg(all(feature = "luau", not(target_family = "wasm")))]
 pub mod luau;
 #[cfg(feature = "settings")]
 pub mod settings;
-#[cfg(feature = "luau")]
+#[cfg(all(feature = "luau", not(target_family = "wasm")))]
 pub mod theme;
-#[cfg(feature = "luau")]
+#[cfg(all(feature = "luau", not(target_family = "wasm")))]
 pub mod vm;
-#[cfg(feature = "luau")]
+#[cfg(all(feature = "luau", not(target_family = "wasm")))]
 pub mod worker;
 
 /// Whose a saved script is.

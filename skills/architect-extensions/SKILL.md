@@ -31,9 +31,9 @@ Every architect path here is checked by `cargo xtask docs`. When a doc and the c
 |---|---|---|
 | A first-party, user-facing feature | linked Rust (`linked::Extension`, `Extensions::with_linked`), with a process copy via `[source]` | desktop, web, iOS |
 | Settings, a theme, keymap or preset, no logic | `kind = "data"` | everywhere |
-| A person's macro, conditional action, overlay | `kind = "luau"` | desktop, iOS (web: #495) |
-| A panel, list or form edited live | a page: `[[views]] page = "*.tsx"` | QuickJS on desktop and iOS; a Web Worker in browsers (web app host: #495) |
-| Light logic, no Rust toolchain | `kind = "typescript"` (`.ts` actions beside TSX pages) | QuickJS on desktop and iOS |
+| A person's macro, conditional action, overlay | `kind = "luau"` | desktop, iOS; actions and hooks in the web app (Web Workers, luau-web) |
+| A panel, list or form edited live | a page: `[[views]] page = "*.tsx"` | QuickJS on desktop and iOS; a Web Worker in the web app (installed TypeScript extensions' pages) |
+| Light logic, no Rust toolchain | `kind = "typescript"` (`.ts` actions beside TSX pages) | QuickJS on desktop and iOS; Web Workers in the web app |
 | Sandboxed third-party compute | `kind = "wasm"` (WASI component, `[wasm] component`) | Wasmtime on desktop, Pulley on iOS (web: #495, JSPI) |
 | Another language, a crash-prone tool | `kind = "process"` (`[entry] path`, vox) | desktop only |
 | A whole npm app, canvas/WebGL | a web view: `[[views]] kind = "web"`, `src` | desktop (`--features webview`), browser iframe, iOS WKWebView |
