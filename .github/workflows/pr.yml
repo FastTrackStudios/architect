@@ -7,14 +7,17 @@ name: pr
 # pool, which never runs a public repo's PR code.
 #
 # Two jobs in parallel, `fast` and `lint`; branch protection requires
-# `check`, which passes only when both did.
+# `check`. By default a PR runs `fast` only: `lint` (clippy over what the
+# PR reaches, ~10 min) waits for main's full Lint after the merge, so a PR
+# is not held up by it. Add the `full-checks` label to a PR to run `lint`
+# on it as well; `check` then needs both.
 #
 # On a push to main `lint` lints the whole workspace, only to save the
 # hosted Rust cache PRs restore: a PR's own cache is visible to that PR
 # alone, so main has to be the one that saves it.
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
   push:
     branches: [main]
 
@@ -183,6 +186,8 @@ jobs:
   # Main's clippy, and the feature combinations the PR reaches.
   lint:
     name: ${{ github.event_name == 'push' && 'lint (warms the PR cache)' || 'lint' }}
+    # Opt-in on a PR (the `full-checks` label); always on main.
+    if: ${{ github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'full-checks') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -243,8 +248,9 @@ jobs:
         if: ${{ !cancelled() && steps.scope.outputs.builds != '0' }}
         run: bash -x "$RUNNER_TEMP/builds.sh"
 
-  # The status branch protection requires. It passes only when both jobs
-  # above succeeded; a skipped or cancelled one fails it.
+  # The status branch protection requires. It passes when `fast` succeeded
+  # and `lint` succeeded or was skipped (no `full-checks` label); a
+  # cancelled or failed one fails it.
   check:
     name: check
     if: ${{ always() && github.event_name == 'pull_request' }}
@@ -256,7 +262,8 @@ jobs:
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
           echo "fast/lint: $RESULTS"
-          for r in $RESULTS; do [ "$r" = success ] || exit 1; done
+          [ "${{ needs.fast.result }}" = success ] || exit 1
+          case "${{ needs.lint.result }}" in success|skipped) ;; *) exit 1 ;; esac
 
   npm-package:
     name: npm package
