@@ -1258,6 +1258,7 @@ dependencies = [
  "architect-files-extension",
  "architect-notify",
  "architect-projects",
+ "architect-review",
  "architect-sites",
  "architect-tasks",
  "architect-threads",
@@ -1903,6 +1904,36 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "tempfile",
+ "vault",
+]
+
+[[package]]
+name = "architect-review"
+version = "0.1.0"
+dependencies = [
+ "anyrender",
+ "anyrender_vello_cpu",
+ "architect",
+ "architect-bases",
+ "architect-extensions",
+ "architect-media",
+ "architect-playhead",
+ "architect-settings",
+ "architect-theme",
+ "architect-threads",
+ "architect-workspace-hack",
+ "blitz-dom",
+ "blitz-paint",
+ "blitz-traits",
+ "dioxus",
+ "dioxus-native-dom",
+ "futures",
+ "futures-timer",
+ "peniko 0.6.1",
+ "png 0.17.16",
+ "serde",
+ "serde_json",
  "tempfile",
  "vault",
 ]

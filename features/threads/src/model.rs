@@ -46,6 +46,8 @@ pub mod keys {
     pub const CREATED_BY: &str = "createdBy";
     pub const CREATED: &str = "created";
     pub const COMMENTS: &str = "comments";
+    /// When in a recording or a video the thread is about ([`super::Moment`]).
+    pub const MOMENT: &str = "moment";
 
     /// Every key, in the order a base lists them.
     pub const ALL: &[&str] = &[
@@ -61,6 +63,7 @@ pub mod keys {
         CREATED_BY,
         CREATED,
         COMMENTS,
+        MOMENT,
     ];
 }
 
@@ -89,6 +92,148 @@ impl Anchor {
     #[must_use]
     pub fn key(&self) -> String {
         key(&self.entity_type, &self.entity_id)
+    }
+}
+
+/// The longest time a moment takes, seconds: 24 h (the playhead's
+/// `MAX_SECONDS`).
+pub const MAX_SECONDS: f64 = 86_400.0;
+
+/// A part of a video's frame, each side 0 to 1 of the frame's width or
+/// height from its top left.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Rect {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+/// When in a recording or a video a thread is about: a time, or a range
+/// `[start, end)`, seconds, and maybe a part of the frame.
+///
+/// Optional and additive: a thread without one is about its anchor as a
+/// whole, as every thread before it was. Its file is the anchor's
+/// `anchorPath` (Review writes `media/<the file's vault path>`), so
+/// `THREADS_LIST`'s `anchor_path` narrows to one file. Only a valid one
+/// is ever kept ([`Moment::new`]): every number finite.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Moment {
+    /// Seconds in.
+    pub start: f64,
+    /// Where a range ends, seconds; none for a time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<f64>,
+    /// A part of the frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rect: Option<Rect>,
+}
+
+// Every number is finite (`Moment::new` is the only way one is kept).
+impl Eq for Moment {}
+
+fn unit(v: f64) -> bool {
+    v.is_finite() && (0.0..=1.0).contains(&v)
+}
+
+impl Rect {
+    /// A part of the frame inside it with some size, else `None`.
+    #[must_use]
+    pub fn new(x: f64, y: f64, w: f64, h: f64) -> Option<Self> {
+        (unit(x)
+            && unit(y)
+            && unit(w)
+            && unit(h)
+            && w > 0.0
+            && h > 0.0
+            && x + w <= 1.0 + 1e-9
+            && y + h <= 1.0 + 1e-9)
+            .then_some(Self { x, y, w, h })
+    }
+}
+
+impl Moment {
+    /// A time, or a range when `end` is past `start`; `None` for a time
+    /// that is not a number, below 0 or past [`MAX_SECONDS`], or a range
+    /// that ends where or before it starts. A rect that is not inside the
+    /// frame is refused with it.
+    #[must_use]
+    pub fn new(start: f64, end: Option<f64>, rect: Option<Rect>) -> Option<Self> {
+        let ok = |t: f64| t.is_finite() && (0.0..=MAX_SECONDS).contains(&t);
+        if !ok(start) || end.is_some_and(|e| !ok(e) || e <= start) {
+            return None;
+        }
+        let rect = match rect {
+            Some(r) => Some(Rect::new(r.x, r.y, r.w, r.h)?),
+            None => None,
+        };
+        Some(Self { start, end, rect })
+    }
+
+    /// One read from JSON (`{start, end?, rect?: {x, y, w, h}}`, numbers
+    /// or the text of one, as YAML may give them back); `None` when it is
+    /// not a valid one.
+    #[must_use]
+    pub fn from_value(v: &Value) -> Option<Self> {
+        let num = |v: Option<&Value>| -> Option<f64> {
+            match v? {
+                Value::Number(n) => n.as_f64(),
+                Value::String(s) => s.trim().parse().ok(),
+                _ => None,
+            }
+        };
+        let o = v.as_object()?;
+        let end = match o.get("end") {
+            None | Some(Value::Null) => None,
+            e => Some(num(e)?),
+        };
+        let rect = match o.get("rect") {
+            None | Some(Value::Null) => None,
+            Some(r) => {
+                let r = r.as_object()?;
+                Some(Rect::new(
+                    num(r.get("x"))?,
+                    num(r.get("y"))?,
+                    num(r.get("w"))?,
+                    num(r.get("h"))?,
+                )?)
+            }
+        };
+        Self::new(num(o.get("start"))?, end, rect)
+    }
+
+    /// Whether it is a range.
+    #[must_use]
+    pub const fn is_range(&self) -> bool {
+        self.end.is_some()
+    }
+
+    /// `m:ss`, or `m:ss–m:ss` for a range.
+    #[must_use]
+    pub fn label(&self) -> String {
+        self.end.map_or_else(
+            || clock(self.start),
+            |e| format!("{}–{}", clock(self.start), clock(e)),
+        )
+    }
+}
+
+/// `m:ss` (`h:mm:ss` past an hour) of `t` seconds, rounded down.
+// Clamped to 0..24 h first: the cast is exact, the divisions constant.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::as_conversions,
+    clippy::arithmetic_side_effects
+)]
+#[must_use]
+pub fn clock(t: f64) -> String {
+    let s = t.max(0.0).min(MAX_SECONDS).floor() as u64;
+    let (h, m, s) = (s / 3600, (s / 60) % 60, s % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
     }
 }
 
@@ -158,6 +303,9 @@ pub struct Thread {
     pub created_by: String,
     pub created: String,
     pub comments: Vec<Comment>,
+    /// When in its anchor's recording or video it is about, if it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moment: Option<Moment>,
 }
 
 fn text(values: &Map<String, Value>, key: &str) -> Option<String> {
@@ -203,6 +351,7 @@ impl Thread {
             created_by: text(values, keys::CREATED_BY).unwrap_or_default(),
             created: text(values, keys::CREATED).unwrap_or_default(),
             comments,
+            moment: values.get(keys::MOMENT).and_then(Moment::from_value),
         })
     }
 
@@ -223,6 +372,12 @@ impl Thread {
         m.insert(keys::CREATED_BY.to_owned(), json!(self.created_by));
         m.insert(keys::CREATED.to_owned(), json!(self.created));
         m.insert(keys::COMMENTS.to_owned(), comments_value(&self.comments));
+        m.insert(
+            keys::MOMENT.to_owned(),
+            self.moment
+                .and_then(|mo| serde_json::to_value(mo).ok())
+                .unwrap_or(Value::Null),
+        );
         m
     }
 
@@ -527,6 +682,37 @@ mod tests {
         let m = mentions_of(&threads, "@Alex");
         assert_eq!(m.len(), 4);
         assert_eq!(m[0].1.posted, "2026-11-05T10:00:00Z");
+    }
+
+    #[test]
+    fn a_moment_is_kept_only_when_valid_and_old_threads_have_none() {
+        assert!(Moment::new(12.5, None, None).is_some());
+        assert!(
+            Moment::new(12.5, Some(12.5), None).is_none(),
+            "an empty range"
+        );
+        assert!(Moment::new(-1.0, None, None).is_none());
+        assert!(Moment::new(f64::NAN, None, None).is_none());
+        assert!(Moment::new(1.0, Some(MAX_SECONDS + 1.0), None).is_none());
+        assert!(Rect::new(0.5, 0.5, 0.6, 0.1).is_none(), "past the frame");
+        let m = Moment::from_value(&json!({
+            "start": "33", "end": 41.25, "rect": {"x": 0.1, "y": 0.2, "w": 0.3, "h": 0.4}
+        }))
+        .unwrap();
+        assert_eq!(m.start, 33.0);
+        assert_eq!(m.label(), "0:33–0:41");
+        assert_eq!(clock(3725.0), "1:02:05");
+        assert!(Moment::from_value(&json!({"start": 3, "rect": {"x": 2}})).is_none());
+
+        // A thread with one round-trips; one written before has none.
+        let mut t = thread("m", "Songs/Song.md", false, &["2026-11-02T10:00:00Z"]);
+        t.anchor.anchor_path = Some("media/Songs/Song - Lights.mp4".into());
+        t.moment = Some(m);
+        let back = Thread::from_values(&t.path, &t.to_values()).unwrap();
+        assert_eq!(back, t);
+        let mut old = t.to_values();
+        old.remove(keys::MOMENT);
+        assert_eq!(Thread::from_values(&t.path, &old).unwrap().moment, None);
     }
 
     #[test]

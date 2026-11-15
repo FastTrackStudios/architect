@@ -1,0 +1,112 @@
+# Review (features/review/src/lib.rs): Lawn-like review of a media item's
+# videos and recordings. A comment is a Threads thread on the item's note,
+# at `anchorPath` `media/<the file>` with a `moment` (a time or a range,
+# maybe a part of the frame), so comments are per version and sync as
+# notes. One Rust value (`Review`, a linked::Extension): the app links it
+# in; its program (src/main.rs) serves the same value as a process for a
+# development copy (EXT_CLONE {"id":"review"}).
+id = "review"
+name = "Review"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "Review a video or a recording with your band or team: comments pinned to a moment or a range (and a part of the frame), replies, @mentions, resolve; versions, with open comments carried to the next."
+authors = ["FastTrackStudio"]
+
+[entry]
+path = "architect-review"
+
+[source]
+git = "https://github.com/FastTrackStudios/architect"
+rev = "main"
+path = "features/review"
+
+# Its API for others (`services.call("architect.review", "open", …)`):
+# method `m` is its action REVIEW_<M>. Studio opens its songs' and light
+# shows' review with it.
+[provides]
+"architect.review" = "0.1.0"
+
+# Comments are Threads' (with `moment`, 0.1.1).
+[requires]
+"architect.threads" = "^0.1.1"
+
+# The player is the app's playhead: Review's own source, so Now Playing
+# shows and drives the same position. Without it, the view still lists
+# and writes comments.
+[uses]
+"architect.playhead" = "^0.1"
+
+# Notes only through the app's actions (it reads the item's note and
+# writes its `review` property); it follows the note being read.
+[capabilities]
+actions = ["VAULT_READ", "VAULT_SET_PROPERTY", "VAULT_REMOVE_PROPERTY", "EXT_VIEW_OPEN"]
+effect = "mutating"
+reads = ["selection", "documents"]
+writes = ["documents"]
+
+[[actions]]
+id = "REVIEW_OPEN"
+name = "Review: open"
+description = "Opens the review view on media item `path` (else the note being read), on `file` (one of its versions; else its first track's newest), and puts it on the playhead, paused. `open: false` only points the view there."
+group = "Review"
+effect = "read_only"
+params = '{"type":"object","properties":{"path":{"type":"string"},"file":{"type":"string"},"open":{"type":"boolean"}}}'
+
+[[actions]]
+id = "REVIEW_ITEM"
+name = "Review: an item"
+description = "Media item `path`: its title, length, and tracks (`review`, else its video, media and recording), each with its versions oldest first and the open and all comments on each."
+group = "Review"
+effect = "read_only"
+params = '{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}'
+
+[[actions]]
+id = "REVIEW_LIST"
+name = "Review: comments"
+description = "The comments on media item `path`, on version `file` (every version's without it), by when they start; `resolved: false` leaves resolved ones out."
+group = "Review"
+effect = "read_only"
+params = '{"type":"object","properties":{"path":{"type":"string"},"file":{"type":"string"},"resolved":{"type":"boolean"}},"required":["path"]}'
+
+[[actions]]
+id = "REVIEW_COMMENT"
+name = "Review: comment at a moment"
+description = "A new comment `body` on version `file` of media item `path` at `start` seconds (`m:ss` too), to `end` for a range, on part `rect` ({x, y, w, h}, 0 to 1) of the frame. `@name` notifies. `kind` as Threads' (discussion, question, …)."
+group = "Review"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"file":{"type":"string"},"start":{},"end":{},"rect":{"type":"object"},"body":{"type":"string"},"kind":{"type":"string"},"author":{"type":"string"}},"required":["path","file","start","body"]}'
+
+[[actions]]
+id = "REVIEW_ADD_VERSION"
+name = "Review: add a version"
+description = "Adds `file` (a video or recording in the vault) as the newest version of track `track` of media item `path` (its first track without one; a new track of that name when none has it), labelled `label` or v<n>. Writes the note's `review` property."
+group = "Review"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"file":{"type":"string"},"track":{"type":"string"},"label":{"type":"string"}},"required":["path","file"]}'
+
+[[actions]]
+id = "REVIEW_CARRY"
+name = "Review: carry open comments over"
+description = "Copies every unresolved comment of version `from` of media item `path` to version `to` (the version after `from` without it), with its replies and moment, and resolves the old one with a note of where it went."
+group = "Review"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"}},"required":["path","from"]}'
+
+[[actions]]
+id = "REVIEW_PLAY"
+name = "Review: play"
+description = "Plays version `file` of media item `path` (else what the view is on) from `t` seconds (where it is, without), its comments as the item's marks; `play: false` cues it."
+group = "Review"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"file":{"type":"string"},"t":{"type":"number"},"play":{"type":"boolean"}}}'
+
+[[views]]
+id = "review"
+title = "Review"
+icon = "clapperboard"
+home = "main"
+
+[[menus]]
+menu = "View"
+action = "REVIEW_OPEN"

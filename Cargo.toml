@@ -130,6 +130,7 @@ members = [
     "extensions/dayplan",
     "extensions/calendar",
     "features/threads",
+    "features/review",
     "features/playhead",
     "features/notify",
     "features/updates",
@@ -195,6 +196,7 @@ architect-calendar = { path = "extensions/calendar" }
 architect-dayplan = { path = "extensions/dayplan" }
 # Threads (#348): comments on any entity, a built-in extension.
 architect-threads = { path = "features/threads" }
+architect-review = { path = "features/review" }
 architect-playhead = { path = "features/playhead", default-features = false }
 # Notify (#348): notifications and the centre, a built-in extension.
 architect-notify = { path = "features/notify" }

@@ -194,5 +194,6 @@ Where it draws:
 
 ## Status
 
-The model is done. Not yet: video in a pane, comments at a timestamp, and
-collections a Base's query produces.
+The model is done. Comments at a timestamp, over a range and on a part of the
+frame, per version, are Review's (`docs/content/features/review.md`). Not
+yet: video in a pane, and collections a Base's query produces.

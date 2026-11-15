@@ -2833,6 +2833,7 @@ impl ShareGuest for GuestLane {
             title: link.title(),
             listen: link.listen.label().to_owned(),
             audience: audience_word(&share.audience).to_owned(),
+            access: if share.comments() { "comment" } else { "read" }.to_owned(),
             notes,
         })
     }

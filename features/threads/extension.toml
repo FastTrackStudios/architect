@@ -7,7 +7,7 @@
 # process when a development copy runs (EXT_CLONE {"id":"threads"}).
 id = "threads"
 name = "Threads"
-version = "0.1.0"
+version = "0.1.1"
 kind = "process"
 api = "0.1"
 description = "Comments on notes and anything else: start a thread, reply, @mention someone (they are notified), resolve and reopen. Threads are notes in Threads/, so they sync with the vault."
@@ -25,7 +25,7 @@ path = "features/threads"
 # method `m` is its action THREADS_<M>. Projects, Tasks, Media Review and
 # share links that let a guest comment use it.
 [provides]
-"architect.threads" = "0.1.0"
+"architect.threads" = "0.1.1"
 
 # Notify, when it is there: a mention or a reply tells the people it
 # reaches, and whose name you write under comes from it. Not [requires]:
@@ -63,10 +63,10 @@ params = '{"type":"object","properties":{"thread":{"type":"string"}},"required":
 [[actions]]
 id = "THREADS_START"
 name = "Threads: start a thread"
-description = "Starts a thread on an entity (a note's `path`, or `entity_type` and `entity_id`; else the note the pane is on) with its first comment `body`. `title` defaults to the comment's first line, `kind` to discussion (question, decision, action, praise). `@name` in the body notifies that person through Notify. `author` defaults to your name."
+description = "Starts a thread on an entity (a note's `path`, or `entity_type` and `entity_id`; else the note the pane is on) with its first comment `body`. `moment` ({start, end?, rect?: {x, y, w, h}}: seconds, the rect 0 to 1 of the frame) makes it about a time or a range of a recording or video, the file named by `anchor_path` (Review's `media/<file>`). `title` defaults to the comment's first line, `kind` to discussion (question, decision, action, praise). `@name` in the body notifies that person through Notify. `author` defaults to your name. `notify: false` tells nobody (a copy)."
 group = "Threads"
 effect = "mutating"
-params = '{"type":"object","properties":{"path":{"type":"string"},"entity_type":{"type":"string"},"entity_id":{"type":"string"},"anchor_path":{"type":"string"},"title":{"type":"string"},"kind":{"type":"string"},"body":{"type":"string"},"author":{"type":"string"}},"required":["body"]}'
+params = '{"type":"object","properties":{"path":{"type":"string"},"entity_type":{"type":"string"},"entity_id":{"type":"string"},"anchor_path":{"type":"string"},"moment":{"type":"object","properties":{"start":{"type":"number"},"end":{"type":"number"},"rect":{"type":"object"}},"required":["start"]},"title":{"type":"string"},"kind":{"type":"string"},"body":{"type":"string"},"author":{"type":"string"},"notify":{"type":"boolean"}},"required":["body"]}'
 
 [[actions]]
 id = "THREADS_POST"
@@ -74,7 +74,7 @@ name = "Threads: comment"
 description = "Adds comment `body` to thread `thread`; `reply_to` (a comment's id) makes it a reply. A resolved thread reopens. Whoever it @mentions, and the thread's other participants, are notified."
 group = "Threads"
 effect = "mutating"
-params = '{"type":"object","properties":{"thread":{"type":"string"},"body":{"type":"string"},"reply_to":{"type":"string"},"author":{"type":"string"}},"required":["thread","body"]}'
+params = '{"type":"object","properties":{"thread":{"type":"string"},"body":{"type":"string"},"reply_to":{"type":"string"},"author":{"type":"string"},"notify":{"type":"boolean"}},"required":["thread","body"]}'
 
 [[actions]]
 id = "THREADS_REPLY"

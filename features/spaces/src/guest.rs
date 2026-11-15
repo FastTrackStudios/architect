@@ -352,6 +352,12 @@ pub struct GuestLink {
     pub listen: String,
     /// Who the link is for: `public`, `link`, `org`, `invited`.
     pub audience: String,
+    /// What its guest may do: `read`, or `comment` (the share's
+    /// `ShareAccess`). The app draws the same views either way; a view
+    /// offers writing a comment only when this says `comment`, and the
+    /// node refuses one when it does not.
+    #[facet(default)]
+    pub access: String,
     /// Its notes, in list order.
     pub notes: Vec<ListedNote>,
 }
