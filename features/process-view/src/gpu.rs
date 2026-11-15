@@ -1,3 +1,5 @@
+//! Frames shared on the GPU between two processes.
+//!
 //! Frames on the GPU, shared between two processes' wgpu devices on one
 //! adapter (Linux, Vulkan): the guest allocates a texture whose memory
 //! is exportable as a dma-buf ([`export_texture`]), the host imports
@@ -75,7 +77,7 @@ pub fn can_share(device: &wgpu::Device) -> bool {
         && unsafe { device.as_hal::<hal::api::Vulkan>() }.is_some()
 }
 
-fn descriptor(
+const fn descriptor(
     width: u32,
     height: u32,
     usage: wgpu::TextureUsages,
@@ -259,7 +261,7 @@ pub fn export_texture(
         return Err(GpuError::Range);
     };
 
-    let owner = raw.clone();
+    let owner = raw;
     let drop_callback: hal::DropCallback = Box::new(move || free(&owner));
     // SAFETY: `image` was made respecting the descriptor (format,
     // extent, usages); the callback frees it and its memory once wgpu is

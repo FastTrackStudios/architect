@@ -378,7 +378,8 @@ impl Session {
 
     /// Asks the window to draw again.
     fn wake(&self) {
-        if let Some(window) = lock(&self.window).clone() {
+        let window = lock(&self.window).clone();
+        if let Some(window) = window {
             window.request_redraw();
         }
     }
@@ -962,7 +963,7 @@ pub fn ProcessViewPane(
         }
     };
     let blur = focus.clone();
-    let restart = session.clone();
+    let restart = session;
     let line = status_line(&s);
     rsx! {
         div { style: "flex: 1; display: flex; flex-direction: column; min-height: 0;",

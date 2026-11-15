@@ -1,3 +1,5 @@
+//! The lab's process view scene (feature `demo`).
+//!
 //! The lab's process view scene (feature `demo`): one [`PaintView`] the
 //! lab shows both ways — linked, in a `PaintPane`, and from the
 //! `process-view-demo` program — so the two can be measured against each
@@ -95,6 +97,8 @@ impl PaintView for Orbits {
         true
     }
 
+    // The scene's geometry reads as math: t, w, h, x, p.
+    #[allow(clippy::many_single_char_names)]
     fn paint(&mut self, ctx: &ViewCtx, scene: &mut Scene) {
         let now = ctx.clock.now();
         if let (Some(at), Some(probe)) = (self.pending.take(), &self.probe) {
@@ -124,8 +128,8 @@ impl PaintView for Orbits {
         let centre = Point::new(w / 2.0, h / 2.0);
         let reach = w.min(h) / 2.0;
         for i in 0..PARTICLES {
-            let radius = (0.08 + 0.9 * spread(i, 1.0)) * reach;
-            let speed = 0.15 + 0.6 * spread(i, 3.0);
+            let radius = 0.9f64.mul_add(spread(i, 1.0), 0.08) * reach;
+            let speed = 0.6f64.mul_add(spread(i, 3.0), 0.15);
             let angle = spread(i, 7.0).mul_add(TAU, t * speed);
             let p = Point::new(
                 radius.mul_add(angle.cos(), centre.x),
@@ -135,7 +139,7 @@ impl PaintView for Orbits {
             let (size, color) = if near {
                 (3.5, Color::from_rgba8(255, 170, 60, 255))
             } else {
-                let shade = 120.0 + 120.0 * spread(i, 11.0);
+                let shade = 120.0f64.mul_add(spread(i, 11.0), 120.0);
                 let blue = shade.clamp(0.0, 255.0);
                 (1.6, Color::from_rgba8(90, 140, u8_of(blue), 255))
             };
@@ -162,7 +166,7 @@ impl PaintView for Orbits {
                 Affine::IDENTITY,
                 Color::from_rgba8(250, 250, 250, alpha),
                 None,
-                &Circle::new(*at, 8.0 + 90.0 * k),
+                &Circle::new(*at, 90.0f64.mul_add(k, 8.0)),
             );
         }
         let square = Rect::from_origin_size(self.square, (28.0, 28.0));
@@ -178,15 +182,15 @@ impl PaintView for Orbits {
             &square,
         );
         for (i, code) in self.chips.iter().enumerate() {
-            let x = 12.0 + 14.0 * f64::from(u32::try_from(i).unwrap_or(0));
+            let x = 14.0f64.mul_add(f64::from(u32::try_from(i).unwrap_or(0)), 12.0);
             let hue = f64::from(code % 7) / 7.0;
             scene.fill(
                 Fill::NonZero,
                 Affine::IDENTITY,
                 Color::from_rgba8(
-                    u8_of(120.0 + 135.0 * hue),
+                    u8_of(135.0f64.mul_add(hue, 120.0)),
                     120,
-                    u8_of(255.0 - 135.0 * hue),
+                    u8_of(135.0f64.mul_add(-hue, 255.0)),
                     255,
                 ),
                 None,
@@ -205,6 +209,6 @@ impl PaintView for Orbits {
     clippy::cast_sign_loss,
     clippy::as_conversions
 )]
-fn u8_of(v: f64) -> u8 {
+const fn u8_of(v: f64) -> u8 {
     v.clamp(0.0, 255.0) as u8
 }

@@ -1,3 +1,5 @@
+//! The wire between the app and a process view's program.
+//!
 //! The messages between the app (the host) and a view's program (the
 //! guest), one per datagram on a `SOCK_SEQPACKET` pair
 //! ([`crate::sock`]): little-endian, a tag byte first. File descriptors

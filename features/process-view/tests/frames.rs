@@ -7,6 +7,15 @@
 //! Needs a Vulkan adapter. Without one (a CI runner with no GPU) each
 //! test says so and passes.
 
+// Pixel rows and buffer sizes are small, checked by the test itself.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::arithmetic_side_effects
+)]
 #![cfg(all(
     target_os = "linux",
     feature = "guest",
@@ -84,7 +93,7 @@ fn read_back(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
-    let mut encoder = device.create_command_encoder(&Default::default());
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     encoder.copy_texture_to_buffer(
         texture.as_image_copy(),
         wgpu::TexelCopyBufferInfo {
@@ -224,7 +233,7 @@ fn frames_arrive_as_dma_bufs_the_host_device_reads_in_place() {
     child.wait().unwrap();
     // The program's end is closed: the host reads the end, not a hang.
     assert!(socket.wait(Some(Duration::from_secs(5))).unwrap());
-    while let Some(_) = socket.recv().unwrap() {}
+    while socket.recv().unwrap().is_some() {}
 }
 
 #[test]
