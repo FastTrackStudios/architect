@@ -29,11 +29,11 @@ fn the_architect_app_is_a_distribution_of_its_first_party_extensions() {
         .map(|e| e["id"].as_str().unwrap().to_owned())
         .collect();
     for want in [
-        "projects", "tasks", "time", "calendar", "dayplan", "updates",
+        "projects", "tasks", "time", "calendar", "dayplan", "cookbook", "updates",
     ] {
         assert!(ids.iter().any(|id| id == want), "{want} in {ids:?}");
     }
-    assert_eq!(ids.len(), 9, "{ids:?}");
+    assert_eq!(ids.len(), 10, "{ids:?}");
     // A test build is never stamped with a release version (#523).
     assert_eq!(d.describe()["release_version"], serde_json::Value::Null);
 }
