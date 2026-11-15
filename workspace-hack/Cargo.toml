@@ -169,6 +169,7 @@ smallvec = { version = "1.16.4", default-features = false, features = ["const_ne
 spki = { version = "0.8.0", default-features = false, features = ["pem", "std"] }
 stable_deref_trait = { version = "1.2.1" }
 strum-1f5adca70f036a62 = { package = "strum", version = "0.28.0", features = ["derive"] }
+strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 subtle = { version = "2.6.1", features = ["const-generics"] }
 sync_wrapper = { version = "1.0.2", default-features = false, features = ["futures"] }
 thiserror = { version = "2.0.20" }
@@ -178,6 +179,7 @@ tokio = { version = "1.53.1", features = ["full", "test-util"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["logging", "ring", "tls12"] }
 tokio-stream = { version = "0.1.19", features = ["fs", "sync"] }
 tokio-util = { version = "0.7.19", features = ["codec", "io-util", "rt"] }
+toml = { version = "0.8.2", features = ["preserve_order"] }
 tower-http = { version = "0.6.11", features = ["cors", "fs", "set-header", "trace"] }
 tracing = { version = "0.1.44", features = ["log"] }
 tracing-core = { version = "0.1.36" }
@@ -245,6 +247,7 @@ thiserror = { version = "2.0.20" }
 time = { version = "0.3.55", features = ["formatting"] }
 time-macros = { version = "0.2.32", default-features = false, features = ["formatting", "parsing", "serde"] }
 tokio = { version = "1.53.1", features = ["full"] }
+toml = { version = "0.8.2" }
 toml_datetime = { version = "1.1.1", features = ["serde"] }
 toml_parser = { version = "1.1.3" }
 tracing = { version = "0.1.44" }
@@ -299,12 +302,10 @@ rustls = { version = "0.23.46", default-features = false, features = ["aws-lc-rs
 rustls-webpki = { version = "0.103.15", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 simdutf8 = { version = "0.1.5" }
 spin = { version = "0.10.1", default-features = false, features = ["once", "rwlock", "spin_mutex"] }
-strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3.0.6", features = ["extra-traits", "full"] }
 tokio = { version = "1.53.1", default-features = false, features = ["tracing"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-lc-rs", "early-data"] }
 tokio-tungstenite = { version = "0.29.0", features = ["rustls-tls-webpki-roots"] }
-toml = { version = "0.8.2" }
 tower = { version = "0.5.3", default-features = false, features = ["log", "make", "retry", "timeout"] }
 tower-http = { version = "0.6.11", default-features = false, features = ["follow-redirect"] }
 tungstenite = { version = "0.29.0", features = ["__rustls-tls", "native-tls"] }
@@ -328,7 +329,6 @@ nom = { version = "7.1.3", default-features = false, features = ["std"] }
 quick-xml = { version = "0.41.0" }
 rustc-hash = { version = "1.1.0" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109" }
-toml = { version = "0.8.2", default-features = false, features = ["parse"] }
 
 [target.aarch64-apple-darwin.dependencies]
 aes-gcm = { version = "0.10.3" }
@@ -373,7 +373,6 @@ rustls = { version = "0.23.46", default-features = false, features = ["aws-lc-rs
 rustls-webpki = { version = "0.103.15", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 simdutf8 = { version = "0.1.5" }
 spin = { version = "0.10.1", default-features = false, features = ["once", "rwlock", "spin_mutex"] }
-strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-lc-rs", "early-data"] }
 tokio-tungstenite = { version = "0.29.0", features = ["rustls-tls-webpki-roots"] }
 tower = { version = "0.5.3", default-features = false, features = ["log", "make", "retry", "timeout"] }
@@ -436,7 +435,6 @@ rustls = { version = "0.23.46", default-features = false, features = ["aws-lc-rs
 rustls-webpki = { version = "0.103.15", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 simdutf8 = { version = "0.1.5" }
 spin = { version = "0.10.1", default-features = false, features = ["once", "rwlock", "spin_mutex"] }
-strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-lc-rs", "early-data"] }
 tokio-tungstenite = { version = "0.29.0", features = ["rustls-tls-webpki-roots"] }
 tower = { version = "0.5.3", default-features = false, features = ["log", "make", "retry", "timeout"] }
@@ -504,7 +502,6 @@ rustls-webpki = { version = "0.103.15", default-features = false, features = ["a
 security-framework-sys = { version = "2.17.0", features = ["OSX_10_10", "OSX_10_11", "OSX_10_12", "OSX_10_9"] }
 simdutf8 = { version = "0.1.5" }
 spin = { version = "0.10.1", default-features = false, features = ["once", "rwlock", "spin_mutex"] }
-strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-lc-rs", "early-data"] }
 tokio-tungstenite = { version = "0.29.0", features = ["rustls-tls-webpki-roots"] }
 tower = { version = "0.5.3", default-features = false, features = ["log", "make", "retry", "timeout"] }
