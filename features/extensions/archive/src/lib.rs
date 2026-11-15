@@ -810,6 +810,52 @@ pub fn peek(archive: &[u8], trust: &Trust, max_unpacked: u64) -> Result<Peeked, 
     })
 }
 
+/// Checks `signature` (a `.minisig`'s text) over `msg` against `trust`:
+/// the key that signed it, and its trusted comment (signed too).
+///
+/// # Errors
+///
+/// It does not read, its key is not trusted, or it is not over `msg`.
+pub fn verify_detached(
+    msg: &[u8],
+    signature: &str,
+    trust: &Trust,
+) -> Result<(TrustedKey, String), ArchiveError> {
+    let sig = minisign_verify::Signature::decode(signature)
+        .map_err(|e| ArchiveError::BadSignatureFile(e.to_string()))?;
+    let signed_by = signature
+        .lines()
+        .find(|l| !l.trim().is_empty() && !l.starts_with("untrusted comment:"))
+        .and_then(key_id)
+        .unwrap_or_default();
+    let signer = trust
+        .keys()
+        .iter()
+        .find(|k| key_id(&k.key).as_deref() == Some(signed_by.as_str()))
+        .ok_or_else(|| ArchiveError::UntrustedKey {
+            key_id: signed_by.clone(),
+            trusted: trust
+                .keys()
+                .iter()
+                .map(|k| format!("{} ({})", k.name, key_id(&k.key).unwrap_or_default()))
+                .collect(),
+        })?;
+    let key = minisign_verify::PublicKey::from_base64(&signer.key)
+        .map_err(|e| ArchiveError::Key(format!("{}: {e}", signer.name)))?;
+    key.verify(msg, &sig, false)
+        .map_err(|_| ArchiveError::IndexTampered {
+            signer: signer.name.clone(),
+        })?;
+    Ok((signer.clone(), sig.trusted_comment().to_owned()))
+}
+
+/// The key id (hex, as minisign prints it) of `key`, a `.pub`'s base64
+/// line.
+#[must_use]
+pub fn key_id_of(key: &str) -> Option<String> {
+    key_id(key)
+}
+
 /// The target triples this platform runs, best first (`None` for one
 /// with no builds yet).
 #[must_use]

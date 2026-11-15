@@ -4,6 +4,8 @@
 //!
 //! | action | what it does |
 //! |---|---|
+//! | `EXT_SHARE_NEEDS` / `EXT_SHARE_NEEDS_SET` | what a share link's guests run, and choosing it: `{folder, code}` (`+ extensions`) |
+//! | `EXT_INSTALLS_PUBLISH` / `EXT_INSTALLS_APPLY` | the signed-in person's installs and grants, to and from the open vault, signed by their devices (feature `person-sync`) |
 //! | `EXT_LIST` | the extensions there are: each one's id, name, version, kind, which copy runs, what it adds, its `platforms` and why it cannot run here (`not_here`) |
 //! | `EXT_NEEDS` | what opening a vault or project folder takes: what is ready, to install, to offer, missing (with why) and refused |
 //! | `EXT_SEARCH` | searches every registry: `{query}` → the newest of each that matches |
@@ -60,6 +62,39 @@ static NEEDS: ActionMeta = meta(
      .architect/extensions.toml names and the ones it carries in .architect/extensions/, as \
      ready, install (required: one consent for all), offer (optional), missing (each with why) \
      and refused (carried archives that are not signed by a key trusted here). Installs nothing.",
+);
+static SHARE_NEEDS: ActionMeta = meta(
+    "EXT_SHARE_NEEDS",
+    "What a share link's guests run",
+    "The extensions share link `code` of the vault at `folder` runs for its guests \
+     (_architect/shares/<code>.extensions.toml): each id, version range, required or not, from \
+     the linked core or a signed archive the link carries (its file and sha256), and the hosts \
+     the owner lets it fetch.",
+);
+static SHARE_NEEDS_SET: ActionMeta = meta(
+    "EXT_SHARE_NEEDS_SET",
+    "Choose a share link's extensions",
+    "Makes `extensions` (each `{id, required?, hosts?}`, running here) what share link `code` of \
+     the vault at `folder` runs for its guests: a built-in from the linked core, an installed one \
+     as its signed archive copied into the link (sha256 pinned). A development copy or an \
+     unsigned install is refused: guests take signed packages only. `hosts` must be ones its \
+     manifest asks for. Empty `extensions` clears it.",
+);
+#[cfg(feature = "person-sync")]
+static INSTALLS_PUBLISH: ActionMeta = meta(
+    "EXT_INSTALLS_PUBLISH",
+    "Share my installs with my devices",
+    "Writes the signed-in person's record in the open vault, signed by this device: each \
+     extension installed here from a signed archive, its pin, signer and grants. Only that \
+     person may ask; it is also done at once after each install, removal or revoke.",
+);
+#[cfg(feature = "person-sync")]
+static INSTALLS_APPLY: ActionMeta = meta(
+    "EXT_INSTALLS_APPLY",
+    "Install what I installed on my other devices",
+    "Applies here the signed-in person's record in the open vault, when it is signed by this \
+     device or one of theirs it trusts: installs, removals and revokes, with their grants and \
+     no prompt. Only that person may ask.",
 );
 static INSTALL: ActionMeta = meta(
     "EXT_INSTALL",
@@ -130,6 +165,23 @@ pub struct SearchArgs {
 pub struct NeedsArgs {
     /// The vault's or project's folder, absolute.
     pub folder: String,
+}
+
+/// `EXT_SHARE_NEEDS`'s arguments.
+#[derive(Debug, Facet)]
+pub struct ShareNeedsArgs {
+    /// The vault's folder, absolute.
+    pub folder: String,
+    /// The link's code.
+    pub code: String,
+}
+
+/// `EXT_SHARE_NEEDS_SET`'s arguments.
+#[derive(Debug, Facet)]
+pub struct ShareNeedsSetArgs {
+    pub folder: String,
+    pub code: String,
+    pub extensions: Vec<crate::share_pick::LinkPick>,
 }
 
 /// `EXT_INSTALL`'s arguments.
@@ -229,6 +281,31 @@ impl Extensions {
                 .to_string(),
             ))
         })?;
+        let me = self.clone();
+        list.register_with(
+            &SHARE_NEEDS,
+            Effect::ReadOnly,
+            move |_: &ActionCaller, a: ShareNeedsArgs| {
+                let needs = me.share_needs(std::path::Path::new(&a.folder), &a.code)?;
+                Ok::<_, String>(RawJson::from(
+                    serde_json::to_string(&needs).map_err(|e| e.to_string())?,
+                ))
+            },
+        )?;
+        let me = self.clone();
+        list.register_with(
+            &SHARE_NEEDS_SET,
+            Effect::Mutating,
+            move |_: &ActionCaller, a: ShareNeedsSetArgs| {
+                let needs =
+                    me.set_share_needs(std::path::Path::new(&a.folder), &a.code, &a.extensions)?;
+                Ok::<_, String>(RawJson::from(
+                    serde_json::to_string(&needs).map_err(|e| e.to_string())?,
+                ))
+            },
+        )?;
+        #[cfg(feature = "person-sync")]
+        self.install_person_actions(&list)?;
         let me = self.clone();
         list.register_with(
             &INSTALL,
@@ -350,5 +427,68 @@ impl Extensions {
             })
             .collect();
         json!({ "extensions": extensions })
+    }
+}
+
+/// Whether `caller` may act for `person`'s installs: the app itself (its
+/// own code, a key), or that person signed in; never another account, a
+/// guest or a peer.
+#[cfg(feature = "person-sync")]
+fn as_person(caller: &ActionCaller, person: &str) -> Result<(), String> {
+    match caller.principal() {
+        None => Ok(()),
+        Some(architect::action::Principal::User { user_id }) if user_id == person => Ok(()),
+        Some(_) => Err(format!("only {person} may ask for their installs")),
+    }
+}
+
+#[cfg(feature = "person-sync")]
+impl Extensions {
+    /// `EXT_INSTALLS_PUBLISH` and `EXT_INSTALLS_APPLY`, for the person set
+    /// with [`Self::sync_person`].
+    fn install_person_actions(
+        &self,
+        list: &architect::action::ActionList,
+    ) -> Result<(), ActionError> {
+        let me = self.clone();
+        list.register_with(
+            &INSTALLS_PUBLISH,
+            Effect::Mutating,
+            move |caller: &ActionCaller, (): ()| {
+                let sync = me
+                    .person_sync()
+                    .ok_or("no one is signed in with a vault open")?;
+                as_person(caller, &sync.person)?;
+                let record = me.publish_installs(&sync, None)?;
+                let ids: Vec<&str> = record
+                    .installs
+                    .iter()
+                    .filter(|i| !i.removed)
+                    .map(|i| i.id.as_str())
+                    .collect();
+                Ok::<_, String>(RawJson::from(json!({ "published": ids }).to_string()))
+            },
+        )?;
+        let me = self.clone();
+        list.register_with(
+            &INSTALLS_APPLY,
+            Effect::Mutating,
+            move |caller: &ActionCaller, (): ()| {
+                let sync = me
+                    .person_sync()
+                    .ok_or("no one is signed in with a vault open")?;
+                as_person(caller, &sync.person)?;
+                let out = me.apply_installs(&sync).map_err(|e| e.to_string())?;
+                let rows: Vec<Value> = out
+                    .into_iter()
+                    .map(|r| match r {
+                        Ok(a) => json!({ "applied": format!("{a:?}") }),
+                        Err((id, e)) => json!({ "id": id, "error": e.to_string() }),
+                    })
+                    .collect();
+                Ok::<_, String>(RawJson::from(json!({ "applied": rows }).to_string()))
+            },
+        )?;
+        Ok(())
     }
 }

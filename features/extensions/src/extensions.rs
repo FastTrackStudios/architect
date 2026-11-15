@@ -46,6 +46,12 @@ struct Inner {
     /// The registries a person adds and the development switch
     /// (`crate::registries`), when the app keeps them.
     registries: Mutex<Option<crate::registries::Registries>>,
+    /// Told the id of each install, removal or revoke a person made
+    /// (`crate::person_sync` publishes it to their other devices).
+    changed: Mutex<Vec<Arc<dyn Fn(&str) + Send + Sync>>>,
+    /// The person whose installs follow them here (`crate::person_sync`).
+    #[cfg(feature = "person-sync")]
+    person: Mutex<Option<crate::person_sync::PersonSync>>,
 }
 
 /// The topic of the `Changed` event a person installing or turning on an
@@ -118,6 +124,9 @@ impl Extensions {
                 failed,
                 builds: crate::source::Builds::default(),
                 registries: Mutex::new(None),
+                changed: Mutex::new(Vec::new()),
+                #[cfg(feature = "person-sync")]
+                person: Mutex::new(None),
             }),
         }
     }
@@ -218,7 +227,7 @@ impl Extensions {
         &self.inner.installs
     }
 
-    fn sources(&self) -> Vec<Arc<dyn Source>> {
+    pub(crate) fn sources(&self) -> Vec<Arc<dyn Source>> {
         let mut sources = lock(&self.inner.sources).clone();
         if let Some(r) = self.registries() {
             sources.extend(r.sources());
@@ -357,7 +366,48 @@ impl Extensions {
         let install = self.inner.installs.install(source.as_ref(), &listing)?;
         let _ = self.sync();
         self.turned_on(&install.id);
+        self.changed(&install.id);
         Ok(install)
+    }
+
+    /// Tells `f` the id of each install, removal or revoke made here from
+    /// now on (not what a person's other device brought:
+    /// `crate::person_sync` applies those without telling).
+    pub fn on_installs_changed(&self, f: impl Fn(&str) + Send + Sync + 'static) {
+        lock(&self.inner.changed).push(Arc::new(f));
+    }
+
+    /// The person whose installs follow them here, when one is set.
+    #[cfg(feature = "person-sync")]
+    #[must_use]
+    pub fn person_sync(&self) -> Option<crate::person_sync::PersonSync> {
+        lock(&self.inner.person).clone()
+    }
+
+    #[cfg(feature = "person-sync")]
+    pub(crate) fn set_person(&self, sync: crate::person_sync::PersonSync) -> bool {
+        let mut slot = lock(&self.inner.person);
+        let first = slot.is_none();
+        *slot = Some(sync);
+        first
+    }
+
+    pub(crate) fn changed(&self, id: &str) {
+        let listeners = lock(&self.inner.changed).clone();
+        for f in listeners {
+            f(id);
+        }
+    }
+
+    /// Takes back `id`'s grant in `scope` (every scope when `None`), as
+    /// a person: how many there were.
+    #[allow(clippy::must_use_candidate)]
+    pub fn revoke(&self, id: &str, scope: Option<&crate::consent::Scope>) -> usize {
+        let n = self.inner.host.grants().map_or(0, |g| g.revoke(id, scope));
+        if n > 0 {
+            self.changed(id);
+        }
+        n
     }
 
     /// Refuses `listing` when it is older than the install of its id, or
@@ -393,6 +443,9 @@ impl Extensions {
     /// It cannot be removed.
     pub fn uninstall(&self, id: &str) -> Result<bool, InstallError> {
         let removed = self.inner.installs.uninstall(id)?;
+        if removed {
+            self.changed(id);
+        }
         let _ = self.sync();
         Ok(removed)
     }

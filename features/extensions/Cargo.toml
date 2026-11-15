@@ -84,6 +84,10 @@ ui = [
 # The extensions page (`page`): search, install with consent, update, pin,
 # grants and logs, in architect-ui's components and the app's theme.
 page = ["ui", "manager", "dep:architect-ui"]
+# A person's installed extensions on all their devices (`person_sync`):
+# each device signs the record it writes with a key of its own (a device
+# key, never a release key: that is the only signing an app does).
+person-sync = ["host", "archive", "architect-extension-archive/sign"]
 # The extensions manager (`manager`): one place for everything that
 # customizes the app — extensions, scripts, workers, themes, layouts and
 # keys, and kinds the app adds — with its MANAGER_* actions; linked in as
@@ -293,7 +297,7 @@ sha2 = { workspace = true }
 hex = { workspace = true }
 # Its own host, so `cargo test --workspace` builds the tests with it; the
 # guest too, since the remote-view tests spawn themselves as one.
-architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked", "manager", "wasi", "net"] }
+architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked", "manager", "wasi", "net", "person-sync"] }
 # tests/wasi.rs: the WIT world read, to compare with the wire's types.
 wit-parser = "0.261"
 futures = "0.3"

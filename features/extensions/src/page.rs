@@ -501,6 +501,19 @@ fn answer(browse: &Browse, s: State, asking: &Asking, scope: Option<Scope>) {
     bump(s);
 }
 
+/// `work` on a thread of its own, its answer awaited: what reads files,
+/// fetches or installs never runs on the window's thread.
+async fn off_thread<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+    let (tx, rx) = futures::channel::oneshot::channel();
+    std::thread::Builder::new()
+        .name("extensions-work".to_owned())
+        .spawn(move || {
+            let _ = tx.send(work());
+        })
+        .ok()?;
+    rx.await.ok()
+}
+
 fn outcome(installed: &Installed, name: &str) -> String {
     match installed {
         Installed::Done {
@@ -864,7 +877,8 @@ fn GrantLine(ext: crate::extensions::Extensions, grant: crate::consent::Grant) -
             Button { variant: ButtonVariant::Outline, size: ButtonSize::Small,
                 on_click: move |_| {
                     if let Some(g) = ext.host().grants() {
-                        let n = g.revoke(&grant.id, Some(&grant.scope));
+                        let _ = g;
+                        let n = ext.revoke(&grant.id, Some(&grant.scope));
                         ext.host().grants_changed(&grant.id);
                         say(s, true, format!("Revoked {n} grant(s): it may no longer reach what it was granted."));
                     }
@@ -1219,21 +1233,28 @@ pub fn MissingExtensions(
                     button {
                         style: "padding: 5px 12px; border-radius: 8px; border: none; background: var(--primary); color: var(--primary-foreground); font-size: 13px; font-weight: 600; cursor: pointer;",
                         onclick: move |_| {
-                            let mut previews = Vec::new();
-                            let mut dropped = Vec::new();
-                            for p in ext.previews_for(preview_folder.as_deref(), &for_previews) {
-                                match p {
-                                    Ok(p) => previews.push(p),
-                                    Err((id, why)) => dropped.push(format!("{id} refused: {why}")),
+                            // Read (fetched, verified) on a thread of its
+                            // own, never the window's.
+                            let (ext, folder, plan) = (ext.clone(), preview_folder.clone(), for_previews.clone());
+                            note.set(Some("Reading what each asks…".to_owned()));
+                            spawn(async move {
+                                let Some(read) = off_thread(move || ext.previews_for(folder.as_deref(), &plan)).await else {
+                                    return;
+                                };
+                                let mut previews = Vec::new();
+                                let mut dropped = Vec::new();
+                                for p in read {
+                                    match p {
+                                        Ok(p) => previews.push(p),
+                                        Err((id, why)) => dropped.push(format!("{id} refused: {why}")),
+                                    }
                                 }
-                            }
-                            // What will not be in the prompt, and why.
-                            if !dropped.is_empty() {
-                                note.set(Some(dropped.join("; ")));
-                            }
-                            if !previews.is_empty() {
-                                asking.set(Some(previews));
-                            }
+                                // What will not be in the prompt, and why.
+                                note.set((!dropped.is_empty()).then(|| dropped.join("; ")));
+                                if !previews.is_empty() {
+                                    asking.set(Some(previews));
+                                }
+                            });
                         },
                         "Install all"
                     }
@@ -1248,7 +1269,7 @@ pub fn MissingExtensions(
                 on_answer: move |scope: Option<Scope>| {
                     asking.set(None);
                     let Some(scope) = scope else { return };
-                    let ext = browse.extensions();
+                    let ext = browse.extensions().clone();
                     // Only what the prompt showed: one yes for those.
                     let shown = Plan {
                         install: plan
@@ -1259,10 +1280,22 @@ pub fn MissingExtensions(
                             .collect(),
                         ..Plan::default()
                     };
-                    let results = folder.as_deref().map_or_else(
-                        || ext.accept(&shown, Some(&scope), "person"),
-                        |root| ext.accept_vault(root, &shown, Some(&scope), "person"),
-                    );
+                    let root = folder.clone();
+                    let previews = previews.clone();
+                    note.set(Some("Installing…".to_owned()));
+                    spawn(async move {
+                    // Installed (fetched, verified, written, loaded) on a
+                    // thread of its own, never the window's.
+                    let Some(results) = off_thread(move || {
+                        root.as_deref().map_or_else(
+                            || ext.accept(&shown, Some(&scope), "person"),
+                            |root| ext.accept_vault(root, &shown, Some(&scope), "person"),
+                        )
+                    })
+                    .await
+                    else {
+                        return;
+                    };
                     let mut done = Vec::new();
                     for r in results {
                         match r {
@@ -1281,6 +1314,7 @@ pub fn MissingExtensions(
                     if let Some(on_done) = on_done {
                         on_done.call(done);
                     }
+                    });
                 },
             }
         }

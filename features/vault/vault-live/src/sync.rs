@@ -2311,6 +2311,37 @@ mod tests {
         assert!(m.files.is_empty());
     }
 
+    /// The vault's own folder is in the manifest (#683's decision): the
+    /// extensions it needs, the archives it carries and each person's
+    /// installs reach every device that holds the vault.
+    #[test]
+    fn the_vaults_own_folder_is_in_the_manifest() {
+        let (tmp, b) = make_backend();
+        for path in [
+            ".architect/extensions.toml",
+            ".architect/extensions/x-0.1.0.archext",
+            ".architect/people/alice/extensions.toml",
+        ] {
+            let at = tmp.path().join(path);
+            std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+            std::fs::write(at, b"x").unwrap();
+        }
+        let paths: Vec<String> = b
+            .manifest("v1")
+            .unwrap()
+            .files
+            .into_iter()
+            .map(|e| e.path)
+            .collect();
+        for path in [
+            ".architect/extensions.toml",
+            ".architect/extensions/x-0.1.0.archext",
+            ".architect/people/alice/extensions.toml",
+        ] {
+            assert!(paths.iter().any(|p| p == path), "{path} not in {paths:?}");
+        }
+    }
+
     /// A node-private directory is out of the manifest, and its files
     /// cannot be read or written by naming them either.
     // t[verify vault.private.node-only]

@@ -422,7 +422,7 @@ impl Extensions {
                     .as_deref()
                     .map(|s| Scope::parse(s, grants.org().as_deref()))
                     .transpose()?;
-                let revoked = grants.revoke(&a.id, scope.as_ref());
+                let revoked = me.revoke(&a.id, scope.as_ref());
                 me.host().grants_changed(&a.id);
                 Ok::<_, String>(raw(&json!({
                     "id": a.id,

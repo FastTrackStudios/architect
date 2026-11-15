@@ -50,12 +50,12 @@ pub const MAX_NEEDS: u64 = 64 * 1024;
 /// The most a carried archive may be.
 pub const MAX_ARCHIVE: u64 = 16 * 1024 * 1024;
 /// The most a carried archive's stream is read for its index and manifest.
-const MAX_PEEK: u64 = 64 * 1024 * 1024;
+pub(crate) const MAX_PEEK: u64 = 64 * 1024 * 1024;
 
 /// `rel` under `root`, refusing a link at any level (`.architect` itself
 /// included): the path, when every part is a real folder and the last a
 /// real file (`file`) or folder. `Ok(None)` when it is not there.
-fn real(root: &Path, rel: &str, file: bool) -> Result<Option<PathBuf>, String> {
+pub(crate) fn real(root: &Path, rel: &str, file: bool) -> Result<Option<PathBuf>, String> {
     let mut at = root.to_path_buf();
     let parts: Vec<&str> = rel.split('/').collect();
     for (i, part) in parts.iter().enumerate() {
@@ -82,6 +82,46 @@ fn real(root: &Path, rel: &str, file: bool) -> Result<Option<PathBuf>, String> {
         }
     }
     Ok(Some(at))
+}
+
+/// Folder `rel` under `root`, made where it is missing, each part a real
+/// folder (never a link).
+///
+/// # Errors
+///
+/// A part is a link or a file, or cannot be made.
+pub(crate) fn real_dir(root: &Path, rel: &str) -> Result<PathBuf, String> {
+    let mut so_far = String::new();
+    for part in rel.split('/') {
+        if !so_far.is_empty() {
+            so_far.push('/');
+        }
+        so_far.push_str(part);
+        if real(root, &so_far, false)?.is_none() {
+            std::fs::create_dir(root.join(&so_far)).map_err(|e| format!("{so_far}: {e}"))?;
+        }
+    }
+    real(root, rel, false)?.ok_or_else(|| format!("{rel} was not made"))
+}
+
+/// Writes `bytes` as file `rel` under `root`: its folders real (made where
+/// missing), the file itself not a link.
+///
+/// # Errors
+///
+/// A part is a link, or it cannot be written.
+pub(crate) fn real_write(root: &Path, rel: &str, bytes: &[u8]) -> Result<(), String> {
+    let (dir, name) = rel
+        .rsplit_once('/')
+        .ok_or_else(|| format!("{rel}: no folder"))?;
+    let dir = real_dir(root, dir)?;
+    let at = dir.join(name);
+    if std::fs::symlink_metadata(&at).is_ok_and(|m| !m.is_file()) {
+        return Err(format!(
+            "{rel} is a link or not a file; it is not written through"
+        ));
+    }
+    std::fs::write(&at, bytes).map_err(|e| format!("{rel}: {e}"))
 }
 
 /// The extensions the vault at `root` names: none when it names none.

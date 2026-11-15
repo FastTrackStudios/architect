@@ -4462,6 +4462,132 @@ file (see "A share link's extensions").
 
 Tests: `features/extensions/tests/vault_needs.rs`.
 
+### A person's installs on all their devices
+
+What a person trusted and installed on one device installs on their
+others with the same grants and no new prompt, and what they removed or
+revoked goes there too (#683's decision). Their record is in the vault's
+own folder, which syncs: `.architect/people/<account id>/extensions.toml`
+(`features/extensions/src/person_sync.rs` `PersonInstalls`), **signed by
+the device that wrote it** (`extensions.toml.minisig`).
+
+- **Who it is from.** Each device has a key of its own (`DeviceKeys`:
+  `<app dir>/device-key`). A device applies a record only when it is
+  signed by its own key or by one of the person's devices it trusts; the
+  person says so once a device ("It's mine: trust it", `DeviceKeys::trust`).
+  A record anyone else wrote, or an unsigned one, is refused and nothing
+  of it applies (`RecordError`). A node also refuses anyone but the person a
+  write under `.architect/people/<id>/`
+  (`features/vault/vault-live/src/write_guard.rs` `ExtensionPaths`).
+- **What it says.** Each entry is the last word on its id (`at_ms`): its
+  version, pin, signer, archive (in `.architect/extensions/`, its SHA-256
+  pinned), grants, or that it was removed. Each install, removal or revoke
+  made here is published at once (`Extensions::sync_person`,
+  `on_installs_changed`); `Extensions::apply_installs` applies the entries
+  newer than this device's own last word.
+- **The same rules on every device.** The archive the entry pins, at most
+  16 MB, no link followed, signed by the key the person's own device named;
+  no downgrade, no step past a pin; grants written only once it installed.
+- **Actions.** `EXT_INSTALLS_APPLY` and `EXT_INSTALLS_PUBLISH` act for the
+  signed-in person only: the app's own call or that person's; anyone else
+  is refused.
+
+Other people (the vault's other members, a share's guests) are not in a
+person's record: grants never transfer. They get the vault's (or link's)
+needs list and are prompted once.
+
+The sync client's local index keeps `.architect/` (only that top-level
+dot-folder: `vault_sync_client::SYNCED_DOT`), and vault-live's manifest
+lists it; both are tested (`features/vault/vault-sync-client/src/lib.rs`,
+`features/vault/vault-live/src/sync.rs`).
+
+Tests: `features/extensions/tests/person_sync.rs`.
+
+### A share link's extensions
+
+A share link's guests run what the owner chose for that link, not the
+vault's list: a shared recipe opens in the meal-plan extension's view. It
+is kept beside the share's note, as its comments are, in
+`_architect/shares/<code>.extensions.toml`
+(`features/extensions/src/share_needs.rs`), so it syncs with the share and
+the node serves it with it. The share's record (`architect-spaces`
+`Share`) is unchanged: that crate does not depend on this one, and the
+file reuses `Requirements` as it is.
+
+```toml
+[[extensions]]               # the link's Requirements
+id = "health.meal-plan"
+name = "Meal plan"
+version = "^1.2"
+
+[[extensions]]
+id = "setlist"               # no package: the distribution's linked core
+required = false
+
+[[packages]]                 # signed archives in _architect/shares/<code>.extensions/
+id = "health.meal-plan"
+version = "1.2.0"
+archive = "health.meal-plan-1.2.0.archext"
+sha256 = "…"
+
+[hosts]                      # what the owner lets each fetch, of what it asks
+"health.meal-plan" = ["api.example.com"]
+```
+
+An audience's link has a file of its own, or takes its share's
+(`share_needs::file_for`).
+
+**The owner** chooses when sharing: `EXT_SHARE_NEEDS_SET {folder, code,
+extensions: [{id, required?, hosts?}]}` (`Extensions::set_share_needs`).
+A built-in comes from the guest's linked core; an installed one is copied
+in as its signed archive from its registry, verified, its SHA-256 pinned.
+A development copy or an unsigned install is refused (guests take signed
+packages only), and so is a host its manifest does not ask for.
+`EXT_SHARE_NEEDS {folder, code}` reads it back.
+
+**The guest host** (the web app's, G1; iOS's; the desktop's) calls the
+model, which is wasm-clean (`verify_package` with feature `archive`):
+
+1. `LinkNeeds::from_toml(text)`: the link's file, checked (at most 64 KB,
+   each id once, packages only for named ids at a version their range
+   takes, plain `.archext` names, a SHA-256 each, no host `*`).
+2. `plan_link(&needs, &here)`, with `here` the guest's running ids and
+   versions (its linked core's among them): `ready`, `fetch` (each
+   requirement with its package), `missing` (`NotInCore`); `prompt()` is
+   "This link uses Meal plan". One consent for `fetch`, as for a vault.
+3. For each package, its bytes (from the node's `/s/<code>/…` route for
+   `packages_dir(code)/<archive>`, or a peer): `verify_package(&bytes,
+   &needs, &package, &trust, platform)`, with `trust` the org key and the
+   share owner's publishers. It checks the pinned SHA-256, the signature
+   and every file, the id and version, and `platforms`; it answers the
+   manifest, the verified files and the guest capabilities.
+4. Run it within `guest_capabilities(&manifest.capabilities,
+   needs.hosts_of(id))`: read-only `ShareGuest` documents of the share and
+   the selection, notifications, prompts, menus and badges; no writes, no
+   actions past its own, no folders, ports, language servers or peer
+   connections; `fetch` only to the approved hosts it also asks for. Refuse
+   `[[secrets]]` outright.
+
+**Who writes it.** Only the share's owner: the node's write guard
+(`features/vault/vault-live/src/write_guard.rs` `ExtensionPaths`, installed
+by the node over its shares) refuses any other account a write to
+`<code>.extensions.toml` or `<code>.extensions/`. Reads and writes on the
+owner's device follow no link and check sizes before reading
+(`vault_needs::real`).
+
+**What the guest host must hold to** (G1):
+
+- the `documents` a guest's extension reads are the share's, read-only
+  (`ShareGuest`), never the vault's;
+- it takes no trust from the vault's files: `trust` for `verify_package`
+  is the org key and the keys the guest host itself holds for the share's
+  owner, never a key named in the link's file or the vault;
+- the consent is the guest's own, per person; nothing from the owner's
+  grants carries over.
+
+Tests: `features/extensions/tests/share_needs.rs`,
+`features/vault/vault-live/src/write_guard.rs`.
+
 ## On each platform
 
 | | Data | WASM | Scripts | Processes |

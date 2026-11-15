@@ -221,7 +221,8 @@ impl ItemKind for ExtensionKind {
             }
             "revoke" => {
                 let g = ext.host().grants().ok_or("this app keeps no consent")?;
-                let revoked = g.revoke(id, None);
+                let _ = g;
+                let revoked = ext.revoke(id, None);
                 ext.host().grants_changed(id);
                 Ok(json!({ "revoked": revoked }))
             }
