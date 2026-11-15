@@ -242,11 +242,7 @@ impl VaultSource {
                 }
             }
             FileOp::Move { from, to } => {
-                let note = |p: &str| {
-                    std::path::Path::new(p)
-                        .extension()
-                        .is_some_and(|e| e.eq_ignore_ascii_case("md"))
-                };
+                let note = vault_proto::note_types::is_note_path;
                 if note(from) && note(to) {
                     self.rename(from, to)?;
                 } else {
@@ -548,10 +544,10 @@ pub fn note_from_text(path: &str, text: &str, created: Millis, modified: Millis)
     let (folder, name) = path.rsplit_once('/').unwrap_or(("", path));
     let page = VaultPage {
         rel_path: path.to_owned(),
-        basename: name.strip_suffix(".md").unwrap_or(name).to_owned(),
+        basename: vault_proto::note_types::note_stem(name).to_owned(),
         folder: folder.to_owned(),
         raw: text.to_owned(),
-        parsed: vault::obsidian::obsidian_parse::parse_page(text),
+        parsed: vault::obsidian::obsidian_parse::parse_note(path, text),
         mtime: SystemTime::UNIX_EPOCH,
         generation: vault::obsidian::next_generation(),
     };

@@ -357,13 +357,12 @@ fn path_receivers()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// The app's opener of a path no extension claims: a Markdown note, sent to
+/// The app's opener of a path no extension claims: a note (`.md`, or a
+/// declared file type's), sent to
 /// the newest Vault view still open.
 fn open_by_path(path: &str) -> Result<serde_json::Value, String> {
-    let markdown = std::path::Path::new(path)
-        .extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("md"));
-    if !markdown {
+    // A note: `.md`, or a file type an extension declared (`[[file_types]]`).
+    if !vault::note_types::is_note_path(path) {
         return Err(format!("nothing opens {path}"));
     }
     let tx = {
@@ -1306,10 +1305,8 @@ const FILES: [(&str, &str); 16] = [
 
 /// The note a file is (its pane id and title), if the lab draws it.
 fn note_of(path: &str) -> Option<(String, String)> {
-    let markdown = std::path::Path::new(path)
-        .extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("md"));
-    if !markdown {
+    // A note: `.md`, or a file type an extension declared (`[[file_types]]`).
+    if !vault::note_types::is_note_path(path) {
         return None;
     }
     if let Some((id, _)) = FILES.iter().find(|(_, p)| *p == path) {
@@ -2660,11 +2657,14 @@ fn VaultNote(path: String) -> Element {
     // draws instead. While the list draws, its own rows (`sets`, `songs`,
     // …) leave the Properties bar and its listing fences fold.
     let fields = architect_media::front::fields(&block());
+    // Its `type`, else its declared file type's (a `.cook` file reads as
+    // `recipe`, `vault::note_types`).
     let note_type = fields
         .get("type")
         .and_then(serde_json::Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
+        .map(str::to_owned)
+        .or_else(|| vault::note_types::note_type_of(&here))
+        .unwrap_or_default();
     let is_list = architect_media::Collection::read(&fields).is_some();
     let claimed = !note_type.is_empty()
         && try_consume_context::<architect_extensions::interface::ExtensionUi>().is_some_and(

@@ -28,7 +28,7 @@ impl PageName {
     /// From a vault-relative path (`Concepts/Ionian.md`).
     #[must_use]
     pub fn of(path: &str) -> Self {
-        let stem_path = path.strip_suffix(".md").unwrap_or(path).to_owned();
+        let stem_path = vault_proto::note_types::note_stem(path).to_owned();
         let basename = stem_path
             .rsplit('/')
             .next()
@@ -43,7 +43,7 @@ impl PageName {
     /// Whether a link target names this page.
     fn named_by(&self, target: &str) -> bool {
         let t = target.trim();
-        let t = t.strip_suffix(".md").unwrap_or(t);
+        let t = vault_proto::note_types::note_stem(t);
         t.eq_ignore_ascii_case(&self.basename) || t.eq_ignore_ascii_case(&self.stem_path)
     }
 
@@ -51,7 +51,7 @@ impl PageName {
     /// by path when it named the old one by path, else by basename.
     fn spelled_like(&self, old: &PageName, target: &str) -> String {
         let t = target.trim();
-        let t = t.strip_suffix(".md").unwrap_or(t);
+        let t = vault_proto::note_types::note_stem(t);
         if t.contains('/') && t.eq_ignore_ascii_case(&old.stem_path) {
             self.stem_path.clone()
         } else {

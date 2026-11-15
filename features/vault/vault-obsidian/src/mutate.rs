@@ -10,7 +10,7 @@
 use std::path::{Component, Path, PathBuf};
 
 use crate::obsidian_parse::{
-    FrontmatterEntry, parse_frontmatter, parse_page, serialize_frontmatter,
+    FrontmatterEntry, parse_frontmatter, parse_note, serialize_frontmatter,
 };
 
 use crate::guard::SelfWriteGuard;
@@ -115,7 +115,7 @@ pub fn create_page(
     vault_live::mutate::write_atomic(&abs, raw.as_bytes()).map_err(MutateError::Io)?;
     guard.mark(&abs);
 
-    let parsed = parse_page(&raw);
+    let parsed = parse_note(rel_path, &raw);
     let (folder, basename) = split_rel(rel_path);
     let mtime = mtime_of(&abs);
     let page = VaultPage {

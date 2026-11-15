@@ -2749,7 +2749,7 @@ impl NavigatorState {
         }
         paths
             .iter()
-            .find(|p| !self.index.file(p).is_some_and(NoteFile::is_markdown))
+            .find(|p| !self.index.file(p).is_some_and(NoteFile::is_note))
             .map_or(Ok(()), |p| {
                 Err(format!(
                     "{p} is not a note: only notes have tags and properties"
@@ -3346,7 +3346,7 @@ impl NavigatorState {
         let mut out: Vec<String> = self
             .all
             .files()
-            .filter(|f| f.is_markdown())
+            .filter(|f| f.is_note())
             .filter(|f| folder.is_empty() || f.path.starts_with(&format!("{folder}/")))
             .map(|f| f.path.clone())
             .collect();
@@ -3425,7 +3425,7 @@ impl NavigatorState {
         let mut order: Vec<String> = self
             .list_order()
             .into_iter()
-            .filter(|p| self.index.file(p).is_some_and(NoteFile::is_markdown))
+            .filter(|p| self.index.file(p).is_some_and(NoteFile::is_note))
             .map(str::to_owned)
             .collect();
         let selected = self.selection.files();

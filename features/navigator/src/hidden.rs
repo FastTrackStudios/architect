@@ -550,8 +550,8 @@ impl Hidden {
     pub fn hides_file(&self, f: &NoteFile) -> bool {
         !self.visibility.shows(f.extension())
             || self.hides_folder(f.folder())
-            || (f.is_markdown() && self.properties.hides(f))
-            || (f.is_markdown() && f.tags.iter().any(|t| self.file_tags.hides(t)))
+            || (f.is_note() && self.properties.hides(f))
+            || (f.is_note() && f.tags.iter().any(|t| self.file_tags.hides(t)))
             || self.names.hides(f)
     }
 

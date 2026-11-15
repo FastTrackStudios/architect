@@ -32,6 +32,10 @@ pub use vault_proto::{
 /// distinguishable when both features are on.
 pub use vault_proto::VaultEvent as SyncEvent;
 
+/// Which files are notes: `.md` and the file types extensions declare
+/// (`[[file_types]]`), registered process-wide.
+pub use vault_proto::note_types;
+
 // architect-emitted vox bits (client, server bridge, descriptor,
 // mount verb). Gated behind the facade's `vox` feature, which
 // propagates to vault-proto.
