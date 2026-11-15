@@ -1637,6 +1637,7 @@ dependencies = [
  "architect",
  "architect-cookbook",
  "architect-extensions",
+ "architect-navigator",
  "architect-settings",
  "architect-workspace-hack",
  "chrono",
@@ -1651,6 +1652,9 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
+ "vault",
+ "vault-proto",
+ "vault-query",
  "vox",
 ]
 
