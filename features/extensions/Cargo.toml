@@ -71,6 +71,9 @@ linked = ["host", "linked-core"]
 linked-core = ["dep:dioxus"]
 ui = [
     "host",
+    # The clipboard on iOS: the general pasteboard (src/hostui.rs).
+    "dep:objc2-ui-kit",
+    "dep:objc2-foundation",
     "linked",
     "dep:dioxus",
     "dep:futures",
@@ -359,6 +362,7 @@ objc2-ui-kit = { workspace = true, optional = true, default-features = false, fe
     "UIDocumentPickerViewController",
     "UIImage",
     "UIImagePickerController",
+    "UIPasteboard",
     "UINavigationController",
     "UIResponder",
     "UIScene",
