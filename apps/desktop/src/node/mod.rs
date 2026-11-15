@@ -303,6 +303,108 @@ pub async fn start_with_shell(
     islands: Vec<architect_sites::SiteIsland>,
     favourites: Vec<architect_favourites::Listed>,
 ) -> Result<Running, StartError> {
+    let parts = Parts {
+        blocks: given,
+        layers,
+        islands,
+        favourites,
+        account: None,
+    };
+    Box::pin(start_parts(config, parts)).await
+}
+
+/// What a node is given besides its [`Config`]: what its distribution
+/// draws and places ([`Parts::of`]), and who it is on the account when
+/// the configuration names no session file (the window's signed-in
+/// account).
+#[derive(Default)]
+pub struct Parts {
+    /// The fences its compiled-in extensions claim ([`start_with`]).
+    pub blocks: architect_sites::Blocks,
+    /// Its compiled-in extensions' share layers ([`start_with_layers`]).
+    pub layers: Vec<architect_sites::ShareLayersDecl>,
+    /// Its linked-in islands ([`start_with_islands`]).
+    pub islands: Vec<architect_sites::SiteIsland>,
+    /// Note types' favourites ([`start_with_shell`]).
+    pub favourites: Vec<architect_favourites::Listed>,
+    /// Who it is on the account, when [`Config::issuer`] and
+    /// [`Config::session_file`] do not say: those win when set.
+    pub account: Option<AccountSource>,
+}
+
+impl Parts {
+    /// What `dist`'s compiled-in extensions give a node run on `config`
+    /// (their packages under `<data dir>/linked`).
+    #[must_use]
+    pub fn of(dist: &architect_distribution::Distribution, config: &Config) -> Self {
+        Self {
+            blocks: dist.blocks(&config.data_dir.join("linked")),
+            layers: dist.share_layers(),
+            islands: dist.islands(),
+            favourites: dist.favourites(),
+            account: None,
+        }
+    }
+
+    /// The same, on the account as `account`.
+    #[must_use]
+    pub fn with_account(mut self, account: AccountSource) -> Self {
+        self.account = Some(account);
+        self
+    }
+}
+
+/// Who a node is on the account: an issuer's origin and a session token.
+///
+/// Asked again at each use, so a sign-in, a sign-out or a switch
+/// of account is followed with nothing to restart. `None` while nobody is
+/// signed in.
+#[derive(Clone)]
+pub struct AccountSource(Arc<dyn Fn() -> Option<(String, String)> + Send + Sync>);
+
+impl AccountSource {
+    /// Asks `now` each time.
+    pub fn new(now: impl Fn() -> Option<(String, String)> + Send + Sync + 'static) -> Self {
+        Self(Arc::new(now))
+    }
+
+    /// [`Config::issuer`] and the token in [`Config::session_file`], when
+    /// both are set (a server's, the local stack's).
+    #[must_use]
+    pub fn of_config(config: &Config) -> Option<Self> {
+        let (issuer, file) = (config.issuer.clone()?, config.session_file.clone()?);
+        Some(Self::new(move || {
+            read_secret(&file).map(|token| (issuer.clone(), token))
+        }))
+    }
+
+    /// The issuer and the session, now.
+    #[must_use]
+    pub fn now(&self) -> Option<(String, String)> {
+        (self.0)()
+    }
+}
+
+impl std::fmt::Debug for AccountSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AccountSource")
+    }
+}
+
+/// The node `config` describes, with `parts`: [`start`] and its
+/// siblings, the window's node and `serve` all start through here.
+///
+/// # Errors
+///
+/// [`StartError`]: the data dir, the iroh endpoint or the HTTP listener.
+pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartError> {
+    let Parts {
+        blocks: given,
+        layers,
+        islands,
+        favourites,
+        account,
+    } = parts;
     let data = &config.data_dir;
     // An installed extension draws over a compiled-in one claiming the
     // same fence, as its development copy does in the app.
@@ -362,13 +464,19 @@ pub async fn start_with_shell(
     // ── Who it lets in, and its lanes over iroh ───────────────────────
     let admission = Admission::new();
     keep_devices(data, &admission);
-    let token = config.session_file.as_deref().and_then(read_secret);
-    let node_org = match (config.vault_org(), &config.issuer, &token) {
-        (Some(slug), Some(issuer), Some(token)) => node_org(data, issuer, token, slug).await,
-        (Some(slug), _, _) => org::remembered(data, slug),
+    // The configuration's session first; else the one the node is given.
+    let account = AccountSource::of_config(&config).or(account);
+    let signed = account.as_ref().and_then(AccountSource::now);
+    let issuer = config
+        .issuer
+        .clone()
+        .or_else(|| signed.as_ref().map(|(issuer, _)| issuer.clone()));
+    let node_org = match (config.vault_org(), &signed) {
+        (Some(slug), Some((issuer, token))) => node_org(data, issuer, token, slug).await,
+        (Some(slug), _) => org::remembered(data, slug),
         _ => None,
     };
-    let lane = match (&node_org, &config.issuer) {
+    let lane = match (&node_org, &issuer) {
         (Some(org), Some(issuer)) => Some(
             org::OrgLane::new(org.clone(), &admission, issuer)
                 .with_recheck(Duration::from_secs(config.lane_recheck_secs.max(1)))
@@ -441,11 +549,11 @@ pub async fn start_with_shell(
 
     // ── The account ──────────────────────────────────────────────────
     let every = Duration::from_secs(config.sweep_secs.max(1));
-    if let (Some(issuer), Some(session)) = (&config.issuer, &config.session_file) {
+    if let Some(account) = &account {
         let me = ThisDevice {
             device_id: device_id(data)?,
             name: config.name.clone(),
-            platform: "server".to_owned(),
+            platform: config.platform.clone(),
             relay_url: None,
             retire: None,
         };
@@ -454,8 +562,7 @@ pub async fn start_with_shell(
             offer: config.org.as_deref().map(offered_org),
         };
         tasks.push(tokio::spawn(keep_on_account(
-            issuer.clone(),
-            session.clone(),
+            account.clone(),
             me,
             node,
             state.clone(),
@@ -466,7 +573,7 @@ pub async fn start_with_shell(
     }
 
     // ── Enrolling itself in an org another node hosts ────────────────
-    if let (Some(at), Some(lane), Some(session)) = (&config.enrol_at, &lane, &config.session_file) {
+    if let (Some(at), Some(lane), Some(account)) = (&config.enrol_at, &lane, &account) {
         let marker = org::enrolled_marker(data);
         if marker.exists() {
             tracing::debug!("enrolled before: not enrolling again");
@@ -477,10 +584,11 @@ pub async fn start_with_shell(
                 role: architect_orgs::Role::parse(&config.enrol_role),
                 endpoint: endpoint_id.clone(),
                 name: config.name.clone(),
+                platform: config.platform.clone(),
             };
             tasks.push(tokio::spawn(enrol_until_done(
                 enrol,
-                session.clone(),
+                account.clone(),
                 marker,
                 admission.clone(),
                 every,
@@ -556,7 +664,7 @@ pub async fn start_with_shell(
         backend.clone(),
         data,
         node_org.clone(),
-        config.issuer.as_deref(),
+        issuer.as_deref(),
         blocks.clone(),
         share_layers,
     )
@@ -832,12 +940,9 @@ pub fn main(
     for t in dist.file_types() {
         t.register();
     }
-    let blocks = dist.blocks(&config.data_dir.join("linked"));
-    let layers = dist.share_layers();
-    let islands = dist.islands();
-    let favourites = dist.favourites();
+    let parts = Parts::of(dist, &config);
     runtime.block_on(async move {
-        match start_with_shell(config, blocks, layers, islands, favourites).await {
+        match start_parts(config, parts).await {
             Ok(running) => {
                 let _ = writeln!(
                     std::io::stdout(),
@@ -950,15 +1055,15 @@ fn keep_devices(data: &Path, admission: &Admission) {
 /// Enrol at the hosting node until it answers, then leave the marker.
 async fn enrol_until_done(
     enrol: org::EnrolAt,
-    session: PathBuf,
+    account: AccountSource,
     marker: PathBuf,
     admission: Admission,
     retry: Duration,
 ) {
     loop {
-        let outcome = match read_secret(&session) {
-            Some(token) => org::enrol_once(&enrol, &token, &admission).await,
-            None => Err("no session in the session file".to_owned()),
+        let outcome = match account.now() {
+            Some((_, token)) => org::enrol_once(&enrol, &token, &admission).await,
+            None => Err("no session".to_owned()),
         };
         match outcome {
             Ok(peer) => {
@@ -1047,18 +1152,23 @@ fn offered_org(slug: &str) -> AccountOrg {
 /// The account pass, now and again: this node in the address book, the
 /// account's other devices let in.
 async fn keep_on_account(
-    issuer: String,
-    session: PathBuf,
+    source: AccountSource,
     me: ThisDevice,
     node: OnAccount,
     state: NodeState,
     retry: Duration,
 ) {
     let pool = architect::connect::Pool::new();
-    let target = architect::connect::Endpoint::url(vox_url(&issuer));
     loop {
+        // Asked each pass: the window's account may sign in, out or change.
+        let Some((issuer, token)) = source.now() else {
+            architect::lock(&state.account).signed_in = false;
+            tracing::debug!("no session: the node is on no account until one signs in");
+            tokio::time::sleep(retry).await;
+            continue;
+        };
+        let target = architect::connect::Endpoint::url(vox_url(&issuer));
         let outcome = async {
-            let token = read_secret(&session).ok_or("no session in the session file")?;
             let devices: auth_proto::DeviceServiceClient =
                 pool.client(&target).await.map_err(|e| e.to_string())?;
             account::pass(&devices, &token, &me, &node, &state.admission)

@@ -24,6 +24,7 @@ default = ["gui", "vox"]
 vox = []
 gui = [
     "dep:architect-app",
+    "dep:architect-accounts",
     "dep:architect-control",
     "dep:architect-guide",
     "dep:architect-shell",
@@ -49,6 +50,9 @@ node-wasi = ["architect-sites/wasi"]
 
 [dependencies]
 architect-app = { workspace = true, optional = true }
+# The window's node is on the account as the app's signed-in account: its
+# folder's accounts file and its secret store (the keychain in a release).
+architect-accounts = { workspace = true, features = ["keychain"], optional = true }
 # Its Action List from the command line (`architect-desktop actions …`) and
 # its control socket; MCP on stdio, bridged onto that socket or headless.
 architect-control = { workspace = true, features = ["server", "cli"], optional = true }

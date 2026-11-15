@@ -873,9 +873,12 @@ pub struct EnrolAt {
     /// This node's endpoint id and name.
     pub endpoint: String,
     pub name: String,
+    /// Its platform ([`super::Config::platform`]: `server`, or the
+    /// machine's in the window).
+    pub platform: String,
 }
 
-/// Enrol this node at the hosting node, as a `server` device with
+/// Enrol this node at the hosting node, as a device of its platform with
 /// `enrol.role`, using `token`; then let that node in as the org's.
 ///
 /// # Errors
@@ -905,7 +908,7 @@ pub async fn enrol_once(
         .enrol(Enrolment {
             endpoint: enrol.endpoint.clone(),
             name: enrol.name.clone(),
-            platform: "server".to_owned(),
+            platform: enrol.platform.clone(),
             role: enrol.role.clone(),
         })
         .await
