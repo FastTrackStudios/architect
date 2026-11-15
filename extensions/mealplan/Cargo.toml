@@ -46,6 +46,11 @@ architect-settings = { workspace = true }
 # The Cookbook linked in beside it, as the app does: the recipes'
 # ingredients it builds a grocery list from.
 architect-cookbook = { workspace = true }
+# The showcase vault on disk: its documents and its index.
+architect-navigator = { workspace = true, features = ["documents"] }
+vault = { workspace = true, features = ["actions"] }
+vault-proto = { workspace = true }
+vault-query = { workspace = true }
 futures = "0.3"
 tempfile = "3"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
