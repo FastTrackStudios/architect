@@ -48,9 +48,32 @@ effect = "destructive"
 reads = ["documents"]
 writes = ["documents"]
 
+[[views]]
+id = "week"
+title = "Meal plan"
+icon = "utensils"
+
+[[views]]
+id = "pantry"
+title = "Pantry"
+icon = "archive"
+
+[[views]]
+id = "groceries"
+title = "Groceries"
+icon = "shopping-cart"
+
+[[actions]]
+id = "MEALPLAN_OPEN"
+name = "Open the meal plan"
+description = "Opens the week's meals (`view` week, the default), the pantry and substitutions (`view` pantry) or the grocery list (`view` groceries)."
+group = "Mealplan"
+effect = "read_only"
+params = '{"type":"object","properties":{"view":{"type":"string","enum":["week","pantry","groceries"]}}}'
+
 [[actions]]
 id = "MEALPLAN_WEEK"
-name = "Mealplan: the week"
+name = "The week"
 description = "The meals planned for the week of `week` (2026-W47) or of `date` (YYYY-MM-DD; this week by default): its note's path, and each day (date, weekday) with its meals (date, meal: breakfast, lunch, dinner or snack, recipe: a .cook file's vault path, name, servings, note, event)."
 group = "Mealplan"
 effect = "read_only"
@@ -58,7 +81,7 @@ params = '{"type":"object","properties":{"week":{"type":"string"},"date":{"type"
 
 [[actions]]
 id = "MEALPLAN_MEALS"
-name = "Mealplan: meals in a range"
+name = "Meals in a range"
 description = "Every meal planned on `from`..`to` (YYYY-MM-DD, `to` exclusive; at most 62 days; the coming week by default), by date and meal."
 group = "Mealplan"
 effect = "read_only"
@@ -66,7 +89,7 @@ params = '{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"
 
 [[actions]]
 id = "MEALPLAN_PLAN"
-name = "Mealplan: plan a meal"
+name = "Plan a meal"
 description = "Plans recipe `recipe` (a .cook file's path or a recipe's name) for `meal` (breakfast, lunch, dinner, snack; dinner by default) on `date` (today by default), for `servings` (mealplan.servings by default), with a `note`. Written to the week's note, Meal plans/<YYYY-Www>.md. One undo step. The week."
 group = "Mealplan"
 effect = "mutating"
@@ -74,7 +97,7 @@ params = '{"type":"object","properties":{"date":{"type":"string"},"meal":{"type"
 
 [[actions]]
 id = "MEALPLAN_UNPLAN"
-name = "Mealplan: unplan a meal"
+name = "Unplan a meal"
 description = "Takes `date`'s `meal` off the plan (`recipe` says which when it has more than one), and its calendar event with it. One undo step. The week."
 group = "Mealplan"
 effect = "mutating"
@@ -82,7 +105,7 @@ params = '{"type":"object","properties":{"date":{"type":"string"},"meal":{"type"
 
 [[actions]]
 id = "MEALPLAN_MOVE_MEAL"
-name = "Mealplan: move a meal"
+name = "Move a meal"
 description = "Moves `date`'s `meal` (`recipe` says which when it has more than one) to `to_date` and `to_meal` (each its own by default), across weeks too; its calendar event follows. The week it went to."
 group = "Mealplan"
 effect = "mutating"
@@ -90,7 +113,7 @@ params = '{"type":"object","properties":{"date":{"type":"string"},"meal":{"type"
 
 [[actions]]
 id = "MEALPLAN_SCHEDULE"
-name = "Mealplan: put a meal on the day"
+name = "Put a meal on the day"
 description = "Task's `meal schedule`: gives `date`'s `meal` (`recipe` says which) the day's meal block in Day Plans (`block`, else the meal block named like the meal; DAYPLAN_ASSIGN, kind recipe), and makes it a Calendar event at `time` (HH:MM; 08:00, 12:30, 18:30, 15:00 by meal) when `event` is true or there is no block for it. Says which."
 group = "Mealplan"
 effect = "mutating"
@@ -98,7 +121,7 @@ params = '{"type":"object","properties":{"date":{"type":"string"},"meal":{"type"
 
 [[actions]]
 id = "MEALPLAN_PANTRY"
-name = "Mealplan: the pantry"
+name = "The pantry"
 description = "The pantry's items (Pantry/<Item>.md), by name: each one's path, name, qty, unit, aisle, staple, min, expires, aliases, and whether it is low (a staple under its min) or expired. `text` (in its name or aliases), `aisle`, `low` and `expired` narrow it."
 group = "Mealplan"
 effect = "read_only"
@@ -106,7 +129,7 @@ params = '{"type":"object","properties":{"text":{"type":"string"},"aisle":{"type
 
 [[actions]]
 id = "MEALPLAN_STOCK"
-name = "Mealplan: set or add stock"
+name = "Set or add stock"
 description = "Sets pantry item `name`'s stock to `qty` or adds `add` to it (in `unit`, converted to the item's own when they differ), making the item when there is none; sets `unit`, `aisle`, `staple`, `min` (a staple under it goes on the list), `expires` (YYYY-MM-DD, empty to clear) and `aliases` when given. One undo step. The item."
 group = "Mealplan"
 effect = "mutating"
@@ -114,7 +137,7 @@ params = '{"type":"object","properties":{"name":{"type":"string"},"qty":{"type":
 
 [[actions]]
 id = "MEALPLAN_REMOVE_ITEM"
-name = "Mealplan: remove a pantry item"
+name = "Remove a pantry item"
 description = "Deletes pantry item `name`'s note (to the vault's trash)."
 group = "Mealplan"
 effect = "destructive"
@@ -122,14 +145,14 @@ params = '{"type":"object","properties":{"name":{"type":"string"}},"required":["
 
 [[actions]]
 id = "MEALPLAN_SUBSTITUTIONS"
-name = "Mealplan: substitutions"
+name = "Substitutions"
 description = "The substitutions (Pantry/Substitutions.md): each one's from, to, ratio (of `to` for one of `from`), always (the list always buys `to` instead) and note. One that is not `always` is used when the pantry has enough of `to`."
 group = "Mealplan"
 effect = "read_only"
 
 [[actions]]
 id = "MEALPLAN_SUBSTITUTE"
-name = "Mealplan: add a substitution"
+name = "Add a substitution"
 description = "Adds, or changes, substitution `from` → `to` with `ratio` (1 by default), `always` and `note`. One undo step. The substitutions."
 group = "Mealplan"
 effect = "mutating"
@@ -137,7 +160,7 @@ params = '{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"
 
 [[actions]]
 id = "MEALPLAN_UNSUBSTITUTE"
-name = "Mealplan: remove a substitution"
+name = "Remove a substitution"
 description = "Removes substitution `from` → `to` (every one from `from` when `to` is not given). The substitutions."
 group = "Mealplan"
 effect = "mutating"
@@ -145,15 +168,23 @@ params = '{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"
 
 [[actions]]
 id = "MEALPLAN_GROCERIES"
-name = "Mealplan: build the grocery list"
+name = "Build the grocery list"
 description = "Builds, or refreshes, the grocery list for `week` (2026-W47), `date`'s week, or `from`..`to` (this week by default): every planned meal's recipe's ingredients from the Cookbook, scaled to its servings, nested recipes cooked out, added up with units converted, less the pantry (expired stock does not count), with substitutions applied, plus staples under their min, grouped by aisle. Written as a checklist note, Groceries/<week>.md; ticked items, and lines added by hand, are kept. One undo step. Its path, sections, items, what was substituted and the note's text."
 group = "Mealplan"
 effect = "mutating"
 params = '{"type":"object","properties":{"week":{"type":"string"},"date":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"}}}'
 
 [[actions]]
+id = "MEALPLAN_GROCERY_LIST"
+name = "The grocery list"
+description = "The grocery list of `week`, `date`'s week or `from`..`to` (this week's by default) as it is, not built again: its path, aisles and items (name, qty, unit, text, checked, own: written by hand) and the note's text."
+group = "Mealplan"
+effect = "read_only"
+params = '{"type":"object","properties":{"week":{"type":"string"},"date":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"}}}'
+
+[[actions]]
 id = "MEALPLAN_CHECK"
-name = "Mealplan: tick a grocery item"
+name = "Tick a grocery item"
 description = "Ticks item `item` (its name, or the line's text) on the grocery list of `week` (or `path`; this week's by default), or unticks it with `checked` false. `bought` true also adds its quantity to the pantry (Task's mark-purchased); without it the tick never touches stock (mark-have). One undo step. The list."
 group = "Mealplan"
 effect = "mutating"
@@ -161,7 +192,7 @@ params = '{"type":"object","properties":{"week":{"type":"string"},"path":{"type"
 
 [[actions]]
 id = "MEALPLAN_CAN_COOK"
-name = "Mealplan: can I cook it?"
+name = "Can I cook it?"
 description = "Task's `recipe can-cook`: whether the pantry has what recipe `recipe` (path or name) needs for `servings` (its own by default), substitutions counted: what it has, what is missing and how much."
 group = "Mealplan"
 effect = "read_only"
@@ -169,7 +200,7 @@ params = '{"type":"object","properties":{"recipe":{"type":"string"},"servings":{
 
 [[actions]]
 id = "MEALPLAN_STARTED"
-name = "Mealplan: started"
+name = "Mealplan started"
 description = "Called once the app has loaded it."
 group = "Mealplan"
 effect = "read_only"
