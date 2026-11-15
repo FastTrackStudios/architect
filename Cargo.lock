@@ -1142,6 +1142,7 @@ dependencies = [
  "dioxus",
  "facet",
  "futures",
+ "futures-timer",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -1278,6 +1279,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-calendar",
+ "architect-cookbook",
  "architect-dayplan",
  "architect-extensions",
  "architect-files-extension",

@@ -750,7 +750,7 @@ pub const LAB_CONFIG_ENV: &str = "ARCHITECT_LAB_CONFIG_DIR";
 /// The Architect app, with architect's first-party extensions compiled in.
 ///
 /// The person's vaults, opened or made on first run; compiled in (#368):
-/// Projects, Tasks, the Time Tracker, the Calendar, Day Plans, Threads,
+/// Projects, Tasks, the Time Tracker, the Calendar, Day Plans, the Cookbook, Threads,
 /// Notify and Files. Each runs alone; together a project's page shows its tasks and
 /// their time, a task its timer, the calendar the tasks' days.
 ///
@@ -770,6 +770,8 @@ pub fn architect() -> Distribution {
         // Day Plans (#444): day templates, their rules, each day's plan,
         // drawn under the Calendar's events.
         .linked(&architect_dayplan::DayPlans)
+        // The Cookbook bundle: recipes in Cooklang, cooked step by step.
+        .bundle(cookbook())
         // Threads and Notify (#348): comments on anything; the bell.
         .linked(&architect_threads::Threads)
         .linked(&architect_notify::Notify)
@@ -805,6 +807,12 @@ pub fn project_management() -> Bundle {
         .member(&architect_projects::Projects)
         .member(&architect_tasks::Tasks)
         .member(&architect_time_tracker::TimeTracker)
+}
+
+/// The Cookbook bundle: the Cookbook (recipes as Cooklang files).
+#[must_use]
+pub fn cookbook() -> Bundle {
+    Bundle::new("cookbook", "Cookbook").member(&architect_cookbook::Cookbook)
 }
 
 /// `extension`'s embed pages that claim a fence, its package written

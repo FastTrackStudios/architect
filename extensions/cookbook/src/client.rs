@@ -14,36 +14,44 @@ use crate::backend::Backend;
 use crate::files::Files;
 use crate::service::{CookbookError, RecipesClient};
 
-struct Held {
-    handle: Option<Handle>,
-    client: Option<RecipesClient>,
-    scope: Option<Arc<architect::resource::Scope>>,
+static HANDLE: Mutex<Option<Handle>> = Mutex::new(None);
+
+/// The client made, and the scope its service lives for.
+type Kept = Option<(RecipesClient, Arc<architect::resource::Scope>)>;
+
+// A browser's client is not `Send` (one thread): kept per thread there.
+#[cfg(not(target_family = "wasm"))]
+static KEPT: Mutex<Kept> = Mutex::new(None);
+#[cfg(target_family = "wasm")]
+thread_local! {
+    static KEPT: std::cell::RefCell<Kept> = const { std::cell::RefCell::new(None) };
 }
 
-static HELD: Mutex<Held> = Mutex::new(Held {
-    handle: None,
-    client: None,
-    scope: None,
-});
+#[cfg(not(target_family = "wasm"))]
+fn with_kept<T>(f: impl FnOnce(&mut Kept) -> T) -> T {
+    f(&mut KEPT.lock().unwrap_or_else(PoisonError::into_inner))
+}
 
-fn held() -> std::sync::MutexGuard<'static, Held> {
-    HELD.lock().unwrap_or_else(PoisonError::into_inner)
+#[cfg(target_family = "wasm")]
+fn with_kept<T>(f: impl FnOnce(&mut Kept) -> T) -> T {
+    KEPT.with(|k| f(&mut k.borrow_mut()))
 }
 
 /// The host this copy was built against: the client is made over it
 /// when first asked for.
 pub fn connect(handle: Handle) {
-    let mut h = held();
-    h.handle = Some(handle);
-    h.client = None;
-    h.scope = None;
+    *HANDLE.lock().unwrap_or_else(PoisonError::into_inner) = Some(handle);
+    with_kept(|k| *k = None);
 }
 
 /// The host's handle, for what is not the service's (opening a view, a
 /// notification).
 #[must_use]
 pub fn handle() -> Option<Handle> {
-    held().handle.clone()
+    HANDLE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
 }
 
 /// The runtime the in-process service runs on, natively.
@@ -98,21 +106,13 @@ pub async fn serve(
 ///
 /// The cookbook is not running, or the service could not be served.
 pub async fn client() -> Result<RecipesClient, CookbookError> {
-    let handle = {
-        let h = held();
-        if let Some(c) = &h.client {
-            return Ok(c.clone());
-        }
-        h.handle
-            .clone()
-            .ok_or_else(|| CookbookError::Failed("the cookbook is not running".into()))?
-    };
+    if let Some(c) = with_kept(|k| k.as_ref().map(|(c, _)| c.clone())) {
+        return Ok(c);
+    }
+    let handle =
+        handle().ok_or_else(|| CookbookError::Failed("the cookbook is not running".into()))?;
     let scope = architect::resource::Scope::new();
     let client = serve(Files::Host(handle), &scope).await?;
-    {
-        let mut h = held();
-        h.client = Some(client.clone());
-        h.scope = Some(scope);
-    }
+    with_kept(|k| *k = Some((client.clone(), scope)));
     Ok(client)
 }

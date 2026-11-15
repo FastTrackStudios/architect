@@ -29,7 +29,11 @@ the app's features and the showcase of how an extension is built
 | Time Tracker (`extensions/time-tracker`) | timers and time entries in a note's `timeEntries`, totals per task, project, day and week, a timesheet base view, a report | [Time Tracker](@/extensions/time-tracker.md) |
 | Calendar (`extensions/calendar`) | events as notes (Task's shape) with repeats and exceptions, day, week, month and agenda views with drag, tasks and tracked time on it, calendar and timeline base views | [Calendar](@/extensions/calendar.md) |
 | Day Plans (`extensions/dayplan`) | day templates (allocatable blocks, meal prep, resets, sleep), rules that pick each day's template with overrides, each day's plan with blocks given to tasks, projects and recipes, drawn under the Calendar's events | [Day Plans](@/extensions/day-plans.md) |
+| Cookbook (`extensions/cookbook`) | recipes as Cooklang files: found, read scaled, edited, cooked step by step with timers; one `Recipes` service served in process | [Cookbook](@/extensions/cookbook.md) |
 
 Projects, Tasks and the Time Tracker are the Project Management bundle
 (#375): each runs alone, and together a project's page shows its tasks
 and their time, and a task its timer.
+
+The Cookbook is the Cookbook bundle (`apps/distribution/src/lib.rs`
+`cookbook`).
