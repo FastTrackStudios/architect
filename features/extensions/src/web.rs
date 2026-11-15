@@ -548,11 +548,11 @@ impl WebHost {
                 what: format!("{request_op} is not in the browser"),
             }),
             // Secrets are kept by the native host (`crate::net::Secrets`).
-            HostRequest::Secret { .. } | HostRequest::AskSecret { .. } => {
-                Err(HostError::Unsupported {
-                    what: "secrets are not kept in the browser yet".to_owned(),
-                })
-            }
+            HostRequest::Secret { .. }
+            | HostRequest::AskSecret { .. }
+            | HostRequest::StoreSecret { .. } => Err(HostError::Unsupported {
+                what: "secrets are not kept in the browser yet".to_owned(),
+            }),
             // MIDI and OSC are the native host's (`crate::ports`): a
             // browser has no UDP, and Web MIDI is not wired yet.
             HostRequest::Ports { .. }

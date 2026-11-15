@@ -48,6 +48,13 @@ use dioxus_native::winit::platform::macos::ApplicationHandlerExtMacOS;
 use crate::host::{Popout, WindowSystem, Windows};
 use crate::model::{Rect, WindowId};
 
+/// Where an app keeps the `WAYLAND_DISPLAY` it dropped to open its window
+/// under `XWayland`.
+///
+/// `architect-desktop`'s `ARCHITECT_WEBVIEW_X11` sets it; it is put back
+/// once the event loop exists, for the processes the app starts.
+pub const RESTORE_WAYLAND_DISPLAY: &str = "ARCHITECT_RESTORE_WAYLAND_DISPLAY";
+
 /// Run `app` in a window made with `window`, pop-outs opening beside it.
 /// What `dioxus_native::launch_cfg` does for one window, with a
 /// [`Windows`] in context for every workspace host.
@@ -67,6 +74,15 @@ pub fn launch_with_fonts(
     fonts: &'static [&'static [u8]],
 ) {
     let event_loop = blitz_shell::create_default_event_loop();
+    #[cfg(target_os = "linux")]
+    if let Some(wayland) = std::env::var_os(RESTORE_WAYLAND_DISPLAY) {
+        // SAFETY: on the main thread, right after the event loop read the
+        // environment and before the app starts any thread of its own.
+        unsafe {
+            std::env::set_var("WAYLAND_DISPLAY", wayland);
+            std::env::remove_var(RESTORE_WAYLAND_DISPLAY);
+        }
+    }
     let winit_proxy = event_loop.create_proxy();
     // The main window's events go to dioxus-native's queue; the pop-outs'
     // to this one, so neither drops the other's.
@@ -647,7 +663,11 @@ impl App {
             proxy: self.own.clone(),
         };
         let os_window = Arc::clone(&window);
+        // Its own document, as the main window's is: what a native view in
+        // one of its panes hit-tests to hide under its overlays.
+        let live = crate::shot::LiveDocument::new(doc.inner.clone());
         doc.vdom.in_scope(ScopeId::ROOT, move || {
+            provide_context(live);
             if let Some(row) = popout_title_row(&os_window) {
                 provide_context(row);
             }

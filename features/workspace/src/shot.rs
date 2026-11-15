@@ -45,6 +45,29 @@ impl LiveDocument {
     pub const fn new(inner: Rc<RefCell<BaseDocument>>) -> Self {
         Self(inner)
     }
+
+    /// Whether something else is on top at window point (`x`, `y`)
+    /// (logical points): the topmost element there is neither the one
+    /// whose attribute `attr` is `value` nor inside it. A native view in
+    /// a pane (a web view, #222) asks this of its rect's points, and hides
+    /// while the app draws over it (⌘K, a menu, a popover). `None` while
+    /// the document is busy or the point is off the window.
+    #[must_use]
+    pub fn covered_at(&self, x: f32, y: f32, attr: &str, value: &str) -> Option<bool> {
+        let doc = self.0.try_borrow().ok()?;
+        let mut at = doc.element_from_point(x, y)?;
+        let name = blitz_dom::LocalName::from(attr);
+        loop {
+            let node = doc.get_node(at)?;
+            if node.attr(name.clone()) == Some(value) {
+                return Some(false);
+            }
+            match node.parent {
+                Some(parent) => at = parent,
+                None => return Some(true),
+            }
+        }
+    }
 }
 
 /// `APP_SHOT`'s arguments.

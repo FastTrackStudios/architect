@@ -1,0 +1,13 @@
+<!doctype html>
+<!-- The browser host with a frame that navigates away (test/webview.test.mjs). -->
+<meta charset="utf-8" />
+<title>webview host: leaving</title>
+<div id="pane" style="width: 390px; height: 300px"></div>
+<script type="module">
+  import { mountWebView } from '../webview-host.js';
+  window.logs = [];
+  window.view = mountWebView(document.getElementById('pane'), {
+    src: './webview-nav/index.html',
+    call: async (req) => { window.logs.push(req.text ?? req.op); return { ok: null }; },
+  });
+</script>

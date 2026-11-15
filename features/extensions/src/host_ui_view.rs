@@ -299,6 +299,8 @@ fn native_pick(owner: &str, pick: Pick) -> Asked<Option<Vec<String>>> {
         target_os = "ios"
     )
 )))]
+// The same signature as the pickers' build, which consumes `pick`.
+#[allow(clippy::needless_pass_by_value)]
 fn native_pick(owner: &str, pick: Pick) -> Asked<Option<Vec<String>>> {
     let _ = (owner, pick);
     Box::pin(async { Err(crate::hostui::unsupported("file pickers on this platform")) })

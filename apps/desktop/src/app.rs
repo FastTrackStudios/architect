@@ -279,6 +279,32 @@ fn Window() -> Element {
     rsx! { LabApp {} }
 }
 
+/// `ARCHITECT_WEBVIEW_X11=1` on Linux, in a build with feature `webview`:
+/// the window opens under `XWayland` (#222: `WebKitGTK` embeds a child web
+/// view only in an X11 window; `docs/content/architecture/embedded-views.md`,
+/// "Web views"). Only when the run opens the window, first thing: the node,
+/// the CLI and MCP never change. `WAYLAND_DISPLAY` is dropped for the
+/// event loop's creation alone and put back for the processes the app
+/// starts (`architect_workspace::native::RESTORE_WAYLAND_DISPLAY`).
+#[allow(clippy::missing_const_for_fn)]
+fn xwayland_for_web_views() {
+    #[cfg(all(target_os = "linux", feature = "webview"))]
+    if std::env::var_os("ARCHITECT_WEBVIEW_X11").is_some_and(|v| v != "0")
+        && std::env::var_os("DISPLAY").is_some()
+        && let Some(wayland) = std::env::var_os("WAYLAND_DISPLAY")
+    {
+        // SAFETY: the first thing `run` does, on the main thread, before
+        // any thread exists.
+        unsafe {
+            std::env::set_var(
+                architect_workspace::native::RESTORE_WAYLAND_DISPLAY,
+                wayland,
+            );
+            std::env::remove_var("WAYLAND_DISPLAY");
+        }
+    }
+}
+
 /// The whole of a desk binary's `main`: the app `distribution` is.
 ///
 /// The Action List's CLI, MCP, the headless app, the node (`serve`, with
@@ -288,8 +314,16 @@ fn Window() -> Element {
 /// opens (`Distribution::adopt_folder`).
 #[must_use]
 pub fn run(distribution: Distribution) -> ExitCode {
-    let dist = distribution.install();
     let first = std::env::args().nth(1);
+    // Only when this run opens the window (no command, or a launch flag),
+    // and before anything starts a thread.
+    if first
+        .as_deref()
+        .is_none_or(|a| a.starts_with("--") && a != "--headless")
+    {
+        xwayland_for_web_views();
+    }
+    let dist = distribution.install();
     match first.as_deref() {
         Some("actions") => return cli().main(std::env::args_os().skip(1)),
         Some("mcp") => {

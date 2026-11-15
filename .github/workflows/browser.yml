@@ -5,7 +5,9 @@ name: browser
 # and app-guest-content.test.mjs, #646: `/s/<code>/` is the app's page from
 # the node), the web app's extension frame host against hostile bundles
 # (apps/web/test/app-ext-host.test.mjs, #495: the release bundle behind a
-# front that sends `/_ext/` to the node), and the web app's bottom slots
+# front that sends `/_ext/` to the node), the web view kind's frame host
+# (features/extensions/web/test/webview.test.mjs, #222: a hostile web view
+# app in its sandboxed frame, one that navigates away), and the web app's bottom slots
 # following the open note's type (apps/web/test/app-favourites.test.mjs,
 # #607). After a merge to main, nightly,
 # and by hand on any branch.
@@ -77,3 +79,7 @@ jobs:
           test -d target/web-bundle/app || bash scripts/web-bundle.sh target/web-bundle
           ARCHITECT_ISLAND_NODE="$CARGO_TARGET_DIR/debug/examples/island_node" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" \
             env -u LD_LIBRARY_PATH "$NODE" --test --test-concurrency=1 apps/web/test/app-favourites.test.mjs
+      - name: the web view kind's frame host against hostile web view apps
+        if: ${{ !cancelled() }}
+        run: |
+          env -u LD_LIBRARY_PATH "$NODE" --test --test-concurrency=1 features/extensions/web/test/webview.test.mjs

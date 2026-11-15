@@ -34,6 +34,16 @@ pub const DIOXUS: &str = "dioxus";
 /// surface or a chart draws through it.
 pub const PAINT: &str = "paint";
 
+/// The web view kind (#222): an extension's own HTML, CSS and JS in a pane.
+///
+/// Its package's files, in a native web view clipped to the pane on a desk
+/// (wry; `WKWebView` on iOS) and a sandboxed `<iframe>` in a browser. Its code is
+/// untrusted: it reaches the app only through the host bridge, every call
+/// checked against the extension's capabilities
+/// (`architect-extensions`' `webview`). The app registers it
+/// ([`KindSpec::web`]) when it links a web view host.
+pub const WEB: &str = "web";
+
 /// A kind's id: `"dioxus"`, `"paint"`, `"frame.surface"`, `"genui"`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct KindId(pub String);
@@ -363,6 +373,23 @@ impl KindSpec {
             .capability(Capability::Actions)
     }
 
+    /// The [`WEB`] kind: a pane (a tab, a dock, a float, a pop-out) on a
+    /// desk's window and in a browser; it takes input in its own
+    /// document, runs actions only through its bridge, and is untrusted.
+    /// An app that hosts it on one of the two only registers
+    /// `KindSpec::new(WEB, …)` with that host.
+    #[must_use]
+    pub fn web() -> Self {
+        Self::new(WEB, "architect")
+            .host(ViewHost::Blitz)
+            .host(ViewHost::Web)
+            .placement(Placement::Pane)
+            .capability(Capability::Input)
+            .capability(Capability::Ime)
+            .capability(Capability::Actions)
+            .capability(Capability::Untrusted)
+    }
+
     /// The [`PAINT`] kind for a host that mounts a WebGL2 paint canvas.
     /// The host must forward input and schedule frames itself.
     #[must_use]
@@ -629,6 +656,33 @@ mod tests {
                 .is_ok()
         );
         assert!(ViewKinds::empty().ids().is_empty());
+    }
+
+    #[test]
+    fn the_web_kind_is_an_untrusted_pane_on_a_desk_and_in_a_browser() {
+        let mut kinds = ViewKinds::new();
+        kinds.register(KindSpec::web()).expect("register");
+        let w = kinds
+            .resolve_for(WEB, ViewHost::Blitz, Placement::Pane)
+            .expect("a desk pane");
+        assert!(w.capabilities.has(Capability::Untrusted));
+        assert!(!w.capabilities.has(Capability::Document));
+        assert!(
+            kinds
+                .resolve_for(WEB, ViewHost::Web, Placement::Pane)
+                .is_ok()
+        );
+        // Never inline in a note, and never in a plugin's window.
+        assert!(
+            kinds
+                .resolve_for(WEB, ViewHost::Blitz, Placement::Embed)
+                .is_err()
+        );
+        assert!(
+            kinds
+                .resolve_for(WEB, ViewHost::Plugin, Placement::Pane)
+                .is_err()
+        );
     }
 
     #[test]

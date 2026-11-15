@@ -63,6 +63,9 @@ use crate::logs::{Level, Logs};
 use crate::manifest::{Capabilities, Manifest, Reach};
 use crate::net::Secrets;
 
+/// The longest secret an extension may store (`store_secret`), bytes.
+pub const MAX_SECRET: usize = 8 * 1024;
+
 /// What the app knows that an extension may ask for (each only with the
 /// capability for it): every method has a default that knows nothing.
 pub trait AppContext: Send + Sync {
@@ -1111,6 +1114,29 @@ impl ExtensionApi {
                 .ask_secret(&host, manifest, &name)
                 .await
                 .map(Value::Bool),
+            HostRequest::StoreSecret { name, value } => {
+                if value.len() > MAX_SECRET {
+                    Err(HostError::Refused {
+                        capability: "secrets".to_owned(),
+                        why: format!("a secret is at most {MAX_SECRET} bytes"),
+                    })
+                } else if host.secrets().is_set(&self.id, &name) {
+                    // Insert-only: the value there (the person's, or the
+                    // view's own from before) is never replaced by the
+                    // extension; the person changes it (`ask_secret`).
+                    Err(HostError::Refused {
+                        capability: "secrets".to_owned(),
+                        why: format!(
+                            "{name} is already set: only the person changes it (ask_secret)"
+                        ),
+                    })
+                } else {
+                    host.secrets()
+                        .set(&self.id, &name, &value)
+                        .map(|()| Value::Bool(true))
+                        .map_err(|message| HostError::Failed { message })
+                }
+            }
             HostRequest::Ports { kind } => host.list_ports(kind.as_deref()),
             HostRequest::OpenPort { kind, name, listen } => {
                 host.open_port(&self.id, &kind, &name, listen)

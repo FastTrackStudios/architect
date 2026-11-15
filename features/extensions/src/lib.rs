@@ -65,6 +65,7 @@ pub mod vault_needs;
 pub use architect_favourites as favourites;
 pub mod toolbar;
 pub mod toolbar_edit;
+pub mod webview;
 
 #[cfg(feature = "host")]
 pub mod actions;

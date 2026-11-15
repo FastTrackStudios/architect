@@ -4,7 +4,8 @@ description = "One contract every view mounts through — a Dioxus component, a 
 weight = 68
 +++
 
-> **Status: the contract and the registry landed (architect#220).** The
+> **Status: the contract and the registry landed (architect#220); the
+> `web` kind is built for desks and browsers (#222, [Web views](#web-views)).** The
 > model is `features/workspace/src/kinds.rs` (`ViewKinds`, `KindSpec`,
 > `ViewHost`, `Placement`, `Capability`, `KindError`), wasm-clean in
 > `architect-workspace`'s default build; the contract a kind mounts
@@ -19,8 +20,7 @@ weight = 68
 > `ViewCtx` and typed host data ([Paint views](#paint-views), features
 > `paint` and `paint-ui`). An app registers it with `KindSpec::paint`.
 > A host-driven WebGL2 canvas for the same scene is available with feature
-> `paint-web`. Other kinds and hosts remain separate work: raw wgpu (#221), WebView/HTML
-> (#222), ImGui from Luau (#223), Frame surfaces (#224, in
+> `paint-web`. Other kinds and hosts remain separate work: raw wgpu (#221), ImGui from Luau (#223), Frame surfaces (#224, in
 > FastTrackStudios/frame; a minimal `frame.surface` provider is the
 > frame-view crate), Dioxus in-process and remote (#225), generative
 > UI (#226). Its A2UI payload landed in #228:
@@ -326,6 +326,145 @@ false}}}]}` over MCP adds a task. Scenario:
 
 ![The Embedded views screenset: a Dioxus swatch picked, the Luau ImGui window's button pressed, the Frame surface's knob turned up with its meter following, and the A2UI release surface patched with a task and shipped after a confirmation](https://raw.githubusercontent.com/FastTrackStudios/architect/media/embedded-views.gif)
 
+## Web views
+
+The `web` kind (#222; `features/workspace/src/kinds.rs` `KindSpec::web`)
+lets an extension ship a full TypeScript/npm app, its built files, and
+show it in a pane: the whole DOM, canvas, WebGL and any npm library, with
+real accessibility. On iOS it is the one way installed code runs at full
+speed, JIT-compiled in WKWebView.
+
+<!-- doc-check: off -->
+```toml
+id = "demo.webview-board"
+kind = "data"            # its code runs only in its view
+
+[capabilities]
+ui = ["notify"]
+
+[[views]]
+id = "board"
+title = "Board"
+kind = "web"
+src = "dist/index.html"  # in the package; a web view needs one
+```
+<!-- doc-check: on -->
+
+`examples/extension/webview-board` is one: Vite, TypeScript, uPlot and
+SortableJS (`just webview-example KEY=…` builds, packs and signs it).
+
+### What it may do
+
+Its code is untrusted (`Capability::Untrusted`). It reaches the app only
+through its bridge, `window.architect`
+(`features/extensions/src/webview/runtime.js`; typed by the npm package's
+`@fasttrackstudio/architect/webview`, `features/extensions/web/webview.d.ts`).
+Each call is a host-service request (`features/extensions/src/hostcall.rs`
+`HostRequest`, the JSON every runtime sends): actions, documents, its
+data and settings, `fetch` within `capabilities.hosts`, notifications,
+prompts, pickers, menus, the clipboard, and its secrets. A secret is
+insert-only: `store_secret` keeps one that is not set yet (at most 8 KiB;
+one already set is the person's to change, `ask_secret`), and the host never
+hands it back. It only puts it in a `{{secret:…}}` header of a request to
+the secret's own hosts, so an endpoint there that echoes its headers can
+return it; that is the extension's own service. Luau scripts have
+`store_secret` too. The host answers as the
+extension, after `hostcall::check` against what the person granted
+(`features/extensions/src/webview.rs` `Bridge`, through `ExtensionApi`; in
+a browser, `WebHost::call_json`). The events it listens for
+(`architect.on("doc.*", …)`) are pushed to it through `Host::hear`, under
+the same rule as hooks: document events only while it may read documents.
+Each view has a budget (`webview::Budget`: 500 messages and 16 MiB a
+second, bursts of 1000 and 32 MiB); past it a call is answered at once and
+the rest dropped. A host keeps at most `MAX_QUEUED` of a view's messages
+and handles `MAX_PER_FRAME` a frame, so a flood costs the view, never the
+window's thread. `features/extensions/tests/webview_bridge.rs` checks the
+refusals, the secret, the budget, a parked view's silence and the events.
+
+Its files come only from its package (`webview::serve`: nothing outside
+the package, a link out of it included, nothing for another extension's
+origin) under `webview::csp`:
+`default-src 'none'`, its own scripts, styles, images, fonts, media and
+workers, and `connect-src 'none'`. Its own `fetch`, XHR and WebSocket fail,
+and its network is the host's `fetch`. A navigation away from its own
+origin and every new window are refused. Its origin is
+`architect-ext://<extension id>` (so an extension with web views has a host
+name for an id: `a-z 0-9 - .`), and on a desk each view has storage of its
+own (an ephemeral WebKit context): no view reads another's local storage.
+WebRTC is off: the runtime takes its constructors away for good, and the
+policy's `frame-src` and `child-src` are `'none'`, so no frame brings them
+back (WebKitGTK ships it off; WebView2 and WKWebView have it on, which is
+why the runtime does it everywhere).
+
+### Where it is drawn
+
+| Host | How | Status |
+|---|---|---|
+| Desk (Blitz) | a wry child web view of the pane's OS window (`features/webview/src/desk.rs` `use_desk_web_views`, `architect-app` feature `webview`), its files over the `architect-ext://<id>/` protocol, `window.architect` put in by its initialisation script | run on Linux under X11 and XWayland; macOS (WKWebView) and Windows (WebView2) are written against wry's API and untested |
+| Web | `<iframe sandbox="allow-scripts">` with no same-origin: an opaque origin with no cookies, storage or parent; a `MessagePort` handed over on its first load only (`features/extensions/web/webview-host.js` `mountWebView`; a frame that navigates itself is stopped); the app's bundle installs the runtime itself (`webview-runtime.js`, the same file) | tested in headless Firefox (`features/extensions/web/test/webview.test.mjs`, in `browser.yml` after a merge and nightly); the web app mounts it once it hosts extensions (#495) |
+| iOS | to be built: a WKWebView as a subview of the pane's `UIView`, the same runtime as a `WKUserScript`, messages through a `WKScriptMessageHandler` named `architect` | not built (the iOS host's work, on the same `Bridge`) |
+
+On a desk, a loop on the window's thread reads the pane's holder element
+every frame (16 ms) and moves the native view there (`set_bounds` takes
+about 0.15 ms), so it follows splits, docks, floats, window resizes and
+pop-outs (a pop-out's pane uses that pop-out's own window). A native view
+cannot be under anything the app draws. So the loop hit-tests nine points
+of the pane's rect (a 5 × 5 grid) in the window's document
+(`features/workspace/src/shot.rs` `LiveDocument::covered_at`) and hides the
+view while ⌘K, a menu, a tooltip, a popover or a dialog covers any of them,
+or the document is too busy to say; it shows again after two clear frames.
+A pane moved to another window (a pop-out) gets a view of that window. A
+view whose tab is switched away is kept hidden for a minute, so its state
+survives; while parked it hears no events and its messages are dropped, and
+parked views are reaped every five seconds. A phone switcher's preview draws a still placeholder.
+
+Typed keys stay in the web view: a native view has the keyboard while it
+is focused, so the app's chords do not fire. An Escape the view did not
+take, after all its handlers and never mid-composition
+(`webview::hands_back`), gives the focus back to the app's document
+(`focus_parent`), only while the window has the keyboard, at most once a
+quarter second.
+
+The theme reaches it as CSS custom properties on `:root` (every resolved
+token, `--brand`, `--ink`, an app's dotted `studio.accent` as
+`--studio-accent`, with `color-scheme`), sent again on every change
+(`webview::theme_css`). The runtime installs a small component sheet
+before the view's own: `.arch-button`, `.arch-input`, `.arch-card`,
+`.arch-list`, `.arch-badge`, `.arch-row`, `.arch-stack`.
+
+### Linux and Wayland: the spike
+
+WebKitGTK can be a child only of an X11 window. Measured on 2026-11-14
+under niri 26.04, wry 0.57.1 and WebKitGTK 4.1, in a small winit + wry
+program (its code is in #222's pull request):
+
+| Approach | Result |
+|---|---|
+| `build_as_child` on a winit window under Wayland | refused: `UnsupportedWindowHandle` (the window handle is a `wl_surface`; wry and WebKitGTK take only Xlib) |
+| The same window under XWayland (xwayland-satellite) | works: first paint after about 300 ms, a canvas animating at 60 fps, IPC both ways, `set_bounds` about 0.14 ms |
+| WebKitGTK in a `GtkOffscreenWindow`, its pixels copied into the pane each frame | works natively under Wayland, but a 1280 × 800 copy takes 7.5 ms (22 ms at worst), and every input event would have to be forwarded by hand |
+| A separate top-level window kept over the pane | not possible: a Wayland client cannot place its own top-level window |
+
+So on Linux under Wayland the app can run under XWayland while web views
+are wanted: in a build with `webview`, `ARCHITECT_WEBVIEW_X11=1` drops
+`WAYLAND_DISPLAY` for the window's event loop only, when the run opens the
+window (never for `serve`, the CLI or MCP), and puts it back for the
+processes the app starts (`apps/desktop/src/app.rs`,
+`architect_workspace::native::RESTORE_WAYLAND_DISPLAY`). Without it the
+pane says so. What XWayland costs: no fractional scaling (blurry at 1.25×
+and 1.5×), XIM instead of text-input-v3 for fcitx5 and IBus, and the
+clipboard going through xwayland-satellite. The
+Wayland-native path is a texture: WPE WebKit's `wpe-platform` renders to
+dmabufs that the window's renderer could draw as an image, with input
+forwarded through `ViewInput`. That is the follow-up, and the offscreen
+measurement above is its floor with copies.
+
+macOS needs nothing of this: wry's child is a `WKWebView` subview of the
+window's content view, positioned and clipped by `set_bounds`. Windows,
+from reading wry: a WebView2 controller parented to the window's `HWND`,
+its custom protocol served as `http://architect-ext.<id>/`
+(`features/webview/src/desk.rs` handles both).
+
 ## Kinds, hosts and the security model
 
 | Kind | Desk (Blitz) | Web | Plugin window | Capabilities | Security model | Issue |
@@ -334,7 +473,7 @@ false}}}]}` over MCP adds a task. Scenario:
 | Dioxus remote (process extension) | yes | via DOM mount (#174) | no | input, actions | another process: crash-isolated, a placeholder and a restart; only the actions its manifest's capabilities name | #225 |
 | `paint` (anyrender scene, in-process) | a Blitz custom widget (`PaintPane`) | not yet | not yet | input, ime, gpu, actions | linked code; draws within its frame budget, never on the audio thread | #221, built |
 | GPU view (raw wgpu) | Blitz `CustomPaintSource` | WebGPU/WebGL2 `<canvas>` | nice-plug `custom_paint` | input, gpu, document, actions | linked code; draws within its frame budget, never on the audio thread | #221 |
-| WebView / HTML | a wry child view clipped to the pane | a sandboxed `<iframe>` | no | input, untrusted | no network, a custom protocol only, CSP; every call through a host bridge onto the Action List | #222 |
+| `web` (WebView / HTML) | a wry child view clipped to the pane (X11 or XWayland on Linux) | a sandboxed `<iframe>` | no | input, ime, actions, untrusted | its package only over a custom protocol, under a CSP with no network; every call through the host bridge, checked by `hostcall::check` | #222, built |
 | ImGui from Luau | boxes, then a GPU view | the same | yes, through the GPU view | input, actions, untrusted | Luau's sandbox and the extension's gate | #223 |
 | Frame surface | a GPU view | a GPU view | yes (frame-plug) | input, gpu, document, actions | bindings resolve to the extension's own actions and params | #224 |
 | Frame editor (composite) | in-process: GPU canvas + Dioxus panels | yes (wasm) | no (opens in the host app) | its parts' | its parts' | #224 |
