@@ -28,8 +28,10 @@ use serde::{Deserialize, Serialize};
 
 pub use architect_extension_archive::{ArchiveError, Trust, Verified};
 
+use crate::disk::{Disk, OsDisk};
 use crate::index::{Index, Listing, Location};
 use crate::manifest::{MANIFEST, Manifest};
+use crate::package::{Package, PackageError};
 
 /// Why a source or an install failed.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -121,6 +123,11 @@ pub enum Fetched {
     /// A signed archive's bytes, not yet opened: [`Installs`] checks its
     /// signature and writes its files.
     Archive(Vec<u8>),
+    /// Its files, each path from the package and its bytes (a registry
+    /// compiled into the app, `crate::bundled`): [`Installs`] writes them
+    /// where it keeps installs, so it needs no folder of its own (a
+    /// browser has none).
+    Files(Vec<(String, Vec<u8>)>),
 }
 
 /// Where packages come from.
@@ -149,6 +156,21 @@ pub trait Source: Send + Sync {
     ///
     /// They cannot be fetched.
     fn fetch(&self, listing: &Listing, into: &Path) -> Result<Fetched, InstallError>;
+
+    /// [`Self::fetch`] with no folder to put files in (a browser's
+    /// installs): its files or its archive, never [`Fetched::Copied`]. A
+    /// source that only copies into a folder cannot install there.
+    ///
+    /// # Errors
+    ///
+    /// They cannot be fetched, or this source needs a folder.
+    fn fetch_files(&self, listing: &Listing) -> Result<Fetched, InstallError> {
+        let _ = listing;
+        Err(InstallError::Io(format!(
+            "{} installs into a folder, which this app does not have",
+            self.name()
+        )))
+    }
 
     /// The keys its archives may be signed by, past the ones the app
     /// trusts everywhere ([`Installs::trust`]): none unless it is told.
@@ -656,12 +678,26 @@ impl Install {
 }
 
 /// What is installed, one folder an id under `root`.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Installs {
     root: PathBuf,
     trust: Trust,
     /// The platform it installs for (`crate::platform`).
     platform: String,
+    /// Where `root` is: the app's folder, or a browser's storage
+    /// (`crate::disk`).
+    disk: Arc<dyn Disk>,
+}
+
+impl std::fmt::Debug for Installs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Installs")
+            .field("root", &self.root)
+            .field("trust", &self.trust)
+            .field("platform", &self.platform)
+            .field("os", &self.disk.is_os())
+            .finish()
+    }
 }
 
 /// One archive, offered as a source: how a file's or a peer's archive is
@@ -686,6 +722,10 @@ impl Source for OneArchive {
     }
 
     fn fetch(&self, _: &Listing, _: &Path) -> Result<Fetched, InstallError> {
+        Ok(Fetched::Archive(self.bytes.clone()))
+    }
+
+    fn fetch_files(&self, _: &Listing) -> Result<Fetched, InstallError> {
         Ok(Fetched::Archive(self.bytes.clone()))
     }
 
@@ -721,7 +761,36 @@ impl Installs {
             root: root.into(),
             trust: Trust::org(),
             platform: crate::platform::here().to_owned(),
+            disk: Arc::new(OsDisk),
         }
+    }
+
+    /// Kept on `disk` (in place of the operating system's files): a
+    /// browser's storage (`crate::disk::MemDisk`).
+    #[must_use]
+    pub fn with_disk(mut self, disk: Arc<dyn Disk>) -> Self {
+        self.disk = disk;
+        self
+    }
+
+    /// Where it keeps installs.
+    #[must_use]
+    pub fn disk(&self) -> &Arc<dyn Disk> {
+        &self.disk
+    }
+
+    /// The package `install` is: read from its folder, through
+    /// [`Self::disk`].
+    ///
+    /// # Errors
+    ///
+    /// Its manifest is missing, unreadable or refused.
+    pub fn package(&self, install: &Install) -> Result<Package, PackageError> {
+        // A linked folder (a folder registry's) is the operating system's.
+        if install.linked {
+            return Package::read(&install.dir);
+        }
+        Package::read_on(&self.disk, &install.dir)
     }
 
     /// Installs for `platform` (in place of this build's): refuses what
@@ -852,13 +921,13 @@ impl Installs {
     /// Everything installed, by id.
     #[must_use]
     pub fn list(&self) -> Vec<Install> {
-        let Ok(entries) = std::fs::read_dir(&self.root) else {
+        let Ok(names) = self.disk.list(&self.root) else {
             return Vec::new();
         };
-        let mut out: Vec<Install> = entries
-            .filter_map(Result::ok)
-            .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
-            .filter_map(|e| read_record(&e.path()))
+        let mut out: Vec<Install> = names
+            .into_iter()
+            .filter(|n| !n.starts_with('.'))
+            .filter_map(|n| read_record(&*self.disk, &self.root.join(n)))
             .collect();
         out.sort_by(|a, b| a.id.cmp(&b.id));
         out
@@ -867,13 +936,13 @@ impl Installs {
     /// `id`'s install.
     #[must_use]
     pub fn get(&self, id: &str) -> Option<Install> {
-        read_record(&self.slot(id))
+        read_record(&*self.disk, &self.slot(id))
     }
 
     /// The signed archive `id`'s install came as, when it came as one.
     #[must_use]
     pub fn archive_of(&self, id: &str) -> Option<Vec<u8>> {
-        std::fs::read(self.slot(id).join(KEPT_ARCHIVE)).ok()
+        self.disk.read(&self.slot(id).join(KEPT_ARCHIVE)).ok()
     }
 
     /// The keys an archive may be signed by here past the app's own: those
@@ -914,7 +983,8 @@ impl Installs {
     ///
     /// It cannot be fetched or written, or is not what was listed.
     pub fn install(&self, source: &dyn Source, listing: &Listing) -> Result<Install, InstallError> {
-        std::fs::create_dir_all(&self.root).map_err(io(&self.root))?;
+        let disk = &*self.disk;
+        disk.create_dir_all(&self.root).map_err(io(&self.root))?;
         let slot = self.slot(&listing.id);
         let incoming = self.root.join(format!(
             ".incoming-{}",
@@ -922,12 +992,12 @@ impl Installs {
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default()
         ));
-        if incoming.exists() {
-            std::fs::remove_dir_all(&incoming).map_err(io(&incoming))?;
+        if disk.exists(&incoming) {
+            disk.remove_dir_all(&incoming).map_err(io(&incoming))?;
         }
         let result = self.receive(source, listing, &incoming, &slot);
-        if incoming.exists() {
-            let _ = std::fs::remove_dir_all(&incoming);
+        if disk.exists(&incoming) {
+            let _ = disk.remove_dir_all(&incoming);
         }
         result
     }
@@ -939,14 +1009,36 @@ impl Installs {
         incoming: &Path,
         slot: &Path,
     ) -> Result<Install, InstallError> {
-        let fetched = source.fetch(listing, incoming)?;
+        let disk = &*self.disk;
+        // A source that copies into a folder needs the operating system's.
+        let fetched = if disk.is_os() {
+            source.fetch(listing, incoming)?
+        } else {
+            source.fetch_files(listing)?
+        };
         let (mut signer_key, mut signer) = (None, None);
         let link = match fetched {
             Fetched::Copied => None,
             Fetched::Linked(dir) => Some(dir),
+            Fetched::Files(files) => {
+                for (path, bytes) in &files {
+                    // Inside the package: no `..`, no root.
+                    if !Path::new(path)
+                        .components()
+                        .all(|c| matches!(c, std::path::Component::Normal(_)))
+                    {
+                        return Err(InstallError::Mismatch(format!(
+                            "{path}: not inside the package"
+                        )));
+                    }
+                    let at = incoming.join(path);
+                    disk.write(&at, bytes).map_err(io(&at))?;
+                }
+                None
+            }
             Fetched::Archive(bytes) => {
                 let v = self.open_archive(&bytes, source)?;
-                if let Some((was, name)) = read_signer(slot) {
+                if let Some((was, name)) = read_signer(disk, slot) {
                     if was.trim() != v.signer_key.trim() {
                         return Err(InstallError::SignerChanged {
                             id: listing.id.clone(),
@@ -965,11 +1057,18 @@ impl Installs {
                         listing.id, listing.version, v.index.id, v.index.version
                     )));
                 }
-                v.extract(incoming)?;
+                if disk.is_os() {
+                    v.extract(incoming)?;
+                } else {
+                    for (rel, bytes, _) in v.files_for(crate::index::host_targets())? {
+                        let at = incoming.join(rel);
+                        disk.write(&at, bytes).map_err(io(&at))?;
+                    }
+                }
                 // The signed archive itself, kept: what a person's other
                 // devices install from (`crate::person_sync`).
                 let kept = incoming.join(KEPT_ARCHIVE);
-                std::fs::write(&kept, &bytes).map_err(io(&kept))?;
+                disk.write(&kept, &bytes).map_err(io(&kept))?;
                 None
             }
         };
@@ -980,7 +1079,12 @@ impl Installs {
         );
         if is_extension {
             let path = files.join(MANIFEST);
-            let text = std::fs::read_to_string(&path).map_err(io(&path))?;
+            let text = if link.is_some() {
+                std::fs::read_to_string(&path)
+            } else {
+                disk.read_to_string(&path)
+            }
+            .map_err(io(&path))?;
             let manifest =
                 Manifest::parse(&text).map_err(|e| InstallError::Mismatch(e.to_string()))?;
             if manifest.id != listing.id || manifest.version != listing.version {
@@ -996,9 +1100,9 @@ impl Installs {
                 });
             }
         }
-        std::fs::create_dir_all(incoming).map_err(io(incoming))?;
+        disk.create_dir_all(incoming).map_err(io(incoming))?;
         // A pin outlives the version it was made on.
-        let pin = read_record(slot).and_then(|i| i.pin);
+        let pin = read_record(disk, slot).and_then(|i| i.pin);
         let record = Record {
             id: listing.id.clone(),
             version: listing.version.to_string(),
@@ -1011,12 +1115,12 @@ impl Installs {
         };
         let text = toml::to_string(&record).map_err(|e| InstallError::Io(e.to_string()))?;
         let at = incoming.join(RECORD);
-        std::fs::write(&at, text).map_err(io(&at))?;
-        if slot.exists() {
-            std::fs::remove_dir_all(slot).map_err(io(slot))?;
+        disk.write(&at, text.as_bytes()).map_err(io(&at))?;
+        if disk.exists(slot) {
+            disk.remove_dir_all(slot).map_err(io(slot))?;
         }
-        std::fs::rename(incoming, slot).map_err(io(slot))?;
-        read_record(slot)
+        disk.rename(incoming, slot).map_err(io(slot))?;
+        read_record(disk, slot)
             .ok_or_else(|| InstallError::Io(format!("{} was not kept", slot.display())))
     }
 
@@ -1029,7 +1133,9 @@ impl Installs {
     pub fn set_pin(&self, id: &str, versions: Option<&str>) -> Result<Install, InstallError> {
         let slot = self.slot(id);
         let at = slot.join(RECORD);
-        let text = std::fs::read_to_string(&at)
+        let text = self
+            .disk
+            .read_to_string(&at)
             .map_err(|_| InstallError::NotFound(format!("{id} is not installed")))?;
         let mut record: Record =
             toml::from_str(&text).map_err(|e| InstallError::Io(e.to_string()))?;
@@ -1039,8 +1145,9 @@ impl Installs {
         }
         record.pin = versions.map(str::to_owned);
         let text = toml::to_string(&record).map_err(|e| InstallError::Io(e.to_string()))?;
-        std::fs::write(&at, text).map_err(io(&at))?;
-        read_record(&slot).ok_or_else(|| InstallError::Io(format!("{} was not kept", at.display())))
+        self.disk.write(&at, text.as_bytes()).map_err(io(&at))?;
+        read_record(&*self.disk, &slot)
+            .ok_or_else(|| InstallError::Io(format!("{} was not kept", at.display())))
     }
 
     /// Removes `id`'s install: false when there was none. A linked one's
@@ -1051,10 +1158,10 @@ impl Installs {
     /// It cannot be removed.
     pub fn uninstall(&self, id: &str) -> Result<bool, InstallError> {
         let slot = self.slot(id);
-        if !slot.exists() {
+        if !self.disk.exists(&slot) {
             return Ok(false);
         }
-        std::fs::remove_dir_all(&slot).map_err(io(&slot))?;
+        self.disk.remove_dir_all(&slot).map_err(io(&slot))?;
         Ok(true)
     }
 }
@@ -1091,14 +1198,14 @@ fn key_name(key: &str, trust: &Trust) -> String {
 }
 
 /// The key (and its name) the install in `slot` was signed by.
-fn read_signer(slot: &Path) -> Option<(String, Option<String>)> {
-    let text = std::fs::read_to_string(slot.join(RECORD)).ok()?;
+fn read_signer(disk: &dyn Disk, slot: &Path) -> Option<(String, Option<String>)> {
+    let text = disk.read_to_string(&slot.join(RECORD)).ok()?;
     let record: Record = toml::from_str(&text).ok()?;
     Some((record.signer_key?, record.signer))
 }
 
-fn read_record(slot: &Path) -> Option<Install> {
-    let text = std::fs::read_to_string(slot.join(RECORD)).ok()?;
+fn read_record(disk: &dyn Disk, slot: &Path) -> Option<Install> {
+    let text = disk.read_to_string(&slot.join(RECORD)).ok()?;
     let record: Record = toml::from_str(&text).ok()?;
     Some(Install {
         version: Version::parse(&record.version).ok()?,
