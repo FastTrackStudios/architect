@@ -382,6 +382,7 @@ mod tests {
             title: "The gig".into(),
             listen: "full".into(),
             audience: "link".into(),
+            access: "read".into(),
             notes: vec![
                 note("Gig/set.md", "The gig", Some("/s/c/set/"), &[]),
                 joy,
