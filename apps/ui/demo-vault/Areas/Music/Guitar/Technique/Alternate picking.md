@@ -7,8 +7,6 @@ bpm_goal: 140
 created: 2026-08-12T19:00:00
 modified: 2026-10-22T20:15:00
 ---
-# Alternate picking
-
 Strict down-up motion, even when skipping strings. Start at 80 bpm.
 
 - Keep the wrist loose, #music/guitar

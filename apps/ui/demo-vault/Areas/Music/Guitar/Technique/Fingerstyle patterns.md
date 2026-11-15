@@ -9,8 +9,6 @@ difficulty: 4
 created: 2026-07-02T18:30:00
 modified: 2026-10-30T21:05:00
 ---
-# Fingerstyle patterns
-
 ![[shapes-circles.png]]
 
 Travis pattern: thumb alternates bass, fingers take the top strings.

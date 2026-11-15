@@ -900,9 +900,43 @@ pub fn VaultPage() -> Element {
             .and_then(|id| w.pane(id))
             .map_or_else(|| "Vault".to_owned(), |p| p.title.clone())
     };
+    // A note's head (#710): its title and Properties in the bar at the
+    // top, a pane header's on a desk, the page bar's on a phone.
+    crate::note_head::use_note_header_parts();
+    crate::note_head::use_note_commands(
+        workspace,
+        use_callback(move |r: crate::note_head::Renamed| {
+            let (disk, from) = lab.vault_of(&r.to);
+            let (_, to) = lab.vault_of(&r.from);
+            if let Some(d) = disk
+                && let Err(e) = d.rename(&from, &to)
+            {
+                tracing::warn!(from = %from, to = %to, error = %e, "lab.vault.rename_undo_failed");
+            }
+        }),
+    );
+    let note_pane = workspace
+        .read()
+        .active
+        .as_ref()
+        .filter(|id| {
+            workspace
+                .read()
+                .pane(id)
+                .is_some_and(|p| p.view.0 == VAULT_NOTE)
+        })
+        .map(|id| id.0.clone());
+    let note_lead = note_pane.map(|pane| {
+        rsx! { crate::note_head::NoteTitle { pane, large: true } }
+    });
+    let properties = crate::note_head::phone_properties(workspace);
     // A phone's tab switcher: how many tabs there are to switch between.
     let open = workspace.read().tab_count();
-    let panes = Toolbar::new().separate(
+    let mut panes = Toolbar::new();
+    if let Some(p) = properties {
+        panes = panes.separate(p);
+    }
+    let panes = panes.separate(
         Action::new(format!("{open} tabs"), icon!(Layers), move |()| {
             switcher.set(true);
         })
@@ -910,7 +944,7 @@ pub fn VaultPage() -> Element {
     );
     rsx! {
         if phone {
-            PageBar { title: pane_title, toolbar: panes }
+            PageBar { title: pane_title, lead: note_lead, toolbar: panes }
         } else if title_row.is_none() {
             PageBar { title: "Vault" }
         }
@@ -935,6 +969,10 @@ pub fn VaultPage() -> Element {
                 status: pane_status,
                 form: screen_class(&screen),
                 actions,
+            }
+            // A phone's note Properties: a sheet over the page's foot.
+            if phone {
+                crate::note_head::PropertiesSheet {}
             }
         }
     }
@@ -2509,24 +2547,39 @@ fn VaultNote(path: String) -> Element {
             titled.set_title(tab);
         }
     }));
+    // Renamed in the bar at the top (`crate::note_head`), or the inline
+    // title when the setting shows it.
+    let heads = crate::note_head::use_note_heads();
+    let rename = use_callback(
+        move |(name, record): (String, bool)| -> Result<(), String> {
+            let from = at.peek().clone();
+            let Some(d) = disk.peek().clone() else {
+                return Err("No vault is open".to_owned());
+            };
+            save();
+            match crate::note_head::rename_note(&d, &from, &name) {
+                Ok(Some(to)) => {
+                    if record {
+                        heads.renamed(state_of(&from), state_of(&to));
+                    }
+                    Ok(())
+                }
+                Ok(None) => Ok(()),
+                Err(e) => {
+                    tracing::info!(from = %from, name = %name, error = %e, "lab.vault.rename_refused");
+                    Err(e)
+                }
+            }
+        },
+    );
     let mut draft = use_signal(|| None::<String>);
-    let rename = move || {
-        let mut draft = draft;
-        let Some(name) = draft.take() else { return };
-        let name = name.trim().replace('/', " ");
-        let from = at.peek().clone();
-        if name.is_empty() || name == title_of(&from) {
-            return;
-        }
-        save();
-        let folder = from.rsplit_once('/').map(|(f, _)| f.to_owned());
-        let to = folder.map_or_else(|| format!("{name}.md"), |f| format!("{f}/{name}.md"));
-        if let Some(d) = disk.peek().as_ref()
-            && let Err(e) = d.rename(&from, &to)
-        {
-            tracing::warn!(from = %from, to = %to, error = %e, "lab.vault.rename_failed");
-        }
-    };
+    // Where no header takes the note's head (a window without
+    // `HeaderParts`), its title and Properties stay in its body.
+    let headerless = try_consume_context::<architect_workspace::HeaderParts>().is_none();
+    let shown_inline = architect_settings::use_setting("editor.inline_title")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let inline_title = headerless || shown_inline;
     let words = ours.cloned().split_whitespace().count();
     use_pane_status(vec![
         StatusItem::new("words", crate::count(words, "word")).left(),
@@ -2615,37 +2668,65 @@ fn VaultNote(path: String) -> Element {
             }
         }
     });
+    // Its head in the bar at the top: its title, its Properties.
+    let on_props = use_callback(move |b: String| {
+        let mut ours = ours;
+        ours.set(format!("{b}{}", body.peek()));
+        block.set(b);
+        later();
+    });
+    let on_prop_link = use_callback(move |name: String| open_link(name));
+    crate::note_head::use_note_head(
+        pane.id.0,
+        crate::note_head::NoteHead {
+            title,
+            state: state_of(&here),
+            block: block(),
+            types: types.clone(),
+            hidden: hidden.clone(),
+            on_change: on_props,
+            on_link: on_prop_link,
+            rename,
+        },
+    );
     rsx! {
         div { style: "flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 24px 36px; overflow-y: scroll;",
             "data-vault-note": "{here}",
-            input {
-                "data-testid": "vault-note-title",
-                "aria-label": "Note title",
-                style: "font-size: 26px; font-weight: 750; color: {t.ink}; background: transparent; border: none; outline: none; padding: 0;",
-                value: "{shown}",
-                oninput: move |e| draft.set(Some(e.value())),
-                onkeydown: move |e: KeyboardEvent| {
-                    if e.key().to_string() == "Enter" {
-                        rename();
-                    }
-                },
-                onblur: move |_| rename(),
+            // The title is the bar's at the top; here only when the
+            // Editor's "Show inline title" asks for it (Obsidian's).
+            if inline_title {
+                input {
+                    "data-testid": "vault-note-title",
+                    "aria-label": "Note title",
+                    style: "font-size: 26px; font-weight: 750; color: {t.ink}; background: transparent; border: none; outline: none; padding: 0;",
+                    value: "{shown}",
+                    oninput: move |e| draft.set(Some(e.value())),
+                    onkeydown: move |e: KeyboardEvent| {
+                        if e.key() == Key::Named(NamedKey::Enter)
+                            && let Some(name) = draft.take()
+                        {
+                            let _ = rename.call((name, true));
+                        }
+                    },
+                    onblur: move |_| {
+                        if let Some(name) = draft.take() {
+                            let _ = rename.call((name, true));
+                        }
+                    },
+                }
             }
             if gone() {
                 div { style: "color: {t.ink_3}; font-size: 13px;", "This note's file was deleted." }
             }
             {head}
-            crate::properties::PropertiesBar {
-                block: block(),
-                types,
-                hidden,
-                on_change: move |b: String| {
-                    let mut ours = ours;
-                    ours.set(format!("{b}{}", body.peek()));
-                    block.set(b);
-                    later();
-                },
-                on_link: move |name: String| open_link(name),
+            if headerless {
+                crate::properties::PropertiesBar {
+                    block: block(),
+                    types,
+                    hidden,
+                    on_change: on_props,
+                    on_link: on_prop_link,
+                }
             }
             crate::note_editor::NoteEditor {
                 id: here.clone(),

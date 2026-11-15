@@ -27,8 +27,6 @@ songs:
   - "[[Libraries/Christmas/All I Want for Christmas Is You/All I Want for Christmas Is You|All I Want for Christmas Is You]]"
 tags: [music/christmas, setlist]
 ---
-# Merry & Bright
-
 A Christmas set in two parts. Its songs' covers are drawn for this demo (`apps/ui/demo-vault.py`), and every recording is the demo's silent one. Four songs have no recording yet.
 
 ```studio-setlist

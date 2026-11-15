@@ -4,8 +4,6 @@ tags: [showcase, showcase/U]
 capability: U3
 example: "Sketch (waits on #175)"
 ---
-# U3 GPU painting
-
 Canvas and GPU painting for installed and linked extensions.
 
 **Stands in for:** Excalidraw, Canvas, Graph.

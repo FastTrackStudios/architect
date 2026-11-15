@@ -19,7 +19,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use architect_shell::use_shell;
+use architect_shell::{ShellTheme, try_use_shell};
 use dioxus::prelude::*;
 use lucide_dioxus::{
     Calendar, CalendarClock, ChevronDown, ChevronRight, ChevronUp, Hash, Link, List, Plus,
@@ -479,6 +479,21 @@ const STYLE: &str = "
 .note-props .np-day:hover { background: var(--np-hover); }
 ";
 
+/// The shell's colours; its defaults outside one (a component's test).
+pub fn theme() -> ShellTheme {
+    try_use_shell().map(|s| s.theme).unwrap_or_default()
+}
+
+/// How many of `block`'s properties show as rows (`hidden` left out): the
+/// count on a note's Properties button.
+#[must_use]
+pub fn shown_count(block: &str, hidden: &[String]) -> usize {
+    entries(block)
+        .iter()
+        .filter(|e| !hidden.contains(&e.key))
+        .count()
+}
+
 /// A note's Properties: `block` its frontmatter (empty for none), each
 /// edit given to `on_change` as the block written again; a link's note
 /// given to `on_link`.
@@ -492,9 +507,13 @@ pub fn PropertiesBar(
     /// block keeps them.
     #[props(default)]
     hidden: Vec<String>,
+    /// Drawn open, without its head row or rule: inside the note's
+    /// Properties popover or sheet (`crate::note_head`).
+    #[props(default)]
+    bare: bool,
 ) -> Element {
-    let t = use_shell().theme;
-    let mut open = use_signal(|| false);
+    let t = theme();
+    let mut open = use_signal(move || bare);
     let mut adding = use_signal(|| None::<String>);
     let list = entries(&block);
     let kind = list
@@ -507,6 +526,11 @@ pub fn PropertiesBar(
     let last = count.saturating_sub(1);
     let shown = list.iter().filter(|e| !hidden.contains(&e.key)).count();
     let vars = format!("--np-hover: {};", t.pill);
+    let ruled = if bare {
+        String::new()
+    } else {
+        format!("border-bottom: 1px solid {}; padding-bottom: 6px;", t.rule)
+    };
     let rows = list
         .into_iter()
         .enumerate()
@@ -562,8 +586,8 @@ pub fn PropertiesBar(
             class: "note-props",
             "data-testid": "note-properties",
             "data-open": "{open()}",
-            style: "{vars} color: {t.ink}; border-bottom: 1px solid {t.rule}; padding-bottom: 6px;",
-            div {
+            style: "{vars} color: {t.ink}; {ruled}",
+            if !bare { div {
                 class: "np-head",
                 "data-testid": "note-properties-toggle",
                 onclick: move |_| open.toggle(),
@@ -577,8 +601,8 @@ pub fn PropertiesBar(
                     style: "font-size: 11px; color: {t.ink_3}; background: {t.pill}; border-radius: 999px; padding: 0 7px; line-height: 18px;",
                     "{shown}"
                 }
-            }
-            if open() {
+            } }
+            if open() || bare {
                 div { style: "display: flex; flex-direction: column; padding: 4px 0 2px 0;",
                     {rows}
                     if let Some(name) = adding() {
@@ -655,7 +679,7 @@ fn PropertyRow(
     on_move: Callback<bool>,
     on_link: Option<Callback<String>>,
 ) -> Element {
-    let t = use_shell().theme;
+    let t = theme();
     let mut key_draft = use_signal(|| None::<String>);
     let shown_key = key_draft().unwrap_or_else(|| name.clone());
     let commit_key = move || {
@@ -724,7 +748,7 @@ fn ValueEditor(
 
 #[component]
 fn TextValue(value: Value, number: bool, on_value: Callback<Value>) -> Element {
-    let t = use_shell().theme;
+    let t = theme();
     let text = text_of(&value);
     let mut draft = use_signal(|| None::<String>);
     let shown = draft().unwrap_or_else(|| text.clone());
@@ -764,7 +788,7 @@ fn TextValue(value: Value, number: bool, on_value: Callback<Value>) -> Element {
 
 #[component]
 fn CheckboxValue(value: Value, on_value: Callback<Value>) -> Element {
-    let t = use_shell().theme;
+    let t = theme();
     let on = value.as_bool().unwrap_or(false);
     let (bg, border) = if on {
         (t.accent.clone(), t.accent.clone())
@@ -811,7 +835,7 @@ fn Pill(
     #[props(default)] on_open: Option<Callback<()>>,
     on_remove: Callback<()>,
 ) -> Element {
-    let t = use_shell().theme;
+    let t = theme();
     let (bg, ink) = if link {
         (t.accent_soft, t.accent)
     } else {
@@ -842,7 +866,7 @@ fn ListValue(
     on_value: Callback<Value>,
     on_link: Option<Callback<String>>,
 ) -> Element {
-    let t = use_shell().theme;
+    let t = theme();
     let items = items_of(&value);
     let mut draft = use_signal(String::new);
     let with = move |next: Vec<String>| {
@@ -905,7 +929,7 @@ fn ListValue(
 
 #[component]
 fn DateValue(value: Value, with_time: bool, on_value: Callback<Value>) -> Element {
-    let t = use_shell().theme;
+    let t = theme();
     let raw = text_of(&value);
     let (date_part, time_part) = raw
         .split_once('T')

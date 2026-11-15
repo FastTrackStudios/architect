@@ -4,8 +4,6 @@ tags: [showcase, showcase/R]
 capability: R3
 example: "Templater-lite"
 ---
-# R3 A TSX page installed at run time
-
 A view written as a TSX or JS file, run on QuickJS (a Web Worker in browsers).
 
 **Stands in for:** Any plugin's custom view.

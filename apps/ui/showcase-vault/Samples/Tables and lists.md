@@ -2,8 +2,6 @@
 title: Tables and lists
 tags: [showcase, sample]
 ---
-# Tables and lists
-
 Practice for [[C11 The editor]]: Tab and Shift-Tab in the list, Tab through the table.
 
 - Groceries

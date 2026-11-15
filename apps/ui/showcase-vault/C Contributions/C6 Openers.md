@@ -4,8 +4,6 @@ tags: [showcase, showcase/C]
 capability: C6
 example: "Openers sampler"
 ---
-# C6 Openers
-
 ⌘O sources and URL claims.
 
 **Stands in for:** Homepage, Omnisearch's ⌘O.

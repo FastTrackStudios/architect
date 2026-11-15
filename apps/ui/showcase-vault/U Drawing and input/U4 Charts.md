@@ -4,8 +4,6 @@ tags: [showcase, showcase/U]
 capability: U4
 example: "Chart"
 ---
-# U4 Charts
-
 SVG charts in a view or a page.
 
 **Stands in for:** Charts, Tracker.

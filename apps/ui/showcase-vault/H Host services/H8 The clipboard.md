@@ -4,8 +4,6 @@ tags: [showcase, showcase/H]
 capability: H8
 example: "Notify sampler"
 ---
-# H8 The clipboard
-
 Read and write the clipboard.
 
 **Stands in for:** Copy-as-HTML, Paste URL into selection.

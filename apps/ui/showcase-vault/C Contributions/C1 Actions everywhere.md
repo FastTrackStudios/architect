@@ -4,8 +4,6 @@ tags: [showcase, showcase/C]
 capability: C1
 example: "Templater-lite"
 ---
-# C1 Actions everywhere
-
 An extension's actions in ⌘K, on keys, on the CLI, over MCP and on the control socket.
 
 **Stands in for:** Commander, every plugin's commands.

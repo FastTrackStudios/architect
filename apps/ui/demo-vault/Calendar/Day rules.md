@@ -8,6 +8,4 @@ fallback: Rest day
 overrides:
   - {from: 2026-11-12, to: 2026-11-12, span: day, template: Studio day}
 ---
-# Day rules
-
 Which day template each day uses: the first rule that matches, unless an override says otherwise.

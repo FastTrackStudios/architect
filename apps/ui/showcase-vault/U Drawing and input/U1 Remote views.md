@@ -4,8 +4,6 @@ tags: [showcase, showcase/U]
 capability: U1
 example: "Templater-lite, Clicker"
 ---
-# U1 Remote views
-
 Forms, lists and dialogs drawn by an extension outside the app's process.
 
 **Stands in for:** Every plugin's view.

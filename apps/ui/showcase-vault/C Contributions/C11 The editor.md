@@ -4,8 +4,6 @@ tags: [showcase, showcase/C]
 capability: C11
 example: "Outline (`apps/sandbox/extensions/outline`)"
 ---
-# C11 The editor
-
 Commands on the selection, keymaps by node, decorations and widgets, slash rows.
 
 **Stands in for:** Advanced Tables, Outliner, Editing Toolbar.

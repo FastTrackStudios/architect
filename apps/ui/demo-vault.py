@@ -56,9 +56,23 @@ def fm(d):
     return "\n".join(out) + "\n"
 
 
+def untitled(path, body):
+    """The body without a first `# <file name>` heading: the app says a
+    note's name in the bar at the top, once (#710)."""
+    name = os.path.splitext(os.path.basename(path))[0]
+    lines = body.strip("\n").split("\n")
+    if lines and lines[0].strip() == "# " + name:
+        lines = lines[1:]
+        while lines and not lines[0].strip():
+            lines = lines[1:]
+    return "\n".join(lines)
+
+
 def W(path, props, body=""):
     full = os.path.join(ROOT, path)
     os.makedirs(os.path.dirname(full), exist_ok=True)
+    if path.endswith(".md"):
+        body = untitled(path, body)
     text = (fm(props) if props else "") + body.strip("\n") + "\n"
     with open(full, "w", encoding="utf-8") as f:
         f.write(text)

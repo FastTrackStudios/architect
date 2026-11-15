@@ -4,8 +4,6 @@ tags: [showcase, showcase/C]
 capability: C4
 example: "Templater-lite"
 ---
-# C4 Tabs, panes, slots, windows, popups
-
 Where an extension's views go.
 
 **Stands in for:** Every plugin view.

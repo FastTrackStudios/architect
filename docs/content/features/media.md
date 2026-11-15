@@ -105,7 +105,7 @@ Where it draws:
   rewrite of the same size within the clock's grain is never stale). The list
   is keyed by the vault's root, so another vault is heard from its own
   subscription. The
-  Properties bar leaves the list's rows out (`PropertiesBar`'s `hidden`), and
+  Properties editor (the Properties button in the bar at the top) leaves the list's rows out (`PropertiesBar`'s `hidden`), and
   the editor folds a listing fence to one line until the caret goes into it
   (`NoteEditor`'s `fold_listing`, `architect_media::listing_fences`), and
   unfolds it when the list gives way. The demo vault on disk gets the demo's

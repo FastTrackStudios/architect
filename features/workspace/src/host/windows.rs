@@ -310,6 +310,8 @@ pub(super) fn PopoutSync(bridge: Bridge) -> Element {
             .context::<architect_commands::Commands>()
             .context::<architect_theme::ThemeHandle>()
             .context::<architect_theme::RootCss>()
+            // A view's own header parts: a note's title and Properties.
+            .context::<super::HeaderParts>()
             .and(&bridge)
     });
     let opened = use_hook(|| Rc::new(RefCell::new(HashMap::<WindowId, String>::new())));

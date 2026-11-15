@@ -4,8 +4,6 @@ tags: [showcase, showcase/W]
 capability: W2
 example: "-"
 ---
-# W2 Installed extensions on the web
-
 Installed Luau, pages and WASI in the browser, with documents and storage.
 
 **Stands in for:** -.

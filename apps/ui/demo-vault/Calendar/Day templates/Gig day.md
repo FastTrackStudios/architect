@@ -11,6 +11,4 @@ blocks:
   - {id: dinner, start: "18:00", end: "18:45", label: Dinner, category: meal}
   - {id: sleep, start: "01:00", end: "09:00", label: Sleep, category: sleep}
 ---
-# Gig day
-
 Load-in, soundcheck, the show.

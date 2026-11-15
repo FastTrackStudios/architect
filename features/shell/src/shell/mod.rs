@@ -223,7 +223,7 @@ impl Action {
         self
     }
 
-    /// A count on the round button: none at 0, `99+` past 99.
+    /// A count on its button (the round one, a toolbar's): none at 0, `99+` past 99.
     #[must_use]
     pub fn with_badge(mut self, count: usize) -> Self {
         self.badge = (count > 0).then(|| {

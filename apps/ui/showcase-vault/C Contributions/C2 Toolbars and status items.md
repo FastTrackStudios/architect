@@ -4,8 +4,6 @@ tags: [showcase, showcase/C]
 capability: C2
 example: "Toolbar sampler, Outline"
 ---
-# C2 Toolbars and status items
-
 Toolbars with toggle state, status items, the phone bar.
 
 **Stands in for:** Editing Toolbar, Commander, the status bar.

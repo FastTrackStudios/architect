@@ -9,4 +9,3 @@ location: The Hall
 tags: [gig]
 color: warning
 ---
-# Show at The Hall

@@ -4,8 +4,6 @@ tags: [showcase, showcase/H]
 capability: H1
 example: "Templater-lite"
 ---
-# H1 The person's vault
-
 List, read, create, edit, rename, move and delete notes through the document API.
 
 **Stands in for:** Every plugin that touches files.

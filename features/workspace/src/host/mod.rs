@@ -1269,6 +1269,31 @@ impl HeaderTools {
     }
 }
 
+/// What a view draws in its own pane's header: its title (a note's, to
+/// rename there) and its buttons (a note's Properties), before the
+/// extensions' [`HeaderTools`].
+///
+/// Asked for by the pane's view kind and id each time the header draws:
+/// `None` keeps the header's own title. Return components, so their hooks
+/// are their own. Provide it above the workspace.
+#[derive(Clone)]
+pub struct HeaderParts(pub Rc<dyn Fn(&str, &PaneId) -> Option<ViewHeader>>);
+
+impl HeaderParts {
+    pub fn new(f: impl Fn(&str, &PaneId) -> Option<ViewHeader> + 'static) -> Self {
+        Self(Rc::new(f))
+    }
+}
+
+/// A view's own parts of its pane's header ([`HeaderParts`]).
+#[derive(Clone, Default)]
+pub struct ViewHeader {
+    /// Drawn in place of the pane's title, in the header's middle.
+    pub title: Option<Element>,
+    /// Drawn after the title, before the extensions' toolbars and the menu.
+    pub tools: Option<Element>,
+}
+
 /// The invocation a context-menu row runs with.
 ///
 /// Opened on `target` (`view:<kind>`, `tab`, `file`) `id` (the pane's, a

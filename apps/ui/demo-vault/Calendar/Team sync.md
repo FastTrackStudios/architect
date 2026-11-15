@@ -8,4 +8,3 @@ all_day: false
 recurrence: "FREQ=WEEKLY;BYDAY=MO,TH"
 color: primary
 ---
-# Team sync

@@ -4,8 +4,6 @@ tags: [showcase, showcase/H]
 capability: H2
 example: "Templater-lite, Dataview-lite"
 ---
-# H2 Document events
-
 Hooks on a note created, saved, renamed or deleted.
 
 **Stands in for:** Templater folder templates, Linter on save, Dataview refresh.

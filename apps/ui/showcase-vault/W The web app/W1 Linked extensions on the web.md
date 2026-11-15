@@ -4,8 +4,6 @@ tags: [showcase, showcase/W]
 capability: W1
 example: "-"
 ---
-# W1 Linked extensions on the web
-
 The web app runs its distribution's linked extensions.
 
 **Stands in for:** -.

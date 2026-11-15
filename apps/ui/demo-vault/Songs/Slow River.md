@@ -10,8 +10,6 @@ performed: false
 album: "[[Projects/Album/project|Album]]"
 sort_index: 2
 ---
-# Slow River
-
 ```kf
 [Intro]
 | D | A/C# | Bm | G |
