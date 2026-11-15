@@ -500,3 +500,36 @@ fn on_a_version_tie_the_persons_registry_wins_over_the_vault() {
         "the registry's copy"
     );
 }
+
+#[test]
+fn a_copy_here_counts_and_one_that_cannot_run_here_says_why() {
+    let tmp = tempfile::tempdir().unwrap();
+    let key = SecretKey::generate().unwrap();
+    let ext = app(tmp.path(), &key, false);
+    // A development copy, then turned off: the person has it.
+    let off = package(tmp.path(), "show.off", "0.1.0", "Off");
+    // A process extension, in an app with no process runner.
+    let desk = tmp.path().join("desk");
+    std::fs::create_dir_all(&desk).unwrap();
+    std::fs::write(
+        desk.join("extension.toml"),
+        "id = \"show.desk\"\nname = \"Desk\"\nversion = \"0.1.0\"\nkind = \"process\"\n\n[entry]\npath = \"desk-bin\"\n",
+    )
+    .unwrap();
+    let _ = ext.dev(&off);
+    let _ = ext.dev(&desk);
+    let _ = ext.sync();
+    let _ = ext.disable("show.off");
+    let vault = tmp.path().join("vault");
+    let mut needs = Requirements::default();
+    needs.need(Requirement::new("show.off"));
+    needs.need(Requirement::new("show.desk").optional());
+    vault_needs::write(&vault, &needs).unwrap();
+    let plan = ext.open_vault(&vault).plan;
+    assert_eq!(plan.ready, ["show.off"], "{plan:?}");
+    assert_eq!(
+        plan.missing[0].1,
+        Missing::CannotRun("this app does not run process extensions".into()),
+        "{plan:?}"
+    );
+}
