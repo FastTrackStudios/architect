@@ -720,6 +720,14 @@ impl Extensions {
                     .into_iter()
                     .map(|i| (i.id, i.version)),
             )
+            .chain(
+                // Any copy here that can run here (a built-in, a
+                // development copy), turned off or not: the person has it.
+                self.chosen()
+                    .into_iter()
+                    .filter(|c| self.inner.host.why_not_here(&c.runs.id).is_none())
+                    .map(|c| (c.runs.id, c.runs.version)),
+            )
             .collect();
         let policy = lock(&self.inner.policy).clone();
         let host = self.inner.host.clone();
@@ -748,7 +756,17 @@ impl Extensions {
             },
             policy.as_ref(),
         );
-        self.settled(requirements, planned, extra)
+        let mut planned = self.settled(requirements, planned, extra);
+        // A copy here that cannot run here (a process on a phone, a
+        // platform it leaves out) says so, not "no registry has it".
+        for (r, missing) in &mut planned.missing {
+            if *missing == crate::project::Missing::NotFound {
+                if let Some(why) = self.inner.host.why_not_here(&r.id) {
+                    *missing = crate::project::Missing::CannotRun(why);
+                }
+            }
+        }
+        planned
     }
 
     /// What opening the vault (or project folder) at `root` takes ("What a
