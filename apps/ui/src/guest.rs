@@ -1,4 +1,7 @@
 //! A share link opened in the app, as a guest of that link (#629).
+//! A link is the app as a guest (`docs/content/guide/shares.md`); this
+//! tab's own renderer is a second implementation to replace with the
+//! app's workspace (#807).
 //!
 //! A link (`https://<node>/s/<code>/…`) arrives from the person
 //! (`SHARE_OPEN`: ⌘K, a pasted link, an agent) or from the OS (a

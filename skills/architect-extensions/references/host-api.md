@@ -315,6 +315,8 @@ All of these need `ui = [...]`. `pick`, `prompt` and `menu` wait for the person 
 
 ## Share-link guests
 
+A share link is the Architect app opened as a guest of that link (`Principal::Guest`): the same app, views and extensions, with some permissions off (`docs/content/guide/shares.md`). There is no guest renderer or guest extension set; a guest's limits are the capabilities below.
+
 A share link's guests can run extensions, scoped to the share (#495 G1).
 
 **The profile** is one function every guest host uses: `features/extensions/src/share_needs.rs` `guest_capabilities(asks, hosts)`. It is the manifest's asks within:
@@ -347,7 +349,7 @@ Only a page embed draws guest content (`features/extensions/src/embeds.rs` `Gues
 
 **Consent is the guest's own**, per person. Nothing from the owner's grants carries over.
 
-**What's built.** Hosts actually loading a link's fetched packages within `guest_capabilities` is #495 G1. Until a host does it, a guest runs no fetched extension. The model, the island path and `AppHost::guest` exist.
+**What's built.** Hosts actually loading a link's fetched packages within `guest_capabilities` is #495 G1. Until a host does it, a guest runs no fetched extension. The model, the island path and `AppHost::guest` exist. The page-only `AppHost::guest` path and the web app's guest mode without extensions are known gaps, not the design (#805).
 
 ## Where each host lives
 

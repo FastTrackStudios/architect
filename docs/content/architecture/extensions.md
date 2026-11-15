@@ -709,7 +709,10 @@ host the desktop does (`apps/web/src/app/extensions.rs`
 `use_extension_ui`) over the page's Action List, so a linked extension's
 actions are in ⌘K, its settings sections on the settings page and its
 views among the workspace's kinds, drawn as Dioxus components in the
-app's own document. A share link's guest runs none.
+app's own document. A share link is this same app opened as a guest
+([A share link is the app](@/guide/shares.md)), so its guest runs the
+same extensions under the guest profile ([below](#a-share-link-s-guests));
+today the web app still loads none for a guest (#805).
 
 What changes in a browser:
 
@@ -782,7 +785,13 @@ to 105 ms.
 
 ### A share link's guests
 
-A share link's guests will run extensions, scoped to the share (#495 G1;
+A share link is the Architect app opened as a guest of that link
+(`Principal::Guest`): the same app, views and extensions, with some
+permissions off ([A share link is the app](@/guide/shares.md)). There is
+no guest renderer and no guest extension set; what a guest can't do is a
+capability it isn't granted.
+
+A share link's guests run extensions, scoped to the share (#495 G1;
 the model is #495's G1 comment). What an extension may do for a guest is
 the install workstream's guest profile, one function every host uses:
 `share_needs::guest_capabilities` (#755: the share's documents read-only,
@@ -791,8 +800,14 @@ actions past its own). Which extensions a link runs, and the packages
 and signers it trusts, are the link's owner-signed or node-held needs
 (`share_needs::LinkNeeds`, `plan_link`, `verify_package`), never a vault
 file. The guest host scopes the documents and the vault query engine to
-the share: `GUEST_READS`' `documents` is the generic capability. Until the
-hosts run a guest's extensions, a guest runs none.
+the share: `GUEST_READS`' `documents` is the generic capability.
+
+**Known gap.** The hosts don't load extensions for a guest yet: the web
+app skips them in guest mode and redraws the palette itself
+(`apps/web/src/app/mod.rs` `own_palette`), and on the desktop only a
+page embed draws a guest's note, on `features/pages/src/host.rs`
+`AppHost::guest`. That is a second implementation to remove, not the
+design (#805).
 
 ## Processes over vox
 
@@ -1768,8 +1783,11 @@ extension draws one.
 | a process's | a `RemoteDocument` sub-document (`features/extensions/src/remote.rs` `RemoteEmbed`) | its content's, measured | `linked::use_embed`, sent as `wire::EMBED_EVENT` to its root |
 | a WASI component's | as a process's | its content's, measured | `architect_extension_wasi::embed()` (`features/extensions/wasi-guest/src/lib.rs` `embed`), the same `wire::EMBED_EVENT` |
 
-**Outside the app.** A share link or a Site the node builds draws the
-same claims once per block, at build time (#488, `docs/content/guide/deploy.md`
+**Outside the app.** A Site the node builds draws the same claims once
+per block, at build time. A share link is not outside the app (it is the
+web app as a guest, [A share link is the app](@/guide/shares.md)), but its
+build still draws blocks this way for the plain blocks a guest reads,
+a second note renderer to remove (#806). The node draws them (#488, `docs/content/guide/deploy.md`
 "Blocks extensions draw"): a page embed by `architect_sites::PageBlocks`, a
 WASI component's embed view by `architect_sites::ComponentBlocks`, which
 mounts the view in the component's sandbox, sends it the block, and writes

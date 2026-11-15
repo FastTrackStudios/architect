@@ -1,5 +1,9 @@
 //! A page's prose as plain blocks (#629).
 //!
+//! A second note renderer for share guests, to remove: a guest should
+//! get the note's text and the app's own views draw it (#806,
+//! `docs/content/guide/shares.md`).
+//!
 //! What a share link's guest reads in the app
 //! ([`architect_spaces::GuestNote`]), from the same [`crate::Page::html`]
 //! the page is drawn from, so it says what the page says and nothing
