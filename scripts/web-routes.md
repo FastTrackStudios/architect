@@ -92,7 +92,7 @@ one on a share link's page, with its issuer
 `apps/web/sws.toml`'s by a test):
 
 ```
-Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; media-src 'self'; connect-src 'self' https://<issuer>; base-uri 'none'; form-action 'self'; object-src 'none'; frame-src 'self'; frame-ancestors 'none'
+Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; media-src 'self'; connect-src 'self' https://<issuer>; base-uri 'none'; form-action 'self'; object-src 'none'; frame-src 'self'; frame-ancestors 'none'
 ```
 
 `media-src 'self'` is for the Now Playing bar's audio (#589): the app's
@@ -106,6 +106,14 @@ files, the demo's recording). Nothing off this origin plays.
 `features/sites/src/island.rs` `webview_headers`), so an extension's code
 runs in an opaque origin and never in the app's. Nothing else frames
 here, and nothing off this origin may.
+
+`blob:` in `script-src` and `worker-src` is for installed extensions'
+TSX pages and TypeScript actions (#495): each runs in a module Web Worker
+the app makes from a `blob:` URL, its modules linked as `blob:` URLs too
+(`features/pages/src/web/page.js`). The worker has no network, storage or
+workers of its own (the prelude takes them away) and reaches the app only
+through its messages, which the extension's host service answers after
+its capability checks.
 
 Never `'unsafe-eval'`: the app's bundle still links wasm-bindgen's
 `new Function` import and dioxus-web's `eval`, and this policy is what

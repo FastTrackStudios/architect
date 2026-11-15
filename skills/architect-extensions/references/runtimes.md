@@ -24,8 +24,8 @@ Docs: `docs/content/extensions/authoring.md` (the walkthrough), `docs/content/ar
 | Runtime | Selected by | Desktop | Web (`/app/`) | iOS | Node |
 |---|---|---|---|---|---|
 | Linked (Rust) | code: `Extensions::with_linked` | yes | yes (demo tested) | yes | no |
-| Luau | `kind = "luau"`, `script = "*.luau"` | yes | no (#495) | yes | node actions only |
-| Pages (TSX/JS, Luau, A2UI) | `[[views]] page = …` | QuickJS | Web Worker runner exists, no host yet (#495) | QuickJS | no |
+| Luau | `kind = "luau"`, `script = "*.luau"` | yes | no (#812) | yes | node actions only |
+| Pages (TSX/JS, Luau, A2UI) | `[[views]] page = …` | QuickJS | Web Workers, in the web app's host (TypeScript extensions' pages) | QuickJS | no |
 | TypeScript actions | `kind = "typescript"`, `script = "*.ts"` | QuickJS | runner exists, no host yet (#723, #736) | QuickJS (not shown) | no |
 | WASI component | `kind = "wasm"`, `[wasm] component` | Wasmtime + Cranelift | jco + Web Workers, no host yet (#495) | Wasmtime + Pulley | not yet |
 | Process | `kind = "process"`, `[entry] path` | yes | never | never | no |
@@ -101,7 +101,7 @@ fn main() -> Result<(), GuestError> {
 **Where.**
 - Desktop: yes.
 - iOS: yes. Templater-lite ran on the Simulator.
-- Web: no. Luau is C++ and `wasm32-unknown-unknown` has no C++ library for it, so the browser host leaves its runner out (#495).
+- Web: no. Luau is C++ and `wasm32-unknown-unknown` has no C or C++ library for it, so the browser host leaves its runner out and lists Luau extensions as "Can't run here" with why (`features/extensions/src/host.rs` `why_no_runner`); the plan is #812.
 - Node: only as node actions (section 8).
 
 **Can't.**
@@ -150,7 +150,7 @@ The page API is defined once in Rust (`features/pages/src/api.rs` `PageHost`, `P
 
 **Where.**
 - Desktop and iOS: QuickJS. Templater-lite's page ran on the Simulator.
-- Browser: `features/pages/src/web/mod.rs` `WebPages` runs TSX/JS in a Web Worker on the browser's engine, with the same prelude and types, and draws through `features/extensions/src/web.rs` `Pane`. The web app has no host for installed extensions' pages yet (#495). The web lab runs them (`just sandbox-web`).
+- Browser: `features/pages/src/web/mod.rs` `WebPages` runs TSX/JS in a Web Worker on the browser's engine, with the same prelude and types, and draws through `features/extensions/src/web.rs` `Pane`. In the web app an installed extension's page view is drawn by `apps/web/src/app/installs.rs` `view_pages` (its host calls through `WebHost::through`); test: `apps/web/test/app-showcase-install.test.mjs`. The web lab runs them too (`just sandbox-web`).
 - Luau and A2UI pages don't run in a browser yet (#187).
 
 **Can't.**

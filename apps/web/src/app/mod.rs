@@ -46,6 +46,7 @@ mod favourites;
 mod frames;
 mod guest;
 mod index_sync;
+mod installs;
 mod keys;
 pub mod org;
 mod page;

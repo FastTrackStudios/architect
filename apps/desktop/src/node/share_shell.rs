@@ -172,7 +172,7 @@ pub fn policy(issuer: Option<&str>) -> String {
         .filter(|i| !i.contains([';', ' ', ',', '\'', '"', '\r', '\n']))
         .map_or_else(|| "'self'".to_owned(), |i| format!("'self' {i}"));
     format!(
-        "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; media-src 'self'; connect-src {connect}; base-uri 'none'; form-action 'self'; object-src 'none'; frame-src 'self'; frame-ancestors 'none'"
+        "default-src 'none'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; media-src 'self'; connect-src {connect}; base-uri 'none'; form-action 'self'; object-src 'none'; frame-src 'self'; frame-ancestors 'none'"
     )
 }
 

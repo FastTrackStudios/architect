@@ -84,6 +84,21 @@ pub struct Requirements {
 }
 
 impl Requirements {
+    /// What a needs file (`.architect/extensions.toml`) says: what a host
+    /// with no folder to read reads from its own copy of the vault (the
+    /// web app's, #495). At most `crate::vault_needs`' 64 KB.
+    ///
+    /// # Errors
+    ///
+    /// It is larger than that, or not requirements.
+    pub fn from_toml(text: &str) -> Result<Self, String> {
+        const MAX: usize = 64 * 1024;
+        if text.len() > MAX {
+            return Err(format!("{} bytes, more than {MAX}", text.len()));
+        }
+        toml::from_str(text).map_err(|e| e.to_string())
+    }
+
     /// Adds or replaces the requirement of the same id.
     pub fn need(&mut self, requirement: Requirement) {
         self.extensions.retain(|r| r.id != requirement.id);

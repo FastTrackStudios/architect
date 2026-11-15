@@ -196,7 +196,7 @@ Owner decision: the production node gets its extensions through Nix, pinned and 
 | | Install from a registry | Install on open | Dev copy |
 |---|---|---|---|
 | Desktop | yes (L1) | vault and project folders yes; share links no (G1) | yes |
-| Web | no (#495) | no (#495) | no |
+| Web | the registry the app carries (the showcase's), TypeScript and data; kept in the browser's storage (`apps/web/src/app/installs.rs`) | the built-in demo and showcase vaults (`VaultNeeds`); signed-in vaults no | no |
 | iOS | Luau, pages, data, WASM (Pulley); not shown | same banner; not shown | through the control socket |
 
 Current status per capability: `docs/content/guide/showcase.md`.

@@ -252,7 +252,7 @@ test('a share link opens the web app as its guest: the list in sets, a note, its
     assert.match(html, /<script type="module" src="\/app\/start\.js"><\/script>/);
     assert.match(html, /<title>Merry and Bright · Architect<\/title>/);
     assert.ok(!html.includes('Christmas Eve'), 'no note on the page');
-    assert.match(res.headers.get('content-security-policy'), /^default-src 'none'; script-src 'self' 'wasm-unsafe-eval';/);
+    assert.match(res.headers.get('content-security-policy'), /^default-src 'none'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:;/);
     assert.match(res.headers.get('content-security-policy'), /frame-ancestors 'none'$/);
     // The node's share contract and version, and the line a too-old app
     // would leave showing.

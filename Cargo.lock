@@ -2548,6 +2548,7 @@ dependencies = [
  "architect-favourites",
  "architect-media",
  "architect-navigator",
+ "architect-pages",
  "architect-playhead",
  "architect-settings",
  "architect-shell",
