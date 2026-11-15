@@ -1,0 +1,56 @@
+[package]
+name = "architect-review"
+description = "Review, a built-in architect extension: comments pinned to a time, a range or a part of the frame of a media item's video or recording, per version, on Threads; the review view (player, timeline with markers, the item's comments), versions and carrying open comments over; it provides `architect.review` (features/review/extension.toml)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[[bin]]
+name = "architect-review"
+path = "src/main.rs"
+
+[dependencies]
+# The trait (`linked-core`): linked into an app, a browser's too (#495);
+# off the browser also its process copy (`guest`).
+architect-extensions = { workspace = true, features = ["linked-core"] }
+# The media model only (links in a note's properties); wasm-clean.
+architect-media = { workspace = true }
+dioxus = { workspace = true }
+futures-timer = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+architect = { workspace = true, features = ["action-list"] }
+architect-extensions = { workspace = true, features = ["host", "linked", "process"] }
+architect-settings = { workspace = true }
+architect-bases = { workspace = true, features = ["actions"] }
+architect-threads = { workspace = true }
+architect-playhead = { workspace = true, features = ["extension"] }
+vault = { workspace = true, features = ["actions"] }
+futures = "0.3"
+tempfile = "3"
+# tests/shots.rs: the view's screenshots in a headless Blitz document,
+# rendered on the CPU in the app's built-in themes.
+architect-theme = { workspace = true, features = ["dioxus"] }
+blitz-dom = { workspace = true }
+blitz-traits = { workspace = true }
+blitz-paint = { workspace = true, features = ["custom-widget"] }
+dioxus-native-dom = { workspace = true }
+anyrender = { workspace = true }
+anyrender_vello_cpu = { workspace = true }
+peniko = { workspace = true }
+png = { workspace = true }
+
+[lints]
+workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+architect-extensions = { workspace = true, features = ["guest"] }
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

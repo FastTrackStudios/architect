@@ -738,7 +738,7 @@ pub const LAB_CONFIG_ENV: &str = "ARCHITECT_LAB_CONFIG_DIR";
 ///
 /// The person's vaults, opened or made on first run; compiled in (#368):
 /// Projects, Tasks, the Time Tracker, the Calendar, Day Plans, Threads,
-/// Notify and Files. Each runs alone; together a project's page shows its tasks and
+/// Notify, Review and Files. Each runs alone; together a project's page shows its tasks and
 /// their time, a task its timer, the calendar the tasks' days.
 ///
 /// A downstream build starts here and renames it (`.named("Studio")`), or
@@ -760,6 +760,9 @@ pub fn architect() -> Distribution {
         // Threads and Notify (#348): comments on anything; the bell.
         .linked(&architect_threads::Threads)
         .linked(&architect_notify::Notify)
+        // Review: comments at a moment of a video or a recording, per
+        // version, kept as Threads' (features/review).
+        .linked(&architect_review::Review)
         // Files (#347): projects and asset libraries, over FILES_*.
         .linked(&architect_files_extension::FilesExtension)
         .with_updates()

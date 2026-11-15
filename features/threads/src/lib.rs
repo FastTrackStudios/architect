@@ -20,6 +20,10 @@
 //! - **Views:** a comments pane in the right dock that follows the note
 //!   being read (`THREADS_PANE`); a badge with the open threads on each
 //!   commented note's tab and file row.
+//! - **Moments:** a thread may say when in a recording or a video it is
+//!   about (`moment`: a time or a range, maybe a part of the frame,
+//!   [`model::Moment`]); Review (`features/review`) anchors its comments
+//!   so. A thread without one is about its anchor as a whole.
 //! - **Service:** `architect.threads`, each method its `THREADS_<METHOD>`
 //!   action, for extensions (Projects, Tasks, Media Review) and share
 //!   links that let a guest comment.
@@ -333,6 +337,12 @@ fn title_of(path: &str) -> String {
     name.strip_suffix(".md").unwrap_or(name).to_owned()
 }
 
+/// `notify: false`: a copy (Review carrying a comment to a new version)
+/// that tells nobody.
+fn quiet(args: &Value) -> bool {
+    args.get("notify") == Some(&Value::Bool(false))
+}
+
 fn comment_of(args: &Value, author: String) -> Result<Comment, String> {
     let body = arg(args, "body").ok_or("give `body`")?.to_owned();
     Ok(Comment {
@@ -346,10 +356,22 @@ fn comment_of(args: &Value, author: String) -> Result<Comment, String> {
     })
 }
 
-/// `THREADS_START {path | entity_type + entity_id, anchor_path?, title?,
-/// kind?, body, author?}`: a new thread, its first comment `body`.
+/// The `moment` `args` gives: none when it gives none, an error when the
+/// one it gives is not valid ([`model::Moment::new`]).
+fn moment_of(args: &Value) -> Result<Option<model::Moment>, String> {
+    match args.get("moment") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => model::Moment::from_value(v).map(Some).ok_or_else(|| {
+            "`moment` is {start, end?, rect?: {x, y, w, h}}: seconds from 0 to 24 h, an end past its start, a rect inside the frame (0 to 1)".to_owned()
+        }),
+    }
+}
+
+/// `THREADS_START {path | entity_type + entity_id, anchor_path?, moment?,
+/// title?, kind?, body, author?}`: a new thread, its first comment `body`.
 async fn start(args: Value) -> Result<Value, String> {
     let anchor = anchor_of(&args)?;
+    let moment = moment_of(&args)?;
     let who = author(&args).await;
     let comment = comment_of(&args, who.clone())?;
     let id = new_id();
@@ -362,6 +384,7 @@ async fn start(args: Value) -> Result<Value, String> {
         created_by: who,
         created: comment.posted.clone(),
         comments: vec![comment.clone()],
+        moment,
         ..Thread::default()
     };
     let body = if thread.anchor.entity_type == model::NOTE {
@@ -375,7 +398,11 @@ async fn start(args: Value) -> Result<Value, String> {
         String::new()
     };
     host::create(&thread.path, &thread.to_values(), &body).await?;
-    let notified = notify(&thread, &comment, true).await;
+    let notified = if quiet(&args) {
+        Vec::new()
+    } else {
+        notify(&thread, &comment, true).await
+    };
     let _ = refresh().await;
     Ok(json!({ "thread": thread_json(&thread), "comment": comment, "notified": notified }))
 }
@@ -401,7 +428,11 @@ async fn post(args: Value) -> Result<Value, String> {
     if thread.resolved {
         set_resolved(&mut thread, false, None).await?;
     }
-    let notified = notify(&thread, &comment, false).await;
+    let notified = if quiet(&args) {
+        Vec::new()
+    } else {
+        notify(&thread, &comment, false).await
+    };
     let _ = refresh().await;
     Ok(json!({ "thread": thread_json(&thread), "comment": comment, "notified": notified }))
 }

@@ -264,6 +264,11 @@ fn ThreadCard(thread: Thread, focused: bool) -> Element {
             style: "display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 8px; \
                     border: 1px solid {border}; background: var(--card); opacity: {opacity};",
             div { style: "display: flex; align-items: center; gap: 8px;",
+                if let Some(m) = thread.moment {
+                    span { class: "thread-moment", style: "font-size: 11px; font-variant-numeric: tabular-nums; padding: 1px 6px; border-radius: 4px; background: var(--muted);",
+                        "{m.label()}"
+                    }
+                }
                 span { style: "font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;", "{thread.title}" }
                 if resolved {
                     span { style: "font-size: 11px; {MUTED}",

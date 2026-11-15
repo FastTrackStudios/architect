@@ -162,6 +162,35 @@ fn a_conversation_on_a_note_lives_in_the_vault() {
     );
     assert_eq!(at["threads"].as_array().unwrap().len(), 1);
 
+    // A moment of a file on the note: kept in the vault, read back.
+    let at = run(
+        &list,
+        "THREADS_START",
+        json!({ "path": NOTE, "anchor_path": "media/Projects/Album - Lights.mp4",
+                "moment": { "start": 33.5, "end": 41, "rect": { "x": 0.25, "y": 0.5, "w": 0.25, "h": 0.25 } },
+                "body": "Too bright here", "author": "cody" }),
+    );
+    let at_id = at["thread"]["id"].as_str().unwrap().to_owned();
+    let back = run(&list, "THREADS_GET", json!({ "thread": at_id }));
+    assert_eq!(
+        back["moment"],
+        json!({ "start": 33.5, "end": 41.0, "rect": { "x": 0.25, "y": 0.5, "w": 0.25, "h": 0.25 } })
+    );
+    assert_eq!(back["anchorPath"], "media/Projects/Album - Lights.mp4");
+    let bad = block_on(
+        list.run_json_async(
+            "THREADS_START",
+            json!({ "path": NOTE, "moment": { "start": 5, "end": 2 }, "body": "x" })
+                .to_string()
+                .as_bytes(),
+        ),
+    );
+    assert!(
+        bad.is_err(),
+        "a range that ends before it starts is refused"
+    );
+    run(&list, "THREADS_DELETE", json!({ "thread": at_id }));
+
     // Delete: the note goes.
     run(&list, "THREADS_DELETE", json!({ "thread": thread }));
     assert!(!dir.join(&path).exists());
