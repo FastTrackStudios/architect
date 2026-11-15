@@ -226,6 +226,10 @@ struct HostInner {
     /// Responses fetched with `stream`: their bodies, read whole by the
     /// browser, given a part at a time.
     streams: RefCell<BTreeMap<String, Buffered>>,
+    /// The app's host service for this extension ([`WebHost::through`]):
+    /// when set, every call is its, checked and answered there.
+    #[cfg(feature = "host")]
+    through: RefCell<Option<crate::hostapi::ExtensionApi>>,
 }
 
 /// A streamed response's body in a browser: what is left of it.
@@ -286,8 +290,24 @@ impl WebHost {
                 context: RefCell::new(None),
                 theme: RefCell::new(Json::Null),
                 streams: RefCell::new(BTreeMap::new()),
+                #[cfg(feature = "host")]
+                through: RefCell::new(None),
             }),
         }
+    }
+
+    /// Every call answered by the app's host service for this extension
+    /// (`api`, `Host::api`), as a desk's and a phone's are: the same
+    /// checks against its capabilities as the person granted them, the
+    /// app's documents, settings, data and actions (#495). What a page or
+    /// a TypeScript action of an installed extension runs with in the web
+    /// app; without it, this host answers alone (the sandbox's pages,
+    /// WASI components).
+    #[cfg(feature = "host")]
+    #[must_use]
+    pub fn through(self, api: crate::hostapi::ExtensionApi) -> Self {
+        *self.inner.through.borrow_mut() = Some(api);
+        self
     }
 
     /// What a person granted it (`consent`): it reaches what its manifest
@@ -304,6 +324,8 @@ impl WebHost {
             sink,
             context,
             theme,
+            #[cfg(feature = "host")]
+            through,
             ..
         } = Rc::try_unwrap(self.inner).unwrap_or_else(|rc| HostInner {
             manifest: rc.manifest.clone(),
@@ -316,6 +338,8 @@ impl WebHost {
             context: RefCell::new(rc.context.borrow().clone()),
             theme: RefCell::new(rc.theme.borrow().clone()),
             streams: RefCell::new(BTreeMap::new()),
+            #[cfg(feature = "host")]
+            through: RefCell::new(rc.through.borrow().clone()),
         });
         Self {
             inner: Rc::new(HostInner {
@@ -329,6 +353,8 @@ impl WebHost {
                 context,
                 theme,
                 streams: RefCell::new(BTreeMap::new()),
+                #[cfg(feature = "host")]
+                through,
             }),
         }
     }
@@ -432,6 +458,13 @@ impl WebHost {
 
     async fn answer(&self, request: HostRequest) -> Result<Json, HostError> {
         let me = &self.inner;
+        #[cfg(feature = "host")]
+        {
+            let api = me.through.borrow().clone();
+            if let Some(api) = api {
+                return api.call(request).await;
+            }
+        }
         let effect = match &request {
             HostRequest::Run { action, .. } => me
                 .list

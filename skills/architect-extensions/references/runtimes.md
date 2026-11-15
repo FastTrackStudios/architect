@@ -194,7 +194,7 @@ export default function Templates() {
 **Where.**
 - Desktop: QuickJS. The Recipe scaler is shown.
 - iOS: the same runner on the shared `apps/ui` host, not shown.
-- Browser: `features/pages/src/web/actions.rs` `WebPages::register_actions` runs each action in its own Web Worker (no JSPI, so Safari works). The web lab runs it. The web app doesn't host installed extensions yet (#723, #736). Prompts and pickers aren't in the browser host yet.
+- Browser: `features/pages/src/web/actions.rs` `WebPages::register_actions` runs each action in its own Web Worker (no JSPI, so Safari works); the web lab runs it. In the extensions host it is `features/pages/src/web/runner.rs` `WebTsRunner` (feature `web-host`): the host's runner for the kind, its actions and hooks in Web Workers, every host call the app's host service for that extension (`features/extensions/src/web.rs` `WebHost::through`), so no second host. Prompts and pickers aren't in the browser host yet.
 
 **Can't.**
 - Import packages; bundle one into a file. No `fetch`, `fs`, `process` or Node globals.
