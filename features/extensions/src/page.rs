@@ -1202,10 +1202,12 @@ pub fn MissingExtensions(
         } else {
             r.name.clone()
         };
-        let tag = if r.required {
-            "Can't install"
-        } else {
-            "Not found"
+        // The tag is the reason's kind: what cannot run here, what no
+        // registry has, what cannot be installed.
+        let tag = match why {
+            crate::project::Missing::CannotRun(_) => "Can't run here",
+            crate::project::Missing::NotFound => "Not found",
+            _ => "Can't install",
         };
         rows.push((r.id.clone(), name, tag, format!("{why}; kept as it is")));
     }
