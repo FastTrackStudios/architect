@@ -13,7 +13,7 @@ test('the CLI package: its files, its bin, jco as its dependency', () => {
   assert.equal(pack.name, '@fasttrackstudio/architect-cli');
   assert.deepEqual(
     pack.files.map((f) => f.path).sort(),
-    ['LICENSE-APACHE', 'LICENSE-MIT', 'README.md', 'cli.mjs', 'manifest.mjs', 'package.json', 'transpile.mjs', 'typegen.mjs'],
+    ['LICENSE-APACHE', 'LICENSE-MIT', 'README.md', 'architect.d.ts', 'cli.mjs', 'manifest.mjs', 'package.json', 'transpile.mjs', 'ts.mjs', 'typegen.mjs'],
   );
   const p = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   assert.deepEqual(p.bin, { 'architect-ext': './cli.mjs' });

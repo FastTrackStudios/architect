@@ -43,12 +43,17 @@ tsx = [
 web = [
     "tsx",
     "architect-extensions/web",
+    "dep:futures",
     "dep:wasm-bindgen",
     "dep:wasm-bindgen-futures",
     "dep:js-sys",
     "dep:web-sys",
 ]
 luau = ["runner"]
+# TypeScript actions (#536): a `typescript` extension's actions and hooks
+# as `.ts`/`.js` modules on the pages' QuickJS runtime, the extensions
+# host's runner for the kind (`js::action::TsRunner`).
+actions = ["js", "architect-extensions/host"]
 a2ui = ["runner", "dep:architect-a2ui"]
 # What every runner shares: the page thread's loop, the host service.
 runner = [
@@ -128,11 +133,11 @@ web-sys = { version = "0.3", optional = true, features = [
 # tests/ports.rs: a virtual MIDI port.
 architect-input = { workspace = true }
 # A window to mount pages in, headless (`tests/pane.rs`).
-architect-extensions = { workspace = true, features = ["host", "linked", "ui", "remote", "manager", "page", "net"] }
+architect-extensions = { workspace = true, features = ["host", "linked", "ui", "remote", "manager", "page", "net", "crdt"] }
 architect-settings = { workspace = true }
 blitz-traits = { workspace = true }
 architect-scripting = { workspace = true, features = ["luau"] }
-architect-pages = { path = ".", features = ["codegen", "js", "luau", "a2ui", "ui", "manager"] }
+architect-pages = { path = ".", features = ["codegen", "js", "luau", "a2ui", "ui", "manager", "actions"] }
 futures = "0.3"
 tempfile = "3"
 tokio = { workspace = true }

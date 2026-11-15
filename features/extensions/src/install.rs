@@ -648,7 +648,10 @@ impl Install {
     /// of the app's own kinds).
     #[must_use]
     pub fn is_extension(&self) -> bool {
-        matches!(self.kind.as_str(), "data" | "luau" | "wasm" | "process")
+        matches!(
+            self.kind.as_str(),
+            "data" | "luau" | "typescript" | "wasm" | "process"
+        )
     }
 }
 
@@ -971,7 +974,10 @@ impl Installs {
             }
         };
         let files = link.clone().unwrap_or_else(|| incoming.to_path_buf());
-        let is_extension = matches!(listing.kind.as_str(), "data" | "luau" | "wasm" | "process");
+        let is_extension = matches!(
+            listing.kind.as_str(),
+            "data" | "luau" | "typescript" | "wasm" | "process"
+        );
         if is_extension {
             let path = files.join(MANIFEST);
             let text = std::fs::read_to_string(&path).map_err(io(&path))?;

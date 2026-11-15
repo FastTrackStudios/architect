@@ -740,6 +740,7 @@ impl Extensions {
             move |kind| match kind {
                 "data" => host.runs(Kind::Data),
                 "luau" => host.runs(Kind::Luau),
+                "typescript" => host.runs(Kind::TypeScript),
                 "wasm" => host.runs(Kind::Wasm),
                 "process" => host.runs(Kind::Process),
                 // A package of the app's own kinds (`ReaPack`'s): files.

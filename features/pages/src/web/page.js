@@ -12,6 +12,12 @@
 // `notify` and `log`. From it: `start`, `event`, `answer`, `shared`,
 // `theme`.
 //
+// A TypeScript action (#536) runs here too: a `start` with `action`
+// (`{ export, args, ctx }`) loads the module and runs its handler through
+// the prelude's `runAction` instead of mounting a page, and says `done`
+// (its answer, or why it failed) once it settles — or `failed` when it
+// waits on nothing that will answer.
+//
 // What the prelude's `sync` answers at once is kept here: shared state
 // (each change comes from the main thread), the embed's input. A page
 // reaches nothing else of the browser: its network, storage and workers
@@ -146,6 +152,9 @@ function link(name, role, from) {
 // thread, which terminates this worker.
 let working = false;
 let loaded = false;
+// The action this worker runs, when it runs one: its answer is said once.
+let action = null;
+let said = false;
 let tree = null;
 let failure = null;
 let timer = null;
@@ -191,6 +200,20 @@ function settle() {
   }
   working = false;
   post(failure != null ? { t: "idle", error: failure } : tree != null ? { t: "idle", tree } : { t: "idle" });
+  if (action && !said) {
+    const out = architect.outcome();
+    if (out !== undefined) {
+      said = true;
+      const o = JSON.parse(out);
+      post({ t: "done", ok: o.ok, text: o.ok ? o.value : named(o.value) });
+      return;
+    }
+    if (next < 0 && architect.waiting() === 0 && jobs.size === 0) {
+      said = true;
+      post({ t: "failed", why: "its answer never settles: it awaits nothing the app will answer (a promise no host call, timer or worker resolves)" });
+      return;
+    }
+  }
   tree = null;
   failure = null;
   if (timer != null) unlater(timer);
@@ -264,8 +287,27 @@ listen("message", (ev) => {
       try {
         architect.setTheme(m.theme);
         const url = link(m.entry, "page", m.entry);
+        action = m.action || null;
         import(url).then(
           (ns) => {
+            if (action) {
+              const handler = ns[action.export];
+              if (handler === undefined) {
+                post({ t: "failed", why: `${m.entry}: it exports no ${action.export} (an action's module: export default async function (args, ctx) { … })` });
+                return;
+              }
+              globalThis.__action = handler;
+              post({ t: "loaded" });
+              work(() => {
+                try {
+                  architect.runAction(action.args, action.ctx);
+                } catch (e) {
+                  said = true;
+                  post({ t: "failed", why: named(show(e)) });
+                }
+              });
+              return;
+            }
             try {
               architect.mount(ns.default);
               loaded = true;

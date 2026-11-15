@@ -34,6 +34,9 @@
 //! fits here: their DOM calls would build the same element tree this
 //! runtime's `h` does, diffed into edits by the same [`crate::diff::Mirror`].
 
+#[cfg(feature = "actions")]
+pub mod action;
+
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
@@ -329,6 +332,9 @@ pub struct JsEngine {
     services: Services,
     workers: Workers,
     files: Files,
+    /// The last promise job that failed past the page's own handlers (an
+    /// interrupt: its time, a stop): what fails an action's run.
+    job_failed: RefCell<Option<String>>,
 }
 
 impl std::fmt::Debug for JsEngine {
@@ -382,6 +388,7 @@ impl JsEngine {
             services: services.clone(),
             workers: Rc::default(),
             files: files.clone(),
+            job_failed: RefCell::default(),
         };
         engine.install(&files)?;
         let path = page
@@ -483,12 +490,202 @@ impl JsEngine {
                     self.services
                         .log
                         .line(&self.services.extension, "error", &why);
+                    *self.job_failed.borrow_mut() = Some(why);
                     if self.services.stop.is_set() {
                         return;
                     }
                 }
             }
         }
+    }
+}
+
+/// How an action's run (#536) ended: its answer as JSON, or why it failed
+/// (at its module's own line and column).
+#[cfg(feature = "actions")]
+pub type ActionOutcome = Result<String, String>;
+
+#[cfg(feature = "actions")]
+impl JsEngine {
+    /// A runtime for the modules of `root` with nothing loaded yet: the
+    /// prelude and `__host`, as a page's — what a TypeScript action runs
+    /// on ([`Self::run_action`]).
+    ///
+    /// # Errors
+    ///
+    /// The runtime did not start.
+    pub fn bare(root: &Path, services: &Services) -> Result<Self, String> {
+        let budget = Budget::new(vec![services.stop.clone()]);
+        let files = Files::new(root, false);
+        let (rt, ctx) = runtime(services.limits.memory, &budget, &files)?;
+        let engine = Self {
+            ctx,
+            rt,
+            budget,
+            services: services.clone(),
+            workers: Rc::default(),
+            files: files.clone(),
+            job_failed: RefCell::default(),
+        };
+        engine.install(&files)?;
+        let snapshot = services.host.theme_snapshot();
+        let text = serde_json::to_string(&snapshot).map_err(|e| e.to_string())?;
+        engine.call("setTheme", (text,))?;
+        Ok(engine)
+    }
+
+    /// Runs the action whose module is `file` (in its folder) with `args`
+    /// and `context` (JSON, its handler's `ctx`): its export `export`
+    /// (`default`) called, then its units of work
+    /// — host calls' answers from `inbox`, its timers, its workers' news —
+    /// each within [`crate::runner::PageLimits::frame`], until what it
+    /// answered settles. `until` bounds the whole run, waits included.
+    ///
+    /// # Errors
+    ///
+    /// Its module did not load, it threw or rejected, it ran past a limit,
+    /// it was stopped, or it waits on nothing that will ever answer.
+    pub fn run_action(
+        &mut self,
+        file: &Path,
+        export: &str,
+        args: &str,
+        context: &str,
+        inbox: &mpsc::Receiver<Inbox>,
+        until: Option<Instant>,
+        cpu: Option<Duration>,
+    ) -> ActionOutcome {
+        // Its CPU time: every unit of its work, summed, waits for the app
+        // and the person left out.
+        let mut spent = Duration::ZERO;
+        let mut unit = Instant::now();
+        let past_cpu = |spent: Duration| {
+            cpu.filter(|limit| spent > *limit).map(|limit| {
+                format!(
+                    "ran past its CPU time of {} ms in all: hand heavy work to a worker (worker.spawn)",
+                    limit.as_millis()
+                )
+            })
+        };
+        let path = file
+            .canonicalize()
+            .unwrap_or_else(|_| file.to_path_buf())
+            .display()
+            .to_string();
+        // Its module's top level, within the load's time.
+        self.budget.arm(self.services.limits.load);
+        let loaded = self.ctx.with(|ctx| -> Result<(), String> {
+            let ns: Object = Module::import(&ctx, path.clone())
+                .and_then(|p| p.finish::<Object>())
+                .catch(&ctx)
+                .map_err(|e| e.to_string())?;
+            let handler: Value = ns.get(export).map_err(|e| e.to_string())?;
+            if handler.is_undefined() {
+                return Err(format!(
+                    "{}: it exports no {export} (an action's module: export default async function (args, ctx) {{ … }})",
+                    file.display()
+                ));
+            }
+            ctx.globals()
+                .set("__action", handler)
+                .map_err(|e| e.to_string())
+        });
+        self.budget.disarm();
+        loaded.map_err(|why| {
+            let errors = self
+                .files
+                .errors
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            errors.first().map_or_else(
+                || self.files.said(&self.budget.explain(why)),
+                ToString::to_string,
+            )
+        })?;
+        // Its handler's first unit of work, within a unit's time (the
+        // prelude takes the handler from `__action`).
+        let started = self.call("runAction", (args, context)).map(drop);
+        started?;
+        if let Some(why) = self.job_failed.borrow_mut().take() {
+            return Err(why);
+        }
+        loop {
+            if let Some(done) = self.outcome()? {
+                return done;
+            }
+            if let Some(why) = self.job_failed.borrow_mut().take() {
+                return Err(why);
+            }
+            if self.services.stop.is_set() {
+                return Err("it was stopped".to_owned());
+            }
+            if until.is_some_and(|at| Instant::now() >= at) {
+                return Err("it ran past its time".to_owned());
+            }
+            let next = self.tick()?;
+            if let Some(done) = self.outcome()? {
+                return done;
+            }
+            if let Some(why) = self.job_failed.borrow_mut().take() {
+                return Err(why);
+            }
+            if next.is_none() && self.waiting()? == 0 {
+                return Err(
+                    "its answer never settles: it awaits nothing the app will answer (a promise no host call, timer or worker resolves)"
+                        .to_owned(),
+                );
+            }
+            let wait = next.map_or(Duration::from_millis(100), |n| {
+                n.min(Duration::from_millis(100))
+            });
+            spent = spent.saturating_add(unit.elapsed());
+            if let Some(why) = past_cpu(spent) {
+                return Err(why);
+            }
+            let received = inbox.recv_timeout(wait);
+            unit = Instant::now();
+            match received {
+                Ok(Inbox::Answer { call, result }) => self.answer(call, result)?,
+                Ok(Inbox::Worker(message)) => self.worker(&message)?,
+                Ok(Inbox::Shared(event)) => self.shared(&event)?,
+                Ok(Inbox::Event(_) | Inbox::Wake) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err("its host went away".to_owned());
+                }
+            }
+        }
+    }
+
+    /// What the action settled with, once it has.
+    fn outcome(&self) -> Result<Option<ActionOutcome>, String> {
+        let Some(text) = self.call("outcome", ())? else {
+            return Ok(None);
+        };
+        let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+        let value = v
+            .get("value")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("null")
+            .to_owned();
+        Ok(Some(
+            if v.get("ok") == Some(&serde_json::Value::Bool(true)) {
+                Ok(value)
+            } else {
+                Err(self.files.said(&value))
+            },
+        ))
+    }
+
+    /// How many host calls and workers it still waits on.
+    fn waiting(&self) -> Result<u32, String> {
+        self.ctx.with(|ctx| {
+            ctx.globals()
+                .get::<_, Object>("__architect")
+                .and_then(|a| a.get::<_, Function>("waiting"))
+                .and_then(|f| f.call::<_, u32>(()))
+                .catch(&ctx)
+                .map_err(|e| e.to_string())
+        })
     }
 }
 

@@ -1,7 +1,7 @@
 {
   "name": "@fasttrackstudio/architect-cli",
   "version": "0.0.0-dev",
-  "description": "Make an Architect extension's WASI component ready for @fasttrackstudio/architect: transpile it (jco), write its metadata, a lock of every file's SHA-256, typed actions, and a size report. `architect-ext build-web`.",
+  "description": "Tooling for Architect extensions: make a WASI component ready for @fasttrackstudio/architect (`architect-ext build-web`: jco, metadata, a lock, typed actions, a size report), and scaffold, type-check, pack and sign a TypeScript extension (`new --typescript`, `types`, `check`, `pack`).",
   "type": "module",
   "license": "MIT OR Apache-2.0",
   "repository": {
@@ -27,12 +27,22 @@
     "typegen.mjs",
     "transpile.mjs",
     "manifest.mjs",
+    "ts.mjs",
+    "architect.d.ts",
     "README.md",
     "LICENSE-MIT",
     "LICENSE-APACHE"
   ],
   "scripts": {
     "prepack": "node ../scripts/build.mjs --cli"
+  },
+  "peerDependencies": {
+    "typescript": ">=5"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
   },
   "dependencies": {
     "@bytecodealliance/jco": "1.41.0",

@@ -17,6 +17,7 @@ import { parse } from 'smol-toml';
 import { transpile } from './transpile.mjs';
 import { typegen } from './typegen.mjs';
 import { checkManifest } from './manifest.mjs';
+import { check as checkTs, keygen, pack, scaffold, writeTypes } from './ts.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -177,10 +178,83 @@ Transpiles an Architect extension's WASI component for a web page (jco), writes
 <out-dir>/actions.d.ts and actions.js (its typed actions; --types puts them in
 your source instead), and prints the size of everything a page downloads.`;
 
+const TS_USAGE = `TypeScript extensions (kind = "typescript", #536): actions as .ts files beside TSX pages.
+
+  architect-ext new --typescript <id> [dir]   a new one: a manifest, an action, a page, its types
+  architect-ext types [dir]                   types/architect.d.ts and types/actions.d.ts (each
+                                              action's arguments, from its manifest's params)
+  architect-ext check [dir]                   the manifest and its files, then tsc --noEmit
+  architect-ext pack [dir] [--out F] [--key F] its .archext, signed with a minisign secret key
+                                              (--key, or ARCHITECT_EXT_SIGNING_KEY: the key's text)
+  architect-ext keygen <dir>                  a throwaway key pair, for trials (never a release key)`;
+
+/// The TypeScript commands; `null` when `command` is none of them.
+function tsMain(command, rest) {
+  const flag = (name) => {
+    const i = rest.indexOf(name);
+    if (i < 0) return undefined;
+    const v = rest[i + 1];
+    rest.splice(i, 2);
+    return v;
+  };
+  try {
+    switch (command) {
+      case 'new': {
+        if (!rest.includes('--typescript')) throw new Error('new makes TypeScript extensions: architect-ext new --typescript <id> [dir]');
+        rest.splice(rest.indexOf('--typescript'), 1);
+        const [id, dir = id] = rest;
+        if (!id) throw new Error('new --typescript <id> [dir]');
+        const files = scaffold(id, dir);
+        console.log(`${id} in ${dir}: ${files.join(', ')}, types/`);
+        console.log(`load it as a development copy (EXT_DEV ${resolve(dir)}), then: architect-ext check ${dir}`);
+        return 0;
+      }
+      case 'types':
+        for (const f of writeTypes(rest[0] ?? '.')) console.log(f);
+        return 0;
+      case 'check':
+        checkTs(rest[0] ?? '.');
+        console.log('ok');
+        return 0;
+      case 'pack': {
+        const out = flag('--out');
+        const keyFile = flag('--key');
+        const dir = rest[0] ?? '.';
+        const key = keyFile ? readFileSync(keyFile, 'utf8') : process.env.ARCHITECT_EXT_SIGNING_KEY;
+        const { bytes, index } = pack(dir, key);
+        const path = out ?? `${index.id}-${index.version}.archext`;
+        writeFileSync(path, bytes);
+        console.log(`${index.id} ${index.version}: ${index.files.length} files → ${path}${key ? ', signed' : ', unsigned (an app installs only signed archives: --key)'}`);
+        return 0;
+      }
+      case 'keygen': {
+        const dir = rest[0];
+        if (!dir) throw new Error('keygen <dir>');
+        mkdirSync(dir, { recursive: true });
+        const pair = keygen();
+        writeFileSync(join(dir, 'architect-ext.key'), pair.secret, { mode: 0o600 });
+        writeFileSync(join(dir, 'architect-ext.pub'), pair.public);
+        console.log(`${join(dir, 'architect-ext.key')} and .pub: a throwaway pair, never a release key`);
+        return 0;
+      }
+      default:
+        return null;
+    }
+  } catch (e) {
+    console.error(`architect-ext ${command}: ${e.message}`);
+    return 1;
+  }
+}
+
 function main(argv) {
   const [command, ...rest] = argv;
+  if (!rest.includes('--help') && !rest.includes('-h')) {
+    const done = tsMain(command, [...rest]);
+    if (done !== null) return done;
+  }
   if (command !== 'build-web' || rest.includes('--help') || rest.includes('-h')) {
     console.error(USAGE);
+    console.error(`\n${TS_USAGE}`);
     return command === '--help' || command === '-h' || rest.includes('--help') ? 0 : 2;
   }
   const opts = {};

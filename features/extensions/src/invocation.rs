@@ -32,11 +32,13 @@ pub fn invocation_json(invocation: Option<&Invocation>) -> Value {
     Value::Object(out)
 }
 
-/// What an action is handed as its context: its invocation
-/// ([`invocation_json`]) and, when an extension made the call, that
-/// extension's id as `caller`, from the call's principal (the host's to
-/// say, never the extension's arguments). A service checks whose call it
-/// is by it (`architect.playhead`: an extension moves its own source only).
+/// What an action is handed as its context.
+///
+/// Its invocation ([`invocation_json`]) and, when an extension made the
+/// call, that extension's id as `caller`, from the call's principal (the
+/// host's to say, never the extension's arguments). A service checks whose
+/// call it is by it (`architect.playhead`: an extension moves its own
+/// source only).
 #[must_use]
 pub fn caller_json(caller: &ActionCaller) -> Value {
     let mut out = invocation_json(caller.invocation());

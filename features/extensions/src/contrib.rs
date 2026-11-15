@@ -1129,6 +1129,8 @@ pub struct Rules<'a> {
     pub views: &'a [String],
     /// Whether it runs Luau (a hook's script).
     pub luau: bool,
+    /// Whether it runs TypeScript (a hook's `.ts` or `.js` module, #536).
+    pub typescript: bool,
     /// The app-defined events it asks to hear (`capabilities.events`).
     pub events: &'a [String],
     /// What of the app's state it asks to read (`capabilities.reads`): a
@@ -1535,13 +1537,25 @@ impl Contribution {
             }
             match (&h.action, &h.script) {
                 (Some(a), None) => action(&what, a)?,
-                (None, Some(path)) if rules.luau => {
+                (None, Some(path))
+                    if (rules.luau && !crate::manifest::is_ts_script(path))
+                        || (rules.typescript && crate::manifest::is_ts_script(path)) =>
+                {
                     if !inside(path) {
                         return refuse(what, format!("{path} is outside the package"));
                     }
                 }
+                (None, Some(path)) if rules.typescript => {
+                    return refuse(
+                        what,
+                        format!("{path}: a typescript extension's hook runs a .ts or .js module"),
+                    );
+                }
                 (None, Some(_)) => {
-                    return refuse(what, "a script hook needs a luau extension".to_owned());
+                    return refuse(
+                        what,
+                        "a script hook needs a luau or typescript extension".to_owned(),
+                    );
                 }
                 _ => return refuse(what, "it runs one action or one script".to_owned()),
             }
@@ -2646,6 +2660,7 @@ mod tests {
             reach,
             views,
             luau: false,
+            typescript: false,
             events: &[],
             reads: &[],
             writes: &[],

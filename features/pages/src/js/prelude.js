@@ -6,7 +6,8 @@
 // answer comes back through `answer`; sync(kind, a, b) answers at once;
 // log(level, text); now() (ms); spawn(file, args) -> id; post(id, json);
 // terminate(id). What Rust calls here is `__architect`'s: render, event,
-// answer, shared, worker, setTheme, tick, dirty.
+// answer, shared, worker, setTheme, tick, dirty; for an action's module
+// (#536), runAction, outcome and waiting.
 (() => {
   "use strict";
   const host = globalThis.__host;
@@ -521,12 +522,67 @@
     );
   }
 
+  // ── actions as files (#536) ───────────────────────────────────────
+  // An action's module exports its handler: `(args, ctx) => answer`, an
+  // answer or a promise of one. Rust sets it as `__action` and calls
+  // `runAction` once, then runs the
+  // runtime's units of work (host calls' answers, timers, workers' news)
+  // until `outcome` says it settled; `waiting` is what it still waits on.
+  // `defineAction(handler)`, or `defineAction("ID", handler)`: then a run
+  // as any other action than ID fails, saying so.
+  const BOUND = Symbol("architect.action");
+  function defineAction(id, handler) {
+    if (typeof id === "function") return id;
+    if (typeof id !== "string" || typeof handler !== "function")
+      throw new TypeError("defineAction takes the action's handler, or its id and its handler: defineAction(\"ID\", (args, ctx) => answer)");
+    const bound = (args, ctx) => {
+      if (ctx && typeof ctx.action === "string" && !ctx.action.startsWith("hook ") && ctx.action !== id)
+        throw new Error("this module is defineAction(\"" + id + "\", …), but its manifest runs it as " + ctx.action);
+      return handler(args, ctx);
+    };
+    bound[BOUND] = id;
+    return bound;
+  }
+  let outcome = null;
+  function runAction(args, ctx) {
+    const handler = globalThis.__action;
+    delete globalThis.__action;
+    if (typeof handler !== "function")
+      throw new TypeError("an action's module exports its handler: export default async function (args, ctx) { … }");
+    outcome = null;
+    const given = JSON.parse(args);
+    const where = Object.freeze(JSON.parse(ctx));
+    Promise.resolve()
+      .then(() => handler(given, where))
+      .then(
+        (v) => {
+          let text;
+          try {
+            text = v === undefined ? "null" : JSON.stringify(v);
+          } catch (e) {
+            outcome = { ok: false, value: "its answer is not JSON: " + show(e) };
+            return;
+          }
+          outcome = { ok: true, value: text === undefined ? "null" : text };
+        },
+        (e) => {
+          outcome = { ok: false, value: show(e) };
+        },
+      );
+  }
+  const actionOutcome = () => (outcome ? JSON.stringify(outcome) : undefined);
+  const waiting = () => pending.size + workers.size;
+
   const api = Object.freeze({
     h, Fragment, useState, useRef, useEffect, useData, useShared, useEmbed, useTheme, invalidate,
     theme, actions, services, settings, state, notify, ui, clipboard, events, documents, editor, net, ports, worker, Overlay, host: raw,
+    defineAction,
   });
   globalThis.__architect = Object.freeze({
     api,
+    runAction,
+    outcome: actionOutcome,
+    waiting,
     mount,
     render,
     event,

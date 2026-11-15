@@ -411,10 +411,10 @@ impl Instance for Luau {
                 let report = runtime.run(&caller, &source, args, &step).await;
                 log_report(&logs, &owner, &id, &report);
                 match report.result {
-                    Ok(value) => Ok(value.to_string().into_bytes()),
+                    Ok(value) => capped_answer(&id, value.to_string().into_bytes()),
                     Err(e) => Err(ActionError::Failed {
                         id,
-                        message: e.to_string(),
+                        message: capped_error(e.to_string()),
                     }),
                 }
             });
@@ -441,13 +441,13 @@ impl Instance for Luau {
         Some(Box::pin(async move {
             let report = runtime.run(&caller, &source, args, &step).await;
             log_report(&logs, &owner, &step, &report);
-            report
-                .result
-                .map(|v| v.to_string().into_bytes())
-                .map_err(|e| ActionError::Failed {
+            match report.result {
+                Ok(v) => capped_answer(&id, v.to_string().into_bytes()),
+                Err(e) => Err(ActionError::Failed {
                     id,
-                    message: e.to_string(),
-                })
+                    message: capped_error(e.to_string()),
+                }),
+            }
         }))
     }
 
@@ -573,6 +573,46 @@ pub fn now_ms() -> u64 {
 }
 
 pub use crate::invocation::invocation_json;
+
+/// The most a script's action (Luau's, a TypeScript one's) may answer:
+/// 1 MB of JSON. Past it the run fails and says so.
+pub const MAX_ANSWER: usize = 1 << 20;
+
+/// The most of a script's error that is kept: 4 KB (a stack past it is
+/// cut, said so).
+pub const MAX_ERROR: usize = 4 << 10;
+
+/// A script action's answer, when it is within [`MAX_ANSWER`].
+///
+/// # Errors
+///
+/// It is larger: [`ActionError::Failed`], with its size.
+pub fn capped_answer(id: &str, answer: Vec<u8>) -> Result<Vec<u8>, ActionError> {
+    if answer.len() > MAX_ANSWER {
+        return Err(ActionError::Failed {
+            id: id.to_owned(),
+            message: format!(
+                "its answer is {} bytes, past the {MAX_ANSWER} an action may answer",
+                answer.len()
+            ),
+        });
+    }
+    Ok(answer)
+}
+
+/// A script's error, cut to [`MAX_ERROR`] bytes (at a character).
+#[must_use]
+pub fn capped_error(mut error: String) -> String {
+    if error.len() > MAX_ERROR {
+        let at = (0..=MAX_ERROR)
+            .rev()
+            .find(|i| error.is_char_boundary(*i))
+            .unwrap_or_default();
+        error.truncate(at);
+        error.push_str("… (cut at 4 KB)");
+    }
+    error
+}
 
 /// An action's arguments as JSON: nothing is `null`.
 fn json_args(id: &str, args: &[u8]) -> Result<Value, ActionError> {
@@ -1348,13 +1388,18 @@ impl Host {
     /// Runs `runner`'s kind with it from now, in place of the one there
     /// was ([`Self::with_runner`] on a host already shared).
     pub fn add_runner(&self, runner: impl Runner + 'static) {
+        self.add_runner_arc(Arc::new(runner));
+    }
+
+    /// [`Self::add_runner`] for a runner already shared.
+    pub fn add_runner_arc(&self, runner: Arc<dyn Runner>) {
         let mut runners = self
             .inner
             .runners
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         runners.retain(|r| r.kind() != runner.kind());
-        runners.push(Arc::new(runner));
+        runners.push(runner);
     }
 
     /// The view kinds it takes.
@@ -1371,9 +1416,12 @@ impl Host {
     /// kinds, and whether it runs process extensions.
     #[must_use]
     pub fn checker(&self) -> crate::check::Checker {
-        let checker = crate::check::Checker::new()
+        let mut checker = crate::check::Checker::new()
             .with_view_kinds(self.view_kinds())
             .with_processes(self.runs(Kind::Process));
+        if let Some(runner) = self.runner(Kind::TypeScript) {
+            checker = checker.with_typescript(runner);
+        }
         match self.page_checker() {
             Some(pages) => checker.with_page_checker(pages),
             None => checker,
