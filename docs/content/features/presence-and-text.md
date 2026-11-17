@@ -88,14 +88,19 @@ use_pane_space(ViewSpace::mapped(
 - **An extension in any runtime** (a process, a WASI component, a page, Luau)
   does the same with actions, under the capability `actions = ["CURSORS_"]`:
   `CURSORS_SPACE_SET {pane, space, x, y}` and `CURSORS_SPACE_CLEAR {pane}`
-  declare a pane's space, `CURSORS_HERE {place}` publishes a pointer from a
-  view that draws its own surface, and `CURSORS_ROSTER {space?}` reads who is
-  here, with a `revision` to poll on. The app puts them on its list with
+  declare a pane's space (`custom: true` instead of axes: the view draws the
+  others and publishes its own pointer, the pane does neither),
+  `CURSORS_HERE {place}` publishes a pointer from a view that draws its own
+  surface, `CURSORS_SELECT {space, keys?, from?, to?}` publishes this
+  person's selection in a space (neither keys nor a range withdraws it), and
+  `CURSORS_ROSTER {space?}` reads who is here, each person's `pointer` and
+  `selections` (only `space`'s when asked for one), with a `revision`. A hook
+  on `changed:cursors` hears each change of it, so a view repaints without
+  polling. The app puts them on its list with
   `architect_workspace::pane_space::register`.
 
 Selections with a range in a declared space are washed in the person's colour
-the same way. Not yet: a roster-changed event (poll `CURSORS_ROSTER`'s
-revision), remote carets in an extension's own editor, and the navigator's
+the same way. Not yet: remote carets in an extension's own editor, and the navigator's
 "who has this open". The Architect app mounts the room
 (`apps/ui/src/cursors.rs` `use_app_cursors`) over a channel of its own until
 it joins a vault's presence channel, so nobody else is on it yet.

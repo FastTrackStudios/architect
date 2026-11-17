@@ -17,7 +17,7 @@
 use std::rc::Rc;
 use std::time::Duration;
 
-use crdt::presence::{Here, Place, PresenceSink, Roster};
+use crdt::presence::{Here, Place, PresenceSink, Roster, Selection};
 use dioxus::prelude::*;
 
 use super::presence::PresenceMarksLayer;
@@ -39,6 +39,10 @@ pub struct PaneRoom {
     board: PresenceBoard,
     send: Rc<dyn Fn(Option<Place>)>,
     look: Rc<dyn Fn(Option<String>)>,
+    /// This person's selection in a space (`None` withdraws it).
+    select: Rc<dyn Fn(String, Option<Selection>)>,
+    /// Send what a throttle held, once its turn has come.
+    flush: Rc<dyn Fn()>,
     clock: Rc<dyn Fn() -> f64>,
 }
 
@@ -59,15 +63,26 @@ impl PaneRoom {
             Some(place) => pointing.pointer(place, at()),
             None => pointing.no_pointer(),
         });
-        let at = Rc::clone(&clock);
+        let (looking, at) = (here.clone(), Rc::clone(&clock));
         let look = Rc::new(move |space: Option<String>| {
-            here.edit_state(at(), |state| state.looking_at = space);
+            looking.edit_state(at(), |state| state.looking_at = space);
         });
+        let (selecting, at) = (here.clone(), Rc::clone(&clock));
+        let select = Rc::new(move |space: String, selection: Option<Selection>| {
+            selecting.edit_state(at(), |state| {
+                state.selections.retain(|s| s.space != space);
+                state.selections.extend(selection);
+            });
+        });
+        let at = Rc::clone(&clock);
+        let flush = Rc::new(move || here.flush(at()));
         Self {
             roster,
             board,
             send,
             look,
+            select,
+            flush,
             clock,
         }
     }
@@ -103,6 +118,12 @@ pub fn use_pane_room(make: impl FnOnce() -> PaneRoom) -> PaneRoom {
                 for place in room.board.take_published() {
                     (room.send)(place);
                 }
+                for (space, selection) in room.board.take_selected() {
+                    (room.select)(space, selection);
+                }
+                // A state change the throttle held (a selection, what this
+                // person looks at) goes once its turn comes.
+                (room.flush)();
                 room.board.saw(&room.roster.peek());
             }
         }
@@ -217,7 +238,12 @@ impl PaneTrack {
         let Some(m) = measured else {
             return;
         };
-        let place = space_of(&room, pane, kind, title).to_place(x - m.x, y - m.y, m.size);
+        let space = space_of(&room, pane, kind, title);
+        // A view that draws the others itself publishes its own pointer.
+        if space.is_custom() {
+            return;
+        }
+        let place = space.to_place(x - m.x, y - m.y, m.size);
         (room.send)(place);
     }
 }

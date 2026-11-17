@@ -44,6 +44,8 @@ How fast a save shows, by kind: data and themes instantly; Luau and TypeScript o
 
 ### An instance of your own: `architect-desktop dev`
 
+Against an installed app: `cargo run --release -p architect-desktop -- install` from a checkout installs that build (bundled, signed, notarized and stapled on a Mac; `--no-notarize` skips Apple) and links `architect` onto `PATH`, so a repo of extensions runs `architect dev --extension <folder> …` with no Architect crate in its build. A development copy is not built by the app: its program at `[entry] path` is the extension's own build's to write (a path dependency's edit included); the app reloads when a file in the folder changes, the program among them.
+
 An agent (or a worktree) gets its own Architect, apart from the person's window and from every other one: its own settings folder, vault, control socket, file secret store (never the keychain), local-only iroh, and no global capture shortcut (`apps/desktop/src/dev.rs`). As many run at once as are asked for.
 
 ```sh

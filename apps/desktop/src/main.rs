@@ -27,6 +27,7 @@
 //! architect-desktop extensions registries      # EXT_REGISTRIES: the store's and the person's registries
 //! architect-desktop serve [--config <file>]    # the app's node with no window: a server (src/node/)
 //! architect-desktop dev [--extension <dir>]…  # an isolated instance, as many as wanted (src/dev.rs)
+//! architect-desktop install [--user]           # this build as the installed app, on PATH (src/install.rs)
 //! ```
 //!
 //! In a window it keeps `<app dir>/AGENTS.md` and `actions.schema.json`
