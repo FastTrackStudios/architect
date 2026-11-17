@@ -17,6 +17,8 @@
 //! architect-desktop dev --only navigator,x       # every other extension off (--bare: all of them)
 //! architect-desktop dev --open "Charts/A.kf"     # opened on a file (EXT_OPEN)
 //! architect-desktop dev --layout focus           # in a layout of the app's folder (HOME_LAYOUT_USE)
+//! architect-desktop dev --collapse left,right    # opened with those sides folded away
+//! architect-desktop dev --hide all               # no rail, docks or status bar: the tabs and the page
 //! architect-desktop dev --run ACTION[=JSON]      # any action, once it is up
 //! architect-desktop dev --seed <dir> | --vault <dir> | --fresh | --name <n> | --wait
 //! architect-desktop dev list                     # the instances, running or not
@@ -33,7 +35,8 @@
 //! they run, hot reload and all, is isolated. The flags have variables:
 //! `ARCHITECT_DEV_ONLY` (`id,id`, `none` for bare), `ARCHITECT_DEV_EXTENSIONS`
 //! (folders, `:`-separated), `ARCHITECT_DEV_OPEN`, `ARCHITECT_DEV_LAYOUT`,
-//! `ARCHITECT_DEV_VAULT`, `ARCHITECT_DEV_SEED`, `ARCHITECT_DEV_FRESH=1`,
+//! `ARCHITECT_DEV_COLLAPSE` (`left,right`), `ARCHITECT_DEV_VAULT`,
+//! `ARCHITECT_DEV_SEED`, `ARCHITECT_DEV_FRESH=1`,
 //! `ARCHITECT_DEV_RUN` (`[["ACTION", {args}], …]`). `dev` is that
 //! variable set for a window it starts, which it waits for.
 
@@ -62,11 +65,19 @@ const FRESH_ENV: &str = "ARCHITECT_DEV_FRESH";
 /// Set by `dev` on the window it starts: its output is the log already.
 const LOGGED_ENV: &str = "ARCHITECT_DEV_LOGGED";
 const RUN_ENV: &str = "ARCHITECT_DEV_RUN";
+const COLLAPSE_ENV: &str = "ARCHITECT_DEV_COLLAPSE";
+/// The sides `--collapse` folds.
+const SIDES: [&str; 3] = ["left", "right", "bottom"];
+const HIDE_ENV: &str = "ARCHITECT_DEV_HIDE";
+/// What `--hide` takes away: the rail (the shell's ribbon slot), the
+/// status bar (its status slot), and the docks.
+const PARTS: [&str; 5] = ["rail", "status", "left", "right", "bottom"];
 /// How long a start waits for the window's socket to answer.
 const READY: Duration = Duration::from_secs(180);
 
 const USAGE: &str = "usage: architect-desktop dev [--name <n>] [--fresh] [--vault <dir> | --seed <dir>] \
-[--only <id,id> | --bare] [--extension <dir>]... [--open <path>] [--layout <name>] [--run <ACTION[=JSON]>]... [--wait]
+[--only <id,id> | --bare] [--extension <dir>]... [--open <path>] [--layout <name>] [--collapse <side,side>] [--hide <part,part>] \
+[--run <ACTION[=JSON]>]... [--wait]
        architect-desktop dev list
        architect-desktop dev stop [<name> | --all]
        architect-desktop dev path [--name <n>]";
@@ -84,6 +95,12 @@ struct Ask {
     extensions: Vec<PathBuf>,
     open: Option<String>,
     layout: Option<String>,
+    /// The sides folded once it is up (`left`: the sidebar to the rail;
+    /// `right`, `bottom`: their docks collapsed).
+    collapse: Vec<String>,
+    /// What is hidden once it is up (`rail`, `status`, `left`, `right`,
+    /// `bottom`): the shell's slots and the docks, no strip left.
+    hide: Vec<String>,
     run: Vec<(String, Value)>,
     wait: bool,
 }
@@ -130,6 +147,12 @@ impl Ask {
                 seed.canonicalize().unwrap_or_else(|_| seed.clone()).into(),
             ));
         }
+        if !self.collapse.is_empty() {
+            out.push((COLLAPSE_ENV, self.collapse.join(",").into()));
+        }
+        if !self.hide.is_empty() {
+            out.push((HIDE_ENV, self.hide.join(",").into()));
+        }
         if !self.run.is_empty() {
             let runs: Vec<Value> = self.run.iter().map(|(id, a)| json!([id, a])).collect();
             out.push((RUN_ENV, Value::Array(runs).to_string().into()));
@@ -165,6 +188,18 @@ impl Ask {
                 .unwrap_or_default(),
             open: var(OPEN_ENV),
             layout: var(LAYOUT_ENV),
+            hide: var(HIDE_ENV).map_or_else(Vec::new, |v| {
+                names(&v, &PARTS).unwrap_or_else(|why| {
+                    let _ = writeln!(std::io::stderr(), "{HIDE_ENV}: {why}");
+                    Vec::new()
+                })
+            }),
+            collapse: var(COLLAPSE_ENV).map_or_else(Vec::new, |v| {
+                names(&v, &SIDES).unwrap_or_else(|why| {
+                    let _ = writeln!(std::io::stderr(), "{COLLAPSE_ENV}: {why}");
+                    Vec::new()
+                })
+            }),
             run: var(RUN_ENV)
                 .and_then(|v| serde_json::from_str::<Vec<(String, Value)>>(&v).ok())
                 .unwrap_or_default(),
@@ -202,6 +237,20 @@ fn parse(args: &[String]) -> Result<Ask, String> {
             "--extension" => ask.extensions.push(value("--extension")?.into()),
             "--open" => ask.open = Some(value("--open")?),
             "--layout" => ask.layout = Some(value("--layout")?),
+            "--collapse" => {
+                for side in names(&value("--collapse")?, &SIDES)? {
+                    if !ask.collapse.contains(&side) {
+                        ask.collapse.push(side);
+                    }
+                }
+            }
+            "--hide" => {
+                for part in names(&value("--hide")?, &PARTS)? {
+                    if !ask.hide.contains(&part) {
+                        ask.hide.push(part);
+                    }
+                }
+            }
             "--run" => {
                 let v = value("--run")?;
                 let (id, args) = match v.split_once('=') {
@@ -221,6 +270,24 @@ fn parse(args: &[String]) -> Result<Ask, String> {
         return Err("--vault and --seed: one or the other".to_owned());
     }
     Ok(ask)
+}
+
+/// `left,right` as names out of `known` (`all`: every one).
+fn names(list: &str, known: &[&str]) -> Result<Vec<String>, String> {
+    if list.trim() == "all" {
+        return Ok(known.iter().map(|s| (*s).to_owned()).collect());
+    }
+    list.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            if known.contains(&s) {
+                Ok(s.to_owned())
+            } else {
+                Err(format!("no {s:?}: {} or all", known.join(", ")))
+            }
+        })
+        .collect()
 }
 
 /// FNV-1a: a short name for a path that is the same on every run.
@@ -627,7 +694,10 @@ fn wait_ready(inst: &Instance, child: &mut std::process::Child) -> Result<(), St
 fn log_tail(inst: &Instance) -> String {
     let text = std::fs::read_to_string(inst.log()).unwrap_or_default();
     let lines: Vec<&str> = text.lines().collect();
-    lines.get(lines.len().saturating_sub(40)..).unwrap_or_default().join("\n")
+    lines
+        .get(lines.len().saturating_sub(40)..)
+        .unwrap_or_default()
+        .join("\n")
 }
 
 /// A window made an instance by its environment alone (not started by
@@ -791,9 +861,14 @@ fn apply(inst: &Instance, ask: &Ask) -> Result<(), String> {
             || id != "updates",
             |only| only.iter().any(|o| o == id) || keep.iter().any(|k| k == id),
         );
-        if !on {
+        let loaded = e.get("loaded").and_then(Value::as_bool).unwrap_or(true);
+        if !on && loaded {
             act(&socket, "EXT_DISABLE", &json!({ "id": id }))
                 .map_err(|e| format!("EXT_DISABLE {id}: {e}"))?;
+        } else if on && !loaded {
+            // Turned off by an earlier ask (it is kept): on again. One that
+            // cannot run here stays off, and says why in EXT_LOGS.
+            let _ = act(&socket, "EXT_ENABLE", &json!({ "id": id }));
         }
     }
     if let Some(name) = &ask.layout {
@@ -803,8 +878,94 @@ fn apply(inst: &Instance, ask: &Ask) -> Result<(), String> {
     if let Some(path) = &ask.open {
         open(&socket, path)?;
     }
+    hide(inst, &socket, &ask.hide)?;
+    collapse(&socket, &ask.collapse)?;
     for (id, args) in &ask.run {
         act(&socket, id, args).map_err(|e| format!("{id}: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Folds `sides` away: the left as the sidebar folded to the rail (a
+/// desk's left dock is its sidebar) and its dock collapsed; the right and
+/// the bottom as their docks collapsed. The person can open them again.
+fn collapse(socket: &Path, sides: &[String]) -> Result<(), String> {
+    for side in sides {
+        if side == "left" {
+            act(
+                socket,
+                "COMMANDS_RUN",
+                &json!({ "id": "SHELL_SIDEBAR_RAIL" }),
+            )
+            .map_err(|e| format!("SHELL_SIDEBAR_RAIL: {e}"))?;
+        }
+        act(
+            socket,
+            "WORKSPACE_DOCK_SET",
+            &json!({ "side": side, "shown": "collapsed" }),
+        )
+        .map_err(|e| format!("WORKSPACE_DOCK_SET {side}: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Takes away the parts in `parts`: the rail and the status bar as the
+/// shell's slots hidden (`HOME_SLOT_SET`), a dock as hidden, strip and
+/// all (`WORKSPACE_DOCK_SET`; the left also folds the sidebar to the
+/// rail). The slots an earlier ask hid that this one does not come back.
+fn hide(inst: &Instance, socket: &Path, parts: &[String]) -> Result<(), String> {
+    let slot = |part: &str| match part {
+        "rail" => Some("ribbon"),
+        "status" => Some("status"),
+        _ => None,
+    };
+    let record = inst.dir.join("hidden-slots");
+    let before = std::fs::read_to_string(&record).unwrap_or_default();
+    let mut changed = false;
+    for gone in before.lines().filter(|s| !s.is_empty()) {
+        if !parts.iter().any(|p| slot(p) == Some(gone)) {
+            act(
+                socket,
+                "HOME_SLOT_SET",
+                &json!({ "slot": gone, "clear": true }),
+            )
+            .map_err(|e| format!("HOME_SLOT_SET {gone}: {e}"))?;
+            changed = true;
+        }
+    }
+    // The slots first: a slot hidden or shown draws the shell again, and a
+    // fold asked of it before that has settled is lost.
+    let mut hidden = Vec::new();
+    for name in parts.iter().filter_map(|p| slot(p)) {
+        act(
+            socket,
+            "HOME_SLOT_SET",
+            &json!({ "slot": name, "hidden": true }),
+        )
+        .map_err(|e| format!("HOME_SLOT_SET {name}: {e}"))?;
+        hidden.push(name);
+        changed = true;
+    }
+    std::fs::write(&record, hidden.join("\n")).map_err(|e| format!("{}: {e}", record.display()))?;
+    let docks: Vec<&String> = parts.iter().filter(|p| slot(p).is_none()).collect();
+    if changed && !docks.is_empty() {
+        std::thread::sleep(Duration::from_millis(600));
+    }
+    for side in docks {
+        if side == "left" {
+            act(
+                socket,
+                "COMMANDS_RUN",
+                &json!({ "id": "SHELL_SIDEBAR_RAIL" }),
+            )
+            .map_err(|e| format!("SHELL_SIDEBAR_RAIL: {e}"))?;
+        }
+        act(
+            socket,
+            "WORKSPACE_DOCK_SET",
+            &json!({ "side": side, "shown": "hidden" }),
+        )
+        .map_err(|e| format!("WORKSPACE_DOCK_SET {side}: {e}"))?;
     }
     Ok(())
 }
@@ -890,6 +1051,20 @@ mod tests {
         assert!(parse(&args("--vault a --seed b")).is_err());
         assert!(parse(&args("--run X={nope")).is_err());
         assert!(parse(&args("--what")).is_err());
+        let collapse = parse(&args("--collapse left,right --collapse left"))
+            .unwrap()
+            .collapse;
+        assert_eq!(collapse, ["left", "right"], "each side once");
+        assert_eq!(parse(&args("--collapse all")).unwrap().collapse.len(), 3);
+        assert!(parse(&args("--collapse top")).is_err());
+        assert_eq!(
+            parse(&args("--hide rail,status")).unwrap().hide,
+            ["rail", "status"]
+        );
+        assert_eq!(parse(&args("--hide all")).unwrap().hide.len(), 5);
+        assert!(parse(&args("--hide ribbon")).is_err());
+        let env = parse(&args("--collapse right")).unwrap().to_env();
+        assert!(env.iter().any(|(k, v)| *k == COLLAPSE_ENV && v == "right"));
     }
 
     #[test]

@@ -599,6 +599,9 @@ pub struct Shell {
     /// The layout the page prefers when nobody has chosen one:
     /// [`use_sidebar_layout`].
     page_sidebar: Claim<SidebarLayout>,
+    /// What a right press on a side's button in the title row shows:
+    /// [`use_side_menu`].
+    side_menu: Claim<SideMenu>,
     /// The page draws a desk's title row itself, its top edge in it:
     /// [`use_title_row`].
     page_title: Claim<()>,
@@ -607,6 +610,9 @@ pub struct Shell {
     desk_tab: Signal<Option<String>>,
     /// What the page adds to a desk's ribbon, under the app's sections.
     rail_extra: Signal<Option<Element>>,
+    /// The desk's ribbon's width: [`RIBBON`], or 0 while a layout hides
+    /// its slot (`HOME_SLOT_SET`), so the title row starts at the edge.
+    ribbon: f64,
     /// What the page draws over the whole shell, its bars too:
     /// [`use_shell_cover`].
     cover: Signal<Option<Element>>,
@@ -741,6 +747,32 @@ fn use_claim<T: Clone + PartialEq + 'static>(pick: fn(&Shell) -> Claim<T>, value
 /// Phones and tablets keep their own.
 pub fn use_sidebar_layout(preferred: SidebarLayout) {
     use_claim(|s| s.page_sidebar, Some(preferred));
+}
+
+/// Opens the menu of a side's button in the title row (a right press on
+/// it), at the press, in the window's points.
+pub type SideMenu = Callback<(Side, (f64, f64))>;
+
+/// The menu a right press on a side's button in the title row shows.
+///
+/// What is drawn around the page, to show or hide (the rail, the status
+/// bar, the sidebars). Whoever can draw a menu over the window gives it
+/// (the workspace host does).
+pub fn use_side_menu(menu: Option<SideMenu>) {
+    use_claim(|s| s.side_menu, menu);
+}
+
+impl Shell {
+    /// Opens the menu of `side`'s button at `at`, when someone gives one
+    /// ([`use_side_menu`]): false when nobody does.
+    #[must_use = "false when nobody gives a menu"]
+    pub fn side_menu(&self, side: Side, at: (f64, f64)) -> bool {
+        let menu = self.side_menu.peek().as_ref().map(|(_, m)| *m);
+        menu.is_some_and(|m| {
+            m.call((side, at));
+            true
+        })
+    }
 }
 
 /// The page's top edge is a desk's title row (a workspace's top tab bars,
@@ -959,7 +991,7 @@ impl Shell {
     #[must_use]
     pub fn title_clearance(&self) -> (f64, f64) {
         // A desk's page starts past the ribbon.
-        let ribbon = if self.desk() { RIBBON } else { 0.0 };
+        let ribbon = if self.desk() { self.ribbon } else { 0.0 };
         let left = if self.desk() && self.has_side(Side::Left) {
             // Past the sidebar as it shows now, so the page's title row
             // gives way smoothly while the sidebar folds or opens.
@@ -997,7 +1029,7 @@ impl Shell {
     /// the sidebar's.
     #[must_use]
     pub fn sidebar_title_left(&self) -> f64 {
-        (self.content_left() - if self.desk() { RIBBON } else { 0.0 }).max(0.0)
+        (self.content_left() - if self.desk() { self.ribbon } else { 0.0 }).max(0.0)
     }
 
     /// Whether the desk's right side's button is over the page's title row
@@ -1259,6 +1291,7 @@ pub fn AppShell(
     let page_left = use_signal(|| None::<Element>);
     let desk_layouts = use_signal(BTreeMap::<&'static str, SidebarLayout>::new);
     let page_sidebar = use_signal(|| None::<(u64, SidebarLayout)>);
+    let side_menu = use_signal(|| None::<(u64, SideMenu)>);
     let page_title = use_signal(|| None::<(u64, ())>);
     let desk_tab = use_signal(|| None::<String>);
     let page_status = use_signal(Vec::<StatusItem>::new);
@@ -1310,9 +1343,15 @@ pub fn AppShell(
         current,
         desk_layouts,
         page_sidebar,
+        side_menu,
         page_title,
         desk_tab,
         rail_extra,
+        ribbon: if chrome.is_hidden(Slot::Ribbon) {
+            0.0
+        } else {
+            RIBBON
+        },
         cover,
         page_status,
         status_style,
@@ -1614,15 +1653,15 @@ pub fn AppShell(
     // sidebar; otherwise clear of the window's and the sidebar's buttons.
     let tabs_left = if left_clip > 0.0 && has_left {
         // Mid-fold, never under the window's and the sidebar's buttons.
-        (RIBBON + left_clip + 4.0).max(shell.content_left())
+        (shell.ribbon + left_clip + 4.0).max(shell.content_left())
     } else if left_clip > 0.0 {
-        RIBBON + left_clip + 4.0
+        shell.ribbon + left_clip + 4.0
     } else if has_left {
         shell.content_left()
     } else if shell.window_chrome().is_some() {
         shell.controls_left()
     } else {
-        RIBBON + 4.0
+        shell.ribbon + 4.0
     };
     // A page that draws the title row itself starts at the window's top
     // (one row): the shell draws no row across the window, only its piece
@@ -2140,7 +2179,17 @@ fn TitleControl(side: Side) -> Element {
                 "aria-label": label,
                 style: "width: {CONTROL}px; height: {CONTROL}px; border: none; border-radius: 7px; background: transparent; \
                         display: flex; align-items: center; justify-content: center;",
-                onclick: move |_| shell.toggle(side),
+                onclick: {
+                    let shell = shell.clone();
+                    move |_| shell.toggle(side)
+                },
+                // The rail, the status bar, the sidebar's layouts.
+                oncontextmenu: move |e: MouseEvent| {
+                    let p = e.client_coordinates();
+                    if shell.side_menu(side, (p.x, p.y)) {
+                        e.prevent_default();
+                    }
+                },
                 match side {
                     Side::Left => rsx! { PanelLeft { size: 17, color: t.ink_2.to_string() } },
                     Side::Right => rsx! { PanelRight { size: 17, color: t.ink_2.to_string() } },
