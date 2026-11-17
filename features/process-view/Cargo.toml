@@ -28,6 +28,10 @@ default = []
 guest = ["dep:wgpu", "dep:vello", "dep:anyrender_vello", "dep:ash", "dep:pollster", "dep:architect"]
 # The app's side: the custom widget and its pane (Blitz, Dioxus).
 host = ["dep:wgpu", "dep:ash", "architect-workspace/paint-ui", "dep:dioxus", "dep:blitz-dom", "dep:blitz-traits", "dep:dioxus-native-dom", "dep:anyrender", "dep:peniko", "dep:wgpu_context", "dep:futures-timer"]
+# Extensions' `kind = "process"` views (#838, `extension`): any
+# extension's view drawn by the pane, whichever copy is loaded; the app
+# provides `architect_extensions::interface::ProcessViews` with it.
+extension = ["host", "dep:architect-extensions", "architect-extensions/ui"]
 # The lab's demo scene (`demo::Orbits`); with `guest`, its program.
 demo = []
 
@@ -54,6 +58,7 @@ peniko = { workspace = true, optional = true }
 wgpu_context = { version = "0.10", optional = true }
 futures-timer = { workspace = true, optional = true }
 architect = { workspace = true, optional = true, features = ["action-list"] }
+architect-extensions = { workspace = true, optional = true }
 
 [lints]
 workspace = true
@@ -63,3 +68,7 @@ architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
 pollster = "0.4"
+# tests/extension_kind.rs: an extension's process view, installed and in
+# development (#838).
+tempfile = "3"
+semver = "1"

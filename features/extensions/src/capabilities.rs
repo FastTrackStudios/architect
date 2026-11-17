@@ -78,7 +78,7 @@ pub const SERVERS: &str = "servers";
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Ask {
     /// `actions`, `effect`, `hosts`, `folders`, `reads`, `writes`, `ui`,
-    /// `events`, `ports`, `languages` or `device`.
+    /// `events`, `ports`, `languages`, `device`, `over` or `programs`.
     pub kind: &'static str,
     /// What exactly (`TRANSPORT_`, `api.github.com`, `selection`).
     pub what: String,
@@ -277,6 +277,7 @@ impl Capabilities {
             && self.languages.is_empty()
             && self.device.is_empty()
             && self.over.is_empty()
+            && self.programs.is_empty()
     }
 
     /// Everything it asks for, one line a thing, in the order a prompt
@@ -380,6 +381,19 @@ impl Capabilities {
                 kind: "over",
                 what: v.clone(),
                 says: format!("Draw over {}", view_words(v)),
+            });
+        }
+        for p in self
+            .programs
+            .iter()
+            .filter(|p| !granted.programs.contains(p))
+        {
+            out.push(Ask {
+                kind: "programs",
+                what: p.clone(),
+                says: format!(
+                    "Run {p}, a program in its package, on this computer to draw its views"
+                ),
             });
         }
         for f in self
@@ -500,6 +514,14 @@ impl Capabilities {
                 .filter(|d| granted.device.contains(d))
                 .cloned()
                 .collect(),
+            // A program of its package only as declared and granted, one
+            // by one.
+            programs: self
+                .programs
+                .iter()
+                .filter(|p| granted.programs.contains(p))
+                .cloned()
+                .collect(),
             // Drawing over another's view only as declared and granted.
             over: self
                 .over
@@ -602,6 +624,13 @@ impl Capabilities {
     #[must_use]
     pub fn may_draw_over(&self, extension: &str, view: &str) -> bool {
         view.starts_with(&format!("{extension}/")) || self.over.iter().any(|v| v == view)
+    }
+
+    /// Whether it may run `program`, a path in its package, to draw a
+    /// `process` view (`capabilities.programs`).
+    #[must_use]
+    pub fn may_run_program(&self, program: &str) -> bool {
+        self.programs.iter().any(|p| p == program)
     }
 
     /// Whether it may use the device's `entry` (`capabilities.device`:

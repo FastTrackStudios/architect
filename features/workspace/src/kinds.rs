@@ -44,6 +44,17 @@ pub const PAINT: &str = "paint";
 /// ([`KindSpec::web`]) when it links a web view host.
 pub const WEB: &str = "web";
 
+/// The process view kind: a pane drawn by a program of its own, its GPU
+/// frames shared with the app's window (`architect-process-view`,
+/// `docs/content/architecture/process-views.md`).
+///
+/// An extension declares one with `kind = "process"` and the `program` in
+/// its package that serves it. The app registers it ([`KindSpec::process`])
+/// on every platform, so such an extension loads everywhere; where the app
+/// draws no process views (not Linux yet, or built without them) the pane
+/// says why.
+pub const PROCESS: &str = "process";
+
 /// A kind's id: `"dioxus"`, `"paint"`, `"frame.surface"`, `"genui"`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct KindId(pub String);
@@ -388,6 +399,18 @@ impl KindSpec {
             .capability(Capability::Ime)
             .capability(Capability::Actions)
             .capability(Capability::Untrusted)
+    }
+
+    /// The [`PROCESS`] kind: a pane drawn by another program, which takes
+    /// input (IME too) and draws on the GPU.
+    #[must_use]
+    pub fn process() -> Self {
+        Self::new(PROCESS, "architect")
+            .host(ViewHost::Blitz)
+            .placement(Placement::Pane)
+            .capability(Capability::Input)
+            .capability(Capability::Ime)
+            .capability(Capability::Gpu)
     }
 
     /// The [`PAINT`] kind for a host that mounts a WebGL2 paint canvas.

@@ -159,6 +159,9 @@ pub mod points;
 pub mod ports;
 #[cfg(all(feature = "process", unix))]
 pub mod process;
+/// Extensions' `process` views: the program a pane runs, checked (#838).
+#[cfg(feature = "host")]
+pub mod process_view;
 #[cfg(feature = "vox")]
 pub mod proto;
 #[cfg(feature = "host")]

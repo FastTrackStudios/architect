@@ -1074,6 +1074,31 @@ pub struct WebAsk {
 #[derive(Clone)]
 pub struct WebViews(pub Rc<dyn Fn(&WebAsk) -> Element>);
 
+/// A `process` view, as [`ProcessViews`] is asked for it (#838).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProcessAsk {
+    pub extension: String,
+    pub view: String,
+}
+
+/// Draws extensions' `process` views (#838).
+///
+/// A program in the package, its GPU frames in the pane
+/// (`architect-process-view`'s `extension::use_process_views`, which checks
+/// each with [`crate::process_view::launch`]). An app with no process-view
+/// host provides none, and such a view says why in its pane.
+#[derive(Clone)]
+pub struct ProcessViews(pub Rc<dyn Fn(&ProcessAsk) -> Element>);
+
+/// Why a `process` view cannot be shown in an app that provides no
+/// [`ProcessViews`] on `platform`.
+#[must_use]
+pub fn no_process_views(platform: &str) -> String {
+    crate::process_view::not_here(platform).unwrap_or_else(|| {
+        "this build of the app draws no process views (feature `process-views`)".to_owned()
+    })
+}
+
 /// Extension `extension`'s view `view`: its linked-in component, its
 /// process's remote view, or — when it is not loaded — a placeholder.
 /// It fills its parent (a pane); `fill: false` sizes it to its content
@@ -1127,6 +1152,33 @@ pub fn ExtensionView(
                 }
             },
             |web| (web.0)(&ask),
+        );
+        return rsx! {
+            div { key: "{key}", style: "{size} display: flex; flex-direction: column;", {body} }
+        };
+    }
+    if loaded
+        .manifest
+        .views
+        .iter()
+        .any(|v| v.id == view && v.kind == architect_workspace::PROCESS)
+    {
+        let ask = ProcessAsk {
+            extension: extension.clone(),
+            view: view.clone(),
+        };
+        let key = format!("{extension}/{view}");
+        let body = try_consume_context::<ProcessViews>().map_or_else(
+            || {
+                let why = no_process_views(&host.platform());
+                rsx! {
+                    div { style: "flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; \
+                                  font-size: 13px; color: var(--muted-foreground); text-align: center;",
+                        "{extension}'s view {view} cannot be shown here: {why}."
+                    }
+                }
+            },
+            |views| (views.0)(&ask),
         );
         return rsx! {
             div { key: "{key}", style: "{size} display: flex; flex-direction: column;", {body} }

@@ -60,8 +60,10 @@ pub fn kinds() -> ViewKinds {
     // Extensions' web views (#222): drawn by the native host with feature
     // `webview`, otherwise their panes say there is none.
     let _ = kinds.register(KindSpec::web());
-    #[cfg(all(feature = "process-views", target_os = "linux"))]
-    let _ = kinds.register(architect_process_view::kind_spec());
+    // Extensions' process views (#838): drawn by the process-view pane
+    // with feature `process-views` on Linux; elsewhere their extension
+    // still loads and the pane says why.
+    let _ = kinds.register(KindSpec::process());
     kinds
 }
 

@@ -50,6 +50,14 @@ pub struct Program {
     pub path: PathBuf,
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
+    /// Its working directory (an extension's package); the app's when
+    /// `None`.
+    pub dir: Option<PathBuf>,
+    /// What it is now (an extension's: its file's size and time and the
+    /// copy loaded): [`session`] with another stamp starts it again.
+    pub stamp: String,
+    /// How it is started again when it dies.
+    pub restart: Restart,
 }
 
 impl Program {
@@ -59,6 +67,9 @@ impl Program {
             path: path.into(),
             args: Vec::new(),
             env: Vec::new(),
+            dir: None,
+            stamp: String::new(),
+            restart: Restart::never(),
         }
     }
 
@@ -66,6 +77,73 @@ impl Program {
     pub fn env(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.env.push((name.into(), value.into()));
         self
+    }
+
+    #[must_use]
+    pub fn args(mut self, args: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.args.extend(args.into_iter().map(Into::into));
+        self
+    }
+
+    #[must_use]
+    pub fn dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.dir = Some(dir.into());
+        self
+    }
+
+    #[must_use]
+    pub fn stamp(mut self, stamp: impl Into<String>) -> Self {
+        self.stamp = stamp.into();
+        self
+    }
+
+    #[must_use]
+    pub const fn restart(mut self, restart: Restart) -> Self {
+        self.restart = restart;
+        self
+    }
+}
+
+/// How a program that died is started again: as a process extension's
+/// (`architect-extensions`' `process::Restart`, the same numbers).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Restart {
+    /// How many times in a row; then it waits for [`Session::restart`]
+    /// (the pane's Restart button).
+    pub attempts: u32,
+    /// The first wait, doubled each attempt up to `max_backoff`.
+    pub backoff: Duration,
+    pub max_backoff: Duration,
+    /// Running this long counts as having started well: the attempts
+    /// start over.
+    pub stable: Duration,
+}
+
+impl Default for Restart {
+    fn default() -> Self {
+        Self {
+            attempts: 3,
+            backoff: Duration::from_millis(250),
+            max_backoff: Duration::from_secs(10),
+            stable: Duration::from_secs(30),
+        }
+    }
+}
+
+impl Restart {
+    /// Never on its own: only [`Session::restart`] starts it again.
+    #[must_use]
+    pub fn never() -> Self {
+        Self {
+            attempts: 0,
+            ..Self::default()
+        }
+    }
+
+    fn wait(&self, attempt: u32) -> Duration {
+        self.backoff
+            .saturating_mul(1_u32 << attempt.saturating_sub(1).min(16))
+            .min(self.max_backoff)
     }
 }
 
@@ -117,6 +195,12 @@ struct State {
     frames_shown: u64,
     /// The window's GPU adapter, as told to the program.
     adapter: Option<String>,
+    /// When it was last started, and the restarts in a row since it last
+    /// ran well.
+    started: Option<Instant>,
+    attempts: u32,
+    /// Stopped by the app ([`Session::stop`]): not started again.
+    ended: bool,
 }
 
 /// What a session measured.
@@ -136,7 +220,9 @@ pub struct Stats {
 /// One view program and what it showed last.
 pub struct Session {
     key: String,
-    program: Program,
+    program: Mutex<Program>,
+    /// Since when no pane shows it ([`park`]).
+    parked: Mutex<Option<Instant>>,
     state: Mutex<State>,
     window: Mutex<Option<Arc<dyn ShellProvider>>>,
     stats: Stats,
@@ -146,7 +232,7 @@ impl std::fmt::Debug for Session {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Session")
             .field("key", &self.key)
-            .field("program", &self.program)
+            .field("program", &*lock(&self.program))
             .finish_non_exhaustive()
     }
 }
@@ -179,15 +265,79 @@ pub fn sessions() -> &'static Mutex<HashMap<String, Arc<Session>>> {
     SESSIONS.get_or_init(Mutex::default)
 }
 
-/// The session for `key`, started with `program` if there is none.
+/// The session for `key`, started with `program` if there is none, and
+/// started again with it if it ran another (a new stamp: a development
+/// copy rebuilt, another copy loaded).
 pub fn session(key: &str, program: &Program) -> Arc<Session> {
     let mut all = sessions().lock().unwrap_or_else(PoisonError::into_inner);
     if let Some(s) = all.get(key) {
-        return s.clone();
+        let s = s.clone();
+        drop(all);
+        let changed = {
+            let mut have = lock(&s.program);
+            let changed = *have != *program;
+            if changed {
+                *have = program.clone();
+            }
+            changed
+        };
+        if changed {
+            s.restart();
+        }
+        return s;
     }
     let s = Session::start(key, program.clone());
     all.insert(key.to_owned(), s.clone());
     s
+}
+
+/// The session for `key`, if there is one.
+#[must_use]
+pub fn find(key: &str) -> Option<Arc<Session>> {
+    lock(sessions()).get(key).cloned()
+}
+
+/// Says no pane shows `key`'s session now (its pane closed, or is moving
+/// to another tab group or window): [`reap`] stops it once it has been so
+/// for longer than it allows.
+pub fn park(key: &str) {
+    if let Some(s) = find(key) {
+        lock(&s.parked).get_or_insert_with(Instant::now);
+    }
+}
+
+/// Says a pane shows `key`'s session again.
+pub fn unpark(key: &str) {
+    if let Some(s) = find(key) {
+        *lock(&s.parked) = None;
+    }
+}
+
+/// Stops `key`'s program and forgets its session.
+pub fn end(key: &str) {
+    let gone = lock(sessions()).remove(key);
+    if let Some(s) = gone {
+        s.stop();
+    }
+}
+
+/// Stops and forgets each session `keep` says no to (given its key), and
+/// each no pane has shown for longer than `parked` (the pane closed).
+/// Returns the keys ended.
+pub fn reap(parked: Duration, keep: impl Fn(&str) -> bool) -> Vec<String> {
+    let all: Vec<(String, Arc<Session>)> = lock(sessions())
+        .iter()
+        .map(|(k, s)| (k.clone(), s.clone()))
+        .collect();
+    let mut ended = Vec::new();
+    for (key, s) in all {
+        let away = lock(&s.parked).is_some_and(|at| at.elapsed() > parked);
+        if away || !keep(&key) {
+            end(&key);
+            ended.push(key);
+        }
+    }
+    ended
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -200,7 +350,8 @@ impl Session {
     pub fn start(key: &str, program: Program) -> Arc<Self> {
         let session = Arc::new(Self {
             key: key.to_owned(),
-            program,
+            program: Mutex::new(program),
+            parked: Mutex::new(None),
             state: Mutex::new(State {
                 status: Status::Starting,
                 generation: 0,
@@ -218,6 +369,9 @@ impl Session {
                 transport: None,
                 frames_shown: 0,
                 adapter: None,
+                started: None,
+                attempts: 0,
+                ended: false,
             }),
             window: Mutex::new(None),
             stats: Stats::default(),
@@ -236,9 +390,23 @@ impl Session {
         &self.stats
     }
 
-    /// Stops the program if it runs, and starts it again.
+    /// The program it runs.
+    #[must_use]
+    pub fn program(&self) -> Program {
+        lock(&self.program).clone()
+    }
+
+    /// Stops the program if it runs, and starts it again (its restarts in
+    /// a row start over).
     pub fn restart(self: &Arc<Self>) {
+        lock(&self.state).attempts = 0;
+        self.start_again();
+    }
+
+    fn start_again(self: &Arc<Self>) {
+        let program = self.program();
         let mut state = lock(&self.state);
+        state.ended = false;
         if let Some(mut child) = state.child.take() {
             let _ = child.kill();
             let _ = child.wait();
@@ -254,9 +422,10 @@ impl Session {
         state.transport = None;
         state.pid = None;
         let generation = state.generation;
-        match self.spawn() {
+        match spawn(&program) {
             Ok((child, socket)) => {
                 state.status = Status::Starting;
+                state.started = Some(Instant::now());
                 state.pid = Some(child.id());
                 state.child = Some(child);
                 state.socket = Some(socket.clone());
@@ -267,10 +436,8 @@ impl Session {
                     .spawn(move || session.read(&socket, generation));
             }
             Err(e) => {
-                state.status = Status::Stopped(format!(
-                    "could not start {}: {e}",
-                    self.program.path.display()
-                ));
+                state.status =
+                    Status::Stopped(format!("could not start {}: {e}", program.path.display()));
             }
         }
         self.wake();
@@ -284,20 +451,12 @@ impl Session {
             let _ = child.wait();
         }
         state.socket = None;
+        state.ended = true;
+        // Its reader sees an older generation and says nothing more.
+        state.generation = state.generation.saturating_add(1);
         state.status = Status::Stopped("stopped by the app".into());
-    }
-
-    fn spawn(&self) -> std::io::Result<(Child, Arc<Socket>)> {
-        let (host, guest) = Socket::pair()?;
-        let child = Command::new(&self.program.path)
-            .args(&self.program.args)
-            .envs(self.program.env.iter().map(|(k, v)| (k, v)))
-            .env(FD_ENV, guest.as_raw_fd().to_string())
-            .stdin(Stdio::null())
-            .spawn()?;
-        // Only the program holds its end now: its exit closes the socket.
-        drop(guest);
-        Ok((child, Arc::new(host)))
+        drop(state);
+        self.wake();
     }
 
     /// The session's thread: every message from the program until it
@@ -324,14 +483,44 @@ impl Session {
         let exit = state.child.as_mut().and_then(|c| wait_briefly(c));
         state.child = None;
         state.socket = None;
-        state.status = Status::Stopped(match (exit, reason.is_empty()) {
+        let why = match (exit, reason.is_empty()) {
             (Some(exit), true) => exit,
             (Some(exit), false) => format!("{reason}; {exit}"),
             (None, _) if reason.is_empty() => "it closed the view".into(),
             (None, _) => reason,
+        };
+        let policy = lock(&self.program).restart;
+        if state
+            .started
+            .is_some_and(|at| at.elapsed() >= policy.stable)
+        {
+            state.attempts = 0;
+        }
+        let again = !state.ended && state.attempts < policy.attempts;
+        if again {
+            state.attempts = state.attempts.saturating_add(1);
+        }
+        let attempt = state.attempts;
+        state.status = Status::Stopped(if again {
+            format!(
+                "{why}; starting it again ({attempt} of {})",
+                policy.attempts
+            )
+        } else {
+            why
         });
         drop(state);
         self.wake();
+        if again {
+            std::thread::sleep(policy.wait(attempt));
+            let current = {
+                let state = lock(&self.state);
+                state.generation == generation && !state.ended
+            };
+            if current {
+                self.start_again();
+            }
+        }
     }
 
     /// One message from the program; false once this generation is over.
@@ -449,6 +638,75 @@ impl Session {
             waiting: state.unanswered.map(|at| at.elapsed()),
             adapter: state.adapter.clone(),
         }
+    }
+}
+
+/// Starts `program` with its end of a socket pair.
+fn spawn(program: &Program) -> std::io::Result<(Child, Arc<Socket>)> {
+    let (host, guest) = Socket::pair()?;
+    let mut command = Command::new(&program.path);
+    command
+        .args(&program.args)
+        .envs(program.env.iter().map(|(k, v)| (k, v)))
+        .env(FD_ENV, guest.as_raw_fd().to_string())
+        .stdin(Stdio::null());
+    if let Some(dir) = &program.dir {
+        command.current_dir(dir);
+    }
+    let child = command.spawn()?;
+    // Only the program holds its end now: its exit closes the socket.
+    drop(guest);
+    Ok((child, Arc::new(host)))
+}
+
+impl Session {
+    /// Says hello to the program with no window: `width` × `height`, the
+    /// GPU `adapter` to draw on, frames over shared memory. What a host
+    /// with no window does (a test, a headless check); a pane's widget
+    /// says hello itself. Again after a restart.
+    pub fn greet_without_window(&self, width: u32, height: u32, adapter: wire::Adapter) {
+        let theme = {
+            let mut state = lock(&self.state);
+            if state.hello == Some(state.generation) || state.socket.is_none() {
+                return;
+            }
+            state.hello = Some(state.generation);
+            state.size = Some((width, height, 1.0));
+            state.adapter = Some(adapter.name.clone());
+            state.theme.clone()
+        };
+        self.send(&ToGuest::Hello {
+            version: wire::VERSION,
+            width,
+            height,
+            scale: 1.0,
+            adapter,
+            dmabuf: false,
+            theme,
+        });
+    }
+
+    /// With no window: takes every frame that arrived, gives each slot
+    /// back and asks for the next (as a pane's paint does). How many.
+    pub fn take_frames_without_window(&self) -> usize {
+        let taken: Vec<Arrived> = {
+            let mut state = lock(&self.state);
+            let taken: Vec<Arrived> = state.frames.drain(..).collect();
+            state.frames_shown = state
+                .frames_shown
+                .saturating_add(u64::try_from(taken.len()).unwrap_or(u64::MAX));
+            taken
+        };
+        for f in &taken {
+            self.send(&ToGuest::Release {
+                buffers: f.buffers,
+                slot: f.slot,
+            });
+        }
+        if !taken.is_empty() {
+            self.send(&ToGuest::Tick);
+        }
+        taken.len()
     }
 }
 
@@ -924,6 +1182,13 @@ pub fn ProcessViewPane(
     program: Program,
 ) -> Element {
     let session = use_hook(|| session(&session_key, &program));
+    // A new program for the same pane (another stamp: a development copy
+    // rebuilt): started again in place.
+    if session.program() != program {
+        let _ = self::session(&session_key, &program);
+    }
+    use_hook(|| unpark(&session_key));
+    use_drop(move || park(&session_key));
     let window = try_use_context::<Arc<dyn ShellProvider>>();
     session.attach_window(window.clone());
     let widget = use_hook({

@@ -203,6 +203,12 @@ pub struct Capabilities {
     /// the arrangement"), and only as granted: an overlay over a view not
     /// granted is not mounted.
     pub over: Vec<String>,
+    /// The programs in its package it may run on this computer to draw a
+    /// `process` view (`[[views]] kind = "process"`, `program =
+    /// "bin/room"`): each a path in the package, as its views name them.
+    /// Asked for in words ("Run bin/room, a program in its package"),
+    /// whatever kind the extension is, and run only as granted.
+    pub programs: Vec<String>,
 }
 
 /// One action it adds.
@@ -368,6 +374,17 @@ pub struct ViewDecl {
     /// one, and only a `web` view has one.
     #[serde(default)]
     pub src: Option<String>,
+    /// The program in the package that draws a `process` view (`program =
+    /// "bin/room"`; `docs/content/architecture/process-views.md`): started
+    /// when its pane opens, its GPU frames shown in the pane, stopped when
+    /// the pane closes or the extension unloads. A `process` view needs
+    /// one, only a `process` view has one, and the extension asks to run it
+    /// (`capabilities.programs`).
+    #[serde(default)]
+    pub program: Option<String>,
+    /// The `program`'s arguments.
+    #[serde(default)]
+    pub args: Vec<String>,
     /// Where it lives: the main area or a dock (`left`, `right`,
     /// `bottom`).
     #[serde(default)]
@@ -1366,6 +1383,10 @@ impl Manifest {
                 }
                 (None, false) => {}
             }
+            self.check_process_view(view)?;
+        }
+        for program in &self.capabilities.programs {
+            inside(program)?;
         }
         for overlay in &self.overlays {
             let bad = |why: &str| ManifestError::BadOverlay {
@@ -1481,6 +1502,40 @@ impl Manifest {
             }
         }
         Ok(())
+    }
+
+    /// A `process` view names its program, in the package, and asks to
+    /// run it; no other view names one.
+    fn check_process_view(&self, view: &ViewDecl) -> Result<(), ManifestError> {
+        let field = format!("views.{}.program", view.id);
+        let bad = |why: String| ManifestError::Interop {
+            field: field.clone(),
+            why,
+        };
+        match (&view.program, view.kind == architect_workspace::PROCESS) {
+            (Some(program), true) => {
+                inside(program)?;
+                if !self.capabilities.programs.contains(program) {
+                    return Err(bad(format!(
+                        "it runs {program}: ask for it with capabilities.programs = [\"{program}\"]"
+                    )));
+                }
+                Ok(())
+            }
+            (None, true) => Err(bad(
+                "a process view names the program in its package that draws it (program)"
+                    .to_owned(),
+            )),
+            (Some(_), false) => Err(bad(format!(
+                "only a process view runs a program (kind = \"process\"; this one is {})",
+                view.kind
+            ))),
+            (None, false) if !view.args.is_empty() => Err(ManifestError::Interop {
+                field: format!("views.{}.args", view.id),
+                why: "only a process view's program takes arguments".to_owned(),
+            }),
+            (None, false) => Ok(()),
+        }
     }
 
     /// The window action `action` opens, when it is one's `opens`.
@@ -2463,5 +2518,106 @@ mod favourites_tests {
         assert!(manifest.favourites.is_empty());
         assert_eq!(manifest.favourites_dropped.len(), 1);
         assert_eq!(manifest.share_layers.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod process_view_tests {
+    use super::{Manifest, ManifestError};
+
+    const HEAD: &str = "id = \"lab.room\"\nname = \"Room\"\nversion = \"0.1.0\"\nkind = \"luau\"\n";
+
+    fn read(caps: &str, view: &str) -> Result<Manifest, ManifestError> {
+        Manifest::parse(&format!(
+            "{HEAD}\n[capabilities]\n{caps}\n\n[[views]]\nid = \"room\"\ntitle = \"Room\"\n{view}\n"
+        ))
+    }
+
+    fn why(r: Result<Manifest, ManifestError>) -> String {
+        r.expect_err("refused").to_string()
+    }
+
+    /// A process view names its program, a file in the package it asks to
+    /// run; any kind of extension may have one.
+    #[test]
+    fn a_process_view_names_the_program_it_asks_to_run() {
+        let m = read(
+            "programs = [\"bin/room\"]",
+            "kind = \"process\"\nprogram = \"bin/room\"\nargs = [\"--process-view\"]",
+        )
+        .expect("it reads");
+        assert_eq!(m.views[0].kind, "process");
+        assert_eq!(m.views[0].program.as_deref(), Some("bin/room"));
+        assert_eq!(m.views[0].args, ["--process-view"]);
+        assert_eq!(m.capabilities.programs, ["bin/room"]);
+        assert!(!m.capabilities.asks_nothing());
+        let asks = m.capabilities.asks();
+        assert_eq!(asks.len(), 1);
+        assert_eq!(asks[0].kind, "programs");
+        assert!(asks[0].says.contains("Run bin/room"), "{}", asks[0].says);
+    }
+
+    #[test]
+    fn a_process_view_without_its_program_or_its_ask_is_refused() {
+        let e = why(read("", "kind = \"process\""));
+        assert!(e.contains("names the program"), "{e}");
+        let e = why(read("", "kind = \"process\"\nprogram = \"bin/room\""));
+        assert!(e.contains("capabilities.programs"), "{e}");
+        let e = why(read(
+            "programs = [\"bin/other\"]",
+            "kind = \"process\"\nprogram = \"bin/room\"",
+        ));
+        assert!(e.contains("capabilities.programs = [\"bin/room\"]"), "{e}");
+    }
+
+    #[test]
+    fn only_a_process_view_runs_a_program() {
+        let e = why(read("programs = [\"bin/room\"]", "program = \"bin/room\""));
+        assert!(e.contains("only a process view"), "{e}");
+        let e = why(read("", "args = [\"-v\"]"));
+        assert!(e.contains("only a process view"), "{e}");
+    }
+
+    /// Never a path out of the package, in the view or the ask.
+    #[test]
+    fn a_program_outside_the_package_is_refused() {
+        for path in ["../bin/room", "/usr/bin/env", "bin/../../room", ""] {
+            let r = read(
+                &format!("programs = [\"{path}\"]"),
+                &format!("kind = \"process\"\nprogram = \"{path}\""),
+            );
+            assert!(matches!(r, Err(ManifestError::BadPath(_))), "{path}: {r:?}");
+        }
+        let r = read("programs = [\"/bin/sh\"]", "");
+        assert!(matches!(r, Err(ManifestError::BadPath(_))), "{r:?}");
+    }
+
+    /// What a person grants is what runs: `within` keeps a program only
+    /// as granted, an update that asks for another asks again, and a share
+    /// link's guest never gets one.
+    #[test]
+    fn running_a_program_is_granted_one_by_one_and_never_to_a_guest() {
+        use crate::manifest::Capabilities;
+        let asks = Capabilities {
+            programs: vec!["bin/room".to_owned(), "bin/rig".to_owned()],
+            ..Capabilities::default()
+        };
+        let granted = Capabilities {
+            programs: vec!["bin/room".to_owned()],
+            ..Capabilities::default()
+        };
+        let may = asks.within(&granted);
+        assert!(may.may_run_program("bin/room"));
+        assert!(!may.may_run_program("bin/rig"));
+        let more = asks.grows_from(&granted);
+        assert_eq!(more.len(), 1);
+        assert_eq!(more[0].what, "bin/rig");
+        assert!(
+            !asks
+                .within(&Capabilities::default())
+                .may_run_program("bin/room")
+        );
+        let guest = crate::share_needs::guest_capabilities(&asks, &[]);
+        assert!(guest.programs.is_empty());
     }
 }
