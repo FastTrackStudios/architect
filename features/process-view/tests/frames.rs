@@ -201,6 +201,7 @@ fn frames_arrive_as_dma_bufs_the_host_device_reads_in_place() {
             x: 100.0,
             y: 100.0,
             button: architect_workspace::Button::Primary,
+            mods: Vec::new(),
         },
     };
     socket.send(&press.encode().unwrap(), &[]).unwrap();

@@ -322,7 +322,7 @@ impl PaintView for Graph {
                 self.dragging = self.node_at(Point::new(f64::from(x), f64::from(y)));
                 false
             }
-            ViewInput::PointerMove { x, y } => {
+            ViewInput::PointerMove { x, y, .. } => {
                 let Some(n) = self.dragging else { return false };
                 if let Some(node) = self.nodes.get_mut(n) {
                     *node = Point::new(f64::from(x), f64::from(y));
