@@ -59,6 +59,8 @@ const LAYOUT_ENV: &str = "ARCHITECT_DEV_LAYOUT";
 const VAULT_ENV: &str = "ARCHITECT_DEV_VAULT";
 const SEED_ENV: &str = "ARCHITECT_DEV_SEED";
 const FRESH_ENV: &str = "ARCHITECT_DEV_FRESH";
+/// Set by `dev` on the window it starts: its output is the log already.
+const LOGGED_ENV: &str = "ARCHITECT_DEV_LOGGED";
 const RUN_ENV: &str = "ARCHITECT_DEV_RUN";
 /// How long a start waits for the window's socket to answer.
 const READY: Duration = Duration::from_secs(180);
@@ -375,7 +377,7 @@ pub fn main(dist: &Distribution, args: &[String]) -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(why) => {
-            let _ = writeln!(std::io::stderr(), "architect-desktop dev: {why}\n{USAGE}");
+            let _ = writeln!(std::io::stderr(), "architect-desktop dev: {why}");
             ExitCode::FAILURE
         }
     }
@@ -510,7 +512,7 @@ fn answers(socket: &Path) -> bool {
 }
 
 fn start(dist: &Distribution, args: &[String]) -> Result<(), String> {
-    let ask = parse(args)?;
+    let ask = parse(args).map_err(|why| format!("{why}\n{USAGE}"))?;
     let inst = instance_for(dist.app_name(), ask.name.clone())?;
     let socket = inst.socket();
     if answers(&socket) {
@@ -520,15 +522,34 @@ fn start(dist: &Distribution, args: &[String]) -> Result<(), String> {
         } else {
             apply(&inst, &ask)?;
             print(&inst.info(None, &vault_of(&inst, &ask), true));
+            if ask.wait {
+                while answers(&socket) {
+                    std::thread::sleep(Duration::from_secs(2));
+                }
+                let tail = log_tail(&inst);
+                if tail.contains("panicked") {
+                    return Err(format!(
+                        "the app panicked; its log ({}) ends:\n{tail}",
+                        inst.log().display()
+                    ));
+                }
+            }
             return Ok(());
         }
     }
-    let pid = launch(&inst, &ask)?;
-    wait_ready(&inst, pid)?;
+    let mut child = launch(&inst, &ask)?;
+    let pid = child.id();
+    wait_ready(&inst, &mut child)?;
     print(&inst.info(Some(pid), &vault_of(&inst, &ask), true));
     if ask.wait {
-        while answers(&socket) {
-            std::thread::sleep(Duration::from_secs(2));
+        // Until it ends: a quit is a success, a panic or a signal is not.
+        let status = child.wait().map_err(|e| e.to_string())?;
+        if !status.success() {
+            return Err(format!(
+                "the app (pid {pid}) ended: {status}; its log ({}) ends:\n{}",
+                inst.log().display(),
+                log_tail(&inst)
+            ));
         }
     }
     Ok(())
@@ -542,7 +563,12 @@ fn vault_of(inst: &Instance, ask: &Ask) -> PathBuf {
 /// it and the asks as variables (the window makes itself the instance,
 /// [`from_env`]), in a process group of its own (a terminal's Ctrl-C or
 /// its closing leaves it), its output in the instance's log.
-fn launch(inst: &Instance, ask: &Ask) -> Result<u32, String> {
+fn launch(inst: &Instance, ask: &Ask) -> Result<std::process::Child, String> {
+    // Started over here, not in the window: there it would take the log
+    // this opens with it.
+    if ask.fresh && inst.dir.exists() {
+        std::fs::remove_dir_all(&inst.dir).map_err(|e| format!("{}: {e}", inst.dir.display()))?;
+    }
     std::fs::create_dir_all(&inst.dir).map_err(|e| format!("{}: {e}", inst.dir.display()))?;
     let _ = std::fs::remove_file(inst.ready());
     let log =
@@ -551,29 +577,34 @@ fn launch(inst: &Instance, ask: &Ask) -> Result<u32, String> {
     let mut cmd = Command::new(exe);
     cmd.env(DEV_ENV, &inst.name)
         .envs(ask.to_env())
+        .env_remove(FRESH_ENV)
+        .env(LOGGED_ENV, "1")
         .env_remove(INSTANCE_ENV)
         .stdin(Stdio::null())
         .stdout(log.try_clone().map_err(|e| e.to_string())?)
         .stderr(log);
-    if ask.fresh {
-        cmd.env(FRESH_ENV, "1");
-    }
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt as _;
         cmd.process_group(0);
     }
-    let child = cmd
-        .spawn()
-        .map_err(|e| format!("could not start the app: {e}"))?;
-    Ok(child.id())
+    cmd.spawn()
+        .map_err(|e| format!("could not start the app: {e}"))
 }
 
 /// Waits for the window `pid` to answer and to have applied what it was
 /// asked (its `ready` file names it).
-fn wait_ready(inst: &Instance, pid: u32) -> Result<(), String> {
+fn wait_ready(inst: &Instance, child: &mut std::process::Child) -> Result<(), String> {
+    let pid = child.id();
     let began = Instant::now();
     while began.elapsed() < READY {
+        if let Ok(Some(status)) = child.try_wait() {
+            return Err(format!(
+                "the app (pid {pid}) ended before it was ready: {status}; its log ({}) ends:\n{}",
+                inst.log().display(),
+                log_tail(inst)
+            ));
+        }
         let ready = std::fs::read_to_string(inst.ready()).unwrap_or_default();
         if ready.trim() == pid.to_string() {
             return Ok(());
@@ -583,22 +614,38 @@ fn wait_ready(inst: &Instance, pid: u32) -> Result<(), String> {
         }
         std::thread::sleep(Duration::from_millis(500));
     }
-    let tail: String = std::fs::read_to_string(inst.log())
-        .unwrap_or_default()
-        .lines()
-        .rev()
-        .take(15)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>()
-        .join("\n");
     Err(format!(
-        "the app (pid {pid}) was not ready on {} within {}s; its log ({}) ends:\n{tail}",
+        "the app (pid {pid}) was not ready on {} within {}s; its log ({}) ends:\n{}",
         inst.socket().display(),
         READY.as_secs(),
-        inst.log().display()
+        inst.log().display(),
+        log_tail(inst)
     ))
+}
+
+/// The last lines of the instance's log (a panic's backtrace fits).
+fn log_tail(inst: &Instance) -> String {
+    let text = std::fs::read_to_string(inst.log()).unwrap_or_default();
+    let lines: Vec<&str> = text.lines().collect();
+    lines.get(lines.len().saturating_sub(40)..).unwrap_or_default().join("\n")
+}
+
+/// A window made an instance by its environment alone (not started by
+/// `dev`, so its output is not the log): a panic is written to the log
+/// too, with its backtrace, before the usual report.
+fn log_panics(log: PathBuf) {
+    let before = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log)
+        {
+            let trace = std::backtrace::Backtrace::force_capture();
+            let _ = writeln!(f, "{info}\n{trace}");
+        }
+        before(info);
+    }));
 }
 
 /// The app as an isolated instance when `ARCHITECT_DEV` asks.
@@ -630,6 +677,16 @@ pub fn from_env(dist: &Distribution) {
     }
     let app = inst.app();
     let _ = std::fs::create_dir_all(&app);
+    if std::env::var_os(LOGGED_ENV).is_none() {
+        let _ = std::fs::write(
+            inst.log(),
+            format!(
+                "pid {} (its output is where it was started)\n",
+                std::process::id()
+            ),
+        );
+        log_panics(inst.log());
+    }
     let _ = std::fs::create_dir_all(inst.socket_dir());
     // The tour is for a person's first run, not a developer's.
     let _ = std::fs::write(app.join("tour-place"), "done");
