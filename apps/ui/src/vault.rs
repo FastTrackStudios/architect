@@ -452,10 +452,6 @@ fn first_workspace() -> Workspace {
             Target::Dock(Side::Left),
         ),
         (
-            Pane::new("search", "search", "Search"),
-            Target::Dock(Side::Left),
-        ),
-        (
             Pane::new("outline", "outline", "Outline"),
             Target::Dock(Side::Right),
         ),
@@ -475,7 +471,7 @@ fn first_workspace() -> Workspace {
         sandbox
             || match pane.view.0.as_str() {
                 VAULT_NOTE => has_welcome,
-                "files" | "search" | "outline" | "backlinks" => true,
+                "files" | "outline" | "backlinks" => true,
                 _ => false,
             }
     });
@@ -488,7 +484,9 @@ fn first_workspace() -> Workspace {
     }
     if let Some(main) = w.windows.first_mut() {
         main.docks.left.ribbon = Some(Ribbon {
-            views: vec![ViewKind::new("files"), ViewKind::new("search")],
+            // Search is a placeholder for now: not opened, not on the
+            // ribbon (its view stays, for a layout that names it).
+            views: vec![ViewKind::new("files")],
             // Today's note only opened a note: it is the palette's
             // (`NAVIGATOR_OPEN_DAILY_NOTE`) and the Calendar row's (#443).
             commands: vec!["new-note".to_owned()],
@@ -633,13 +631,11 @@ fn mix_workspace() -> Workspace {
     w
 }
 
-/// "Project": a project's deck starts in it: the navigator and search on
-/// the left, the outline and backlinks on the right, the project's note
+/// "Project": a project's deck starts in it: the navigator on the left, the outline and backlinks on the right, the project's note
 /// (opened when it loads) in the middle.
 fn project_workspace() -> Workspace {
     let mut w = Workspace::new();
     for (pane, side) in [
-        (Pane::new("search", "search", "Search"), Side::Left),
         (Pane::new("files", "files", "Files"), Side::Left),
         (Pane::new("outline", "outline", "Outline"), Side::Right),
         (
@@ -652,7 +648,9 @@ fn project_workspace() -> Workspace {
     let _ = w.activate(&architect_workspace::PaneId::new("files"));
     if let Some(main) = w.windows.first_mut() {
         main.docks.left.ribbon = Some(Ribbon {
-            views: vec![ViewKind::new("files"), ViewKind::new("search")],
+            // Search is a placeholder for now: not opened, not on the
+            // ribbon (its view stays, for a layout that names it).
+            views: vec![ViewKind::new("files")],
             // Today's note only opened a note: it is the palette's
             // (`NAVIGATOR_OPEN_DAILY_NOTE`) and the Calendar row's (#443).
             commands: vec!["new-note".to_owned()],
@@ -714,17 +712,20 @@ pub fn VaultPage() -> Element {
     });
     // The vault the navigator shows (the ribbon's "New note" adds to it).
     let lab = use_lab_vault();
+    let ui = try_use_context::<architect_extensions::interface::ExtensionUi>();
     // The Vault's panes are its sidebar: on a vault on disk, two columns
-    // (the navigator's folders beside its notes); a film's in-memory one
-    // opens it folded to the rail. Every layout stays a press away.
-    architect_shell::use_sidebar_layout(if lab.disk.peek().is_some() {
+    // (the navigator's folders beside its notes); a film's in-memory one,
+    // or a window where no loaded extension fills the left dock (the
+    // navigator turned off), opens it folded to the rail. Every layout
+    // stays a press away, and the person's own choice wins.
+    let left_filled = use_memo(move || ui.is_none_or(|u| u.fills_dock(Side::Left)))();
+    architect_shell::use_sidebar_layout(if lab.disk.peek().is_some() && left_filled {
         architect_shell::SidebarLayout::Two
     } else {
         architect_shell::SidebarLayout::Rail
     });
     // The lab's views, and every view a loaded extension adds (made again
     // when one loads or unloads).
-    let ui = try_use_context::<architect_extensions::interface::ExtensionUi>();
     let views = use_memo(move || views(ui.map(|u| u.views()).unwrap_or_default()))();
     // The workspace on the lab's Action List: every operation, run by the
     // host below; a scenario's checks read the arrangement, each change

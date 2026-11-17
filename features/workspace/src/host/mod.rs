@@ -404,6 +404,71 @@ fn use_popup_provider(host: Host) {
     });
 }
 
+/// The menu of the title row's side buttons (a right press on the
+/// sidebar's or the right sidebar's): the rail, the status bar, the right
+/// sidebar and, from the left, the sidebar's layouts. Each row runs its
+/// command (`SHELL_RAIL_TOGGLE`, `SHELL_STATUS_TOGGLE`,
+/// `WORKSPACE_TOGGLE_RIGHT_DOCK`, `SHELL_SIDEBAR_*`), as ⌘K and the CLI
+/// (`COMMANDS_RUN`) do.
+fn use_side_menu_provider(host: Host) {
+    let commands = architect_commands::try_use_commands();
+    let chrome = try_use_context::<Signal<architect_shell::Chrome>>();
+    let shell = try_use_context::<Signal<architect_shell::Shell>>();
+    let menu = use_callback(move |(side, at): (architect_shell::Side, (f64, f64))| {
+        let run = move |id: &'static str| {
+            move || {
+                if let Some(c) = commands {
+                    let _ = c.run(id);
+                }
+            }
+        };
+        let shown = |slot| !chrome.is_some_and(|c| c.peek().is_hidden(slot));
+        let right_open = host
+            .workspace
+            .peek()
+            .windows
+            .first()
+            .is_some_and(|w| w.docks.right.shown == Shown::Open);
+        let mut rows: Vec<architect_shell::popup::PopupRow> = vec![
+            architect_shell::popup::PopupRow::check(
+                "Rail",
+                shown(architect_shell::Slot::Ribbon),
+                run(architect_commands::TOGGLE_RAIL),
+            ),
+            architect_shell::popup::PopupRow::check(
+                "Status bar",
+                shown(architect_shell::Slot::Status),
+                run(architect_commands::TOGGLE_STATUS),
+            ),
+            architect_shell::popup::PopupRow::check(
+                "Right sidebar",
+                right_open,
+                run(architect_commands::TOGGLE_RIGHT),
+            ),
+            architect_shell::popup::PopupRow::check(
+                "Right sidebar closes to a rail",
+                *host.right_rail.peek(),
+                run("WORKSPACE_RIGHT_DOCK_RAIL"),
+            ),
+        ];
+        if side == architect_shell::Side::Left
+            && let Some(shell) = shell
+        {
+            let now = shell.peek().sidebar_layout();
+            rows.push(architect_shell::popup::PopupRow::Separator);
+            for layout in architect_shell::SidebarLayout::ALL {
+                rows.push(architect_shell::popup::PopupRow::check(
+                    format!("Sidebar: {}", layout.label()),
+                    now == layout,
+                    run(architect_commands::sidebar_command(layout)),
+                ));
+            }
+        }
+        host.open_menu(Menu::Popup(rows), (narrow(at.0), narrow(at.1)));
+    });
+    architect_shell::use_side_menu(Some(menu));
+}
+
 /// The sizes the pointer asks for: a mouse's, or a finger's.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Sizes {
@@ -485,6 +550,12 @@ pub struct Host {
     sizes: Signal<Sizes>,
     phone: Signal<bool>,
     title_row: Signal<Option<TitleRow>>,
+    /// What the right dock's button takes at the title row's right end
+    /// while the dock is open (its tab bar keeps clear of it), points.
+    right_toggle: Signal<f32>,
+    /// The right sidebar closes to its rail (`WORKSPACE_RIGHT_DOCK_RAIL`)
+    /// rather than away.
+    pub(super) right_rail: Signal<bool>,
     /// The app's decks, when it has them: carried into what the shell
     /// draws for the host.
     decks: CopyValue<Option<deck::DeckHandle>>,
@@ -1491,6 +1562,8 @@ pub fn WorkspaceView(
         sizes: Signal::new(Sizes::FINE),
         phone: Signal::new(phone),
         title_row: Signal::new(None),
+        right_toggle: Signal::new(0.0),
+        right_rail: Signal::new(false),
         decks: CopyValue::new(decks_now),
         in_shell: Signal::new(false),
         phone_header: Signal::new(phone_header),
@@ -1537,6 +1610,7 @@ pub fn WorkspaceView(
         managing: Signal::new(false),
     });
     use_popup_provider(host);
+    use_side_menu_provider(host);
     // Props change under a live host: keep it current.
     host.views.set(views);
     host.commands.set(commands);
@@ -1792,12 +1866,35 @@ fn DeskBody() -> Element {
         (true, false) => RAIL,
     };
     let in_shell = (host.in_shell)();
+    // The right sidebar's button in the title row, at its inner edge: at
+    // the start of its tab bar while it is open, just left of its rail
+    // while it is folded (the center's bar keeps clear of it).
+    let right_toggle = (host.title_row)().is_some() && docks.right.root.is_some();
+    let right_open = open_tree(&docks.right);
+    // Open, just left of its divider (it stays put when the sidebar
+    // closes); closed, in the window's top right corner; folded to its
+    // rail, over the rail's head.
+    let toggle_at = if right_open { docks.right.size } else { 0.0 };
+    // What the center's bar keeps clear at its end: the button beside the
+    // open sidebar, or in the corner when it is away.
+    let closed = docks.right.shown == Shown::Hidden;
+    let room = if right_toggle && closed { RAIL } else { 0.0 };
+    let center_room = if right_toggle && right_open {
+        RAIL
+    } else {
+        0.0
+    };
+    if (*host.right_toggle.peek() - room).abs() > f32::EPSILON {
+        let mut r = host.right_toggle;
+        spawn(async move { r.set(room) });
+    }
     let center_edges = group::Edges {
         top: true,
         left: in_shell || !open_tree(&docks.left),
         right: !open_tree(&docks.right),
         covered: if in_shell { 0.0 } else { strip(&docks.left) },
         lead: true,
+        room_right: center_room,
     };
     rsx! {
         div { style: "flex:1 1 0; min-width:0; min-height:0; display:flex; flex-direction:row;",
@@ -1811,6 +1908,12 @@ fn DeskBody() -> Element {
                 DockView { side: Side::Bottom, dock: docks.bottom }
             }
             DockView { side: Side::Right, dock: docks.right }
+        }
+        if right_toggle {
+            dock::RightToggle {
+                open: right_open,
+                right: toggle_at,
+            }
         }
         for (index, pane) in floats {
             FloatView { key: "{pane.0}", index, pane }

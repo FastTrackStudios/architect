@@ -275,6 +275,17 @@ impl ExtensionUi {
             .collect()
     }
 
+    /// Whether a loaded extension has a view whose home is dock `side`
+    /// (the navigator's on the left): a page can fold a dock nothing fills.
+    /// Read again when an extension loads or unloads.
+    #[must_use]
+    pub fn fills_dock(&self, side: Side) -> bool {
+        let _ = (self.revision)();
+        declared(&self.host())
+            .values()
+            .any(|(_, decl)| home(decl.home) == Target::Dock(side))
+    }
+
     /// Opens `url` with the extension opener that claims it, as a link's
     /// Ctrl- or Cmd-click does: false when none does.
     #[must_use = "false when nothing opens it"]

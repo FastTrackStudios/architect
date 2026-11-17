@@ -48,16 +48,18 @@ An agent (or a worktree) gets its own Architect, apart from the person's window 
 
 ```sh
 architect-desktop dev --extension ./my-ext --only navigator --open Showcase.md
+architect-desktop dev --only keyflow --open "Charts/A.kf" --collapse left,right   # that view, sides folded
+architect-desktop dev --only keyflow --open "Charts/A.kf" --hide all              # the tabs and the view, nothing else
 architect-desktop dev list                 # name, pid, socket, log, vault of each
 architect-desktop dev path                 # this folder's instance, with its `drive` command
 architect-desktop dev stop [<name> | --all]
 ```
 
 - **Its name** is the working folder's (its last part and a hash of the whole path), so each checkout has one; `--name` picks another. It lives in `~/Library/Caches/architect-dev/<app>/<name>/` (`$ARCHITECT_DEV_ROOT` moves it); `--fresh` starts it over.
-- **What it opens:** the demo vault, seeded fresh (`--seed <dir>` another, `--vault <dir>` an existing one); `--open <path>` a note or file beside the first tab; `--layout <name>` a saved layout; `--run ACTION[=JSON]` actions after, in order.
-- **What runs:** `--extension <dir>` loads a folder as a development copy (reloaded on save, as above); `--only <id,id>` turns every other extension off (the development copies stay on); `--bare` turns them all off. With neither, everything but `updates` runs. The vault's install offer is not shown: the instance has what it was given.
+- **What it opens:** the demo vault, seeded fresh (`--seed <dir>` another, `--vault <dir>` an existing one); `--open <path>` a note or file beside the first tab; `--collapse left,right` (or `all`) opens with those sides folded away (the left sidebar to the rail, the docks collapsed; a press opens them again); `--hide rail,status,left,right,bottom` (or `all`) takes them away: the rail and the status bar are the shell's slots (`HOME_SLOT_SET` hidden; an extension may fill one, a layout may hide one), the docks hidden strip and all, so `--hide all` leaves the tab bar and the open view; `--layout <name>` a saved layout; `--run ACTION[=JSON]` actions after, in order.
+- **What runs:** `--extension <dir>` loads a folder as a development copy (reloaded on save, as above); `--only <id,id>` turns every other extension off (the development copies stay on); `--bare` turns them all off. With neither, everything but `updates` runs. Run again with another `--only`, what it names comes back on (off is kept in the instance's folder). With nothing loaded that fills the left dock (the navigator off), the Vault opens its sidebar folded to the rail by itself (`ExtensionUi::fills_dock`). The vault's install offer is not shown: the instance has what it was given.
 - **Driving it:** the command prints JSON with `socket`; `architect-desktop actions --app <socket> …` drives that instance only (`APP_SHOT`, `APP_STATUS`, `EXT_LOGS`). Run again with the same name, it applies the new flags to the running one. Its output, and any panic with its backtrace, is in the printed `log` (when started from the environment, the panic only; the rest stays where it was started); `--wait` blocks until it ends and exits nonzero if it died.
-- **From the environment:** `ARCHITECT_DEV=1` (or a name) makes a plain launch an isolated instance, so a devenv or a script can set it; `ARCHITECT_DEV_ONLY`, `ARCHITECT_DEV_EXTENSIONS` (a path list), `ARCHITECT_DEV_OPEN`, `ARCHITECT_DEV_LAYOUT`, `ARCHITECT_DEV_VAULT`, `ARCHITECT_DEV_SEED`, `ARCHITECT_DEV_FRESH` and `ARCHITECT_DEV_RUN` (JSON `[["ACTION", {args}], …]`) are the flags' equivalents. The window's title says `(dev: <name>)`.
+- **From the environment:** `ARCHITECT_DEV=1` (or a name) makes a plain launch an isolated instance, so a devenv or a script can set it; `ARCHITECT_DEV_ONLY`, `ARCHITECT_DEV_EXTENSIONS` (a path list), `ARCHITECT_DEV_OPEN`, `ARCHITECT_DEV_COLLAPSE`, `ARCHITECT_DEV_HIDE`, `ARCHITECT_DEV_LAYOUT`, `ARCHITECT_DEV_VAULT`, `ARCHITECT_DEV_SEED`, `ARCHITECT_DEV_FRESH` and `ARCHITECT_DEV_RUN` (JSON `[["ACTION", {args}], …]`) are the flags' equivalents. The window's title says `(dev: <name>)`.
 
 ## Registries
 

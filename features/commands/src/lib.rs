@@ -78,7 +78,9 @@ pub use native::WindowKeys;
 #[cfg(all(feature = "native", target_os = "macos"))]
 pub use native_menu::NativeMenus;
 #[cfg(feature = "ui")]
-pub use sidebar::{TOGGLE_SIDEBAR, sidebar_command, use_sidebar_commands};
+pub use sidebar::{
+    TOGGLE_RAIL, TOGGLE_RIGHT, TOGGLE_SIDEBAR, TOGGLE_STATUS, sidebar_command, use_sidebar_commands,
+};
 #[cfg(feature = "ui")]
 pub use ui::*;
 

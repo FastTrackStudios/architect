@@ -429,6 +429,7 @@ push 64
 attr aria-label None "Toggle the sidebar"
 attr style None "width: 28px; height: 28px; border: none; border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center;"
 listen click
+listen contextmenu
 pop
 push 64
 element svg Some("http://www.w3.org/2000/svg")
@@ -475,6 +476,7 @@ push 68
 attr aria-label None "Toggle the details"
 attr style None "width: 28px; height: 28px; border: none; border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center;"
 listen click
+listen contextmenu
 pop
 push 68
 element svg Some("http://www.w3.org/2000/svg")

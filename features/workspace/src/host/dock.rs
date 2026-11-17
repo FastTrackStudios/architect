@@ -8,7 +8,7 @@
 use architect_shell::motion::{Spring, use_motion};
 use architect_shell::{Icon, IconFn};
 use dioxus::prelude::*;
-use lucide_dioxus::{ExternalLink, PanelLeftOpen};
+use lucide_dioxus::{ExternalLink, PanelLeftOpen, PanelRight};
 
 use super::{DRAG_SLOP, Drag, Host, Mount, Op, point, use_host};
 use crate::model::{Area, Axis, Dock, Node, PaneId, Shown, Side};
@@ -49,6 +49,7 @@ pub(super) fn DockView(
                 right: dock.ribbon.is_none(),
                 covered: 0.0,
                 lead: false,
+                room_right: 0.0,
             };
             rsx! {
                 div { style: "flex:1 1 0; min-width:0; min-height:0; display:flex; position:relative; overflow:hidden;",
@@ -101,6 +102,7 @@ pub(super) fn DockView(
                 right: side == Side::Right && dock.ribbon.is_none(),
                 covered: ribbon_w,
                 lead: false,
+                room_right: 0.0,
             };
             let tree = rsx! {
                 div { style: "{style} display:flex; position:relative; overflow:hidden;",
@@ -481,10 +483,103 @@ fn Rail(side: Side, root: Node) -> Element {
         .map(|p| (p.id.clone(), host.title(p), host.icon(p)))
         .collect();
     drop(workspace);
+    // A side's rail under the title row, as the shell's ribbon is on the
+    // left: the row runs on across it (its bar, its rule, a press moves
+    // the window), the icons start below.
+    let row = (host.title_row)().filter(|_| across);
+    let icons_style = format!(
+        "flex:1 1 auto; {shape} display:flex; align-items:center; gap:4px; padding:4px; \
+         background:{}; overflow:hidden;",
+        t.desk
+    );
+    let Some(row) = row else {
+        return rsx! {
+            div { style: "flex:0 0 auto; {icons_style}",
+                RailButtons { side, tabs }
+            }
+        };
+    };
+    let on_drag = row.on_drag;
+    let on_zoom = row.on_zoom;
+    rsx! {
+        div { style: "flex:0 0 auto; width:{super::RAIL}px; display:flex; flex-direction:column; min-height:0;",
+            div {
+                style: "flex:0 0 auto; height:{row.height}px; box-sizing:border-box; background:{t.title_bar}; \
+                        border-bottom:1px solid {t.rule};",
+                onpointerdown: move |_| {
+                    if let Some(drag) = on_drag {
+                        drag.call(());
+                    }
+                },
+                ondoubleclick: move |_| {
+                    if let Some(zoom) = on_zoom {
+                        zoom.call(());
+                    }
+                },
+            }
+            div { style: "{icons_style} min-height:0;",
+                RailButtons { side, tabs }
+            }
+        }
+    }
+}
+
+/// The right sidebar's button in the title row: just left of the open
+/// sidebar's divider, in the window's top right corner while it is away.
+/// It opens the sidebar, or closes it (away, or to its rail).
+#[component]
+pub(super) fn RightToggle(
+    open: bool,
+    /// How far from the window's right edge its box ends: the open dock's
+    /// width (it sits just left of the divider), else 0 (the corner).
+    right: f32,
+) -> Element {
+    let host = use_host();
+    let t = host.theme.read().clone();
+    let Some(row) = (host.title_row)() else {
+        return rsx! {};
+    };
+    let label = if open {
+        "Collapse the right sidebar"
+    } else {
+        "Show the right sidebar"
+    };
     rsx! {
         div {
-            style: "flex:0 0 auto; {shape} display:flex; align-items:center; gap:4px; padding:4px; \
-                    background:{t.desk}; overflow:hidden;",
+            style: "position:absolute; top:0; right:{right}px; width:{super::RAIL}px; height:{row.height}px; \
+                    display:flex; align-items:center; justify-content:center; z-index:5;",
+            button {
+                class: "lp",
+                "aria-label": label,
+                title: label,
+                style: "width:28px; height:28px; border:none; border-radius:7px; background:transparent; \
+                        display:flex; align-items:center; justify-content:center; cursor:pointer;",
+                // Away, or to its rail when the person keeps one
+                // (`WORKSPACE_RIGHT_DOCK_RAIL`).
+                onclick: move |_| {
+                    let closed = if *host.right_rail.peek() { Shown::Collapsed } else { Shown::Hidden };
+                    host.run(Op::Dock(Side::Right, if open { closed } else { Shown::Open }));
+                },
+                // The rail, the status bar, the right sidebar.
+                oncontextmenu: move |e: MouseEvent| {
+                    let p = e.client_coordinates();
+                    let shown = try_consume_context::<Signal<architect_shell::Shell>>()
+                        .is_some_and(|s| s.peek().side_menu(architect_shell::Side::Right, (p.x, p.y)));
+                    if shown {
+                        e.prevent_default();
+                    }
+                },
+                PanelRight { size: 17, color: t.ink_2.to_string() }
+            }
+        }
+    }
+}
+
+/// A rail's buttons: each tab's icon; a press opens the dock on it.
+#[component]
+fn RailButtons(side: Side, tabs: Vec<(PaneId, String, Option<IconFn>)>) -> Element {
+    let host = use_host();
+    rsx! {
             for (pane, title, icon) in tabs {
                 RibbonButton {
                     key: "{pane.0}",
@@ -497,7 +592,6 @@ fn Rail(side: Side, root: Node) -> Element {
                     },
                 }
             }
-        }
     }
 }
 
@@ -568,6 +662,7 @@ pub(super) fn ShellLeftDock() -> Element {
         right: false,
         covered,
         lead: false,
+        room_right: 0.0,
     };
     // An empty dock under the title row: the row runs on over it, as the
     // shell's would.
