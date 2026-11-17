@@ -42,6 +42,23 @@ Rules:
 
 How fast a save shows, by kind: data and themes instantly; Luau and TypeScript on the next run; WASM components rebuilt (seconds, state kept); processes rebuilt and restarted with state handed over. Full table: "Hot reload" in the architecture page.
 
+### An instance of your own: `architect-desktop dev`
+
+An agent (or a worktree) gets its own Architect, apart from the person's window and from every other one: its own settings folder, vault, control socket, file secret store (never the keychain), local-only iroh, and no global capture shortcut (`apps/desktop/src/dev.rs`). As many run at once as are asked for.
+
+```sh
+architect-desktop dev --extension ./my-ext --only navigator --open Showcase.md
+architect-desktop dev list                 # name, pid, socket, log, vault of each
+architect-desktop dev path                 # this folder's instance, with its `drive` command
+architect-desktop dev stop [<name> | --all]
+```
+
+- **Its name** is the working folder's (its last part and a hash of the whole path), so each checkout has one; `--name` picks another. It lives in `~/Library/Caches/architect-dev/<app>/<name>/` (`$ARCHITECT_DEV_ROOT` moves it); `--fresh` starts it over.
+- **What it opens:** the demo vault, seeded fresh (`--seed <dir>` another, `--vault <dir>` an existing one); `--open <path>` a note or file beside the first tab; `--layout <name>` a saved layout; `--run ACTION[=JSON]` actions after, in order.
+- **What runs:** `--extension <dir>` loads a folder as a development copy (reloaded on save, as above); `--only <id,id>` turns every other extension off (the development copies stay on); `--bare` turns them all off. With neither, everything but `updates` runs. The vault's install offer is not shown: the instance has what it was given.
+- **Driving it:** the command prints JSON with `socket`; `architect-desktop actions --app <socket> …` drives that instance only (`APP_SHOT`, `APP_STATUS`, `EXT_LOGS`). Run again with the same name, it applies the new flags to the running one.
+- **From the environment:** `ARCHITECT_DEV=1` (or a name) makes a plain launch an isolated instance, so a devenv or a script can set it; `ARCHITECT_DEV_ONLY`, `ARCHITECT_DEV_EXTENSIONS` (a path list), `ARCHITECT_DEV_OPEN`, `ARCHITECT_DEV_LAYOUT`, `ARCHITECT_DEV_VAULT`, `ARCHITECT_DEV_SEED`, `ARCHITECT_DEV_FRESH` and `ARCHITECT_DEV_RUN` (JSON `[["ACTION", {args}], …]`) are the flags' equivalents. The window's title says `(dev: <name>)`.
+
 ## Registries
 
 `features/extensions/src/registries.rs` `Registries` keeps the registries an app searches and installs from, kept in `<app dir>/extension-registries.json`:

@@ -236,6 +236,12 @@ window, every architect app can give through its list (#268):
   `architect-desktop extensions check <folder>` does it with no window
   and exits nonzero when it fails. **`EXT_CLONE`** and
   **`WORKSPACES_CLONE`** copy what the app ships before it is changed.
+- **An instance of its own.** `architect-desktop dev` starts an Architect
+  apart from the person's (its own settings, vault, socket and secrets;
+  `ARCHITECT_DEV=1` does it from the environment), with only the
+  extensions asked for and a note open; `dev list`, `dev stop`. Its
+  printed `socket` is what `actions --app` drives
+  (`apps/desktop/src/dev.rs`).
 - **Safety at the door.** An argument name an action does not take is
   refused with the names it takes; a destructive call from outside is
   `confirmation_required` (exit code 7), never a dialog. The escape hatch,

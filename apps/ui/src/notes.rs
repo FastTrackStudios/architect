@@ -105,12 +105,22 @@ fn env_either(new: &str, old: &str) -> Option<std::ffi::OsString> {
         .find_map(|k| std::env::var_os(k).filter(|v| !v.is_empty()))
 }
 
+/// The seed that names the demo vault built into the app (`architect-desktop
+/// dev`'s default), where no folder of it is at hand.
+pub const BUILTIN_DEMO_SEED: &str = "builtin:demo";
+
 /// The vault folder the environment names (`$ARCHITECT_VAULT`), seeded
-/// from `$ARCHITECT_VAULT_SEED` when it is missing.
+/// from `$ARCHITECT_VAULT_SEED` when it is missing: a folder, or
+/// [`BUILTIN_DEMO_SEED`].
 fn named_folder() -> Option<PathBuf> {
     let dir = PathBuf::from(env_either("ARCHITECT_VAULT", "ARCHITECT_LAB_VAULT")?);
     if let Some(seed) = env_either("ARCHITECT_VAULT_SEED", "ARCHITECT_LAB_SEED") {
-        match seed_from(&dir, Path::new(&seed)) {
+        let seeded = if seed == BUILTIN_DEMO_SEED {
+            crate::vaults::write_demo(&dir)
+        } else {
+            seed_from(&dir, Path::new(&seed))
+        };
+        match seeded {
             Ok(true) => tracing::info!(dir = %dir.display(), "app.vault.seeded"),
             Ok(false) => {}
             Err(e) => tracing::warn!(dir = %dir.display(), "the app's vault: {e}"),

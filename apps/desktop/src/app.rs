@@ -324,6 +324,14 @@ pub fn run(distribution: Distribution) -> ExitCode {
         xwayland_for_web_views();
     }
     let dist = distribution.install();
+    // `ARCHITECT_DEV`: an isolated instance of its own (src/dev.rs), set up
+    // before anything reads the environment or starts a thread.
+    if first
+        .as_deref()
+        .is_none_or(|a| a.starts_with("--") && a != "--headless")
+    {
+        crate::dev::from_env(dist);
+    }
     match first.as_deref() {
         Some("actions") => return cli().main(std::env::args_os().skip(1)),
         Some("mcp") => {
@@ -347,6 +355,10 @@ pub fn run(distribution: Distribution) -> ExitCode {
             return extensions(&rest);
         }
         Some("links") => return links(dist.name(), std::env::args().nth(2).as_deref()),
+        Some("dev") => {
+            let rest: Vec<String> = std::env::args().skip(2).collect();
+            return crate::dev::main(dist, &rest);
+        }
         Some("distribution") => {
             return crate::distribution_command(dist, std::env::args().nth(2).as_deref());
         }
@@ -363,8 +375,17 @@ pub fn run(distribution: Distribution) -> ExitCode {
     // too, with the window closed).
     start_node(dist);
     let (w, h) = first_device().size().unwrap_or((1280.0, 820.0));
+    // An isolated instance (`dev`) says which in its title, so it is never
+    // taken for the person's own app.
+    let title = std::env::var(crate::dev::INSTANCE_ENV)
+        .ok()
+        .filter(|n| !n.is_empty())
+        .map_or_else(
+            || dist.name().to_owned(),
+            |n| format!("{} (dev: {n})", dist.name()),
+        );
     let window = WindowAttributes::default()
-        .with_title(dist.name())
+        .with_title(title)
         .with_surface_size(LogicalSize::new(w, h))
         .with_visible(!architect_presence::launched_in_background());
     // The shell draws the title bar: the content runs under a transparent
