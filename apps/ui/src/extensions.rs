@@ -62,8 +62,10 @@ use architect_extensions::manager::{Manager, kinds};
 use architect_extensions::process::{ProcessRunner, Processes};
 use architect_extensions::ui::use_extension_sections;
 use architect_extensions::vault_needs::VaultNeeds;
+use architect_shell::StatusItem;
 use dioxus::prelude::*;
 use facet::Facet;
+use lucide_dioxus::Puzzle;
 
 const METRONOME: &str = "fts.metronome";
 
@@ -1270,13 +1272,41 @@ fn project_folder(root: &Path, folder: &str) -> Option<PathBuf> {
 
 /// What the open vault, or the project on show, needs ("What a project
 /// needs", #710 L2): the extensions its `.architect/extensions.toml` names
-/// (a project's in its own folder's) and the ones it carries, with
-/// "Install all" (one consent prompt, loaded at once) and what cannot be
-/// had here, each with why. Nothing when it has all of it.
+/// (a project's in its own folder's) and the ones it carries, that this
+/// device lacks. Said by an item in the page's status bar (`status`, which
+/// the page adds to its own), or a row at the page's top on a phone or
+/// with no `status`; pressed, the card in a dialog over the window
+/// ("Install all", what cannot run here and why, "Not now"). A device of
+/// the person's to trust, the same way. Nothing when it has all of it.
 #[component]
-pub fn VaultNeedsBanner() -> Element {
+pub fn VaultNeedsBanner(#[props(default)] status: Option<Signal<Option<StatusItem>>>) -> Element {
     let browse = try_use_context::<Browse>();
-    let root = use_hook(|| crate::notes::open_vault().map(|o| o.root()));
+    let mut open = use_signal(|| false);
+    let toggle = use_callback(move |()| open.toggle());
+    // The dialog goes over the whole window, drawn by the app's root.
+    let slot = use_hook(try_consume_context::<WindowDialog>);
+    use_drop(move || {
+        if let Some(WindowDialog(mut s)) = slot
+            && s.try_peek().is_ok_and(|d| d.is_some())
+        {
+            s.set(None);
+        }
+    });
+    // The vault's folder, once it is open: a vault seeded at launch opens
+    // after the page mounts, so it is looked for (a minute at most).
+    let mut opened = use_signal(|| crate::notes::open_vault().map(|o| o.root()));
+    use_future(move || async move {
+        for _ in 0..240 {
+            if opened.peek().is_some() {
+                break;
+            }
+            futures_timer::Delay::new(std::time::Duration::from_millis(250)).await;
+            if let Some(vault) = crate::notes::open_vault() {
+                opened.set(Some(vault.root()));
+            }
+        }
+    });
+    let root = opened();
     // A project on show: its folder's needs; else the vault's.
     let shown = architect_workspace::use_deck_context();
     let is_project = shown
@@ -1361,37 +1391,92 @@ pub fn VaultNeedsBanner() -> Element {
         }
     });
     let (Some(browse), Some(target)) = (browse, target) else {
-        return rsx! {};
+        publish(status, None);
+        return hand(slot, None);
     };
     let needs = planned();
-    if let Some((keys, device)) = unknown_device() {
-        return rsx! {
-            div { style: "padding: 8px 12px 0; font-size: 13px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;",
+    // An isolated instance (`architect-desktop dev`) has the extensions it
+    // was given on purpose: no offer to install what the vault names.
+    let dev_instance = std::env::var_os("ARCHITECT_DEV_INSTANCE").is_some_and(|v| !v.is_empty());
+    let shown = !needs.is_empty() && !dev_instance && !dismissed.read().contains(&target);
+    // What the status bar says; pressed, the dialog with the card.
+    let said = match unknown_device() {
+        Some((_, device)) => Some((
+            format!("Trust {}?", device.name),
+            "One of your devices installed extensions in this vault".to_owned(),
+        )),
+        None if shown => Some((
+            needs_label(&needs),
+            "What this vault uses: press to see".to_owned(),
+        )),
+        None => None,
+    };
+    // A phone has no status bar (nor a page that gives none): a slim row at
+    // the page's top instead.
+    let phone = try_consume_context::<Signal<architect_shell::Shell>>()
+        .is_some_and(|s| s.read().form() == architect_shell::FormFactor::Phone);
+    let row = match (&said, phone || status.is_none()) {
+        (Some((text, _)), true) => rsx! {
+            div {
+                class: "lp",
+                role: "button",
+                style: "display: flex; align-items: center; gap: 8px; margin: 6px 12px 0; padding: 7px 10px; flex-shrink: 0; \
+                        border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--card-foreground); \
+                        font-size: 13px; cursor: pointer;",
+                onclick: move |_| toggle.call(()),
+                Puzzle { size: 14 }
+                span { style: "flex: 1 1 auto;", "{text}" }
+                span { style: "color: var(--muted-foreground);", "›" }
+            }
+        },
+        _ => rsx! {},
+    };
+    publish(
+        status,
+        said.filter(|_| !phone).map(|(text, hint)| {
+            let mut item = StatusItem::new("vault-needs", text)
+                .icon(architect_shell::icon!(Puzzle))
+                .hint(hint)
+                .chip();
+            item.on_press = Some(toggle);
+            item
+        }),
+    );
+    if !open() {
+        return rsx! { {row} {hand(slot, None)} };
+    }
+    let body = if let Some((keys, device)) = unknown_device() {
+        rsx! {
+            div { style: "display: flex; flex-direction: column; gap: 10px; font-size: 13px;",
+                div { style: "font-weight: 600;", "A device of yours installed extensions here" }
                 span { "Your device \"{device.name}\" installed extensions in this vault. Is it yours? Its key is {device.key.chars().take(12).collect::<String>()}…" }
-                button {
-                    style: "padding: 4px 10px; border-radius: 8px; border: none; background: var(--primary); color: var(--primary-foreground); cursor: pointer;",
-                    onclick: move |_| {
-                        if let Err(error) = keys.trust(&device) {
-                            tracing::warn!(%error, "app.extensions.trust_device");
-                        }
-                        unknown_device.set(None);
-                        let next = again.peek().wrapping_add(1);
-                        again.set(next);
-                    },
-                    "It's mine: trust it"
-                }
-                button {
-                    style: "font-size: 12px; background: none; border: none; color: var(--muted-foreground); cursor: pointer;",
-                    onclick: move |_| unknown_device.set(None),
-                    "Not mine"
+                div { style: "display: flex; gap: 8px;",
+                    button {
+                        style: "padding: 5px 12px; border-radius: 8px; border: none; background: var(--primary); color: var(--primary-foreground); cursor: pointer;",
+                        onclick: move |_| {
+                            if let Err(error) = keys.trust(&device) {
+                                tracing::warn!(%error, "app.extensions.trust_device");
+                            }
+                            unknown_device.set(None);
+                            open.set(false);
+                            let next = again.peek().wrapping_add(1);
+                            again.set(next);
+                        },
+                        "It's mine: trust it"
+                    }
+                    button {
+                        style: "padding: 5px 12px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--card-foreground); cursor: pointer;",
+                        onclick: move |_| {
+                            unknown_device.set(None);
+                            open.set(false);
+                        },
+                        "Not mine"
+                    }
                 }
             }
-        };
-    }
-    if needs.is_empty() || dismissed.read().contains(&target) {
-        return rsx! {};
-    }
-    rsx! {
+        }
+    } else if shown {
+        rsx! {
         // The consent prompt's classes, at app level: a `<style>` in the
         // pane does not apply in Blitz, and one there panicked its layout.
         document::Style { {architect_ui::UTILITIES_CSS} }
@@ -1400,12 +1485,13 @@ pub fn VaultNeedsBanner() -> Element {
         // Made again each round: a Blitz scroller keeps its offset when
         // what it holds shrinks (after Install all).
         for k in [round] {
-            div { key: "{k}", style: "padding: 8px 12px 4px; display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; max-height: 440px; overflow-y: auto;",
+            div { key: "{k}", style: "display: flex; flex-direction: column; gap: 6px;",
                 architect_extensions::page::MissingExtensions {
                     browse: browse.clone(),
                     plan: needs.plan.clone(),
                     folder: Some(target.clone()),
                     what: if is_project { "project".to_owned() } else { "vault".to_owned() },
+                    bare: true,
                     on_done: move |done: String| {
                         last.set(Some(done));
                         let next = again.peek().wrapping_add(1);
@@ -1431,6 +1517,116 @@ pub fn VaultNeedsBanner() -> Element {
                 }
             }
         }
+        }
+    } else {
+        open.set(false);
+        return rsx! { {row} {hand(slot, None)} };
+    };
+    // Over the window, centred; a press beside it, its × or Escape closes it.
+    let scrim = try_consume_context::<Signal<architect_shell::Shell>>().map_or_else(
+        || "rgba(0,0,0,0.55)".into(),
+        |s| s.peek().theme.scrim.clone(),
+    );
+    let heading = if unknown_device().is_some() {
+        "Extensions from your devices"
+    } else {
+        "Extensions"
+    };
+    let dialog = hand(
+        slot,
+        Some(rsx! {
+            div {
+                style: "position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: {DIALOG_LAYER}; display: flex; align-items: center; \
+                        justify-content: center; padding: 16px; box-sizing: border-box; background: {scrim};",
+                onkeydown: move |e: KeyboardEvent| {
+                    if e.key() == Key::Named(NamedKey::Escape) {
+                        open.set(false);
+                    }
+                },
+                onclick: move |_| open.set(false),
+                div {
+                    role: "dialog",
+                    "aria-label": "Extensions this vault uses",
+                    style: "position: relative; width: 560px; max-width: 100%; max-height: 80%; overflow-y: auto; box-sizing: border-box; \
+                            padding: 18px 20px; border-radius: 14px; color: var(--card-foreground); background: var(--card); border: 1px solid var(--border); \
+                            box-shadow: 0 24px 64px rgba(0,0,0,0.5);",
+                    onclick: move |e| e.stop_propagation(),
+                    div { style: "display: flex; align-items: center; gap: 8px; margin-bottom: 12px;",
+                        span { style: "flex: 1 1 auto; font-size: 15px; font-weight: 650;", "{heading}" }
+                        button {
+                            "aria-label": "Close",
+                            class: "lp",
+                            style: "width: 26px; height: 26px; flex-shrink: 0; border: none; border-radius: 6px; \
+                                    background: transparent; color: var(--muted-foreground); cursor: pointer; font-size: 16px;",
+                            onclick: move |_| open.set(false),
+                            "×"
+                        }
+                    }
+                    {body}
+                }
+            }
+        }),
+    );
+    rsx! { {row} {dialog} }
+}
+
+/// Where a page's dialog is drawn: the app's root puts what is here over
+/// the whole window (the shell's cover is the workspace's menus').
+#[derive(Clone, Copy)]
+pub struct WindowDialog(pub Signal<Option<Element>>);
+
+/// Below the confirm sheet (95), over the page and its bars.
+const DIALOG_LAYER: u8 = 90;
+
+/// `dialog` into the window's layer (after this render), or drawn here
+/// where the app has none.
+fn hand(slot: Option<WindowDialog>, dialog: Option<Element>) -> Element {
+    let Some(WindowDialog(s)) = slot else {
+        return dialog.unwrap_or_else(|| rsx! {});
+    };
+    if dialog.is_some() || s.peek().is_some() {
+        let mut s = s;
+        spawn(async move { s.set(dialog) });
+    }
+    rsx! {}
+}
+
+/// What the status bar says of a vault's needs: what there is to install,
+/// else what cannot run here.
+fn needs_label(needs: &VaultNeeds) -> String {
+    let plan = &needs.plan;
+    let to_install = plan.install.len().saturating_add(plan.offer.len());
+    let plural = |n: usize, one: &str, many: &str| {
+        if n == 1 {
+            format!("1 {one}")
+        } else {
+            format!("{n} {many}")
+        }
+    };
+    if to_install > 0 {
+        format!(
+            "{} to install",
+            plural(to_install, "extension", "extensions")
+        )
+    } else if !plan.missing.is_empty() {
+        format!(
+            "{} can't run here",
+            plural(plan.missing.len(), "extension", "extensions")
+        )
+    } else {
+        "Extensions".to_owned()
+    }
+}
+
+/// `item` into the page's status bar (`status`), when it changed: after
+/// this render, as the page reads it.
+fn publish(status: Option<Signal<Option<StatusItem>>>, item: Option<StatusItem>) {
+    let Some(status) = status else {
+        return;
+    };
+    if *status.peek() != item {
+        let mut status = status;
+        spawn(async move { status.set(item) });
     }
 }
 

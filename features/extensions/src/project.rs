@@ -283,14 +283,21 @@ impl Plan {
         self.prompt_for("project")
     }
 
-    /// [`Self::prompt`] for `what` opens: "This vault uses Word Count".
+    /// [`Self::prompt`] for `what` opens: "This vault uses Word Count"; past
+    /// four, how many ("This vault uses 17 extensions you don't have").
     #[must_use]
     pub fn prompt_for(&self, what: &str) -> Option<String> {
         let names: Vec<&str> = self.install.iter().map(|l| l.name.as_str()).collect();
         match names.as_slice() {
             [] => None,
             [one] => Some(format!("This {what} uses {one}")),
-            [rest @ .., last] => Some(format!("This {what} uses {} and {last}", rest.join(", "))),
+            [rest @ .., last] if rest.len() <= 3 => {
+                Some(format!("This {what} uses {} and {last}", rest.join(", ")))
+            }
+            many => Some(format!(
+                "This {what} uses {} extensions you don't have",
+                many.len()
+            )),
         }
     }
 }
@@ -405,6 +412,24 @@ mod tests {
         r.need(Requirement::new("acme.lyrics").optional());
         r.need(Requirement::new("acme.gone"));
         r
+    }
+
+    #[test]
+    fn a_long_prompt_counts_instead_of_naming() {
+        let names = |n: usize| super::Plan {
+            install: (0..n)
+                .map(|i| listing(&format!("x.e{i}"), "1.0.0", "luau"))
+                .collect(),
+            ..super::Plan::default()
+        };
+        assert_eq!(
+            names(4).prompt_for("vault").as_deref(),
+            Some("This vault uses x.e0, x.e1, x.e2 and x.e3")
+        );
+        assert_eq!(
+            names(5).prompt_for("vault").as_deref(),
+            Some("This vault uses 5 extensions you don't have")
+        );
     }
 
     #[test]

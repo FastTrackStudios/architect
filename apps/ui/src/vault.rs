@@ -885,6 +885,12 @@ pub fn VaultPage() -> Element {
     if let Some(set) = set {
         items.push(StatusItem::new("screenset", set).hint("⌘1 Write, ⌘2 Mix, ⌘3 Embedded views"));
     }
+    // What the vault needs and this device lacks: an item that opens it
+    // (`crate::extensions::VaultNeedsBanner`), not a card over the page.
+    let needs_status = use_signal(|| None::<StatusItem>);
+    if let Some(needs) = needs_status() {
+        items.push(needs);
+    }
     architect_shell::use_status(items);
     // On a desk the workspace's tabs are the title row (Obsidian's): no page
     // bar, the top tab bars as tall, clear of the window's buttons.
@@ -959,7 +965,7 @@ pub fn VaultPage() -> Element {
         } else if title_row.is_none() {
             PageBar { title: "Vault" }
         }
-        crate::extensions::VaultNeedsBanner {}
+        crate::extensions::VaultNeedsBanner { status: Some(needs_status) }
         div { style: "flex: 1 1 0; min-height: 0; display: flex; position: relative;",
             WorkspaceView {
                 workspace,

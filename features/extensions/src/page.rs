@@ -1164,7 +1164,8 @@ pub fn ConsentPrompt(
 /// `folder` is the vault's (or project's) folder, whose carried archives
 /// are searched for these installs only; `on_done` hears what an install
 /// did (each one's outcome, `; `-joined), to plan again; `on_dismiss`,
-/// when given, is its "Not now" (beside "Install all").
+/// when given, is its "Not now" (beside "Install all"). `bare` drops its
+/// own frame, for a dialog that is the card already.
 #[component]
 pub fn MissingExtensions(
     browse: Browse,
@@ -1173,6 +1174,7 @@ pub fn MissingExtensions(
     #[props(default)] folder: Option<std::path::PathBuf>,
     #[props(default)] on_done: Option<EventHandler<String>>,
     #[props(default)] on_dismiss: Option<EventHandler<()>>,
+    #[props(default)] bare: bool,
 ) -> Element {
     let mut asking = use_signal(|| None::<Vec<Preview>>);
     let mut note = use_signal(|| None::<String>);
@@ -1224,6 +1226,16 @@ pub fn MissingExtensions(
         };
         rows.push((r.id.clone(), name, tag, format!("{why}; kept as it is")));
     }
+    let rows_box = if bare {
+        "max-height: 320px; overflow-y: auto; padding: 4px 0;"
+    } else {
+        ""
+    };
+    let frame = if bare {
+        ""
+    } else {
+        "padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--card-foreground);"
+    };
     // Inline styles over the theme's tokens, and no `style` node: one
     // here made Blitz panic (`layout_parent … does not point at its layout
     // container`) beside the workspace. The consent prompt's classes are
@@ -1231,13 +1243,16 @@ pub fn MissingExtensions(
     rsx! {
         div {
             role: "alert",
-            style: "display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--card-foreground); font-size: 13px;",
+            style: "display: flex; flex-direction: column; gap: 6px; font-size: 13px; {frame}",
             div { style: "font-weight: 600;", "{prompt}" }
-            for (id, name, tag, detail) in rows {
-                div { key: "{id}", style: "display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 8px;",
-                    span { style: "font-weight: 500;", "{name}" }
-                    span { style: "font-size: 11px; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--border); color: var(--muted-foreground);", "{tag}" }
-                    span { style: "color: var(--muted-foreground);", "{detail}" }
+            // In a dialog the rows scroll, its buttons stay in reach.
+            div { style: "display: flex; flex-direction: column; gap: 6px; {rows_box}",
+                for (id, name, tag, detail) in rows {
+                    div { key: "{id}", style: "display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 8px; flex-shrink: 0;",
+                        span { style: "font-weight: 500;", "{name}" }
+                        span { style: "font-size: 11px; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--border); color: var(--muted-foreground);", "{tag}" }
+                        span { style: "color: var(--muted-foreground);", "{detail}" }
+                    }
                 }
             }
             if let Some(n) = note() {
