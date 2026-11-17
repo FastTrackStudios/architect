@@ -470,7 +470,13 @@ fn print(v: &Value) {
 fn path(app: &str, args: &[String]) -> Result<(), String> {
     let ask = parse(args)?;
     let inst = instance_for(app, ask.name)?;
-    let vault = inst.dir.join("vault");
+    // What it was started with (its record: the vault it was given), else
+    // where it would be.
+    let vault = std::fs::read_to_string(inst.record())
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|v| v.get("vault").and_then(Value::as_str).map(PathBuf::from))
+        .unwrap_or_else(|| inst.dir.join("vault"));
     print(&inst.info(None, &vault, answers(&inst.socket())));
     Ok(())
 }
