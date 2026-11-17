@@ -82,6 +82,52 @@ extensions today; installed Luau, pages and WASI in the browser are
 - **The walkthrough:** [Your first extension](@/getting-started/extension.md),
   then [Extending an app](@/guide/extending.md).
 
+## The development loop
+
+Develop against the app itself, in an instance of your own: your
+extension loaded from its folder, reloaded on save, nothing else in the
+way, and the app you use every day untouched.
+
+1. **Have the app, with `architect` on your `PATH`.** From a checkout of
+   Architect, `cargo run --release -p architect-desktop -- install`
+   installs that build (on a Mac bundled, signed, notarized and stapled
+   as a release is, into `/Applications`; on Linux under `~/.local`) and
+   links `~/.local/bin/architect` to it (`apps/desktop/src/install.rs`).
+   Your extension's repository needs no Architect crate to build.
+2. **Run your extension in an isolated instance.** From its repository:
+
+   ```sh
+   architect dev --extension path/to/your-extension      # it, and the app's own extensions
+   architect dev --extension ./ext --only your.id         # it alone
+   architect dev --extension ./ext --open "Charts/A.kf" --hide all   # just its view, no sidebars, rail or status bar
+   ```
+
+   Each working folder gets its own instance (its own settings, vault,
+   secrets and control socket), so agents in several worktrees each run
+   theirs. `--fresh` starts it over; run it again with other flags and
+   the running one takes them. The same with no launcher, for a
+   `justfile` or devenv: `ARCHITECT_DEV=1` plus `ARCHITECT_DEV_EXTENSIONS`,
+   `ARCHITECT_DEV_ONLY`, `ARCHITECT_DEV_OPEN`, `ARCHITECT_DEV_HIDE`, … on
+   the app's environment.
+3. **Save.** The folder is a development copy: every file is
+   fingerprinted twice a second, and a change reloads it as a diff, its
+   state kept and its panes where they were. Data, themes, Luau, pages
+   and TypeScript take effect at once. A process extension's program (its
+   `[entry] path`) is your build's to write, path dependencies and all;
+   when it changes, the app restarts the process on it. A broken save
+   keeps the last good copy and says why.
+4. **See and drive it.** `dev` prints the instance's `socket`;
+   `architect actions --app <socket> run APP_SHOT --json '{"path":"/tmp/a.png"}'`
+   draws it, `EXT_LOGS {id}` and `APP_STATUS` say what went wrong, and
+   every action your extension adds runs the same way. `architect dev
+   path` prints this folder's instance; `dev list`, `dev stop [--all]`.
+5. **Check it as CI would.** `architect extensions check <folder>` loads
+   it once with no window and renders each view; nonzero when it fails.
+
+More: "An instance of your own" in the `architect-extensions` skill
+(`skills/architect-extensions/references/install-lifecycle.md`), and
+[Command line and MCP](@/guide/cli-and-mcp.md).
+
 ## The manifest
 
 `extension.toml` is read by `features/extensions/src/manifest.rs`
