@@ -1305,7 +1305,7 @@ a target and a slot ones there are, a URL pattern one that compiles.
 id = "kf"
 title = "Keyflow chart"
 files = ["kf"]
-view = "chart"              # or action = "…": given ctx.path / ctx.url
+view = "chart"              # a pane per file (its id kind:path); or action = "…": given ctx.path / ctx.url
 
 [[openers]]
 id = "issue"

@@ -146,7 +146,7 @@ impl PaintView for Grid {
         let (hover, picked) = (self.hover, self.picked);
         let mut text = false;
         match event {
-            ViewInput::PointerMove { x, y } => self.hover = self.at(*x, *y),
+            ViewInput::PointerMove { x, y, .. } => self.hover = self.at(*x, *y),
             ViewInput::PointerDown { x, y, .. } => self.picked = self.at(*x, *y),
             ViewInput::Touch { x, y, phase, .. } => {
                 self.hover = self.at(*x, *y);
@@ -366,11 +366,16 @@ mod tests {
         let input = painter.ctx().input.clone();
 
         // Column 12, row 34: what the pointer lights is what `hit` finds.
-        input.push(ViewInput::PointerMove { x: 100.5, y: 206.5 });
+        input.push(ViewInput::PointerMove {
+            x: 100.5,
+            y: 206.5,
+            mods: Vec::new(),
+        });
         input.push(ViewInput::PointerDown {
             x: 100.5,
             y: 206.5,
             button: architect_workspace::Button::Primary,
+            mods: Vec::new(),
         });
         let _ = painter.frame(size);
         let at = painter.hit(Point::new(100.5, 206.5));

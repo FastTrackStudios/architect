@@ -194,15 +194,25 @@ pub fn view_input(event: &UiEvent) -> Option<ViewInput> {
             x,
             y,
             button: button(p.button),
+            mods: modifiers(p.mods),
         }),
-        UiEvent::PointerMove(p) => pointer(p, "move", |x, y| ViewInput::PointerMove { x, y }),
+        UiEvent::PointerMove(p) => pointer(p, "move", |x, y| ViewInput::PointerMove {
+            x,
+            y,
+            mods: modifiers(p.mods),
+        }),
         UiEvent::PointerUp(p) => pointer(p, "end", |x, y| ViewInput::PointerUp {
             x,
             y,
             button: button(p.button),
+            mods: modifiers(p.mods),
         }),
         // Gone: where it went, outside the view, so nothing is under it.
-        UiEvent::PointerLeave(p) => pointer(p, "cancel", |x, y| ViewInput::PointerMove { x, y }),
+        UiEvent::PointerLeave(p) => pointer(p, "cancel", |x, y| ViewInput::PointerMove {
+            x,
+            y,
+            mods: modifiers(p.mods),
+        }),
         UiEvent::PointerCancel(p) => match p.id {
             BlitzPointerId::Finger(_) => pointer(p, "cancel", |_, _| ViewInput::Focus(false)),
             BlitzPointerId::Mouse | BlitzPointerId::Pen => return None,

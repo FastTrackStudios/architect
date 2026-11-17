@@ -79,7 +79,7 @@ struct Grid {
 
 impl PaintView for Grid {
     fn input(&mut self, _: &ViewCtx, event: &ViewInput) -> bool {
-        let ViewInput::PointerMove { x, y } = *event else {
+        let ViewInput::PointerMove { x, y, .. } = *event else {
             return false;
         };
         if let Some((at, fill)) = self.hover.take() {
@@ -216,10 +216,11 @@ fn paint_and_hit_testing_read_one_list() {
 
         // Live input: the pointer over a bar's cell lights the bar, not the
         // cell under it, in the picture and in the hit test alike.
-        painter
-            .ctx()
-            .input
-            .push(ViewInput::PointerMove { x: 300.5, y: 45.5 });
+        painter.ctx().input.push(ViewInput::PointerMove {
+            x: 300.5,
+            y: 45.5,
+            mods: Vec::new(),
+        });
         assert!(painter.wants_frame());
         let lit = painter.hit(Point::new(300.5, 45.5));
         assert_eq!(lit, Some(COLS * ROWS));
@@ -237,10 +238,11 @@ fn frame_times_for_ten_thousand_rects() {
     let mut raster_times = Vec::new();
     for i in 0..240_u16 {
         let x = f32::mul_add(f32::from(i % 100), 8.0, 3.5);
-        painter
-            .ctx()
-            .input
-            .push(ViewInput::PointerMove { x, y: 200.5 });
+        painter.ctx().input.push(ViewInput::PointerMove {
+            x,
+            y: 200.5,
+            mods: Vec::new(),
+        });
         let scene = painter.frame(SIZE);
         if i % 8 == 0 {
             let began = Instant::now();
