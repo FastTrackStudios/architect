@@ -13,6 +13,12 @@
 //! ([`FrameStats`]). [`Marks`] is a display list a view can draw and
 //! hit-test from, so what is drawn and what a pointer finds are one list.
 //!
+//! A view that returns layers ([`PaintView::layers`]) may say how they
+//! move ([`anim`]): the painter keeps the layers it was given and draws
+//! them at each frame's clocks ([`Clocks`]) without asking the view, for
+//! as long as nothing the view draws changed. The same evaluation draws
+//! the same layers from a view in a process.
+//!
 //! This module is the model: no Dioxus, wasm-clean. The Blitz host —
 //! `PaintPane`, a pane mounting a `PaintWidget` — is feature `paint-ui`.
 
@@ -38,6 +44,8 @@ use std::time::Duration;
 // that paints needs no anyrender or peniko of its own.
 pub use anyrender::{PaintScene, Scene};
 pub use architect_scene::Layer;
+pub use architect_scene::anim::{self, Clocks, Readings};
+use architect_scene::anim::{Access, Name, Space, Values};
 pub use architect_scene::layers::Key as LayerKey;
 pub use peniko;
 use peniko::kurbo::{Affine, Point, Rect};
@@ -64,13 +72,24 @@ pub trait PaintView: 'static {
     ///
     /// Each layer is content in its own space and where it is drawn. Keep
     /// a layer's `commands` the same `Arc` while its content is the same:
-    /// a pan, a zoom or a moving playhead is then a new transform and
-    /// nothing is recorded again, here or in a host the view runs outside
-    /// of, where only what changed crosses. A view that returns layers is
-    /// not asked to `paint`.
+    /// a pan or a zoom is then a new transform and nothing is recorded
+    /// again, here or in a host the view runs outside of, where only what
+    /// changed crosses. What moves every frame (a playhead, a scroll)
+    /// should move by its layer's animations ([`Layer::animated`]): its
+    /// host runs them and the view is not asked. A view that returns
+    /// layers is not asked to `paint`, and is asked for layers only when
+    /// input, a resize or [`Painter::invalidate`] may have changed them,
+    /// or while it says it is [`Self::animating`].
     fn layers(&mut self, ctx: &ViewCtx) -> Option<Vec<(LayerKey, Layer)>> {
         let _ = ctx;
         None
+    }
+
+    /// Its named values ([`anim::Values`]) that a layer's animation may
+    /// read: asked with its layers, and only its own (`view.` names).
+    fn values(&mut self, ctx: &ViewCtx) -> Vec<(Name, f64)> {
+        let _ = ctx;
+        Vec::new()
     }
 
     /// What is under `at` (logical pixels): the id of what it drew there.
@@ -80,7 +99,9 @@ pub trait PaintView: 'static {
         None
     }
 
-    /// Whether it draws every frame (it is moving), not only after input.
+    /// Whether it must be asked for every frame, not only after input.
+    /// Layers that move by their animations need not be: their host
+    /// draws them every frame a clock they read runs.
     fn animating(&self, ctx: &ViewCtx) -> bool {
         let _ = ctx;
         false
@@ -247,6 +268,48 @@ pub struct Painter {
     view: Box<dyn PaintView>,
     stats: FrameStats,
     dirty: bool,
+    clocks: Clocks,
+    /// What a view of layers last returned, drawn again at each frame's
+    /// clocks without it.
+    held: Option<Held>,
+}
+
+/// A view's layers and values as its painter keeps them.
+#[derive(Debug, Default)]
+struct Held {
+    layers: architect_scene::Layers,
+    values: Values,
+    /// The clocks it was last drawn at.
+    drawn: Readings,
+}
+
+impl Held {
+    /// `layers` kept, each animation checked as a host checks one sent
+    /// to it: a layer whose animations fail, or that would take the pane
+    /// past its cap, is kept still.
+    fn keep(&mut self, layers: Vec<(LayerKey, Layer)>, values: Vec<(Name, f64)>) {
+        let mut budget = anim::MAX_ANIMATIONS;
+        self.layers = layers
+            .into_iter()
+            .map(|(key, mut layer)| {
+                let count = layer.animation_count();
+                let fits = layer
+                    .animations
+                    .as_deref()
+                    .is_none_or(|a| anim::check(a, Access::default()).is_ok());
+                match budget.checked_sub(count) {
+                    Some(left) if fits => budget = left,
+                    _ => layer.animations = None,
+                }
+                (key, layer)
+            })
+            .collect();
+        for (name, value) in values {
+            // Another space's name, or past the cap: not the view's to
+            // write, as a host refuses it from a process.
+            let _ = self.values.write(Space::View, &name, value);
+        }
+    }
 }
 
 impl std::fmt::Debug for Painter {
@@ -266,12 +329,31 @@ impl Painter {
 
     #[must_use]
     pub fn boxed(ctx: ViewCtx, view: Box<dyn PaintView>) -> Self {
+        // Wall time is the pane's frame clock: one clock for the view
+        // and its animations.
+        let frames = ctx.clock.clone();
         Self {
             ctx,
             view,
             stats: FrameStats::new(),
             dirty: true,
+            clocks: Clocks::app().with_wall(move || frames.now().as_secs_f64()),
+            held: None,
         }
+    }
+
+    /// Its animations run on `clocks` (the app's, with the pane's frame
+    /// clock as wall time, unless told).
+    #[must_use]
+    pub fn with_clocks(mut self, clocks: Clocks) -> Self {
+        self.clocks = clocks;
+        self
+    }
+
+    /// Its view's named values, once it returned layers.
+    #[must_use]
+    pub fn values(&self) -> Option<&Values> {
+        self.held.as_ref().map(|h| &h.values)
     }
 
     /// Recording its frames into `stats` (one the host reads elsewhere).
@@ -315,16 +397,32 @@ impl Painter {
     }
 
     /// Whether a frame would show something new: input changed it, input
-    /// is waiting, or it is moving.
+    /// is waiting, it is moving, or a clock its layers read moved.
     #[must_use]
     pub fn wants_frame(&self) -> bool {
-        self.dirty || !self.ctx.input.is_empty() || self.view.animating(&self.ctx)
+        self.dirty
+            || !self.ctx.input.is_empty()
+            || self.view.animating(&self.ctx)
+            || self
+                .held
+                .as_ref()
+                .is_some_and(|h| h.layers.stale(&h.drawn, &self.clocks.read()))
     }
 
-    /// Whether it is moving (it draws every frame).
+    /// Whether it is moving (it draws every frame): the view says so, or
+    /// its layers move on a running clock.
     #[must_use]
     pub fn animating(&self) -> bool {
         self.view.animating(&self.ctx)
+            || self
+                .held
+                .as_ref()
+                .is_some_and(|h| h.layers.moving(&self.clocks.read()))
+    }
+
+    /// Whether the next frame asks the view, or draws what it holds.
+    fn asks(&self, resized: bool) -> bool {
+        self.dirty || resized || self.held.is_none() || self.view.animating(&self.ctx)
     }
 
     /// What is under `at`, in logical pixels ([`PaintView::hit`]).
@@ -336,19 +434,45 @@ impl Painter {
     /// One frame at `geometry`: the view's scene, scaled to physical
     /// pixels. Its time — the view's input and its recording, on the
     /// host's clock — goes into the stats.
+    ///
+    /// A view of layers is asked only when something it draws may have
+    /// changed (input, a resize, [`Self::invalidate`], or it says it is
+    /// [`PaintView::animating`]); otherwise its layers are drawn again
+    /// as their animations place them now.
     pub fn frame(&mut self, geometry: Geometry) -> Scene {
         let began = self.ctx.clock.now();
+        let resized = self.ctx.geometry != geometry;
         self.ctx.geometry = geometry;
         self.pump();
         let scale = f64::from(geometry.scale);
         let scale = if scale > 0.0 { scale } else { 1.0 };
         let mut scene = Scene::new();
-        if let Some(layers) = self.view.layers(&self.ctx) {
-            // Composed from where each layer's content is kept.
-            layers
-                .into_iter()
-                .collect::<architect_scene::Layers>()
-                .compose(&mut scene, Affine::scale(scale));
+        let asked = if self.asks(resized) {
+            Some(self.view.layers(&self.ctx))
+        } else {
+            None
+        };
+        let held = match asked {
+            Some(Some(layers)) => {
+                let values = self.view.values(&self.ctx);
+                let held = self.held.get_or_insert_with(Held::default);
+                held.keep(layers, values);
+                Some(held)
+            }
+            // A view that paints: no layers to hold.
+            Some(None) => {
+                self.held = None;
+                None
+            }
+            None => self.held.as_mut(),
+        };
+        if let Some(held) = held {
+            // Composed from where each layer's content is kept, at the
+            // clocks now.
+            let now = self.clocks.read();
+            held.layers
+                .compose_at(&mut scene, Affine::scale(scale), &now, &held.values);
+            held.drawn = now;
         } else {
             self.view.paint(&self.ctx, &mut scene);
             if (scale - 1.0).abs() > f64::EPSILON {
@@ -366,3 +490,6 @@ impl Painter {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod anim_tests;

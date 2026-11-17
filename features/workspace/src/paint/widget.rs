@@ -11,7 +11,7 @@
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyrender::RenderContext;
 use architect::action::{ActionCaller, ActionList};
@@ -60,7 +60,10 @@ impl PaintWidget {
     }
 
     fn frame(&mut self, geometry: Geometry) -> Scene {
-        self.wake.0.dirty.swap(false, Ordering::AcqRel);
+        // A wake is news the view must draw: it is asked again.
+        if self.wake.0.dirty.swap(false, Ordering::AcqRel) {
+            self.painter.invalidate();
+        }
         self.sync_theme();
         self.painter.frame(geometry)
     }
@@ -427,8 +430,9 @@ pub fn PaintPane(mount: PaintMount) -> Element {
     mount.wake.attach(window.clone());
     mount.wake.set_theme(theme.clone());
     let (widget, input) = use_hook(|| {
-        let began = Instant::now();
-        let clock = FrameClock::new(mount.budget, move || began.elapsed());
+        // The app's one wall clock: a pane in any window, and the
+        // animations of its layers, read the same time.
+        let clock = FrameClock::new(mount.budget, architect_scene::anim::wall_elapsed);
         let actions = actions.map(|a| (*a).clone()).unwrap_or_default();
         let ctx = ViewCtx::new(
             pane.id.clone(),

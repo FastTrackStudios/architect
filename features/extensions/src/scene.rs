@@ -635,14 +635,38 @@ pub fn framed(
 
 #[cfg(feature = "remote")]
 impl Painted {
-    /// Draws it into `scene` at `at`: its layers, or its one scene.
+    /// Draws it into `scene` at `at`: its layers, placed by their
+    /// animations at the clocks now, or its one scene.
     // kurbo's transforms compose with `*`: no overflow to guard.
     #[allow(clippy::arithmetic_side_effects)]
-    pub(crate) fn draw(&self, scene: &mut Scene, at: Affine) {
+    pub(crate) fn draw(&mut self, scene: &mut Scene, at: Affine) {
         match &self.layers {
-            Some(layers) => layers.layers().compose(scene, at * self.transform),
+            Some(layers) => {
+                let now = self.clocks.read();
+                layers
+                    .layers()
+                    .compose_at(scene, at * self.transform, &now, layers.values());
+                self.drawn = now;
+            }
             None => architect_scene::layers::replay(scene, &self.commands, at * self.transform),
         }
+    }
+
+    /// Whether a layer moves on a running clock: drawn every frame.
+    pub(crate) fn moving(&self) -> bool {
+        self.layers
+            .as_ref()
+            .is_some_and(|l| l.layers().moving(&self.clocks.read()))
+    }
+
+    /// Whether a frame now would draw something else than the last one:
+    /// a batch came, a layer moves, or a clock one reads was moved.
+    pub(crate) fn stale(&self) -> bool {
+        self.dirty
+            || self
+                .layers
+                .as_ref()
+                .is_some_and(|l| l.layers().stale(&self.drawn, &self.clocks.read()))
     }
 }
 
@@ -655,6 +679,11 @@ pub(crate) struct Painted {
     /// Its layers, once its view sent any ([`LAYERS_ATTR`]): drawn in
     /// place of `commands`.
     pub(crate) layers: Option<architect_scene::ops::Receiver>,
+    /// What its layers' animations read: the app's clocks, the same in
+    /// every window.
+    pub(crate) clocks: architect_scene::Clocks,
+    /// The clocks it was last drawn at.
+    pub(crate) drawn: architect_scene::Readings,
     pub(crate) transform: Affine,
     pub(crate) element: u64,
     pub(crate) dirty: bool,
@@ -723,6 +752,19 @@ pub struct OverlayWidget {
 }
 
 #[cfg(feature = "remote")]
+impl OverlayWidget {
+    /// Whether `test` holds of any scene it draws.
+    fn any(&self, test: impl Fn(&Painted) -> bool) -> bool {
+        self.layer
+            .scenes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .any(|p| test(&p.lock().unwrap_or_else(std::sync::PoisonError::into_inner)))
+    }
+}
+
+#[cfg(feature = "remote")]
 // kurbo's transforms compose with `*`: no overflow to guard.
 #[allow(clippy::arithmetic_side_effects)]
 impl blitz_dom::Widget for OverlayWidget {
@@ -731,6 +773,11 @@ impl blitz_dom::Widget for OverlayWidget {
             .version
             .load(std::sync::atomic::Ordering::Relaxed)
             != self.drawn
+            || self.any(Painted::stale)
+    }
+
+    fn requires_redraw(&self) -> bool {
+        self.any(Painted::moving)
     }
 
     fn paint(
@@ -754,13 +801,11 @@ impl blitz_dom::Widget for OverlayWidget {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         for painted in scenes {
-            let p = painted
+            let mut p = painted
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            p.draw(
-                &mut scene,
-                Affine::scale(scale) * Affine::translate(p.origin),
-            );
+            let at = Affine::scale(scale) * Affine::translate(p.origin);
+            p.draw(&mut scene, at);
         }
         scene
     }
@@ -779,11 +824,20 @@ pub(crate) struct SceneWidget {
 
 #[cfg(feature = "remote")]
 impl blitz_dom::Widget for SceneWidget {
+    // Drawn again when its view sent something, and every frame its
+    // layers move on their own: the view is not asked for those.
     fn needs_redraw(&self) -> bool {
         self.painted
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .dirty
+            .stale()
+    }
+
+    fn requires_redraw(&self) -> bool {
+        self.painted
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .moving()
     }
 
     fn paint(
@@ -885,13 +939,25 @@ mod guest {
         }
     }
 
+    /// The named values a [`RemoteScene`] shows with its layers
+    /// (`architect_scene::anim::Values`): compared by pointer, so keep
+    /// one while nothing changes.
+    #[derive(Clone)]
+    pub struct ShownValues(pub Rc<Vec<(architect_scene::anim::Name, f64)>>);
+
+    impl PartialEq for ShownValues {
+        fn eq(&self, other: &Self) -> bool {
+            Rc::ptr_eq(&self.0, &other.0)
+        }
+    }
+
     /// What a [`RemoteScene`] has told its host of its layers.
     #[derive(Default)]
     struct Told {
         sender: architect_scene::ops::Sender,
         batches: u64,
         value: String,
-        shown: Option<Shown>,
+        shown: Option<(Shown, Option<ShownValues>)>,
     }
 
     /// The handlers a [`RemoteScene`] passes on.
@@ -908,6 +974,10 @@ mod guest {
         /// Text, images and gradients cross as drawn.
         #[props(default)]
         pub layers: Option<Shown>,
+        /// Values its layers' animations may be bound to: each crosses
+        /// as its name and number when it changes. Only with `layers`.
+        #[props(default)]
+        pub values: Option<ShownValues>,
         #[props(default)]
         pub style: String,
         #[props(default)]
@@ -950,12 +1020,14 @@ mod guest {
         let told = use_hook(|| Rc::new(RefCell::new(Told::default())));
         let layers = props.layers.as_ref().map(|shown| {
             let mut t = told.borrow_mut();
-            if t.shown.as_ref() != Some(shown) {
-                if let Some(batch) = t.sender.frame(&shown.0) {
+            let now = (shown.clone(), props.values.clone());
+            if t.shown.as_ref() != Some(&now) {
+                let values = props.values.as_ref().map_or(&[][..], |v| v.0.as_slice());
+                if let Some(batch) = t.sender.frame_with(&shown.0, values) {
                     t.batches = t.batches.wrapping_add(1);
                     t.value = super::layers_value(t.batches, &batch);
                 }
-                t.shown = Some(shown.clone());
+                t.shown = Some(now);
             }
             t.value.clone()
         });
@@ -1001,7 +1073,9 @@ mod guest {
 }
 
 #[cfg(feature = "guest")]
-pub use guest::{RemoteScene, RemoteSceneProps, SceneSize, Shown, scene_attr, size_of};
+pub use guest::{
+    RemoteScene, RemoteSceneProps, SceneSize, Shown, ShownValues, scene_attr, size_of,
+};
 
 /// A linked extension's paint view in its process copy (#591, #175).
 ///
@@ -1028,6 +1102,8 @@ where
         ctx: ViewCtx,
         /// What it shows: one layer of the frame it last recorded.
         shown: Shown,
+        /// The values its layers read, as it last said them.
+        values: ShownValues,
     }
 
     impl<V: PaintView> Live<V> {
@@ -1042,6 +1118,10 @@ where
                 )]
             });
             self.shown = Shown(Rc::new(layers));
+            let values = self.view.values(&self.ctx);
+            if *self.values.0 != values {
+                self.values = ShownValues(Rc::new(values));
+            }
         }
 
         /// `input` given to the view: whether it drew again.
@@ -1104,13 +1184,15 @@ where
             view: V::default(),
             ctx,
             shown: Shown(Rc::new(Vec::new())),
+            values: ShownValues(Rc::new(Vec::new())),
         };
         live.record();
         Rc::new(RefCell::new(live))
     });
     let mut drawn = use_signal(|| 0_u64);
     let mut redraw = move || drawn.with_mut(|d| *d = d.wrapping_add(1));
-    // A view that is moving draws every frame.
+    // A view that says it is moving is asked every frame. Layers that
+    // move by their animations need not: the host runs them.
     {
         let live = Rc::clone(&live);
         use_future(move || {
@@ -1129,7 +1211,10 @@ where
         });
     }
     let _ = drawn();
-    let shown = live.borrow().shown.clone();
+    let (shown, values) = {
+        let l = live.borrow();
+        (l.shown.clone(), l.values.clone())
+    };
     let sized = Rc::clone(&live);
     let on = {
         let live = Rc::clone(&live);
@@ -1151,6 +1236,7 @@ where
         RemoteScene {
             content: Rc::new(Vec::new()),
             layers: shown,
+            values,
             onresize: move |size: SceneSize| {
                 #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
                 let geometry = Geometry {

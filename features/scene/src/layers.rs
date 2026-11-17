@@ -10,6 +10,10 @@
 //! host read from a fragment ([`crate::decode`]). Either way the tree is
 //! the same, and so is what is drawn.
 //!
+//! A layer may also say how it moves ([`crate::anim`]): its host then
+//! draws it every frame its clocks move, from the same tree, without the
+//! view ([`Layers::compose_at`]).
+//!
 //! The tree belongs to the pane, not to a window: a pane moved to a
 //! window of its own is drawn from the same tree there.
 
@@ -17,6 +21,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyrender::PaintScene;
+
+use crate::anim::{self, Animation, Readings, Values};
 use anyrender::recording::RenderCommand;
 use peniko::kurbo::{Affine, Rect};
 use peniko::{Fill, Mix};
@@ -39,6 +45,9 @@ pub struct Layer {
     /// their keys.
     pub z: i32,
     pub visible: bool,
+    /// How it moves without its view ([`crate::anim`]): at most one per
+    /// property.
+    pub animations: Option<Arc<[Animation]>>,
 }
 
 impl Layer {
@@ -52,7 +61,22 @@ impl Layer {
             clip: None,
             z: 0,
             visible: true,
+            animations: None,
         }
+    }
+
+    /// Moving as `animations` say, evaluated by its host each frame.
+    #[must_use]
+    pub fn animated(mut self, animations: impl Into<Arc<[Animation]>>) -> Self {
+        let animations = animations.into();
+        self.animations = (!animations.is_empty()).then_some(animations);
+        self
+    }
+
+    /// How many animations it has.
+    #[must_use]
+    pub fn animation_count(&self) -> usize {
+        self.animations.as_ref().map_or(0, |a| a.len())
     }
 
     #[must_use]
@@ -88,6 +112,8 @@ pub struct Layers {
     /// changes its `z`.
     order: Vec<Key>,
     revision: u64,
+    /// Animations over every layer.
+    animations: usize,
 }
 
 impl Layers {
@@ -118,10 +144,19 @@ impl Layers {
         self.held.get(&key)
     }
 
+    /// How many animations its layers have, over all of them.
+    #[must_use]
+    pub const fn animation_count(&self) -> usize {
+        self.animations
+    }
+
     /// Puts `layer` at `key`, in place of what was there.
     pub fn set(&mut self, key: Key, layer: Layer) {
         let reorder = self.held.get(&key).is_none_or(|old| old.z != layer.z);
-        self.held.insert(key, layer);
+        self.animations = self.animations.saturating_add(layer.animation_count());
+        if let Some(old) = self.held.insert(key, layer) {
+            self.animations = self.animations.saturating_sub(old.animation_count());
+        }
         if reorder {
             self.reorder();
         }
@@ -133,8 +168,12 @@ impl Layers {
         let Some(layer) = self.held.get_mut(&key) else {
             return false;
         };
-        let z = layer.z;
+        let (z, before) = (layer.z, layer.animation_count());
         change(layer);
+        self.animations = self
+            .animations
+            .saturating_sub(before)
+            .saturating_add(layer.animation_count());
         if layer.z != z {
             self.reorder();
         }
@@ -144,12 +183,13 @@ impl Layers {
 
     /// Takes the layer at `key` away: whether there was one.
     pub fn remove(&mut self, key: Key) -> bool {
-        let had = self.held.remove(&key).is_some();
-        if had {
+        let had = self.held.remove(&key);
+        if let Some(old) = &had {
+            self.animations = self.animations.saturating_sub(old.animation_count());
             self.reorder();
             self.changed();
         }
-        had
+        had.is_some()
     }
 
     /// Takes every layer away.
@@ -157,6 +197,7 @@ impl Layers {
         if !self.held.is_empty() {
             self.held.clear();
             self.order.clear();
+            self.animations = 0;
             self.changed();
         }
     }
@@ -180,20 +221,35 @@ impl Layers {
     }
 
     /// Draws every layer into `scene`, `root` taking the pane's logical
-    /// pixels to the scene's.
+    /// pixels to the scene's, each where it was sent (its animations not
+    /// run: [`Self::compose_at`] runs them).
     ///
     /// Nothing is copied: each command is drawn from where it is kept.
+    pub fn compose(&self, scene: &mut impl PaintScene, root: Affine) {
+        self.compose_at(scene, root, &Readings::NONE, &Values::default());
+    }
+
+    /// Draws every layer into `scene` as [`Self::compose`] does, each
+    /// placed by its animations at these clocks and values
+    /// ([`anim::place`]).
     // kurbo's transforms compose with `*`: no overflow to guard.
     #[allow(clippy::arithmetic_side_effects)]
-    pub fn compose(&self, scene: &mut impl PaintScene, root: Affine) {
+    pub fn compose_at(
+        &self,
+        scene: &mut impl PaintScene,
+        root: Affine,
+        readings: &Readings,
+        values: &Values,
+    ) {
         for (_, layer) in self.in_order() {
-            if !layer.visible || layer.opacity <= 0.0 {
+            let placed = anim::place(layer, readings, values);
+            if !placed.visible || placed.opacity <= 0.0 {
                 continue;
             }
             if let Some(clip) = layer.clip {
                 scene.push_clip_layer(Fill::NonZero, root, &clip);
             }
-            let faded = layer.opacity < 1.0;
+            let faded = placed.opacity < 1.0;
             if faded {
                 // A layer needs a shape: everything a scene may hold.
                 let all = Rect::new(
@@ -205,14 +261,14 @@ impl Layers {
                 scene.push_layer(
                     Fill::NonZero,
                     Mix::Normal,
-                    layer.opacity,
+                    placed.opacity,
                     Affine::IDENTITY,
                     &all,
                     None,
                     None,
                 );
             }
-            replay(scene, &layer.commands, root * layer.transform);
+            replay(scene, &layer.commands, root * placed.transform);
             if faded {
                 scene.pop_layer();
             }
@@ -221,12 +277,42 @@ impl Layers {
             }
         }
     }
+
+    fn animated(&self) -> impl Iterator<Item = &[Animation]> {
+        self.held
+            .values()
+            .filter_map(|layer| layer.animations.as_deref())
+    }
+
+    /// Whether a layer moves on its own at `readings`: one of its
+    /// animations reads a clock that is running. Its host draws every
+    /// frame while one does, and only then.
+    #[must_use]
+    pub fn moving(&self, readings: &Readings) -> bool {
+        self.animations > 0 && self.animated().any(|a| anim::moving(a, readings))
+    }
+
+    /// Whether what it draws at `now` may differ from what it drew at
+    /// `drawn`: a layer moves on its own, or a clock one reads was moved
+    /// (a seek while paused).
+    #[must_use]
+    pub fn stale(&self, drawn: &Readings, now: &Readings) -> bool {
+        self.animations > 0
+            && self
+                .animated()
+                .any(|a| anim::moving(a, now) || anim::differs(a, drawn, now))
+    }
 }
 
 impl FromIterator<(Key, Layer)> for Layers {
     fn from_iter<I: IntoIterator<Item = (Key, Layer)>>(layers: I) -> Self {
         let mut out = Self::new();
         out.held = layers.into_iter().collect();
+        out.animations = out
+            .held
+            .values()
+            .map(Layer::animation_count)
+            .fold(0, usize::saturating_add);
         out.reorder();
         out
     }

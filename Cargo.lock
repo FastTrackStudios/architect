@@ -2132,6 +2132,7 @@ dependencies = [
  "blake3",
  "peniko 0.6.1",
  "thiserror 2.0.20",
+ "web-time",
 ]
 
 [[package]]

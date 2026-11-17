@@ -11,8 +11,10 @@
 //! - `arrangement`: 50 tracks of 40 clips, panned and zoomed: the
 //!   arrangement-sized scene #175 measures.
 //! - `timeline`: the same clips with a playhead moving over them, as a
-//!   [`PaintView`] that returns layers: the clips are sent once, and each
-//!   frame of playback is the playhead's transform alone.
+//!   [`PaintView`] that returns layers: the clips are sent once, and the
+//!   playhead once with how it moves (on the app's playhead, or wall time
+//!   when nothing plays), so the host runs playback and a frame of it
+//!   sends nothing.
 
 // Geometry in floats and small colour sums: nothing to overflow, and
 // written as the formulas read.
@@ -22,6 +24,7 @@ use std::rc::Rc;
 
 use architect_extensions::linked::{Builder, Extension};
 use architect_extensions::scene::{Affine, RemoteScene, RenderCommand};
+use architect_workspace::paint::anim::{Animation, Clock, Input, Linear, Property};
 use architect_workspace::paint::peniko::kurbo::{BezPath, Circle, Line, Point, Rect, Stroke};
 use architect_workspace::paint::peniko::{Color, Fill};
 use architect_workspace::paint::{Layer, LayerKey, PaintScene as _, PaintView, Scene};
@@ -364,6 +367,10 @@ impl PaintView for Graph {
 /// How far the timeline's playhead moves a second, in content space.
 pub const PLAYHEAD_SPEED: f64 = 120.0;
 
+/// How wide the timeline's clips are, in content space: its playhead
+/// loops over them on wall time.
+pub const TIMELINE_WIDTH: f64 = 40.0 * 64.0;
+
 /// The timeline's clips layer, and its playhead's.
 pub const CLIPS: LayerKey = 1;
 pub const PLAYHEAD: LayerKey = 2;
@@ -371,10 +378,12 @@ pub const PLAYHEAD: LayerKey = 2;
 /// An arrangement's clips with a playhead moving over them: a paint view
 /// that keeps what it draws.
 ///
-/// The clips are recorded once and the playhead once. A frame of
-/// playback, a pan or a zoom is a new transform for a layer, so nothing
-/// is recorded again, and from a process nothing but that transform
-/// crosses.
+/// The clips are recorded once and the playhead once, with how it moves:
+/// [`PLAYHEAD_SPEED`] content units a second of the app's playhead, or
+/// of wall time (looping over the clips) when nothing is on it. Its host
+/// runs that every frame, so playback, a pause or a seek asks nothing of
+/// the view; a pan or a zoom is a new transform for each layer, and from
+/// a process nothing but that crosses.
 #[derive(Debug)]
 pub struct Timeline {
     clips: std::sync::Arc<Vec<RenderCommand>>,
@@ -434,9 +443,8 @@ impl PaintView for Timeline {
 
     fn paint(&mut self, _: &ViewCtx, _: &mut Scene) {}
 
-    fn layers(&mut self, ctx: &ViewCtx) -> Option<Vec<(LayerKey, Layer)>> {
+    fn layers(&mut self, _: &ViewCtx) -> Option<Vec<(LayerKey, Layer)>> {
         let view = self.camera.transform();
-        let at = ctx.clock.now().as_secs_f64() * PLAYHEAD_SPEED;
         Some(vec![
             (
                 CLIPS,
@@ -445,16 +453,24 @@ impl PaintView for Timeline {
             (
                 PLAYHEAD,
                 Layer::new(std::sync::Arc::clone(&self.playhead))
-                    .at(view * Affine::translate((at, 0.0)))
+                    .at(view)
+                    .animated(vec![playhead_motion()])
                     .z(1),
             ),
         ])
     }
+}
 
-    // It plays: a frame every frame.
-    fn animating(&self, _: &ViewCtx) -> bool {
-        true
-    }
+/// How the timeline's playhead moves: its `x` in content space is
+/// [`PLAYHEAD_SPEED`] × the app's playhead, or × wall time when nothing
+/// is on it, looping over the clips.
+#[must_use]
+pub const fn playhead_motion() -> Animation {
+    Animation::linear(
+        Property::X,
+        Input::clock_or(Clock::Playhead, Clock::Wall),
+        Linear::new(PLAYHEAD_SPEED, 0.0).wrap(TIMELINE_WIDTH),
+    )
 }
 
 #[cfg(test)]

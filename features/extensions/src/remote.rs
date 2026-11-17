@@ -161,6 +161,9 @@ pub struct RemoteDocument {
     painted: HashMap<NodeId, Arc<Mutex<crate::scene::Painted>>>,
     /// How many bytes of scenes and transforms it sent (for a benchmark).
     scene_bytes: u64,
+    /// What its layers' animations read (`architect_scene::anim`): the
+    /// app's clocks unless told.
+    clocks: architect_scene::Clocks,
 }
 
 impl std::fmt::Debug for RemoteDocument {
@@ -228,7 +231,19 @@ impl RemoteDocument {
             resizes: Arc::default(),
             painted: HashMap::new(),
             scene_bytes: 0,
+            clocks: architect_scene::Clocks::app(),
         }
+    }
+
+    /// Its layers' animations read `clocks` from now on (a test's, or a
+    /// host's own): every element it paints.
+    pub fn set_clocks(&mut self, clocks: architect_scene::Clocks) {
+        for painted in self.painted.values() {
+            let mut p = painted.lock().unwrap_or_else(PoisonError::into_inner);
+            p.clocks = clocks.clone();
+            p.dirty = true;
+        }
+        self.clocks = clocks;
     }
 
     /// Lets go of a held pointer the view will see no release for: a
@@ -487,6 +502,8 @@ impl RemoteDocument {
         let painted = Arc::new(Mutex::new(crate::scene::Painted {
             commands: commands.unwrap_or_default(),
             layers: None,
+            clocks: self.clocks.clone(),
+            drawn: architect_scene::Readings::NONE,
             transform: transform.unwrap_or(Affine::IDENTITY),
             element,
             dirty: true,

@@ -10,6 +10,11 @@
 //! A [`Receiver`] is the host's side: it reads a batch, checked, into the
 //! pane's [`Layers`], which the host composes without the view.
 //!
+//! A layer that moves on its own ([`crate::anim`]) crosses once with its
+//! animations (an `ANIMATE` after its `LAYER`), and its host runs them:
+//! a frame of playback writes nothing. A named value a layer is bound to
+//! crosses as its name and its number (`VALUE`), when it changes.
+//!
 //! A batch is bytes: [`MAGIC`], then operations until it ends. How a
 //! batch travels (a process's socket, a component's call, a worker's
 //! message) is its carrier's business, not this format's.
@@ -20,6 +25,7 @@ use std::sync::Arc;
 use anyrender::recording::RenderCommand;
 use peniko::kurbo::{Affine, Rect};
 
+use crate::anim::{self, Access, Name, Space, Values};
 use crate::bytes::{Reader, Writer};
 use crate::fragment::{Encoder, decode};
 use crate::layers::{Key, Layer, Layers};
@@ -45,6 +51,12 @@ const MOVE: u8 = 4;
 const REMOVE: u8 = 5;
 const DROP: u8 = 6;
 const CLEAR: u8 = 7;
+/// A layer's animations, in place of those it had (none: it stops).
+/// Added after the first seven, which read as they did: a batch without
+/// one is the same bytes as before.
+const ANIMATE: u8 = 8;
+/// A named value the view writes ([`Space::View`]).
+const VALUE: u8 = 9;
 
 /// What the host was last told of a layer.
 struct Sent {
@@ -65,6 +77,8 @@ pub struct Sender {
     resources: HashSet<Id>,
     fragments: HashSet<Id>,
     sent: BTreeMap<Key, Sent>,
+    /// The values the host was last told, as their bits.
+    values: BTreeMap<Name, u64>,
 }
 
 impl std::fmt::Debug for Sender {
@@ -101,6 +115,17 @@ impl Sender {
     /// last frame is not encoded again. New content is encoded and
     /// hashed, and sent only if the host does not hold that fragment.
     pub fn frame(&mut self, layers: &[(Key, Layer)]) -> Option<Vec<u8>> {
+        self.frame_with(layers, &[])
+    }
+
+    /// [`Self::frame`], and the values in `values` that changed since
+    /// the host was last told (a value it no longer names keeps its last
+    /// number there).
+    pub fn frame_with(
+        &mut self,
+        layers: &[(Key, Layer)],
+        values: &[(Name, f64)],
+    ) -> Option<Vec<u8>> {
         let mut w = Writer::default();
         w.bytes(&MAGIC);
         let start = w.out.len();
@@ -117,6 +142,17 @@ impl Sender {
                 .get(key)
                 .filter(|sent| sent.fragment == fragment && same_placement(&sent.layer, layer))
                 .map(|sent| sent.layer.transform);
+            // What the host runs of it now, if it is told again.
+            let animated_as = self
+                .sent
+                .get(key)
+                .filter(|_| placed.is_some())
+                .map(|sent| &sent.layer.animations);
+            if animated_as.is_some_and(|was| *was != layer.animations) {
+                w.u8(ANIMATE);
+                w.u64(*key);
+                anim::write(&mut w, layer.animations.as_deref().unwrap_or_default());
+            }
             match placed {
                 Some(at) if at == layer.transform => {}
                 Some(_) => {
@@ -138,6 +174,12 @@ impl Sender {
                     }
                     w.i32(layer.z);
                     w.bool(layer.visible);
+                    // A layer comes still: it moves once told how.
+                    if let Some(animations) = &layer.animations {
+                        w.u8(ANIMATE);
+                        w.u64(*key);
+                        anim::write(&mut w, animations);
+                    }
                 }
             }
             self.sent.insert(
@@ -168,6 +210,15 @@ impl Sender {
             self.fragments.remove(&id);
             w.u8(DROP);
             w.bytes(&id.0);
+        }
+        for (name, value) in values {
+            let bits = value.to_bits();
+            if self.values.get(name) != Some(&bits) {
+                self.values.insert(name.clone(), bits);
+                w.u8(VALUE);
+                anim::write_name(&mut w, name);
+                w.f64(*value);
+            }
         }
         (w.out.len() > start).then_some(w.out)
     }
@@ -203,12 +254,34 @@ pub struct Receiver {
     fragments: HashMap<Id, (Arc<Vec<RenderCommand>>, usize)>,
     fragment_bytes: usize,
     layers: Layers,
+    values: Values,
+    access: Access,
 }
 
 impl Receiver {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Reading the values `access` lets its pane read: an animation bound
+    /// to any other fails the view.
+    #[must_use]
+    pub const fn with_access(mut self, access: Access) -> Self {
+        self.access = access;
+        self
+    }
+
+    /// The pane's named values, as its view last wrote them.
+    #[must_use]
+    pub const fn values(&self) -> &Values {
+        &self.values
+    }
+
+    /// The pane's values, for the host to write its own
+    /// ([`Space::Host`]).
+    pub const fn values_mut(&mut self) -> &mut Values {
+        &mut self.values
     }
 
     /// The pane's layers.
@@ -300,6 +373,29 @@ impl Receiver {
                 }
             }
             CLEAR => self.layers.clear(),
+            ANIMATE => {
+                let key = r.u64()?;
+                let animations = anim::read(r, self.access)?;
+                let had = self.layers.get(key).map_or(0, Layer::animation_count);
+                let total = self
+                    .layers
+                    .animation_count()
+                    .saturating_sub(had)
+                    .saturating_add(animations.len());
+                if total > anim::MAX_ANIMATIONS {
+                    return Err(Error::TooManyAnimations(anim::MAX_ANIMATIONS));
+                }
+                // As a move: animating a layer it does not have is a
+                // view's mistake, not a reason to fail it.
+                self.layers.update(key, |layer| {
+                    layer.animations = (!animations.is_empty()).then(|| Arc::from(animations));
+                });
+            }
+            VALUE => {
+                let name = anim::read_name(r)?;
+                let value = r.f64()?;
+                self.values.write(Space::View, &name, value)?;
+            }
             other => return Err(Error::Unknown("operation", other)),
         }
         Ok(())
