@@ -469,6 +469,7 @@ fn PopoutView(props: PopoutProps) -> Element {
         // A pop-out writes nothing back to the shipped sets.
         shipped: CopyValue::new(Vec::new()),
     });
+    super::use_popup_provider(host);
     use_release_outside(host);
     let mut host = host;
     let t = host.theme.read().clone();
