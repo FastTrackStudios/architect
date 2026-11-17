@@ -405,6 +405,37 @@ impl RemoteDocument {
         self.predecoded.extend(decoded);
     }
 
+    /// An element's layers (`scene::LAYERS_ATTR`) changed: the batch is
+    /// applied to them, and the element is drawn from them as a widget.
+    fn layers_attr(&mut self, node: NodeId, value: Option<&str>) -> Result<(), String> {
+        let Some(value) = value.filter(|v| !v.is_empty()) else {
+            return Ok(());
+        };
+        self.scene_bytes = self
+            .scene_bytes
+            .saturating_add(u64::try_from(value.len()).unwrap_or(u64::MAX));
+        let batch = crate::scene::layers_batch(value)?;
+        if !self.painted.contains_key(&node) {
+            // The widget, as a scene's.
+            self.paint_attr(node, crate::scene::TRANSFORM_ATTR, None)?;
+        }
+        let Some(painted) = self.painted.get(&node) else {
+            return Ok(());
+        };
+        let mut p = painted.lock().unwrap_or_else(PoisonError::into_inner);
+        let applied = p
+            .layers
+            .get_or_insert_with(architect_scene::ops::Receiver::new)
+            .apply(&batch)
+            .map_err(|e| format!("its layers: {e}"));
+        p.dirty = true;
+        drop(p);
+        if let Some(layer) = &self.overlay {
+            layer.touch();
+        }
+        applied
+    }
+
     /// An element's scene (`scene::SCENE_ATTR`) or transform
     /// (`scene::TRANSFORM_ATTR`) changed: it is drawn as a widget, its
     /// state updated in place.
@@ -455,6 +486,7 @@ impl RemoteDocument {
         let element = self.elements.get(&node).copied().unwrap_or(0);
         let painted = Arc::new(Mutex::new(crate::scene::Painted {
             commands: commands.unwrap_or_default(),
+            layers: None,
             transform: transform.unwrap_or(Affine::IDENTITY),
             element,
             dirty: true,
@@ -803,6 +835,13 @@ impl RemoteDocument {
                         _ => None,
                     };
                     return self.held_attr(node, &name, text);
+                }
+                if name == crate::scene::LAYERS_ATTR {
+                    let text = match &value {
+                        Value::Text(t) => Some(t.as_str()),
+                        _ => None,
+                    };
+                    return self.layers_attr(node, text);
                 }
                 if name == crate::scene::SCENE_ATTR || name == crate::scene::TRANSFORM_ATTR {
                     let text = match &value {

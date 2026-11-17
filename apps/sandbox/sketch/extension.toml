@@ -27,6 +27,14 @@ title = "Graph"
 icon = "share-2"
 kind = "paint"
 
+# The arrangement's clips with a playhead moving over them: a paint view
+# that returns layers, so playback sends the playhead's transform alone.
+[[views]]
+id = "timeline"
+title = "Timeline"
+icon = "play"
+kind = "paint"
+
 # 50 tracks of 40 clips: the arrangement-sized scene #175 measures.
 [[views]]
 id = "arrangement"

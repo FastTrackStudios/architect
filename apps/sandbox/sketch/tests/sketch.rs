@@ -344,6 +344,58 @@ fn a_graph_node_drags_in_a_paint_view_served_by_its_process() {
     }
 }
 
+/// Where the playhead's line is in `commands`: its transform's x.
+fn playhead_x(commands: &[RenderCommand]) -> Option<f64> {
+    commands.iter().find_map(|c| match c {
+        RenderCommand::Stroke(s) => Some(s.transform.as_coeffs()[4]),
+        _ => None,
+    })
+}
+
+fn fills(commands: &[RenderCommand]) -> usize {
+    commands
+        .iter()
+        .filter(|c| matches!(c, RenderCommand::Fill(_)))
+        .count()
+}
+
+#[test]
+fn playback_in_a_process_sends_the_playheads_transform_and_not_the_clips() {
+    let mut app = open("timeline");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while fills(&app.window_scene()) < 2000 {
+        assert!(
+            Instant::now() < deadline,
+            "the clips never reached the window"
+        );
+        app.pump("the clips", |_| true);
+    }
+    // What the clips cost to cross once.
+    let once = bytes(&app.doc.inner.borrow());
+    assert!(once > 50_000, "the clips crossed in {once} bytes");
+    let from = playhead_x(&app.window_scene()).unwrap();
+    let began = Instant::now();
+    let mut to = from;
+    while to - from < 30.0 {
+        assert!(
+            began.elapsed() < Duration::from_secs(10),
+            "the playhead never moved"
+        );
+        app.pump("playback", |_| true);
+        to = playhead_x(&app.window_scene()).unwrap();
+    }
+    // A quarter of a second of playback: frames of a transform each, not
+    // the clips again, and every clip still drawn.
+    let playing = bytes(&app.doc.inner.borrow()) - once;
+    assert!(playing > 0);
+    assert!(
+        playing < once / 4,
+        "playback sent {playing} bytes after the clips' {once}"
+    );
+    assert!(fills(&app.window_scene()) >= 2000);
+    println!("clips once: {once} bytes; playback over {:.0} px: {playing} bytes", to - from);
+}
+
 fn p(samples: &mut [Duration], q: usize) -> f64 {
     samples.sort();
     samples[(samples.len() - 1) * q / 100].as_secs_f64() * 1e3

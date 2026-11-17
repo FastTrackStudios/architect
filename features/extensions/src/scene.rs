@@ -42,6 +42,38 @@ pub const SCENE_ATTR: &str = "data-architect-scene";
 /// The attribute that carries its transform, content to element.
 pub const TRANSFORM_ATTR: &str = "data-architect-transform";
 
+/// The attribute that carries an element's layers (`architect_scene`).
+///
+/// Its value is `<n>\n<base64 of a batch>`, where `n` counts the batches so each is a
+/// new value. A batch says what changed (`architect_scene::ops`): a font
+/// or an image once, a fragment once, a layer when it comes or changes,
+/// a moved layer's transform alone. An element with layers is drawn from
+/// them and its [`SCENE_ATTR`] is not read.
+pub const LAYERS_ATTR: &str = "data-architect-layers";
+
+/// A batch as [`LAYERS_ATTR`] carries it, the `n`th of its view.
+#[must_use]
+pub fn layers_value(n: u64, batch: &[u8]) -> String {
+    use base64::Engine as _;
+    format!(
+        "{n:x}\n{}",
+        base64::engine::general_purpose::STANDARD_NO_PAD.encode(batch)
+    )
+}
+
+/// The batch a [`LAYERS_ATTR`] value carries.
+///
+/// # Errors
+///
+/// It is not `<n>\n<base64>`.
+pub fn layers_batch(value: &str) -> Result<Vec<u8>, String> {
+    use base64::Engine as _;
+    let (_, encoded) = value.split_once('\n').ok_or("layers with no batch")?;
+    base64::engine::general_purpose::STANDARD_NO_PAD
+        .decode(encoded)
+        .map_err(|e| format!("layers that are not base64: {e}"))
+}
+
 /// The event a host sends a scene's element when it is laid out at a new
 /// size: a form value, `{"width": …, "height": …, "scale": …}`.
 pub const RESIZE_EVENT: &str = "architect-resize";
@@ -601,12 +633,28 @@ pub fn framed(
     scene
 }
 
+#[cfg(feature = "remote")]
+impl Painted {
+    /// Draws it into `scene` at `at`: its layers, or its one scene.
+    // kurbo's transforms compose with `*`: no overflow to guard.
+    #[allow(clippy::arithmetic_side_effects)]
+    pub(crate) fn draw(&self, scene: &mut Scene, at: Affine) {
+        match &self.layers {
+            Some(layers) => layers.layers().compose(scene, at * self.transform),
+            None => architect_scene::layers::replay(scene, &self.commands, at * self.transform),
+        }
+    }
+}
+
 /// An element's scene as its widget and its document share it: updated
 /// in place, so a new transform keeps the size the widget last told.
 #[cfg(feature = "remote")]
 #[derive(Debug)]
 pub(crate) struct Painted {
     pub(crate) commands: Commands,
+    /// Its layers, once its view sent any ([`LAYERS_ATTR`]): drawn in
+    /// place of `commands`.
+    pub(crate) layers: Option<architect_scene::ops::Receiver>,
     pub(crate) transform: Affine,
     pub(crate) element: u64,
     pub(crate) dirty: bool,
@@ -709,13 +757,9 @@ impl blitz_dom::Widget for OverlayWidget {
             let p = painted
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let at = Affine::scale(scale) * Affine::translate(p.origin) * p.transform;
-            scene.append_scene(
-                Scene {
-                    commands: p.commands.to_vec(),
-                    ..Scene::new()
-                },
-                at,
+            p.draw(
+                &mut scene,
+                Affine::scale(scale) * Affine::translate(p.origin),
             );
         }
         scene
@@ -751,13 +795,24 @@ impl blitz_dom::Widget for SceneWidget {
         scale: f64,
     ) -> Scene {
         let scale = if scale > 0.0 { scale } else { 1.0 };
-        let (commands, transform, element) = {
+        let (drawn, element) = {
             let mut p = self
                 .painted
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             p.dirty = false;
-            (Arc::clone(&p.commands), p.transform, p.element)
+            // Drawn over the whole app by its view's `OverlayLayer`.
+            let mut scene = Scene::new();
+            if !self.overlay {
+                scene.push_clip_layer(
+                    peniko::Fill::NonZero,
+                    Affine::IDENTITY,
+                    &peniko::kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height)),
+                );
+                p.draw(&mut scene, Affine::scale(scale));
+                scene.pop_layer();
+            }
+            (scene, p.element)
         };
         if self.size != Some((width, height)) {
             self.size = Some((width, height));
@@ -775,11 +830,7 @@ impl blitz_dom::Widget for SceneWidget {
                 data: crate::wire::EventData::Form(size.to_string()),
             });
         }
-        if self.overlay {
-            // Drawn over the whole app by its view's `OverlayLayer`.
-            return Scene::new();
-        }
-        framed(&commands, transform, scale, (width, height), false)
+        drawn
     }
 }
 
@@ -823,6 +874,26 @@ mod guest {
         })
     }
 
+    /// The layers a [`RemoteScene`] shows: compared by pointer, so keep
+    /// one while nothing changes.
+    #[derive(Clone)]
+    pub struct Shown(pub Rc<Vec<(architect_scene::layers::Key, architect_scene::Layer)>>);
+
+    impl PartialEq for Shown {
+        fn eq(&self, other: &Self) -> bool {
+            Rc::ptr_eq(&self.0, &other.0)
+        }
+    }
+
+    /// What a [`RemoteScene`] has told its host of its layers.
+    #[derive(Default)]
+    struct Told {
+        sender: architect_scene::ops::Sender,
+        batches: u64,
+        value: String,
+        shown: Option<Shown>,
+    }
+
     /// The handlers a [`RemoteScene`] passes on.
     #[derive(Clone, PartialEq, Props)]
     pub struct RemoteSceneProps {
@@ -832,6 +903,11 @@ mod guest {
         /// Content space to the element's: pan and zoom.
         #[props(default = Affine::IDENTITY)]
         pub transform: Affine,
+        /// Its layers, in place of `content`: each crosses when it comes
+        /// or changes, and a layer that only moved as its transform.
+        /// Text, images and gradients cross as drawn.
+        #[props(default)]
+        pub layers: Option<Shown>,
         #[props(default)]
         pub style: String,
         #[props(default)]
@@ -865,10 +941,28 @@ mod guest {
         let scene = {
             let mut e = encoded.borrow_mut();
             let at = Rc::as_ptr(&props.content);
-            if e.0 != at {
+            if e.0 != at && props.layers.is_none() {
                 *e = (at, scene_attr(&props.content));
             }
             e.1.clone()
+        };
+        // What changed since the layers it last showed, as one batch.
+        let told = use_hook(|| Rc::new(RefCell::new(Told::default())));
+        let layers = props.layers.as_ref().map(|shown| {
+            let mut t = told.borrow_mut();
+            if t.shown.as_ref() != Some(shown) {
+                if let Some(batch) = t.sender.frame(&shown.0) {
+                    t.batches = t.batches.wrapping_add(1);
+                    t.value = super::layers_value(t.batches, &batch);
+                }
+                t.shown = Some(shown.clone());
+            }
+            t.value.clone()
+        });
+        let scene = if layers.is_some() {
+            String::new()
+        } else {
+            scene
         };
         let transform = super::transform_attr(props.transform);
         let RemoteSceneProps {
@@ -886,7 +980,8 @@ mod guest {
             object {
                 style: "display: block; position: absolute; left: 0; top: 0; width: 100%; height: 100%; outline: none; {style}",
                 tabindex: "0",
-                "data-architect-scene": "{scene}",
+                "data-architect-scene": if layers.is_none() { "{scene}" },
+                "data-architect-layers": layers,
                 "data-architect-transform": "{transform}",
                 // The host's `RESIZE_EVENT` arrives as an `input`.
                 oninput: move |e: FormEvent| {
@@ -906,7 +1001,7 @@ mod guest {
 }
 
 #[cfg(feature = "guest")]
-pub use guest::{RemoteScene, RemoteSceneProps, SceneSize, scene_attr, size_of};
+pub use guest::{RemoteScene, RemoteSceneProps, SceneSize, Shown, scene_attr, size_of};
 
 /// A linked extension's paint view in its process copy (#591, #175).
 ///
@@ -931,14 +1026,22 @@ where
     struct Live<V> {
         view: V,
         ctx: ViewCtx,
-        content: Rc<Vec<RenderCommand>>,
+        /// What it shows: one layer of the frame it last recorded.
+        shown: Shown,
     }
 
     impl<V: PaintView> Live<V> {
         fn record(&mut self) {
-            let mut scene = Scene::new();
-            self.view.paint(&self.ctx, &mut scene);
-            self.content = Rc::new(scene.commands);
+            // Its own layers, or the one scene it paints.
+            let layers = self.view.layers(&self.ctx).unwrap_or_else(|| {
+                let mut scene = Scene::new();
+                self.view.paint(&self.ctx, &mut scene);
+                vec![(
+                    0,
+                    architect_scene::Layer::new(std::sync::Arc::new(scene.commands)),
+                )]
+            });
+            self.shown = Shown(Rc::new(layers));
         }
 
         /// `input` given to the view: whether it drew again.
@@ -1000,7 +1103,7 @@ where
         let mut live = Live {
             view: V::default(),
             ctx,
-            content: Rc::new(Vec::new()),
+            shown: Shown(Rc::new(Vec::new())),
         };
         live.record();
         Rc::new(RefCell::new(live))
@@ -1026,7 +1129,7 @@ where
         });
     }
     let _ = drawn();
-    let content = Rc::clone(&live.borrow().content);
+    let shown = live.borrow().shown.clone();
     let sized = Rc::clone(&live);
     let on = {
         let live = Rc::clone(&live);
@@ -1046,7 +1149,8 @@ where
     );
     rsx! {
         RemoteScene {
-            content,
+            content: Rc::new(Vec::new()),
+            layers: shown,
             onresize: move |size: SceneSize| {
                 #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
                 let geometry = Geometry {

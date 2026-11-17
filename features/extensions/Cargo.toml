@@ -85,7 +85,7 @@ linked-core = ["dep:dioxus"]
 # anyrender scene, carried by two attributes (content by hash, then a
 # transform). The guest's `RemoteScene`, the host's widget, the browser's
 # canvas.
-scenes = ["dep:anyrender", "dep:peniko"]
+scenes = ["dep:anyrender", "dep:peniko", "dep:architect-scene", "dep:base64"]
 # A paint view (`linked::Builder::paint`, #591): a `PaintView` that
 # records a scene for its pane and takes the pane's input. Linked in with
 # `paint-ui` it is a Blitz widget in the pane (`architect_workspace::paint`);
@@ -292,6 +292,9 @@ blitz-dom = { workspace = true, optional = true }
 blitz-traits = { workspace = true, optional = true }
 # A remote view's scenes (`scenes`): anyrender's commands as data.
 anyrender = { workspace = true, optional = true }
+# Layers of binary fragments (`scene::LAYERS_ATTR`): what a paint view
+# sends its host, and what the host composes.
+architect-scene = { workspace = true, optional = true }
 peniko = { workspace = true, optional = true }
 dioxus-native-dom = { workspace = true, optional = true }
 dioxus-html = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["serialize"], optional = true }

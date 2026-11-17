@@ -10,6 +10,9 @@
 //!   its process. Stands in for the graph view.
 //! - `arrangement`: 50 tracks of 40 clips, panned and zoomed: the
 //!   arrangement-sized scene #175 measures.
+//! - `timeline`: the same clips with a playhead moving over them, as a
+//!   [`PaintView`] that returns layers: the clips are sent once, and each
+//!   frame of playback is the playhead's transform alone.
 
 // Geometry in floats and small colour sums: nothing to overflow, and
 // written as the formulas read.
@@ -21,7 +24,7 @@ use architect_extensions::linked::{Builder, Extension};
 use architect_extensions::scene::{Affine, RemoteScene, RenderCommand};
 use architect_workspace::paint::peniko::kurbo::{BezPath, Circle, Line, Point, Rect, Stroke};
 use architect_workspace::paint::peniko::{Color, Fill};
-use architect_workspace::paint::{PaintScene as _, PaintView, Scene};
+use architect_workspace::paint::{Layer, LayerKey, PaintScene as _, PaintView, Scene};
 use architect_workspace::{ViewCtx, ViewInput};
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
@@ -44,7 +47,8 @@ impl Extension for Sketch {
     fn build(&self, ext: &mut Builder) {
         ext.view("sketch", SketchView)
             .view("arrangement", ArrangementView)
-            .paint::<Graph>("graph");
+            .paint::<Graph>("graph")
+            .paint::<Timeline>("timeline");
     }
 }
 
@@ -354,6 +358,102 @@ impl PaintView for Graph {
                 &Circle::new(*n, NODE_RADIUS),
             );
         }
+    }
+}
+
+/// How far the timeline's playhead moves a second, in content space.
+pub const PLAYHEAD_SPEED: f64 = 120.0;
+
+/// The timeline's clips layer, and its playhead's.
+pub const CLIPS: LayerKey = 1;
+pub const PLAYHEAD: LayerKey = 2;
+
+/// An arrangement's clips with a playhead moving over them: a paint view
+/// that keeps what it draws.
+///
+/// The clips are recorded once and the playhead once. A frame of
+/// playback, a pan or a zoom is a new transform for a layer, so nothing
+/// is recorded again, and from a process nothing but that transform
+/// crosses.
+#[derive(Debug)]
+pub struct Timeline {
+    clips: std::sync::Arc<Vec<RenderCommand>>,
+    playhead: std::sync::Arc<Vec<RenderCommand>>,
+    camera: Camera,
+    panning: Option<(f64, f64)>,
+}
+
+impl Default for Timeline {
+    fn default() -> Self {
+        let mut line = Scene::new();
+        line.stroke(
+            &Stroke::new(1.5),
+            Affine::IDENTITY,
+            NODE,
+            None,
+            &Line::new((0.0, 0.0), (0.0, 50.0 * 24.0)),
+        );
+        Self {
+            clips: std::sync::Arc::new(arrangement_scene(50, 40)),
+            playhead: std::sync::Arc::new(line.commands),
+            camera: Camera::default(),
+            panning: None,
+        }
+    }
+}
+
+impl PaintView for Timeline {
+    fn input(&mut self, _: &ViewCtx, event: &ViewInput) -> bool {
+        match *event {
+            ViewInput::PointerDown { x, y, .. } => {
+                self.panning = Some((f64::from(x), f64::from(y)));
+                false
+            }
+            ViewInput::PointerMove { x, y, .. } => {
+                let Some((px, py)) = self.panning else {
+                    return false;
+                };
+                let (x, y) = (f64::from(x), f64::from(y));
+                self.camera.x += x - px;
+                self.camera.y += y - py;
+                self.panning = Some((x, y));
+                true
+            }
+            ViewInput::PointerUp { .. } => {
+                self.panning = None;
+                false
+            }
+            ViewInput::Wheel { dy, x, y, .. } => {
+                let factor = if dy < 0.0 { 1.1 } else { 1.0 / 1.1 };
+                self.camera = self.camera.zoomed(factor, f64::from(x), f64::from(y));
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn paint(&mut self, _: &ViewCtx, _: &mut Scene) {}
+
+    fn layers(&mut self, ctx: &ViewCtx) -> Option<Vec<(LayerKey, Layer)>> {
+        let view = self.camera.transform();
+        let at = ctx.clock.now().as_secs_f64() * PLAYHEAD_SPEED;
+        Some(vec![
+            (
+                CLIPS,
+                Layer::new(std::sync::Arc::clone(&self.clips)).at(view),
+            ),
+            (
+                PLAYHEAD,
+                Layer::new(std::sync::Arc::clone(&self.playhead))
+                    .at(view * Affine::translate((at, 0.0)))
+                    .z(1),
+            ),
+        ])
+    }
+
+    // It plays: a frame every frame.
+    fn animating(&self, _: &ViewCtx) -> bool {
+        true
     }
 }
 

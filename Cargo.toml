@@ -50,6 +50,7 @@ members = [
     # ── ui ────────────────────────────────────────────────────────────
     "features/ui/architect-ui",
     "features/workspace",
+    "features/scene",
     "features/commands",
     "features/settings",
     "features/settings/derive",
@@ -365,6 +366,7 @@ palette = "0.7.6"
 linkme = "0.3"
 architect-shell = { path = "features/shell", default-features = false }
 architect-workspace = { path = "features/workspace" }
+architect-scene = { path = "features/scene" }
 architect-commands = { path = "features/commands" }
 # The palette and launcher engine (MIT): sources, items, ranking.
 architect-palette = { path = "features/palette" }

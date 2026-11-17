@@ -44,7 +44,7 @@ hot-reload = ["native", "dioxus-native/hot-reload", "dep:dioxus-devtools"]
 # watched, last-good with a .error beside a broken one, .state/ apart.
 home = ["actions", "dep:serde_json"]
 # A view that paints a scene each frame (`PaintView`, `Painter`, `Marks`).
-paint = ["ctx", "dep:anyrender", "dep:peniko"]
+paint = ["ctx", "dep:anyrender", "dep:peniko", "dep:architect-scene"]
 # Drawn in-process by Blitz in a pane (`PaintPane`, a `PaintWidget`).
 paint-ui = ["paint", "ui", "dep:blitz-dom", "dep:blitz-traits", "dep:dioxus-native-dom"]
 # A host-driven WebGL2 canvas for paint scenes (wasm32 only).
@@ -88,6 +88,9 @@ futures-timer = { workspace = true, optional = true }
 # A paint view's scene and its colours and shapes (feature `paint`); the
 # Blitz widget it is drawn as (`paint-ui`).
 anyrender = { workspace = true, optional = true }
+# A paint view's layers (`PaintView::layers`): the tree a linked view and
+# a view that runs elsewhere are both drawn from.
+architect-scene = { workspace = true, optional = true }
 peniko = { workspace = true, optional = true }
 blitz-dom = { workspace = true, optional = true, features = ["custom-widget"] }
 # `APP_SHOT` (feature `native`): the window's document painted on the CPU

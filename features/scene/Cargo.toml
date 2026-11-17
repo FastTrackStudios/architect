@@ -1,0 +1,26 @@
+[package]
+name = "architect-scene"
+description = "Scenes as they cross a boundary: a binary fragment of drawing commands, named by the hash of its bytes, with the fonts and images it draws named by theirs and sent once. What a runtime extension's view (a process, a WASI component, a page) sends its host, and what a linked one skips. Wasm-clean: anyrender's commands in, the same commands out."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# docs/content/features/remote-views.md ("Fragments"). No host, no Dioxus,
+# no serde: a writer and a checked reader over bytes, so a guest in any
+# runtime and a host on any renderer share one format.
+
+[lib]
+doctest = false
+
+[dependencies]
+anyrender = { workspace = true }
+peniko = { workspace = true }
+blake3 = { version = "1.8", default-features = false }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

@@ -37,6 +37,8 @@ use std::time::Duration;
 // What a view records with, at the versions the host draws: a crate
 // that paints needs no anyrender or peniko of its own.
 pub use anyrender::{PaintScene, Scene};
+pub use architect_scene::Layer;
+pub use architect_scene::layers::Key as LayerKey;
 pub use peniko;
 use peniko::kurbo::{Affine, Point, Rect};
 use peniko::{Color, Fill};
@@ -56,6 +58,20 @@ pub trait PaintView: 'static {
     /// This frame, recorded into `scene` in its logical pixels over
     /// `ctx.geometry` (the host scales it to the display's).
     fn paint(&mut self, ctx: &ViewCtx, scene: &mut Scene);
+
+    /// This frame as layers, for a view that keeps what it draws: `None`
+    /// (the default) and it is [`Self::paint`]'s one scene.
+    ///
+    /// Each layer is content in its own space and where it is drawn. Keep
+    /// a layer's `commands` the same `Arc` while its content is the same:
+    /// a pan, a zoom or a moving playhead is then a new transform and
+    /// nothing is recorded again, here or in a host the view runs outside
+    /// of, where only what changed crosses. A view that returns layers is
+    /// not asked to `paint`.
+    fn layers(&mut self, ctx: &ViewCtx) -> Option<Vec<(LayerKey, Layer)>> {
+        let _ = ctx;
+        None
+    }
 
     /// What is under `at` (logical pixels): the id of what it drew there.
     /// A host asks it for a tooltip, a context menu or an agent's look.
@@ -324,13 +340,22 @@ impl Painter {
         let began = self.ctx.clock.now();
         self.ctx.geometry = geometry;
         self.pump();
-        let mut scene = Scene::new();
-        self.view.paint(&self.ctx, &mut scene);
         let scale = f64::from(geometry.scale);
-        if (scale - 1.0).abs() > f64::EPSILON && scale > 0.0 {
-            let mut scaled = Scene::new();
-            scaled.append_scene(scene, Affine::scale(scale));
-            scene = scaled;
+        let scale = if scale > 0.0 { scale } else { 1.0 };
+        let mut scene = Scene::new();
+        if let Some(layers) = self.view.layers(&self.ctx) {
+            // Composed from where each layer's content is kept.
+            layers
+                .into_iter()
+                .collect::<architect_scene::Layers>()
+                .compose(&mut scene, Affine::scale(scale));
+        } else {
+            self.view.paint(&self.ctx, &mut scene);
+            if (scale - 1.0).abs() > f64::EPSILON {
+                let mut scaled = Scene::new();
+                scaled.append_scene(scene, Affine::scale(scale));
+                scene = scaled;
+            }
         }
         self.stats
             .record(self.ctx.clock.now().saturating_sub(began));

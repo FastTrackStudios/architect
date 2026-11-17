@@ -34,6 +34,8 @@ architect-theme = { workspace = true, features = ["dioxus"] }
 anyrender = { workspace = true }
 anyrender_vello_cpu = { workspace = true }
 png = { workspace = true }
+# tests/scene_bench.rs: the fragment format beside today's scenes.
+architect-scene = { workspace = true }
 
 [lints]
 workspace = true
