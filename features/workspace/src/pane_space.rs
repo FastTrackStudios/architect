@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use architect::action::{ActionError, ActionList, ActionMeta, Effect};
-use crdt::presence::{Coord, Place, Roster};
+use crdt::presence::{Coord, Coords, Place, Roster, Selection};
 use facet::Facet;
 
 use crate::presence::{PointerMark, PresenceMarks, WashMark};
@@ -151,6 +151,12 @@ pub enum ViewSpace {
     Fractions { space: String },
     /// A space the view declared, one [`Axis`] across and one down.
     Mapped { space: String, x: Axis, y: Axis },
+    /// A space the view draws itself (a chart whose systems wrap): the
+    /// pane neither publishes the pointer nor draws the others; the view
+    /// does both with `CURSORS_HERE`, `CURSORS_SELECT` and
+    /// `CURSORS_ROSTER`. What the pane shows is still `space` (its tab's
+    /// people, "looking at").
+    Custom { space: String },
 }
 
 impl ViewSpace {
@@ -159,6 +165,19 @@ impl ViewSpace {
         Self::Fractions {
             space: space.into(),
         }
+    }
+
+    #[must_use]
+    pub fn custom(space: impl Into<String>) -> Self {
+        Self::Custom {
+            space: space.into(),
+        }
+    }
+
+    /// Whether the view draws the others itself ([`Self::Custom`]).
+    #[must_use]
+    pub const fn is_custom(&self) -> bool {
+        matches!(self, Self::Custom { .. })
     }
 
     #[must_use]
@@ -174,7 +193,9 @@ impl ViewSpace {
     #[must_use]
     pub fn name(&self) -> &str {
         match self {
-            Self::Fractions { space } | Self::Mapped { space, .. } => space,
+            Self::Fractions { space } | Self::Mapped { space, .. } | Self::Custom { space } => {
+                space
+            }
         }
     }
 
@@ -201,6 +222,7 @@ impl ViewSpace {
                 let place = ax.write(x, Place::new(space.clone()))?;
                 ay.write(y, place)
             }
+            Self::Custom { .. } => None,
         }
     }
 
@@ -214,6 +236,7 @@ impl ViewSpace {
         match self {
             Self::Fractions { .. } => Some((place.num("x")? * size.w, place.num("y")? * size.h)),
             Self::Mapped { x, y, .. } => Some((x.read(place)?, y.read(place)?)),
+            Self::Custom { .. } => None,
         }
     }
 }
@@ -223,6 +246,9 @@ impl ViewSpace {
 /// that names a range (a wash from one corner to the other).
 #[must_use]
 pub fn marks(roster: &Roster, space: &ViewSpace, size: Size, local_ms: f64) -> PresenceMarks {
+    if space.is_custom() {
+        return PresenceMarks::default();
+    }
     let inside = |(x, y): (f64, f64)| {
         ((0.0..=size.w).contains(&x) && (0.0..=size.h).contains(&y)).then_some((x, y))
     };
@@ -340,6 +366,61 @@ impl From<&PlaceArg> for Place {
     }
 }
 
+fn coords_arg(at: &Coords) -> Vec<CoordArg> {
+    PlaceArg::from(&Place {
+        space: String::new(),
+        at: at.clone(),
+    })
+    .at
+}
+
+fn coords_of(at: &[CoordArg]) -> Coords {
+    Place::from(&PlaceArg {
+        space: String::new(),
+        at: at.to_vec(),
+    })
+    .at
+}
+
+/// A selection as an action carries it: things by key in `space`, a
+/// range between two places in it (`from`, `to`), or both.
+#[derive(Debug, Clone, PartialEq, Default, Facet)]
+pub struct SelectionArg {
+    pub space: String,
+    #[facet(default)]
+    pub keys: Vec<String>,
+    /// Where a range starts: its coordinates (needs `to`).
+    #[facet(default)]
+    pub from: Option<Vec<CoordArg>>,
+    #[facet(default)]
+    pub to: Option<Vec<CoordArg>>,
+}
+
+impl From<&Selection> for SelectionArg {
+    fn from(s: &Selection) -> Self {
+        Self {
+            space: s.space.clone(),
+            keys: s.keys.clone(),
+            from: s.range.as_ref().map(|(a, _)| coords_arg(a)),
+            to: s.range.as_ref().map(|(_, b)| coords_arg(b)),
+        }
+    }
+}
+
+impl From<&SelectionArg> for Selection {
+    fn from(s: &SelectionArg) -> Self {
+        Self {
+            space: s.space.clone(),
+            keys: s.keys.clone(),
+            range: s
+                .from
+                .as_ref()
+                .zip(s.to.as_ref())
+                .map(|(a, b)| (coords_of(a), coords_of(b))),
+        }
+    }
+}
+
 /// One person, as `CURSORS_ROSTER` tells them.
 #[derive(Debug, Clone, PartialEq, Default, Facet)]
 pub struct PersonHere {
@@ -350,6 +431,10 @@ pub struct PersonHere {
     pub looking_at: Option<String>,
     /// Where their pointer is, if it is anywhere.
     pub pointer: Option<PlaceArg>,
+    /// What they have selected, each in a space (only `space`'s when the
+    /// roster was asked for one).
+    #[facet(default)]
+    pub selections: Vec<SelectionArg>,
 }
 
 /// Everyone else, as `CURSORS_ROSTER` answers.
@@ -372,7 +457,9 @@ pub fn people(roster: &Roster, space: Option<&str>) -> Vec<PersonHere> {
             let state = peer.state.as_ref()?;
             let pointer = peer.trail.latest();
             let shown = space.is_none_or(|s| {
-                state.looking_at.as_deref() == Some(s) || pointer.is_some_and(|p| p.space == s)
+                state.looking_at.as_deref() == Some(s)
+                    || pointer.is_some_and(|p| p.space == s)
+                    || state.selections.iter().any(|sel| sel.space == s)
             });
             shown.then(|| PersonHere {
                 peer: id.clone(),
@@ -380,6 +467,12 @@ pub fn people(roster: &Roster, space: Option<&str>) -> Vec<PersonHere> {
                 color: format!("#{:06x}", state.color & 0x00ff_ffff),
                 looking_at: state.looking_at.clone(),
                 pointer: pointer.map(PlaceArg::from),
+                selections: state
+                    .selections
+                    .iter()
+                    .filter(|sel| space.is_none_or(|s| sel.space == s))
+                    .map(SelectionArg::from)
+                    .collect(),
             })
         })
         .collect()
@@ -397,6 +490,12 @@ struct Board {
     /// Places an action published, waiting for the host to send them:
     /// `None` withdraws the pointer.
     outbox: Vec<Option<Place>>,
+    /// Selections an action published, by space, waiting for the host:
+    /// `None` withdraws the space's.
+    selected: Vec<(String, Option<Selection>)>,
+    /// The list the actions are on: the roster's changes are raised on
+    /// it (`changed:cursors`).
+    list: Option<ActionList>,
 }
 
 /// What the `CURSORS_*` actions and the host that draws the panes share.
@@ -443,10 +542,18 @@ impl PresenceBoard {
     /// The host saw `roster`: what `CURSORS_ROSTER` answers from now.
     pub fn saw(&self, roster: &Roster) {
         let people = people(roster, None);
-        let mut board = self.lock();
-        if board.people != people {
+        let raise = {
+            let mut board = self.lock();
+            if board.people == people {
+                return;
+            }
             board.people = people;
             board.people_revision = board.people_revision.wrapping_add(1);
+            board.list.clone().map(|list| (list, board.people_revision))
+        };
+        // Heard by hooks as `changed:cursors`: ask CURSORS_ROSTER again.
+        if let Some((list, revision)) = raise {
+            list.changed(TOPIC, &format!("{{\"revision\":{revision}}}"));
         }
     }
 
@@ -463,9 +570,16 @@ impl PresenceBoard {
                     space.is_none_or(|s| {
                         p.looking_at.as_deref() == Some(s)
                             || p.pointer.as_ref().is_some_and(|at| at.space == s)
+                            || p.selections.iter().any(|sel| sel.space == s)
                     })
                 })
-                .cloned()
+                .map(|p| {
+                    let mut p = p.clone();
+                    if let Some(s) = space {
+                        p.selections.retain(|sel| sel.space == s);
+                    }
+                    p
+                })
                 .collect(),
         }
     }
@@ -481,7 +595,23 @@ impl PresenceBoard {
     pub fn take_published(&self) -> Vec<Option<Place>> {
         std::mem::take(&mut self.lock().outbox)
     }
+
+    /// An action sets this person's selection in `space` (`None`
+    /// withdraws it). The host sends it on its next tick.
+    pub fn select(&self, space: String, selection: Option<Selection>) {
+        self.lock().selected.push((space, selection));
+    }
+
+    /// The selections actions published since the last call, oldest first.
+    #[must_use]
+    pub fn take_selected(&self) -> Vec<(String, Option<Selection>)> {
+        std::mem::take(&mut self.lock().selected)
+    }
 }
+
+/// The Action List topic the roster's changes are raised on: a hook
+/// hears `changed:cursors` (its detail `{revision}`).
+pub const TOPIC: &str = "cursors";
 
 // ── the actions ─────────────────────────────────────────────────────────
 
@@ -497,7 +627,9 @@ pub mod ids {
     pub const SPACE_CLEAR: &str = "CURSORS_SPACE_CLEAR";
     /// Publish this person's pointer at a place.
     pub const HERE: &str = "CURSORS_HERE";
-    pub const ALL: &[&str] = &[ROSTER, SPACE_SET, SPACE_CLEAR, HERE];
+    /// Publish this person's selection in a space.
+    pub const SELECT: &str = "CURSORS_SELECT";
+    pub const ALL: &[&str] = &[ROSTER, SPACE_SET, SPACE_CLEAR, HERE, SELECT];
 }
 
 const fn meta(
@@ -522,17 +654,22 @@ const fn meta(
 static ROSTER_META: ActionMeta = meta(
     ids::ROSTER,
     "Who is here",
-    "Everyone else on this document or vault: each person's id, name, colour, what they look at (`looking_at`, a space) and where their pointer is (`pointer`, a place: a space and named coordinates). `space` keeps only the people looking at or pointing in that space. `revision` goes up when anything changed: ask again when it differs.",
+    "Everyone else on this document or vault: each person's id, name, colour, what they look at (`looking_at`, a space), where their pointer is (`pointer`, a place: a space and named coordinates) and what they have selected (`selections`: each a space, `keys`, a range `from`..`to`). `space` keeps only the people looking at, pointing or selecting in that space, and only their selections there. `revision` goes up when anything changed: ask again when it differs, or hear `changed:cursors` in a hook.",
 );
 static SPACE_SET_META: ActionMeta = meta(
     ids::SPACE_SET,
     "Declare a pane's space",
-    "Says how pane `pane`'s pixels map to the coordinates of `space`, so the others' pointers and selections are drawn on the same item at any zoom and scroll. `x` and `y` are axes: a number (`coord`, `at_zero` the value at the pane's edge, `per_px` how much it grows a pixel) or lanes (`coord`, `keys` in order, `first_px`, `lane_px`). Run it again when the view scrolls or zooms. Without it a pane's space is its own box.",
+    "Says how pane `pane`'s pixels map to the coordinates of `space`, so the others' pointers and selections are drawn on the same item at any zoom and scroll. `x` and `y` are axes: a number (`coord`, `at_zero` the value at the pane's edge, `per_px` how much it grows a pixel) or lanes (`coord`, `keys` in order, `first_px`, `lane_px`). Run it again when the view scrolls or zooms. Without it a pane's space is its own box. `custom: true` (no axes): the view draws the others itself and publishes its own pointer (`CURSORS_HERE`); the pane does neither.",
 );
 static SPACE_CLEAR_META: ActionMeta = meta(
     ids::SPACE_CLEAR,
     "Clear a pane's space",
     "Pane `pane` goes back to its default space: its own box, as fractions.",
+);
+static SELECT_META: ActionMeta = meta(
+    ids::SELECT,
+    "Select in a space",
+    "Publishes this person's selection in `space` for everyone else: things by key (`keys`), a range between two places (`from`, `to`: each a list of named coordinates), or both. Replaces their last selection in that space; with neither keys nor a range it is withdrawn. Sent at most a few times a second; the last one always goes.",
 );
 static HERE_META: ActionMeta = meta(
     ids::HERE,
@@ -552,8 +689,14 @@ pub struct RosterArgs {
 pub struct SpaceArgs {
     pub pane: String,
     pub space: String,
+    #[facet(default)]
     pub x: Axis,
+    #[facet(default)]
     pub y: Axis,
+    /// The view draws the others and publishes its pointer itself (no
+    /// axes): [`ViewSpace::Custom`].
+    #[facet(default)]
+    pub custom: bool,
 }
 
 /// `CURSORS_SPACE_CLEAR`'s arguments.
@@ -596,6 +739,7 @@ fn checked(axis: &Axis, which: &str) -> Result<(), String> {
 ///
 /// [`ActionError::Duplicate`] when one is already there.
 pub fn register(list: &ActionList, board: &PresenceBoard) -> Result<(), ActionError> {
+    board.lock().list = Some(list.clone());
     let b = board.clone();
     list.register(&ROSTER_META, Effect::ReadOnly, move |args: RosterArgs| {
         Ok(b.roster(args.space.as_deref()))
@@ -604,6 +748,10 @@ pub fn register(list: &ActionList, board: &PresenceBoard) -> Result<(), ActionEr
     list.register(&SPACE_SET_META, Effect::Mutating, move |args: SpaceArgs| {
         if args.pane.is_empty() || args.space.is_empty() {
             return Err("pane and space are both needed".to_owned());
+        }
+        if args.custom {
+            b.declare(&args.pane, ViewSpace::custom(args.space));
+            return Ok(Done { ok: true });
         }
         checked(&args.x, "x")?;
         checked(&args.y, "y")?;
@@ -621,6 +769,19 @@ pub fn register(list: &ActionList, board: &PresenceBoard) -> Result<(), ActionEr
             return Err("place.space is empty: name the space".to_owned());
         }
         b.publish(args.place.as_ref().map(Place::from));
+        Ok(Done { ok: true })
+    })?;
+    let b = board.clone();
+    list.register(&SELECT_META, Effect::Mutating, move |args: SelectionArg| {
+        if args.space.is_empty() {
+            return Err("space is empty: name the space".to_owned());
+        }
+        if args.from.is_some() != args.to.is_some() {
+            return Err("a range needs both `from` and `to`".to_owned());
+        }
+        let selection = Selection::from(&args);
+        let some = !selection.keys.is_empty() || selection.range.is_some();
+        b.select(args.space, some.then_some(selection));
         Ok(Done { ok: true })
     })
 }
@@ -901,6 +1062,89 @@ mod tests {
         list.run_json(ids::SPACE_CLEAR, br#"{"pane":"p1"}"#)
             .expect("cleared");
         assert!(board.declared("p1").is_none());
+    }
+
+    #[test]
+    fn a_selection_published_by_action_reaches_the_others_roster_and_raises_the_topic() {
+        let list = ActionList::new();
+        let board = PresenceBoard::default();
+        register(&list, &board).expect("registered");
+        list.run_json(
+            ids::SELECT,
+            br#"{"space":"keyflow.chart:a.kf","keys":["m3","m4"],
+                "from":[{"name":"measure","num":3.0}],"to":[{"name":"measure","num":5.0}]}"#,
+        )
+        .expect("selected");
+        list.run_json(ids::SELECT, br#"{"space":"other"}"#)
+            .expect("withdrawn");
+        assert!(
+            list.run_json(ids::SELECT, br#"{"space":"x","from":[]}"#)
+                .is_err(),
+            "a range needs both ends"
+        );
+        let taken = board.take_selected();
+        assert_eq!(taken.len(), 2);
+        assert!(taken[1].1.is_none(), "no keys and no range: withdrawn");
+
+        // What the room does with it: Ann's state carries the selection.
+        let channel = Channel::default();
+        let ann = Here::new(channel.clone(), "ann", PeerState::new("ann", "Ann"));
+        let (space, selection) = taken[0].clone();
+        ann.edit_state(0.0, |state| {
+            state.selections.retain(|s| s.space != space);
+            state.selections.extend(selection);
+        });
+        ann.flush(10_000.0);
+
+        let since = list.latest();
+        board.saw(&roster_of(&channel, "bob", 0.0));
+        let (events, _) = list.events_since(since, 8, std::time::Duration::ZERO);
+        assert!(
+            events.iter().any(|e| matches!(
+                &e.kind,
+                architect::action::EventKind::Changed { topic, .. } if topic == TOPIC
+            )),
+            "the roster's change is raised as `cursors`"
+        );
+        let answer = board.roster(Some("keyflow.chart:a.kf"));
+        let person = &answer.people[0];
+        assert_eq!(person.name, "Ann");
+        assert_eq!(person.selections.len(), 1);
+        let sel = &person.selections[0];
+        assert_eq!(sel.keys, ["m3", "m4"]);
+        assert_eq!(sel.from.as_ref().unwrap()[0].num, Some(3.0));
+        assert!(
+            board.roster(Some("elsewhere")).people.is_empty(),
+            "a selection elsewhere does not put her here"
+        );
+    }
+
+    #[test]
+    fn a_custom_space_leaves_the_pointer_and_the_drawing_to_the_view() {
+        let list = ActionList::new();
+        let board = PresenceBoard::default();
+        register(&list, &board).expect("registered");
+        list.run_json(
+            ids::SPACE_SET,
+            br#"{"pane":"p1","space":"keyflow.chart:a.kf","custom":true}"#,
+        )
+        .expect("declared without axes");
+        let space = board.declared("p1").expect("on the board");
+        assert!(space.is_custom());
+        assert_eq!(space.name(), "keyflow.chart:a.kf");
+        assert!(
+            space.to_place(10.0, 10.0, BIG).is_none(),
+            "the pane publishes nothing"
+        );
+
+        let channel = Channel::default();
+        let ann = Here::new(channel.clone(), "ann", PeerState::new("ann", "Ann"));
+        ann.pointer(Place::new("keyflow.chart:a.kf").with("measure", 3.0), 0.0);
+        let roster = roster_of(&channel, "bob", 0.0);
+        assert!(
+            marks(&roster, &space, BIG, 1000.0).is_empty(),
+            "the pane draws nothing"
+        );
     }
 
     #[test]
