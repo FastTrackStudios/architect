@@ -248,8 +248,9 @@ impl ExtensionUi {
         let _ = (self.revision)();
         let _ = (self.toolbar_panes)();
         let me = *self;
+        let host = self.host();
         let mut all = self.seen.peek().clone();
-        all.extend(declared(&self.host()));
+        all.extend(declared(&host));
         all.iter()
             .map(|(kind, (extension, decl))| {
                 let (e, v) = (extension.clone(), decl.id.clone());
@@ -258,6 +259,13 @@ impl ExtensionUi {
                 })
                 .home(home(decl.home))
                 .still();
+                // A document view has a pane per document (`ViewOpen::pane_id`).
+                if host
+                    .get(extension)
+                    .is_some_and(|l| l.manifest.shows_documents(&decl.id))
+                {
+                    view = view.many();
+                }
                 if !decl.icon.is_empty() {
                     view = view.icon(named_icon(&decl.icon));
                 }
@@ -408,9 +416,10 @@ impl Near {
 }
 
 /// Opens `open` in the workspace through the app's list: a pane of its
-/// kind (its id the kind, so opening it again brings it forward), zoomed
-/// when it says so.
+/// kind, its id [`ViewOpen::pane_id`] (the kind, or a document's own), so
+/// opening the same thing again brings it forward; zoomed when it says so.
 async fn open_in_workspace(list: &ActionList, open: &ViewOpen) -> Result<Value, String> {
+    let pane = open.pane_id();
     let layout = list
         .run_json_async("WORKSPACE_LAYOUT", b"")
         .await
@@ -419,7 +428,7 @@ async fn open_in_workspace(list: &ActionList, open: &ViewOpen) -> Result<Value, 
     let near = Near::of(&layout);
     let args = json!({
         "view": open.kind,
-        "id": open.kind,
+        "id": pane,
         "state": open.state,
         "title": open.title,
         "at": at(open, &near),
@@ -430,7 +439,7 @@ async fn open_in_workspace(list: &ActionList, open: &ViewOpen) -> Result<Value, 
         .await
         .map_err(|e| e.to_string())?;
     if open.placement == ViewPlacement::Zoomed {
-        let zoom = json!({ "pane": open.kind, "mode": "on" }).to_string();
+        let zoom = json!({ "pane": pane, "mode": "on" }).to_string();
         let _ = list.run_json_async("WORKSPACE_ZOOM", zoom.as_bytes()).await;
     }
     Ok(serde_json::from_slice(&out).unwrap_or(Value::Null))

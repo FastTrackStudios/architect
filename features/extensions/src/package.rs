@@ -145,6 +145,16 @@ impl Package {
         })
     }
 
+    /// Its files, each `(path, text)`, when it is one linked in
+    /// ([`Package::embedded`]); none for any other.
+    #[must_use]
+    pub fn embedded_files(&self) -> &[(&'static str, &'static str)] {
+        match &self.files {
+            Files::Embedded(files) => files,
+            Files::Dir(_) | Files::Disk(_) => &[],
+        }
+    }
+
     /// Its folder on the operating system's disk, when it has one (not
     /// one linked in, nor one kept in a browser's storage).
     #[must_use]

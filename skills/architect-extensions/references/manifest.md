@@ -428,6 +428,13 @@ An opener with `files`, `doc_kinds` or `urls` claims them and opens with
 `view` or `action`; one with none is a ⌘O source and needs `kind` and
 `action` (and `open` optionally).
 
+A view that a `[[doc_kinds]]` or a file-claiming `[[openers]]` names is a
+**document view** (`Manifest::shows_documents`): each document opens in a
+pane of its own, id `<extension>/<view>:<path>` (`ViewOpen::pane_id`), so a
+second file opens beside the first and the same file again brings its
+pane forward. Any other view has one pane, id its kind. The view reads
+which document it shows from its pane's state (`use_pane().state()`).
+
 ### Toolbars, the ribbon, favourites
 
 `[[toolbars]]` (`features/extensions/src/toolbar.rs` `ToolbarDecl`):
@@ -447,7 +454,10 @@ An opener with `files`, `doc_kinds` or `urls` claims them and opens with
 `right_click` (`menu`, `arm`, `none`, or an action id), `menu` (rows:
 `kind` `action`/`heading`/`separator`/`submenu`, `action`, `label`,
 `items`), `items` (a group's), `view` (a widget's), `width`, `height`,
-`newline`. Examples: `examples/showcase/toolbar-sampler/extension.toml`,
+`newline`. An `image` is a file of the extension's package: its folder's,
+or, for one linked in, one of its `Extension::files` (`Toolbars::embedded_image`).
+An `icon` is a Lucide name the shell knows (`named_icon`); an unknown one draws
+a puzzle piece. Examples: `examples/showcase/toolbar-sampler/extension.toml`,
 `apps/sandbox/extensions/metronome/extension.toml`.
 
 The desk's **ribbon** is a shell slot (`[[slots]] slot = "ribbon"`) and
