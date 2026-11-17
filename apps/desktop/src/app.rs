@@ -359,6 +359,10 @@ pub fn run(distribution: Distribution) -> ExitCode {
             let rest: Vec<String> = std::env::args().skip(2).collect();
             return crate::dev::main(dist, &rest);
         }
+        Some("install") => {
+            let rest: Vec<String> = std::env::args().skip(2).collect();
+            return crate::install::main(dist, &rest);
+        }
         Some("distribution") => {
             return crate::distribution_command(dist, std::env::args().nth(2).as_deref());
         }

@@ -236,6 +236,14 @@ window, every architect app can give through its list (#268):
   `architect-desktop extensions check <folder>` does it with no window
   and exits nonzero when it fails. **`EXT_CLONE`** and
   **`WORKSPACES_CLONE`** copy what the app ships before it is changed.
+- **The app from a checkout.** `cargo run --release -p architect-desktop
+  -- install` installs this build as the app: on a Mac bundled, made into
+  a disk image, signed with the Developer ID, notarized and stapled as a
+  release is, in `/Applications` (`--user`: `~/Applications`), the disk
+  image kept in `target/desktop/`; on Linux the binary and a desktop
+  entry under `~/.local`. It links the command onto `PATH`
+  (`~/.local/bin/architect`), so `architect dev …` runs from any folder
+  (`apps/desktop/src/install.rs`).
 - **An instance of its own.** `architect-desktop dev` starts an Architect
   apart from the person's (its own settings, vault, socket and secrets;
   `ARCHITECT_DEV=1` does it from the environment), with only the
