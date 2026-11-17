@@ -252,14 +252,22 @@ const fn button_from(code: u8) -> Button {
 
 fn input(out: &mut Out, event: &ViewInput) {
     match event {
-        ViewInput::PointerDown { x, y, button } => {
-            out.u8(0).f32(*x).f32(*y).u8(button_code(*button));
+        ViewInput::PointerDown { x, y, button, mods } => {
+            out.u8(0)
+                .f32(*x)
+                .f32(*y)
+                .u8(button_code(*button))
+                .strs(mods);
         }
-        ViewInput::PointerMove { x, y } => {
-            out.u8(1).f32(*x).f32(*y);
+        ViewInput::PointerMove { x, y, mods } => {
+            out.u8(1).f32(*x).f32(*y).strs(mods);
         }
-        ViewInput::PointerUp { x, y, button } => {
-            out.u8(2).f32(*x).f32(*y).u8(button_code(*button));
+        ViewInput::PointerUp { x, y, button, mods } => {
+            out.u8(2)
+                .f32(*x)
+                .f32(*y)
+                .u8(button_code(*button))
+                .strs(mods);
         }
         ViewInput::Wheel { dx, dy, x, y, mods } => {
             out.u8(3).f32(*dx).f32(*dy).f32(*x).f32(*y).strs(mods);
@@ -293,15 +301,18 @@ fn read_input(i: &mut In<'_>) -> Result<ViewInput, WireError> {
             x: i.f32()?,
             y: i.f32()?,
             button: button_from(i.u8()?),
+            mods: i.names()?,
         },
         1 => ViewInput::PointerMove {
             x: i.f32()?,
             y: i.f32()?,
+            mods: i.names()?,
         },
         2 => ViewInput::PointerUp {
             x: i.f32()?,
             y: i.f32()?,
             button: button_from(i.u8()?),
+            mods: i.names()?,
         },
         3 => ViewInput::Wheel {
             dx: i.f32()?,
@@ -542,12 +553,18 @@ mod tests {
                 x: 1.0,
                 y: 2.0,
                 button: Button::Secondary,
+                mods: vec!["Shift", "Mod"],
             },
-            ViewInput::PointerMove { x: 1.5, y: -2.0 },
+            ViewInput::PointerMove {
+                x: 1.5,
+                y: -2.0,
+                mods: vec!["Alt"],
+            },
             ViewInput::PointerUp {
                 x: 1.0,
                 y: 2.0,
                 button: Button::Middle,
+                mods: vec!["Shift", "Mod"],
             },
             ViewInput::Wheel {
                 dx: 0.0,

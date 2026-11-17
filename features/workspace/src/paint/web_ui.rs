@@ -229,6 +229,12 @@ fn pointer(core: &Rc<WakeCore>, event: PointerEvent, phase: &'static str) {
         2 => Button::Secondary,
         _ => Button::Primary,
     };
+    let mods = held(
+        event.ctrl_key(),
+        event.meta_key(),
+        event.shift_key(),
+        event.alt_key(),
+    );
     let view = if event.pointer_type() == "touch" {
         ViewInput::Touch {
             id: u64::try_from(event.pointer_id()).unwrap_or_default(),
@@ -238,9 +244,9 @@ fn pointer(core: &Rc<WakeCore>, event: PointerEvent, phase: &'static str) {
         }
     } else {
         match phase {
-            "start" => ViewInput::PointerDown { x, y, button },
-            "end" => ViewInput::PointerUp { x, y, button },
-            _ => ViewInput::PointerMove { x, y },
+            "start" => ViewInput::PointerDown { x, y, button, mods },
+            "end" => ViewInput::PointerUp { x, y, button, mods },
+            _ => ViewInput::PointerMove { x, y, mods },
         }
     };
     if phase == "start" {
@@ -251,11 +257,41 @@ fn pointer(core: &Rc<WakeCore>, event: PointerEvent, phase: &'static str) {
     input(core, view);
 }
 
+/// The held modifiers by [`ViewInput::Key`]'s names, as `key` gives
+/// them: `"Mod"` for ⌘ or Ctrl, then `"Shift"`, `"Alt"` and `"Ctrl"`.
+fn held(ctrl: bool, meta: bool, shift: bool, alt: bool) -> Vec<&'static str> {
+    [
+        (ctrl || meta, "Mod"),
+        (shift, "Shift"),
+        (alt, "Alt"),
+        (ctrl, "Ctrl"),
+    ]
+    .into_iter()
+    .filter(|(on, _)| *on)
+    .map(|(_, name)| name)
+    .collect()
+}
+
 fn wheel(core: &Rc<WakeCore>, event: WheelEvent) {
     let unit = match event.delta_mode() {
         1 => 20.0,
         2 => 800.0,
         _ => 1.0,
+    };
+    // The pointer's point in the canvas, as the pointer events give it.
+    let (x, y) = {
+        let Some(runtime) = core.runtime.borrow().upgrade() else {
+            return;
+        };
+        let slot = runtime.borrow();
+        let Some(runtime) = slot.as_ref() else { return };
+        let rect = runtime.canvas.get_bounding_client_rect();
+        #[allow(clippy::as_conversions, clippy::cast_possible_truncation)]
+        let at = (
+            (f64::from(event.client_x()) - rect.left()) as f32,
+            (f64::from(event.client_y()) - rect.top()) as f32,
+        );
+        at
     };
     #[allow(clippy::as_conversions, clippy::cast_possible_truncation)]
     input(
@@ -263,6 +299,14 @@ fn wheel(core: &Rc<WakeCore>, event: WheelEvent) {
         ViewInput::Wheel {
             dx: (event.delta_x() * unit) as f32,
             dy: (event.delta_y() * unit) as f32,
+            x,
+            y,
+            mods: held(
+                event.ctrl_key(),
+                event.meta_key(),
+                event.shift_key(),
+                event.alt_key(),
+            ),
         },
     );
 }

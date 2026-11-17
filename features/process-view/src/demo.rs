@@ -64,7 +64,7 @@ impl PaintView for Orbits {
     fn input(&mut self, ctx: &ViewCtx, event: &ViewInput) -> bool {
         let now = ctx.clock.now();
         match event {
-            ViewInput::PointerMove { x, y } => {
+            ViewInput::PointerMove { x, y, .. } => {
                 self.pointer = Some(Point::new(f64::from(*x), f64::from(*y)));
             }
             ViewInput::PointerDown { x, y, .. } => {

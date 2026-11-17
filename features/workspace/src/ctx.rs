@@ -96,19 +96,28 @@ pub enum Button {
 /// in-process and across a process boundary.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ViewInput {
+    /// A button pressed at `x, y`. `mods` are the modifiers held as it
+    /// was (`"Mod"`, `"Shift"`, `"Alt"`, `"Ctrl"`, as [`Key`](Self::Key)
+    /// gives them): a Shift-click is one even when it is also the click
+    /// that gives the pane the keyboard.
     PointerDown {
         x: f32,
         y: f32,
         button: Button,
+        mods: Vec<&'static str>,
     },
+    /// The pointer moved to `x, y`, with `mods` held (a drag that adds).
     PointerMove {
         x: f32,
         y: f32,
+        mods: Vec<&'static str>,
     },
+    /// A button let go at `x, y`, with `mods` held.
     PointerUp {
         x: f32,
         y: f32,
         button: Button,
+        mods: Vec<&'static str>,
     },
     /// Scrolled by `dx, dy` logical pixels. `x, y` are the pointer's
     /// position in the view's logical pixels (the same space as

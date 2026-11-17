@@ -956,6 +956,26 @@ where
         (p.x as f32, p.y as f32)
     }
 
+    /// The held modifiers by [`ViewInput::Key`]'s names (`"Mod"` is ⌘ on
+    /// a Mac, Ctrl elsewhere).
+    fn held(m: Modifiers) -> Vec<&'static str> {
+        let command = if cfg!(target_os = "macos") {
+            Modifiers::META
+        } else {
+            Modifiers::CONTROL
+        };
+        [
+            (command, "Mod"),
+            (Modifiers::SHIFT, "Shift"),
+            (Modifiers::ALT, "Alt"),
+            (Modifiers::CONTROL, "Ctrl"),
+        ]
+        .into_iter()
+        .filter(|(k, _)| m.contains(*k))
+        .map(|(_, name)| name)
+        .collect()
+    }
+
     fn button(e: &PointerEvent) -> Button {
         match e.trigger_button() {
             Some(dioxus::html::input_data::MouseButton::Secondary) => Button::Secondary,
@@ -1044,26 +1064,26 @@ where
             },
             onpointerdown: move |e: PointerEvent| {
                 let (x, y) = at(e.element_coordinates());
-                down(ViewInput::PointerDown { x, y, button: button(&e) });
+                down(ViewInput::PointerDown { x, y, button: button(&e), mods: held(e.modifiers()) });
             },
             onpointermove: move |e: PointerEvent| {
                 let (x, y) = at(e.element_coordinates());
-                moved(ViewInput::PointerMove { x, y });
+                moved(ViewInput::PointerMove { x, y, mods: held(e.modifiers()) });
             },
             onpointerup: move |e: PointerEvent| {
                 let (x, y) = at(e.element_coordinates());
-                up(ViewInput::PointerUp { x, y, button: button(&e) });
+                up(ViewInput::PointerUp { x, y, button: button(&e), mods: held(e.modifiers()) });
             },
             // A press it won't see the end of: the view hears a release.
             onpointercancel: move |e: PointerEvent| {
                 let (x, y) = at(e.element_coordinates());
-                cancel(ViewInput::PointerUp { x, y, button: button(&e) });
+                cancel(ViewInput::PointerUp { x, y, button: button(&e), mods: held(e.modifiers()) });
             },
             onwheel: move |e: WheelEvent| {
                 let (x, y) = at(e.element_coordinates());
                 let d = e.delta().strip_units();
                 #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
-                wheel(ViewInput::Wheel { dx: d.x as f32, dy: d.y as f32, x, y, mods: Vec::new() });
+                wheel(ViewInput::Wheel { dx: d.x as f32, dy: d.y as f32, x, y, mods: held(e.modifiers()) });
             },
             onkeydown: move |e: KeyboardEvent| {
                 key(ViewInput::Key { key: e.key().to_string(), down: true, modifiers: Vec::new() });
