@@ -368,6 +368,7 @@ fn redo(_: &EditorState) -> Option<TransactionSpec> {
 /// note: `--ed-scroll-height: auto`, so the pane scrolls it, not a box of
 /// its own (every line is built then; a note is not a 100k-line file).
 const LAYOUT: &str = "
+.lab-note-editor .md-wikilink, .lab-note-editor .md-link { cursor: pointer; }
 .lab-note-editor { box-sizing: border-box; color: var(--foreground); position: relative;
   max-width: 760px; width: 100%; padding: 0; min-height: 0; }
 .lab-note-editor .editor-root { --ed-scroll-height: auto; padding-left: 0; min-height: 120px;

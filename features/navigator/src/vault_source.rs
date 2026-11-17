@@ -698,9 +698,13 @@ mod tests {
     fn a_preview_is_the_notes_words() {
         let text = "---\ntitle: X\ntags: [a]\n---\n# Heading\nSee [[Other note|the other]] and **[[Plain]]**.\n\
                     ![[img.png]]\n```kf\n| C | G |\n```\n- [ ] A task\n> Quoted";
+        assert_eq!(preview_of(text), "See the other and Plain. A task · Quoted");
+        // A list keeps its items apart; a lower heading stays, apart too.
         assert_eq!(
-            preview_of(text),
-            "Heading See the other and Plain. A task Quoted"
+            preview_of(
+                "# Home\nBack to [[Welcome]].\n\n- [[Garden]]\n- Sourdough\n## Later\nWrapped\nprose"
+            ),
+            "Back to Welcome. Garden · Sourdough · Later · Wrapped prose"
         );
         assert_eq!(unlink("a [link](http://x) b ![i](x.png) c"), "a link b  c");
     }

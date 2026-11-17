@@ -368,7 +368,29 @@ fn CoverLayer() -> Element {
     if (host.phone)() {
         rsx! { switcher::SwitcherLayer { cover: true } }
     } else {
-        rsx! { MenuLayer { window: true } }
+        rsx! {
+            MenuLayer { window: true }
+            TipLayer {}
+        }
+    }
+}
+
+/// A tab's name under the pointer ([`Host::tip`]), over the window: the
+/// shell's tooltip look (`.tip`), outside the tab bar that would clip it.
+#[component]
+fn TipLayer() -> Element {
+    let host = use_host();
+    let t = host.theme.read().clone();
+    let Some((text, (x, y))) = (host.tip)() else {
+        return rsx! {};
+    };
+    rsx! {
+        div {
+            style: "position:absolute; left:{x}px; top:{y}px; z-index:{architect_shell::layer::POPOVER}; white-space:nowrap; \
+                    padding:4px 8px; border-radius:6px; background:{t.pill}; border:1px solid {t.rule}; color:{t.ink}; \
+                    font-family:{t.font}; font-size:12px; font-weight:500; pointer-events:none; box-shadow:{t.shadow_lift};",
+            "{text}"
+        }
     }
 }
 
@@ -481,6 +503,9 @@ pub struct Host {
     /// Where the menu on show was asked for (window points); `None` puts it
     /// in the middle.
     menu_at: Signal<Option<(f32, f32)>>,
+    /// A tab's name over the window, under the pointer (window points):
+    /// a squeezed tab shows its icon alone.
+    tip: Signal<Option<(String, (f32, f32))>>,
     mounts: CopyValue<HashMap<Mount, Rc<MountedData>>>,
     /// The arrange key is held: every pane can be grabbed.
     held: Signal<bool>,
@@ -1476,6 +1501,7 @@ pub fn WorkspaceView(
         switch: switcher::Switch::new(),
         float_area: Signal::new(None),
         menu_at: Signal::new(None),
+        tip: Signal::new(None),
         mounts: CopyValue::new(HashMap::new()),
         held: Signal::new(false),
         latched: Signal::new(false),

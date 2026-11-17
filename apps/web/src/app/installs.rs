@@ -246,13 +246,7 @@ pub fn VaultNeeds() -> Element {
                 what: "vault".to_owned(),
                 // It says what the install did; the plan is made again.
                 on_done: move |_: String| round += 1,
-            }
-            div {
-                button {
-                    style: "font-size: 12px; background: none; border: none; color: var(--muted-foreground); cursor: pointer; padding: 0;",
-                    onclick: move |_| dismissed.set(true),
-                    "Not now"
-                }
+                on_dismiss: move |()| dismissed.set(true),
             }
         }
     }

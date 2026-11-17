@@ -85,7 +85,7 @@ fn it_lists_folders_files_and_what_each_note_derives() {
     );
     assert_eq!(
         plan.preview.as_deref(),
-        Some("Plan See my ideas. One Two Three")
+        Some("See my ideas. One · Two · Three")
     );
     assert_eq!(
         plan.tasks,

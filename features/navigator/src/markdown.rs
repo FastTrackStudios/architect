@@ -28,6 +28,11 @@ const PREVIEW_CHARS: usize = 300;
 /// A note's text as its preview: its words, without its frontmatter, its
 /// fences, headings' and tasks' marks, or links' brackets (a link's alias
 /// when it has one); embeds left out.
+///
+/// A first line that is a top heading is left out too (the row shows the
+/// note's title already), and list items and headings are kept apart with
+/// " · ", so a list does not read as one run-on line ("Garden · Sourdough
+/// · Lentil soup").
 #[must_use]
 pub fn preview_of(text: &str) -> String {
     let body = text
@@ -38,6 +43,10 @@ pub fn preview_of(text: &str) -> String {
         });
     let mut out = String::new();
     let mut in_fence = false;
+    let mut first = true;
+    // The line before was a list item or a heading: the next one is kept
+    // apart from it.
+    let mut apart = false;
     for line in body.lines() {
         let t = line.trim();
         if t.starts_with("```") || t.starts_with("~~~") {
@@ -47,23 +56,34 @@ pub fn preview_of(text: &str) -> String {
         if in_fence || t.is_empty() || t.starts_with('|') {
             continue;
         }
+        let heading = t.starts_with('#') && t.trim_start_matches('#').starts_with(' ');
+        if std::mem::take(&mut first) && t.starts_with("# ") {
+            continue;
+        }
         let t = t
             .trim_start_matches('#')
             .trim_start_matches('>')
             .trim_start();
-        let t = ["- [ ] ", "- [x] ", "- [X] ", "- ", "* ", "+ "]
+        let item = ["- [ ] ", "- [x] ", "- [X] ", "- ", "* ", "+ "]
             .iter()
-            .find_map(|m| t.strip_prefix(m))
-            .unwrap_or(t);
-        if !out.is_empty() {
-            out.push(' ');
-        }
+            .find_map(|m| t.strip_prefix(m));
+        let t = item.unwrap_or(t);
         // Emphasis and code marks are not words.
         let plain: String = unlink(t)
             .chars()
             .filter(|c| !matches!(c, '*' | '`' | '=' | '~'))
             .collect();
-        out.push_str(&plain);
+        // A line of embeds alone says nothing.
+        if plain.trim().is_empty() {
+            continue;
+        }
+        if !out.is_empty() {
+            let sentence_ended = out.ends_with(['.', '!', '?', ':']);
+            let opens = (item.is_some() || heading) && !sentence_ended;
+            out.push_str(if apart || opens { " · " } else { " " });
+        }
+        apart = item.is_some() || heading;
+        out.push_str(plain.trim());
         if out.chars().count() >= PREVIEW_CHARS {
             break;
         }
@@ -378,7 +398,7 @@ mod tests {
             f.preview
                 .as_deref()
                 .unwrap_or_default()
-                .starts_with("Welcome Some words here")
+                .starts_with("Some words here")
         );
         assert!(f.words.unwrap_or_default() > 5);
     }

@@ -27,6 +27,21 @@ use crate::item::clock;
 /// A list's sections: each one's name (`None`: none) and its rows.
 pub type Sections = Vec<(Option<String>, Vec<Row>)>;
 
+/// `colour` with no alpha, for a fade into it: a long title fades out
+/// (Blitz has no `text-overflow: ellipsis`), and a gradient from
+/// `transparent` would pass through black.
+fn clear(colour: &str) -> String {
+    let hex = colour.trim().trim_start_matches('#');
+    let channel = |i: usize| {
+        hex.get(i..i.saturating_add(2))
+            .and_then(|h| u8::from_str_radix(h, 16).ok())
+    };
+    match (hex.len(), channel(0), channel(2), channel(4)) {
+        (6 | 8, Some(r), Some(g), Some(b)) => format!("rgba({r},{g},{b},0)"),
+        _ => "transparent".to_owned(),
+    }
+}
+
 /// The list's sheet: classes, so its states and a phone's narrower grid
 /// are rules, not each row's style. Colours come from the shell's theme
 /// through the root's custom properties.
@@ -51,8 +66,10 @@ const SHEET: &str = "
   background: var(--ml-tile); color: var(--ml-faint); }
 .media-list-art img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
 .media-list-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.media-list-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 500; line-height: 1.3; }
-.media-list-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; line-height: 1.3; color: var(--ml-faint); }
+.media-list-title { position: relative; overflow: hidden; white-space: nowrap; font-size: 16px; font-weight: 500; line-height: 1.3; }
+.media-list-meta { position: relative; overflow: hidden; white-space: nowrap; font-size: 13.5px; line-height: 1.3; color: var(--ml-faint); }
+.media-list-title::after, .media-list-meta::after { content: \"\"; position: absolute; top: 0; right: 0; bottom: 0; width: 28px;
+  background: linear-gradient(to right, var(--ml-ground-clear), var(--ml-ground)); }
 .media-list-length { font-size: 13px; font-variant-numeric: tabular-nums; color: var(--ml-faint); padding-right: 4px; }
 .media-list-open { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; border-radius: 999px;
   background: transparent; color: var(--ml-faint); cursor: pointer; }
@@ -170,8 +187,17 @@ pub fn MediaList(
         s
     };
     let vars = format!(
-        "--ml-ink: {}; --ml-faint: {}; --ml-accent: {}; --ml-accent-ink: {}; --ml-hover: {}; --ml-tile: {}; --ml-font: {};",
-        t.ink, t.ink_3, t.accent, t.accent_ink, t.active, t.pill, t.font
+        "--ml-ink: {}; --ml-faint: {}; --ml-accent: {}; --ml-accent-ink: {}; --ml-hover: {}; --ml-tile: {}; --ml-font: {}; \
+         --ml-ground: {}; --ml-ground-clear: {};",
+        t.ink,
+        t.ink_3,
+        t.accent,
+        t.accent_ink,
+        t.active,
+        t.pill,
+        t.font,
+        t.sheet,
+        clear(&t.sheet)
     );
     let head_play = {
         let (source, name, q) = (source.clone(), name.clone(), q.clone());

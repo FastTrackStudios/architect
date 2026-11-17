@@ -130,17 +130,27 @@ pub(super) fn StatusBar(items: Vec<StatusItem>) -> Element {
     let t = use_shell().theme;
     let (left, right): (Vec<StatusItem>, Vec<StatusItem>) =
         items.into_iter().partition(|i| i.side == StatusSide::Left);
+    // Too many for the width: whole items give way, never half of one.
+    // Each side wraps what does not fit onto a second line its box hides;
+    // the right side is laid out from its far end (reversed twice, so it
+    // reads in order), so its last items (the palette, the notices) stay.
+    let right: Vec<StatusItem> = right.into_iter().rev().collect();
+    let line = "height: 18px; min-width: 0; display: flex; flex-wrap: wrap; align-content: flex-start; \
+                align-items: center; column-gap: 12px; overflow: hidden;";
     rsx! {
         div {
             style: "height: {STATUS_BAR}px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; \
                     gap: 12px; padding: 0 10px; background: {t.title_bar}; border-top: 1px solid {t.rule}; \
                     color: {t.ink_3}; font-family: {t.font}; font-size: 11px; white-space: nowrap; overflow: hidden;",
-            for item in left {
-                StatusEntry { key: "{item.id}", item }
+            div { style: "flex: 0 1 auto; {line}",
+                for item in left {
+                    StatusEntry { key: "{item.id}", item }
+                }
             }
-            span { style: "flex: 1;" }
-            for item in right {
-                StatusEntry { key: "{item.id}", item }
+            div { style: "flex: 1 1 0; flex-direction: row-reverse; {line}",
+                for item in right {
+                    StatusEntry { key: "{item.id}", item }
+                }
             }
         }
     }

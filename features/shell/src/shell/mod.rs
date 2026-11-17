@@ -1643,6 +1643,28 @@ pub fn AppShell(
     } else {
         0.0
     };
+    // Over a desk's status bar the separate button is the bar's last item
+    // (its icon, its name and its count), not a round button floating over
+    // the page's content: Obsidian's frame has no floating button.
+    let status_with_separate: Vec<StatusItem> = {
+        let mut items = all_status.clone();
+        if let Some(sep) = separate
+            .clone()
+            .filter(|_| float_separate && show_status_bar)
+        {
+            let text = sep
+                .badge
+                .as_ref()
+                .map_or_else(|| sep.label.clone(), |n| format!("{} {n}", sep.label));
+            let mut item = StatusItem::new("shell:separate", text)
+                .icon(sep.icon)
+                .hint(sep.label.clone());
+            item.on_press = Some(sep.on_press);
+            item.chip = sep.badge.is_some();
+            items.push(item);
+        }
+        items
+    };
     // The floating button's room under it, inside the page: the window's
     // inset and a corner badge only when nothing (a status bar, the Now
     // Playing bar) is at the page's foot below it already.
@@ -1764,7 +1786,7 @@ pub fn AppShell(
                 // under them (#660: the bar's source chip covered it).
                 div { style: "position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column;",
                     {children}
-                    if float_separate {
+                    if float_separate && !show_status_bar {
                         if let Some(sep) = separate.clone() {
                             div {
                                 style: "position: absolute; right: {20.0 + screen.insets.right}px; \
@@ -1784,7 +1806,7 @@ pub fn AppShell(
                 // so the sidebars run to the window's bottom (Obsidian's).
                 if show_status_bar {
                     SlotView { slot: Slot::Status,
-                        StatusBar { items: all_status.clone() }
+                        StatusBar { items: status_with_separate }
                     }
                 }
             }

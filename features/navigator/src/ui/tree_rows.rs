@@ -315,7 +315,7 @@ pub(super) fn ItemRow(
                 }
             } else if !count.is_empty() {
                 Leader { nav }
-                span { class: "nv-count", style: "flex:0 0 auto; color:var(--nv-faint); font-size:11px;", "{count}" }
+                span { class: "nv-count", title: super::panes::count_hint(&count), style: "flex:0 0 auto; color:var(--nv-faint); font-size:11px;", "{count}" }
             }
             Guides { nav, level, indent }
         }
@@ -1728,14 +1728,13 @@ pub(super) fn SectionRow(
         div { class, role: "treeitem", "data-section": "{id}",
             "aria-expanded": if expanded { "true" } else { "false" },
             style: "position:absolute; left:4px; right:4px; top:{top}px; height:{height}px; display:flex; align-items:center; gap:4px; \
-                    padding:0 8px 0 6px; border-radius:6px; white-space:nowrap; color:var(--nv-muted); font-size:11px; font-weight:600; \
-                    text-transform:uppercase; letter-spacing:0.04em;",
+                    padding:0 8px 0 6px; border-radius:6px; white-space:nowrap; color:var(--nv-muted); font-size:12px; font-weight:600;",
             onclick: move |_| nav.update(|s| s.toggle_section(&toggle)),
             span { style: "flex:0 0 16px; display:flex; align-items:center; justify-content:center; color:var(--nv-faint);",
                 if expanded { ChevronDown { size: 14 } } else { ChevronRight { size: 14 } }
             }
             span { style: "flex:1 1 auto;", "{name}" }
-            span { class: "nv-count", style: "flex:0 0 auto; color:var(--nv-faint); font-weight:400;", "{count}" }
+            span { class: "nv-count", title: super::panes::count_hint(&count.to_string()), style: "flex:0 0 auto; color:var(--nv-faint); font-weight:400;", "{count}" }
         }
     }
 }

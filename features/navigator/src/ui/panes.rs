@@ -528,6 +528,24 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
     }
 }
 
+/// A row's count in words, for its tooltip: "3 • 12" says little by
+/// itself ("3 notes here, 12 in folders below").
+pub(super) fn count_hint(count: &str) -> String {
+    let notes = |n: &str| {
+        if n == "1" {
+            "1 note".to_owned()
+        } else {
+            format!("{n} notes")
+        }
+    };
+    match count.split_once('•').map(|(a, b)| (a.trim(), b.trim())) {
+        Some(("", below)) => format!("{} in folders below", notes(below)),
+        Some((here, below)) => format!("{} here, {below} in folders below", notes(here)),
+        None if count.trim().is_empty() => String::new(),
+        None => notes(count.trim()),
+    }
+}
+
 /// A folder's count as Notebook Navigator writes it: "3 • 12" (its own,
 /// then below), "• 12" with none of its own, nothing at zero.
 fn count_label(c: NoteCount, show: bool, separate: bool) -> String {
@@ -700,7 +718,7 @@ fn FolderRow(
                 }
             } else if !count.is_empty() {
                 tree_rows::Leader { nav }
-                span { class: "nv-count", style: "flex:0 0 auto; color:var(--nv-faint); font-size:11px;", "{count}" }
+                span { class: "nv-count", title: count_hint(&count), style: "flex:0 0 auto; color:var(--nv-faint); font-size:11px;", "{count}" }
             }
             tree_rows::Guides { nav, level, indent }
         }
@@ -751,7 +769,9 @@ pub(super) fn ListPane(
         NavTarget::Folder(f) => f.clone(),
         _ => String::new(),
     };
-    let empty = s.list_order().is_empty();
+    // Nothing to show: no notes, and no group header (every group
+    // folded still shows its headers, to unfold them).
+    let empty = s.list_rows().is_empty();
     let writable = nav.source().can_write();
     let searching = s.search_open || !s.search().text().is_empty();
     drop(s);
@@ -868,27 +888,6 @@ pub(super) fn ListPane(
     }
 }
 
-#[component]
-fn MenuHeading(label: &'static str) -> Element {
-    rsx! {
-        div { class: "nv-menu-heading", style: "padding:6px 8px 2px; font-size:11px; font-weight:600; color:var(--nv-faint);", "{label}" }
-    }
-}
-
-#[component]
-fn MenuRow(data: String, label: String, checked: bool, on_pick: EventHandler<()>) -> Element {
-    rsx! {
-        div { class: "nv-menu-row", role: "menuitemradio",
-            "data-menu": "{data}",
-            "aria-checked": if checked { "true" } else { "false" },
-            style: "display:flex; align-items:center; gap:6px; height:26px; padding:0 8px; border-radius:5px; white-space:nowrap;",
-            onclick: move |_| on_pick.call(()),
-            span { style: "flex:0 0 14px; display:flex;", if checked { Check { size: 13 } } }
-            "{label}"
-        }
-    }
-}
-
 /// The list's Sort and group menu, as the window's popup rows.
 fn sort_rows(
     nav: &Navigator,
@@ -957,6 +956,27 @@ fn profile_rows(
         }
     }));
     rows
+}
+
+#[component]
+fn MenuHeading(label: &'static str) -> Element {
+    rsx! {
+        div { class: "nv-menu-heading", style: "padding:6px 8px 2px; font-size:11px; font-weight:600; color:var(--nv-faint);", "{label}" }
+    }
+}
+
+#[component]
+fn MenuRow(data: String, label: String, checked: bool, on_pick: EventHandler<()>) -> Element {
+    rsx! {
+        div { class: "nv-menu-row", role: "menuitemradio",
+            "data-menu": "{data}",
+            "aria-checked": if checked { "true" } else { "false" },
+            style: "display:flex; align-items:center; gap:6px; height:26px; padding:0 8px; border-radius:5px; white-space:nowrap;",
+            onclick: move |_| on_pick.call(()),
+            span { style: "flex:0 0 14px; display:flex;", if checked { Check { size: 13 } } }
+            "{label}"
+        }
+    }
 }
 
 #[component]

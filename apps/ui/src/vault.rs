@@ -2136,7 +2136,10 @@ fn VaultFiles(providers: Vec<LoadedProvider>) -> Element {
                 }
                 return;
             }
-            let markdown = has_ext(rest, "md");
+            // A note: `.md`, or a file type an extension declared
+            // (`[[file_types]]`: the Cookbook's `.cook` recipes), which
+            // opens in the editor as one (its card at its head).
+            let markdown = vault::note_types::is_note_path(rest);
             // Another org's note: opened from its own vault, without
             // switching the app's.
             if mount != own {

@@ -437,6 +437,7 @@ fn PopoutView(props: PopoutProps) -> Element {
         switch: super::switcher::Switch::new(),
         float_area: Signal::new(None),
         menu_at: Signal::new(None),
+        tip: Signal::new(None),
         mounts: CopyValue::new(HashMap::new()),
         held: Signal::new(false),
         latched: Signal::new(false),

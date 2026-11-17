@@ -1163,7 +1163,8 @@ pub fn ConsentPrompt(
 /// `what` names what is opening ("vault"; "project" when not given);
 /// `folder` is the vault's (or project's) folder, whose carried archives
 /// are searched for these installs only; `on_done` hears what an install
-/// did (each one's outcome, `; `-joined), to plan again.
+/// did (each one's outcome, `; `-joined), to plan again; `on_dismiss`,
+/// when given, is its "Not now" (beside "Install all").
 #[component]
 pub fn MissingExtensions(
     browse: Browse,
@@ -1171,6 +1172,7 @@ pub fn MissingExtensions(
     #[props(default)] what: Option<String>,
     #[props(default)] folder: Option<std::path::PathBuf>,
     #[props(default)] on_done: Option<EventHandler<String>>,
+    #[props(default)] on_dismiss: Option<EventHandler<()>>,
 ) -> Element {
     let mut asking = use_signal(|| None::<Vec<Preview>>);
     let mut note = use_signal(|| None::<String>);
@@ -1241,8 +1243,9 @@ pub fn MissingExtensions(
             if let Some(n) = note() {
                 div { style: "font-size: 12px; color: var(--muted-foreground);", "{n}" }
             }
-            if can_install {
+            if can_install || on_dismiss.is_some() {
                 div { style: "display: flex; gap: 8px; padding-top: 2px;",
+                    if can_install {
                     button {
                         style: "padding: 5px 12px; border-radius: 8px; border: none; background: var(--primary); color: var(--primary-foreground); font-size: 13px; font-weight: 600; cursor: pointer;",
                         onclick: move |_| {
@@ -1270,6 +1273,15 @@ pub fn MissingExtensions(
                             });
                         },
                         "Install all"
+                    }
+                    }
+                    if let Some(dismiss) = on_dismiss {
+                        button {
+                            style: "padding: 5px 12px; border-radius: 8px; border: 1px solid var(--border); background: transparent; \
+                                    color: var(--card-foreground); font-size: 13px; font-weight: 500; cursor: pointer;",
+                            onclick: move |_| dismiss.call(()),
+                            "Not now"
+                        }
                     }
                 }
             }
