@@ -967,6 +967,7 @@ pub fn LabApp() -> Element {
         .unwrap_or(false);
     // Commands: the palette (⌘K), quick open (⌘O), and every command's key.
     let commands = architect_commands::use_commands_provider();
+    use_kept_recents(&commands);
     // Extensions, and what they add to the window: the shell's chrome
     // (above the shell), a pane's context menu, the menus, their views.
     let ext_ui = extensions::use_lab_extensions(metronome);
@@ -1928,6 +1929,39 @@ fn NativeMenus(bar: architect_commands::MenuBar, windowed: bool) -> Element {
     };
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "ios")))]
     rsx! { architect_commands::InWindowMenus { bar } }
+}
+
+/// The palette's recent commands, kept across launches in the app's
+/// folder (`palette-recents.json`): ⌘K opens on what was run last, not
+/// on the alphabet.
+fn use_kept_recents(commands: &architect_commands::Commands) {
+    let commands = *commands;
+    let file = use_hook(|| app_dir().map(|d| d.join("palette-recents.json")));
+    let at_start = file.clone();
+    use_hook(move || {
+        let ids: Vec<String> = at_start
+            .as_deref()
+            .and_then(|f| std::fs::read_to_string(f).ok())
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+        if !ids.is_empty() {
+            let mut recents = commands.recents;
+            let mut kept = recents.peek().clone();
+            for id in ids.iter().rev() {
+                kept.touch(id);
+            }
+            recents.set(kept);
+        }
+    });
+    use_effect(move || {
+        let ids = commands.recents.read().ids.clone();
+        if let Some(f) = file.as_deref()
+            && let Ok(text) = serde_json::to_string(&ids)
+            && let Err(error) = std::fs::write(f, text)
+        {
+            tracing::debug!(%error, "app.palette.recents_save");
+        }
+    });
 }
 
 #[cfg(test)]
