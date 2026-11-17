@@ -812,6 +812,9 @@ pub struct Loaded {
     pub origin: Origin,
     /// Its folder (to watch), when it has one.
     pub dir: Option<PathBuf>,
+    /// Its files when it has no folder (one linked in: `Extension::files`),
+    /// each `(path, text)`: where its toolbar images are read from.
+    pub embedded: Vec<(&'static str, &'static str)>,
     /// Its actions on the list.
     pub actions: Vec<String>,
 }
@@ -841,6 +844,9 @@ pub struct ViewOpen {
     pub title: String,
     /// What it shows (a file's path, a link): the pane's state.
     pub state: Option<String>,
+    /// Whether the view shows documents (`Manifest::shows_documents`):
+    /// then each document opens in a pane of its own ([`ViewOpen::pane_id`]).
+    pub document: bool,
     pub home: crate::manifest::Home,
     pub placement: crate::manifest::ViewPlacement,
     pub width: Option<f32>,
@@ -858,6 +864,22 @@ pub enum Opening {
     Url(String),
     /// A document of a kind, and its path when it has one.
     DocKind { kind: String, path: Option<String> },
+}
+
+impl ViewOpen {
+    /// The id of the pane it opens in. A document view showing a document
+    /// gets one pane per document, `<kind>:<state>`: opening the same file
+    /// again brings its pane forward, another opens beside it. Any other
+    /// view has one pane, its kind, which opening it again brings forward.
+    #[must_use]
+    pub fn pane_id(&self) -> String {
+        match self.state.as_deref() {
+            Some(state) if self.document && !state.is_empty() => {
+                format!("{}:{state}", self.kind)
+            }
+            _ => self.kind.clone(),
+        }
+    }
 }
 
 impl Opening {
@@ -1288,10 +1310,12 @@ impl Host {
         placement: Option<crate::manifest::ViewPlacement>,
         invocation: Invocation,
     ) -> Result<Value, String> {
-        let decl = self
+        let manifest = self
             .get(extension)
             .ok_or_else(|| format!("{extension} is not loaded"))?
-            .manifest
+            .manifest;
+        let document = manifest.shows_documents(view);
+        let decl = manifest
             .views
             .into_iter()
             .find(|v| v.id == view)
@@ -1309,6 +1333,7 @@ impl Host {
             view: decl.id,
             title: decl.title,
             state,
+            document,
             home: decl.home,
             placement: placement.unwrap_or(decl.placement),
             width: decl.width,
@@ -2044,6 +2069,7 @@ impl Host {
                     manifest: manifest.clone(),
                     origin,
                     dir: package.dir().map(std::path::Path::to_path_buf),
+                    embedded: package.embedded_files().to_vec(),
                     actions: after.into_iter().collect(),
                 },
                 instance,

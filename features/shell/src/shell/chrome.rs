@@ -216,6 +216,8 @@ pub fn named_icon(name: &str) -> IconFn {
         Package, Pin, Play, Puzzle, Search, Settings, SlidersHorizontal, Star, Sun, Tag, Terminal,
         Timer, User, Users, Zap,
     };
+    // Editing tools a toolbar names (a score editor's note input).
+    use lucide_dioxus::{ChevronsLeft, PanelLeft, PanelRight, Pencil, Spline};
     match name {
         "bell" => crate::icon!(Bell),
         "bookmark" => crate::icon!(Bookmark),
@@ -260,6 +262,11 @@ pub fn named_icon(name: &str) -> IconFn {
         "user" => crate::icon!(User),
         "users" => crate::icon!(Users),
         "zap" => crate::icon!(Zap),
+        "chevrons-left" => crate::icon!(ChevronsLeft),
+        "panel-left" => crate::icon!(PanelLeft),
+        "panel-right" => crate::icon!(PanelRight),
+        "pencil" => crate::icon!(Pencil),
+        "spline" => crate::icon!(Spline),
         _ => crate::icon!(Puzzle),
     }
 }

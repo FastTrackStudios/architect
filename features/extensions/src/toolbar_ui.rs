@@ -748,7 +748,13 @@ fn ToolButton(cx: Ctx, item: ToolItem, path: String, joined: bool) -> Element {
         String::new()
     };
     let image = (!item.image.is_empty())
-        .then(|| host.toolbars().image(&item.image, cx.images.as_deref()))
+        .then(|| match cx.images.as_deref() {
+            // An extension linked in has no folder: its files are its own.
+            None if cx.owner != crate::toolbars::PERSON => host
+                .get(&cx.owner)
+                .and_then(|l| crate::toolbars::Toolbars::embedded_image(&item.image, &l.embedded)),
+            beside => host.toolbars().image(&item.image, beside),
+        })
         .flatten();
     let iconic = !item.icon.is_empty() || image.is_some();
     let show_label = !(iconic && (item.hide_label || cx.hide_labels || cx.header));

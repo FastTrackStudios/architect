@@ -1143,6 +1143,21 @@ impl Manifest {
         action_prefix(&self.id)
     }
 
+    /// Whether its view `view` shows documents: a `[[doc_kinds]]` or an
+    /// `[[openers]]` that claims files or document kinds opens them in it.
+    /// Such a view has a pane per document (`ViewOpen::pane_id`), as a note
+    /// does; any other view has one pane, its kind.
+    #[must_use]
+    pub fn shows_documents(&self, view: &str) -> bool {
+        let names = |v: &Option<String>| v.as_deref() == Some(view);
+        self.contributes.doc_kinds.iter().any(|k| names(&k.view))
+            || self
+                .contributes
+                .openers
+                .iter()
+                .any(|o| names(&o.view) && !(o.files.is_empty() && o.doc_kinds.is_empty()))
+    }
+
     /// Who declares its `[[favourites]]`: its id and what its
     /// capabilities let it run (`architect_favourites::Declarer`).
     #[must_use]

@@ -947,6 +947,20 @@ impl Toolbars {
         uri
     }
 
+    /// A toolbar image of an extension linked in, which has no folder: file
+    /// `image` among its `files` (`Extension::files`), as a `data:` URI.
+    /// None when it is not one of them or not an image.
+    #[must_use]
+    pub fn embedded_image(image: &str, files: &[(&str, &str)]) -> Option<String> {
+        use base64::Engine as _;
+        let mime = crate::toolbar::image_type(image)?;
+        let (_, text) = files.iter().find(|(path, _)| *path == image)?;
+        Some(format!(
+            "data:{mime};base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(text.as_bytes())
+        ))
+    }
+
     /// Arms `action` (one at a time): its buttons show it armed.
     pub fn arm(&self, action: &str) {
         let mut s = self.lock();
@@ -1210,6 +1224,21 @@ mod tests {
         assert_eq!(uri, "data:image/svg+xml;base64,PHN2Zy8+");
         assert_eq!(bars.image("icons/none.svg", None), None);
         assert_eq!(bars.image("icons/a.txt", None), None);
+    }
+
+    #[test]
+    fn an_extension_linked_in_has_its_images_among_its_files() {
+        let files = [("icons/a.svg", "<svg/>"), ("notes.txt", "hello")];
+        assert_eq!(
+            Toolbars::embedded_image("icons/a.svg", &files).as_deref(),
+            Some("data:image/svg+xml;base64,PHN2Zy8+")
+        );
+        assert_eq!(Toolbars::embedded_image("icons/none.svg", &files), None);
+        assert_eq!(
+            Toolbars::embedded_image("notes.txt", &files),
+            None,
+            "not an image"
+        );
     }
 
     #[test]

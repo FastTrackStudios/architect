@@ -213,8 +213,24 @@ fn an_extensions_contributions_come_and_go_with_it() {
     assert_eq!(open.kind, "lab.board/chart");
     assert_eq!(open.state.as_deref(), Some("songs/intro.kf"));
     assert_eq!(open.invocation.source, InvocationSource::Open);
+    // The chart view shows documents: each opens in a pane of its own, so a
+    // second chart opens beside the first rather than bringing it forward.
+    assert!(open.document, "an opener's view shows documents");
+    assert_eq!(open.pane_id(), "lab.board/chart:songs/intro.kf");
+    let manifest = architect_extensions::manifest::Manifest::parse(MANIFEST).unwrap();
+    assert!(manifest.shows_documents("chart"));
+    assert!(
+        !manifest.shows_documents("board"),
+        "a view no opener names keeps one pane, its kind"
+    );
     until("the doc.opened hook", || {
         state_text(&ext, "opened").as_deref() == Some("songs/intro.kf")
+    });
+    let _ = run(&list, "EXT_OPEN", &json!({ "path": "songs/outro.kf" }));
+    let second = opened.lock().unwrap().last().cloned().unwrap();
+    assert_eq!(second.pane_id(), "lab.board/chart:songs/outro.kf");
+    until("the doc.opened hook, again", || {
+        state_text(&ext, "opened").as_deref() == Some("songs/outro.kf")
     });
     let answer = run(
         &list,
