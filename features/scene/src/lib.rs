@@ -14,6 +14,9 @@
 //!   draws; it never carries them.
 //! - [`layers`] are what a pane's host keeps of it: content by key, and
 //!   where each piece is drawn, composed every frame without the view.
+//! - [`anim`] is how a layer moves without the view: a property as a
+//!   function of a clock (wall time, the app's playhead) or of a named
+//!   value (a meter, a fader), evaluated by the host each frame.
 //!
 //! The host hashes what it receives itself: a name is never the sender's
 //! word, so one extension can't put its bytes under another's name.
@@ -28,12 +31,14 @@
 //! and every number, so what a view sends can fail the view, never the
 //! app.
 
+pub mod anim;
 mod bytes;
 pub mod fragment;
 pub mod layers;
 pub mod ops;
 pub mod resource;
 
+pub use anim::{Animation, Clock, Clocks, Input, Linear, Map, Property, Readings, Values};
 pub use anyrender::recording::RenderCommand;
 pub use fragment::{Dropped, Encoded, Encoder, decode};
 pub use layers::{Layer, Layers};
@@ -128,4 +133,14 @@ pub enum Error {
     TooManyLayers(usize),
     #[error("{0} bytes after its last command")]
     Trailing(usize),
+    #[error("an animation that can't be run: {0}")]
+    BadAnimation(&'static str),
+    #[error("more than {0} animations")]
+    TooManyAnimations(usize),
+    #[error("not a value's name: {0:?}")]
+    BadName(String),
+    #[error("more than {0} values")]
+    TooManyValues(usize),
+    #[error("a value it may not {0}: {1}")]
+    Denied(&'static str, String),
 }

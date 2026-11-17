@@ -18,6 +18,8 @@ anyrender = { workspace = true }
 peniko = { workspace = true }
 blake3 = { version = "1.8", default-features = false }
 thiserror = { workspace = true }
+# The app's one wall clock (`anim::wall_seconds`), a browser's too.
+web-time = "1.1"
 
 [lints]
 workspace = true
