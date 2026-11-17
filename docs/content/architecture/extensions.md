@@ -1602,6 +1602,26 @@ body's first words, unless the type names a property with `preview`
 preview, never its markup (`features/navigator/src/markdown.rs`
 `preview_for`, `vault_proto::note_types::preview_property_of`).
 
+**Its text in the editor.** `[[renderers]]` gives a note type its own
+live preview, as markdown has the editor's: the text stays what is
+edited, and the extension says how its ranges read.
+
+```toml
+[[renderers]]
+note_type = "recipe"
+action = "COOKBOOK_RENDER"   # given {text}, answers {items}
+```
+
+While such a note is open the app runs the action with its body each time
+the text changes, and draws its answer over every line but the caret's
+(`apps/ui/src/note_editor.rs` `rendered_decorations`): each item a
+`conceal`ed range, a range `replace`d by other words, or a range or a
+`line` in a look (`features/extensions/src/render.rs` `RenderItem`,
+`Look`: heading, strong, muted, accent, chip, chip-accent, code). The
+looks are the app's classes, styled by its theme, never CSS the
+extension sends. A body that is not markdown gets no markdown preview,
+only its renderer's. The Cookbook's: `extensions/cookbook/src/render.rs`.
+
 **Its body.** A declared type's body is markdown unless it says `body =
 "text"`: then the vault reads only its frontmatter and its `[[links]]`,
 not its inline `#tags`, task lines or headings, because the `#` and `-`

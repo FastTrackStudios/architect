@@ -56,6 +56,7 @@ pub mod person_sync;
 pub mod platform;
 pub mod project;
 pub mod reapack;
+pub mod render;
 pub mod share_layers;
 pub mod share_needs;
 #[cfg(feature = "host")]
