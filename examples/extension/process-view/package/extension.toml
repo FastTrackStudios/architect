@@ -1,0 +1,29 @@
+# The process view showcase (#838): a pane drawn by a program of its own,
+# the lab's process-view demo (`features/process-view`, `demo::Orbits`)
+# as an extension. A `data` extension whose only view has
+# `kind = "process"`: no code of its own runs in the app; the app's
+# process-view pane starts `bin/process-view-demo` from this package when
+# the pane opens and shows its GPU frames. Running a program is a
+# capability: `capabilities.programs` asks for it, a person grants it to an
+# installed copy. Build `bin/` with `just process-view-example`.
+id = "demo.process-view"
+name = "Process view"
+version = "0.1.0"
+kind = "data"
+description = "Orbits drawn by a program of its own on its own GPU device, its frames shown in a pane (Linux)."
+
+[capabilities]
+actions = ["EXT_VIEW_OPEN"]
+effect = "mutating"
+programs = ["bin/process-view-demo"]
+
+[[actions]]
+id = "DEMO_PROCESS_VIEW_OPEN"
+name = "Open the process view"
+preset = { action = "EXT_VIEW_OPEN", args = '{"extension": "demo.process-view", "view": "orbits"}' }
+
+[[views]]
+id = "orbits"
+title = "Orbits (process view)"
+kind = "process"
+program = "bin/process-view-demo"

@@ -393,7 +393,10 @@ fn playback_in_a_process_sends_the_playheads_transform_and_not_the_clips() {
         "playback sent {playing} bytes after the clips' {once}"
     );
     assert!(fills(&app.window_scene()) >= 2000);
-    println!("clips once: {once} bytes; playback over {:.0} px: {playing} bytes", to - from);
+    println!(
+        "clips once: {once} bytes; playback over {:.0} px: {playing} bytes",
+        to - from
+    );
 }
 
 fn p(samples: &mut [Duration], q: usize) -> f64 {

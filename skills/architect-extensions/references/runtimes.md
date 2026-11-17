@@ -19,7 +19,7 @@ Docs: `docs/content/extensions/authoring.md` (the walkthrough), `docs/content/ar
 
 ## At a glance
 
-`kind` is the manifest's top-level key (`features/extensions/src/manifest.rs` `Kind`: `data`, `luau`, `typescript`, `wasm`, `process`). Pages and web views are view-level keys, so any kind can have them.
+`kind` is the manifest's top-level key (`features/extensions/src/manifest.rs` `Kind`: `data`, `luau`, `typescript`, `wasm`, `process`). Pages, web views and process views are view-level keys, so any kind can have them.
 
 | Runtime | Selected by | Desktop | Web (`/app/`) | iOS | Node |
 |---|---|---|---|---|---|
@@ -29,6 +29,7 @@ Docs: `docs/content/extensions/authoring.md` (the walkthrough), `docs/content/ar
 | TypeScript actions | `kind = "typescript"`, `script = "*.ts"` | QuickJS | runner exists, no host yet (#723, #736) | QuickJS (not shown) | no |
 | WASI component | `kind = "wasm"`, `[wasm] component` | Wasmtime + Cranelift | jco + Web Workers, no host yet (#495) | Wasmtime + Pulley | not yet |
 | Process | `kind = "process"`, `[entry] path` | yes | never | never | no |
+| Process view (GPU frames) | `[[views]] kind = "process"`, `program` | Linux (`--features process-views`); macOS and Windows say why | never: the pane says why | never: the pane says why | no |
 | Web view app | `[[views]] kind = "web"`, `src` | wry child (`--features webview`) | sandboxed iframe, mounted once #495 lands | WKWebView (`--features webview`) | no |
 | Node action | `[[actions]] runs = "node"` | forwards to the node | not wired yet (#495) | forwards to the node | runs it |
 
@@ -377,6 +378,44 @@ architect.theme.onChange(showScheme);
 - `features/extensions/web/test/webview.test.mjs`: headless Firefox.
 - The tests in `features/webview/src/desk.rs`.
 
+## 7b. Process views (the `process` view kind, #838)
+
+**What.** A view drawn by a program in the package, on its own GPU device, in its own process: Bevy, a game engine, a renderer in another language. The app's process-view pane (`features/process-view/src/host.rs` `ProcessViewPane`) shows its frames: dma-buf textures read in place, or shared memory uploaded. It forwards the pane's input, size, focus and theme. It is not a process extension's remote view, which is a Dioxus document the app draws. Any kind of extension may have one, and it is shown the same whichever copy is loaded: built in, installed or in development.
+
+**Manifest.** `[[views]] kind = "process"`, `program = "<file in the package>"`, `args = [...]`. The program must also be named in `capabilities.programs`, and `Manifest::check` refuses a process view whose program is missing, unasked or outside the package. Only a process view may name a `program`.
+
+**Consent.** `capabilities.programs` is a capability like any other: asked in words ("Run bin/room, a program in its package, on this computer"), granted by a person for an installed copy, taken back at once, and never a share-link guest's (`share_needs::guest_capabilities`). A built-in or development copy runs with what it asks. Each pane checks it again when it opens (`features/extensions/src/process_view.rs` `launch`).
+
+**Where.**
+- Linux desktop: `architect-desktop --features process-views` (`apps/ui/src/extensions.rs` calls `architect_process_view::extension::use_process_views`).
+- macOS and Windows: the extension loads; its pane says why (`process_view::not_here`). Designed (`IOSurface`, a DXGI shared handle), not built.
+- Browser and iOS: never; the pane says why.
+
+**Lifecycle.** One program per pane (`<extension>/<view>#<pane>`). It is started when the pane opens and keeps running when the pane moves to another group or a pop-out window. It is stopped 10 s after the pane closes, and within a second of an unload or a revoked grant. It is restarted like a process extension's program (three tries with backoff, saying why it died). A development copy rebuilt (`EXT_DEV`) starts it again in place.
+
+**The program.** It serves a `PaintView` with `architect_process_view::guest::serve`, or speaks the wire itself (`features/process-view/src/wire.rs`; its socket is in `ARCHITECT_VIEW_FD`). It runs in the package's folder.
+
+**Example** (`examples/extension/process-view`, built by `just process-view-example`):
+
+<!-- doc-check: off (a path inside the package) -->
+```toml
+id = "demo.process-view"
+kind = "data"            # no code of its own in the app
+[capabilities]
+programs = ["bin/process-view-demo"]
+[[views]]
+id = "orbits"
+title = "Orbits (process view)"
+kind = "process"
+program = "bin/process-view-demo"
+```
+<!-- doc-check: on -->
+
+**Tests.**
+- `features/process-view/tests/extension_kind.rs`: installed (refused, granted, frames), revoked, unloaded, as a development copy, rebuilt, killed and restarted.
+- `features/process-view/tests/frames.rs`: the wire, dma-buf and shared memory.
+- `features/extensions/src/manifest.rs` `process_view_tests`, `features/extensions/src/process_view.rs` tests.
+
 ## 8. Node actions (server-side, on the org's node)
 
 **What.** The one piece of extension code that runs on the server. It holds a secret the person's devices must never have, such as a token exchange with a client secret (#583). Everything else runs in the app.
@@ -437,6 +476,7 @@ local r = host.fetch(api .. "/item/public_token/exchange", {
 | A panel, list, form or dashboard view that can be edited live | A page (`page = "*.tsx"`) | Desktop and iOS on QuickJS, the browser on a Web Worker; not for dense or animated views |
 | Light logic with no Rust toolchain | `kind = "typescript"` | The same runtime as pages; interpreted, so not for heavy work |
 | Third-party code that needs real compute, sandboxed | WASI component | It runs on desktop, iOS (Pulley) and the browser (JSPI); no network of its own |
+| A native GPU renderer (Bevy, wgpu, another engine) in a pane | A process view (`[[views]] kind = "process"`) | Native speed and its own crash domain; Linux only for now, never phones or browsers |
 | A whole npm app, canvas or WebGL, or JIT speed on iOS | A web view (`kind = "web"`) | Full DOM and JIT, but untrusted, so it reaches the app only through the bridge |
 | Another language, a crash-prone tool, its own lifetime | Process | Desktop only, never phones or browsers |
 | A secret the devices must never hold (OAuth client secret) | A node action (`runs = "node"`) | The bar is high: everything else runs in the app |

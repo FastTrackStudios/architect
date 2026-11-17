@@ -15,6 +15,8 @@
 //! - `guest` (feature): `guest::serve` serves a view from a program.
 //! - `host` (feature): `host::ProcessViewPane`, the pane, and its
 //!   session (started, read, stopped, restarted).
+//! - `extension` (feature): extensions' `kind = "process"` views drawn
+//!   by the pane, whichever copy of the extension is loaded (#838).
 //! - `demo` (feature): `demo::Orbits`, the lab's scene, and the
 //!   `process-view-demo` program that serves it.
 //!
@@ -22,19 +24,13 @@
 //! DXGI shared handle) are designed in the docs, not built.
 
 /// The process view's kind id: a view drawn by a program of its own.
-pub const PROCESS: &str = "process";
+pub const PROCESS: &str = architect_workspace::PROCESS;
 
 /// The [`PROCESS`] kind: a pane drawn by another program, which takes
 /// input (IME too) and draws on the GPU.
 #[must_use]
 pub fn kind_spec() -> architect_workspace::KindSpec {
-    use architect_workspace::{Capability, KindSpec, Placement, ViewHost};
-    KindSpec::new(PROCESS, "architect")
-        .host(ViewHost::Blitz)
-        .placement(Placement::Pane)
-        .capability(Capability::Input)
-        .capability(Capability::Ime)
-        .capability(Capability::Gpu)
+    architect_workspace::KindSpec::process()
 }
 
 pub mod wire;
@@ -50,6 +46,9 @@ pub mod guest;
 
 #[cfg(all(target_os = "linux", feature = "host"))]
 pub mod host;
+
+#[cfg(all(target_os = "linux", feature = "extension"))]
+pub mod extension;
 
 #[cfg(feature = "demo")]
 pub mod demo;

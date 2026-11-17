@@ -17,7 +17,8 @@ keyflow-lab = ["dep:keyflow", "dep:keyflow-ui", "dep:editor-keyflow"]
 wasi = ["architect-extensions/wasi"]
 # Process views (Linux): the Vault's "Process views" screenset (⌘6), a
 # pane drawn by a program of its own (`architect-process-view`'s
-# `process-view-demo`) beside the same scene linked.
+# `process-view-demo`) beside the same scene linked; and extensions'
+# `kind = "process"` views, whichever copy is loaded (#838).
 process-views = ["dep:architect-process-view", "architect-workspace/external-textures"]
 
 [dependencies]
@@ -26,7 +27,7 @@ keyflow-ui = { git = "https://github.com/FastTrackStudios/keyflow", rev = "33784
 # The source editor on its own, for the Editor tab (src/keyflow.rs).
 editor-keyflow = { git = "https://github.com/FastTrackStudios/keyflow", rev = "337842d994b8025aadd810c49281cc9cc8a10985", features = ["native"], optional = true }
 architect-shell = { workspace = true, features = ["ui"] }
-architect-process-view = { workspace = true, features = ["host", "demo"], optional = true }
+architect-process-view = { workspace = true, features = ["host", "demo", "extension"], optional = true }
 # The note editor (src/note_editor.rs): the FastTrackStudios editor on
 # Blitz, through architect's door (#512), worked by extensions through
 # architect_extensions::editor; the language registry and the `syntax.*`

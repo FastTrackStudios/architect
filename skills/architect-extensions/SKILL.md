@@ -36,6 +36,7 @@ Every architect path here is checked by `cargo xtask docs`. When a doc and the c
 | Light logic, no Rust toolchain | `kind = "typescript"` (`.ts` actions beside TSX pages) | QuickJS on desktop and iOS; Web Workers in the web app |
 | Sandboxed third-party compute | `kind = "wasm"` (WASI component, `[wasm] component`) | Wasmtime on desktop, Pulley on iOS (web: #495, JSPI) |
 | Another language, a crash-prone tool | `kind = "process"` (`[entry] path`, vox) | desktop only |
+| A native GPU renderer (Bevy, wgpu) in a pane | a process view: `[[views]] kind = "process"`, `program`, plus `capabilities.programs`; any extension kind, any copy | Linux desktop (`--features process-views`); elsewhere the pane says why |
 | A whole npm app, canvas/WebGL | a web view: `[[views]] kind = "web"`, `src` | desktop (`--features webview`), browser iframe, iOS WKWebView |
 | A secret the devices must never hold | a node action: `[[actions]] runs = "node"` | the org's node; apps forward to it |
 | Per-frame or per-sample work | Rust inside a linked extension | — |

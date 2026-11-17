@@ -835,11 +835,13 @@ fn uncovered(manifest: &Manifest, hello: &Hello) -> Option<String> {
             hello.wire
         ));
     }
-    if let Some(view) = manifest
-        .views
-        .iter()
-        .find(|v| v.document.is_none() && !hello.views.contains(&v.id))
-    {
+    if let Some(view) = manifest.views.iter().find(|v| {
+        // A web or process view is the app's to draw (its `src`, its
+        // `program`), not the guest's.
+        let app_draws =
+            v.kind == architect_workspace::WEB || v.kind == architect_workspace::PROCESS;
+        v.document.is_none() && !app_draws && !hello.views.contains(&v.id)
+    }) {
         return Some(format!("it does not draw its view {}", view.id));
     }
     manifest
@@ -1296,5 +1298,35 @@ impl Runner for ProcessRunner {
             process,
             processes: self.processes.clone(),
         }))
+    }
+}
+
+#[cfg(test)]
+mod hello_tests {
+    use super::{API, Hello, WIRE, uncovered};
+    use crate::manifest::Manifest;
+
+    /// A process extension's hello covers the views it draws; a web or
+    /// process view is the app's to draw (#838), so it need not name them.
+    #[test]
+    fn views_the_app_draws_need_not_be_in_the_hello() {
+        let manifest = Manifest::parse(
+            "id = \"lab.lights\"\nname = \"Lights\"\nversion = \"0.1.0\"\nkind = \"process\"\n\
+             [entry]\npath = \"bin/lights\"\n[capabilities]\nprograms = [\"bin/room\"]\n\
+             [[views]]\nid = \"panel\"\ntitle = \"Panel\"\n\
+             [[views]]\nid = \"room\"\ntitle = \"Room\"\nkind = \"process\"\nprogram = \"bin/room\"\n",
+        )
+        .unwrap();
+        let hello = |views: &[&str]| Hello {
+            api: API.to_owned(),
+            wire: WIRE,
+            views: views.iter().map(|v| (*v).to_owned()).collect(),
+            actions: Vec::new(),
+        };
+        assert_eq!(uncovered(&manifest, &hello(&["panel"])), None);
+        assert_eq!(
+            uncovered(&manifest, &hello(&[])).as_deref(),
+            Some("it does not draw its view panel")
+        );
     }
 }

@@ -1238,6 +1238,10 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         )
     ))]
     let _ = architect_webview::desk::use_desk_web_views(extensions.host().clone());
+    // Extensions' `process` views (#838): a program in the package, its
+    // GPU frames in the pane. Without it their panes say why.
+    #[cfg(all(feature = "process-views", target_os = "linux"))]
+    let _ = architect_process_view::extension::use_process_views(extensions.host().clone());
     use_extension_ui(extensions.host().clone(), Arc::clone(&lab))
 }
 

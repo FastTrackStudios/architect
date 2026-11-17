@@ -103,7 +103,7 @@ fn ProcessLabPane() -> Element {
                 about: "Drawn by process-view-demo, a program of its own: its GPU frames shared with this window. Point, press, use the arrows and type; kill it and restart it here.",
             }
             div { style: "flex: 1; display: flex; min-height: 0; margin: 4px 12px 8px;",
-                ProcessViewPane { session_key: pane.id.0.clone(), program }
+                ProcessViewPane { session_key: pane.id.0, program }
             }
         }
     }
