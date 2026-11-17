@@ -28,7 +28,8 @@ icon = "share-2"
 kind = "paint"
 
 # The arrangement's clips with a playhead moving over them: a paint view
-# that returns layers, so playback sends the playhead's transform alone.
+# that returns layers, the playhead's motion with them, so the host runs
+# playback and a frame of it sends nothing.
 [[views]]
 id = "timeline"
 title = "Timeline"

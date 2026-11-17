@@ -5,6 +5,9 @@
 //! - panning and zooming send only the transform, not the scene again;
 //! - the graph, a paint view (`Builder::paint`) running in the process,
 //!   moves a node it is dragged by;
+//! - the timeline's playhead is run by the host: a frame of playback
+//!   sends nothing, and a pause, a seek or another rate on the app's
+//!   playhead moves the line with no message from the view;
 //! - `arrangement_budget` (ignored; `--ignored --nocapture`) measures a
 //!   50-track arrangement: its first scene's bytes, the bytes and the round
 //!   trip of each frame of panning, and the host's time to build its scene.
@@ -38,9 +41,12 @@ use architect_extensions::host::{Host, SharedSections};
 use architect_extensions::process::{ProcessRunner, Processes, Restart};
 use architect_extensions::proto::SOCKET;
 use architect_extensions::remote::{RemoteDocument, RemoteView, mounted_views};
-use architect_extensions::scene::{RenderCommand, Scene};
+use architect_extensions::scene::{Affine, RenderCommand, Scene, layers_value};
 use architect_extensions::{Origin, Package};
-use architect_sandbox_sketch::{ID, Sketch, arrangement_scene};
+use architect_sandbox_sketch::{ID, PLAYHEAD_SPEED, Sketch, arrangement_scene};
+use architect_scene::anim::{Clocks, Reading};
+use architect_scene::layers::Layer;
+use architect_scene::ops::Sender;
 use architect_workspace::paint::peniko::kurbo::Shape as _;
 use blitz_dom::{BaseDocument, Document as _, DocumentConfig};
 use blitz_traits::events::{
@@ -185,6 +191,12 @@ fn view(doc: &BaseDocument) -> Option<&RemoteDocument> {
     let at = *mounted_views(doc).first()?;
     let sub: &dyn Any = doc.subdoc(at)?;
     sub.downcast_ref::<RemoteDocument>()
+}
+
+fn view_mut(doc: &mut BaseDocument) -> Option<&mut RemoteDocument> {
+    let at = *mounted_views(doc).first()?;
+    let sub: &mut dyn Any = doc.subdoc_mut(at)?;
+    sub.downcast_mut::<RemoteDocument>()
 }
 
 /// How many bytes of scenes and transforms the view sent.
@@ -359,8 +371,33 @@ fn fills(commands: &[RenderCommand]) -> usize {
         .count()
 }
 
-#[test]
-fn playback_in_a_process_sends_the_playheads_transform_and_not_the_clips() {
+/// What a test's clocks read: wall seconds, and the playhead.
+#[derive(Clone, Default)]
+struct Hands(Arc<std::sync::Mutex<(f64, Option<Reading>)>>);
+
+impl Hands {
+    fn set(&self, wall: f64, playhead: Option<Reading>) {
+        *self.0.lock().unwrap() = (wall, playhead);
+    }
+
+    fn clocks(&self) -> Clocks {
+        let (wall, playhead) = (self.clone(), self.clone());
+        Clocks::new(
+            move || wall.0.lock().unwrap().0,
+            move || playhead.0.lock().unwrap().1,
+        )
+    }
+}
+
+const fn reading(time: f64, running: bool) -> Reading {
+    Reading { time, running }
+}
+
+/// A second at 240 frames.
+const FRAMES: u32 = 240;
+
+/// The timeline, its clips in the window, its animations on `hands`.
+fn timeline(hands: &Hands) -> App {
     let mut app = open("timeline");
     let deadline = Instant::now() + Duration::from_secs(10);
     while fills(&app.window_scene()) < 2000 {
@@ -370,30 +407,103 @@ fn playback_in_a_process_sends_the_playheads_transform_and_not_the_clips() {
         );
         app.pump("the clips", |_| true);
     }
-    // What the clips cost to cross once.
+    view_mut(&mut app.doc.inner.borrow_mut())
+        .unwrap()
+        .set_clocks(hands.clocks());
+    app
+}
+
+/// Whether the window would draw another frame now, unasked.
+fn animating(app: &mut App) -> bool {
+    app.pump("a frame", |_| true);
+    app.doc.inner.borrow().is_animating()
+}
+
+#[test]
+fn playback_in_a_process_is_run_by_the_host_and_sends_nothing() {
+    let hands = Hands::default();
+    let mut app = timeline(&hands);
+    // What the clips and the playhead's motion cost to cross, once.
     let once = bytes(&app.doc.inner.borrow());
     assert!(once > 50_000, "the clips crossed in {once} bytes");
-    let from = playhead_x(&app.window_scene()).unwrap();
-    let began = Instant::now();
-    let mut to = from;
-    while to - from < 30.0 {
+    let mut last = playhead_x(&app.window_scene()).unwrap();
+    // A second at 240 frames: nothing on the playhead, so wall time. The
+    // view's process is alive and is sent nothing, and sends nothing;
+    // the line moves every frame.
+    for frame in 1..=FRAMES {
+        hands.set(f64::from(frame) / 240.0, None);
+        assert!(animating(&mut app), "frame {frame}: the window went idle");
+        let x = playhead_x(&app.window_scene()).unwrap();
         assert!(
-            began.elapsed() < Duration::from_secs(10),
-            "the playhead never moved"
+            (x - last - PLAYHEAD_SPEED / 240.0).abs() < 1e-9,
+            "frame {frame}: the line went from {last} to {x}"
         );
-        app.pump("playback", |_| true);
-        to = playhead_x(&app.window_scene()).unwrap();
+        last = x;
+        assert!(fills(&app.window_scene()) >= 2000);
     }
-    // A quarter of a second of playback: frames of a transform each, not
-    // the clips again, and every clip still drawn.
     let playing = bytes(&app.doc.inner.borrow()) - once;
-    assert!(playing > 0);
-    assert!(
-        playing < once / 4,
-        "playback sent {playing} bytes after the clips' {once}"
+    assert_eq!(playing, 0, "playback sent {playing} bytes");
+    // What a frame cost when the view sent its playhead's transform: a
+    // `MOVE` in the attribute, as the same encoder writes it.
+    let line = || Layer::new(Arc::new(arrangement_scene(1, 1)));
+    let mut sender = Sender::new();
+    let _ = sender.frame(&[(1, line())]);
+    let moved = sender
+        .frame(&[(1, line().at(Affine::translate((0.5, 0.0))))])
+        .unwrap();
+    let was = layers_value(u64::from(FRAMES), &moved).len();
+    println!(
+        "clips and motion once: {once} bytes; {FRAMES} frames of playback: {playing} bytes \
+         (a transform a frame was {was} bytes, {} over these frames)",
+        was * FRAMES as usize
     );
-    assert!(fills(&app.window_scene()) >= 2000);
-    println!("clips once: {once} bytes; playback over {:.0} px: {playing} bytes", to - from);
+    // Still the view's: a pan crosses as before.
+    drag(
+        &mut app,
+        (200.0, 150.0),
+        (230.0, 150.0),
+        3,
+        Modifiers::empty(),
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while bytes(&app.doc.inner.borrow()) == once {
+        assert!(Instant::now() < deadline, "the pan never crossed");
+        app.pump("the pan", |_| true);
+    }
+    let panned = playhead_x(&app.window_scene()).unwrap();
+    assert!(
+        (panned - last - 30.0).abs() < 1e-6,
+        "{last} panned to {panned}"
+    );
+}
+
+#[test]
+fn the_playhead_moves_the_line_with_no_message_from_the_view() {
+    let hands = Hands::default();
+    let mut app = timeline(&hands);
+    let once = bytes(&app.doc.inner.borrow());
+    // Paused one second in: the line stands, and the window rests.
+    hands.set(10.0, Some(reading(1.0, false)));
+    let at = playhead_x(&app.window_scene()).unwrap();
+    hands.set(11.0, Some(reading(1.0, false)));
+    assert!(
+        !animating(&mut app),
+        "a paused playhead kept the window drawing"
+    );
+    assert_eq!(playhead_x(&app.window_scene()).unwrap(), at);
+    // A seek: drawn, the line where the playhead is.
+    hands.set(12.0, Some(reading(3.5, false)));
+    assert!(animating(&mut app), "a seek wasn't drawn");
+    let sought = playhead_x(&app.window_scene()).unwrap();
+    assert!((sought - at - 2.5 * PLAYHEAD_SPEED).abs() < 1e-9);
+    assert!(!animating(&mut app));
+    // Playing at half speed: the playhead's time, not the wall's.
+    hands.set(20.0, Some(reading(3.75, true)));
+    assert!(animating(&mut app));
+    let played = playhead_x(&app.window_scene()).unwrap();
+    assert!((played - sought - 0.25 * PLAYHEAD_SPEED).abs() < 1e-9);
+    // None of it from the view.
+    assert_eq!(bytes(&app.doc.inner.borrow()), once);
 }
 
 fn p(samples: &mut [Duration], q: usize) -> f64 {
