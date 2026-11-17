@@ -835,17 +835,27 @@ fn apply(inst: &Instance, ask: &Ask) -> Result<(), String> {
             Err(why) => return Err(format!("its extensions never loaded: {why}")),
         }
     };
+    // Each step's failure is kept and the rest still done: a copy that
+    // does not load leaves the window hidden, folded and on its document
+    // all the same. All of them are what `ready` says.
+    let mut failed: Vec<String> = Vec::new();
     let mut keep: Vec<String> = Vec::new();
     for dir in &ask.extensions {
-        let folder = dir
-            .canonicalize()
-            .map_err(|e| format!("{}: {e}", dir.display()))?;
-        let out = act(&socket, "EXT_DEV", &json!({ "folder": folder }))
-            .map_err(|e| format!("EXT_DEV {}: {e}", folder.display()))?;
+        let folder = match dir.canonicalize() {
+            Ok(folder) => folder,
+            Err(e) => {
+                failed.push(format!("{}: {e}", dir.display()));
+                continue;
+            }
+        };
+        let out = act(&socket, "EXT_DEV", &json!({ "folder": folder }));
+        if let Err(e) = &out {
+            failed.push(format!("EXT_DEV {}: {e}", folder.display()));
+        }
+        // Kept on whatever happened: `--only` never turns it off.
         if let Some(id) = out
-            .get("id")
-            .and_then(Value::as_str)
-            .map(str::to_owned)
+            .ok()
+            .and_then(|o| o.get("id").and_then(Value::as_str).map(str::to_owned))
             .or_else(|| manifest_id(&folder))
         {
             keep.push(id);
@@ -869,27 +879,41 @@ fn apply(inst: &Instance, ask: &Ask) -> Result<(), String> {
         );
         let loaded = e.get("loaded").and_then(Value::as_bool).unwrap_or(true);
         if !on && loaded {
-            act(&socket, "EXT_DISABLE", &json!({ "id": id }))
-                .map_err(|e| format!("EXT_DISABLE {id}: {e}"))?;
+            if let Err(e) = act(&socket, "EXT_DISABLE", &json!({ "id": id })) {
+                failed.push(format!("EXT_DISABLE {id}: {e}"));
+            }
         } else if on && !loaded {
             // Turned off by an earlier ask (it is kept): on again. One that
             // cannot run here stays off, and says why in EXT_LOGS.
             let _ = act(&socket, "EXT_ENABLE", &json!({ "id": id }));
         }
     }
-    if let Some(name) = &ask.layout {
-        act(&socket, "HOME_LAYOUT_USE", &json!({ "name": name }))
-            .map_err(|e| format!("HOME_LAYOUT_USE {name}: {e}"))?;
+    if let Some(name) = &ask.layout
+        && let Err(e) = act(&socket, "HOME_LAYOUT_USE", &json!({ "name": name }))
+    {
+        failed.push(format!("HOME_LAYOUT_USE {name}: {e}"));
     }
-    if let Some(path) = &ask.open {
-        open(&socket, path)?;
+    if let Some(path) = &ask.open
+        && let Err(e) = open(&socket, path)
+    {
+        failed.push(e);
     }
-    hide(inst, &socket, &ask.hide)?;
-    collapse(&socket, &ask.collapse)?;
+    if let Err(e) = hide(inst, &socket, &ask.hide) {
+        failed.push(e);
+    }
+    if let Err(e) = collapse(&socket, &ask.collapse) {
+        failed.push(e);
+    }
     for (id, args) in &ask.run {
-        act(&socket, id, args).map_err(|e| format!("{id}: {e}"))?;
+        if let Err(e) = act(&socket, id, args) {
+            failed.push(format!("{id}: {e}"));
+        }
     }
-    Ok(())
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(failed.join("; "))
+    }
 }
 
 /// Folds `sides` away: the left as the sidebar folded to the rail (a

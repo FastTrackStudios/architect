@@ -631,9 +631,18 @@ pub fn app_registries(
             root.join("extension-registries.json"),
             root.join("registries"),
         )
-        .with_dev_forced(cfg!(debug_assertions)),
+        // On in a debug build, and in an isolated development instance
+        // (`architect-desktop dev`): it was started to run development
+        // copies, in settings of its own. A person's own app asks.
+        .with_dev_forced(cfg!(debug_assertions) || dev_instance()),
         Registries::with_builtin,
     )
+}
+
+/// Whether this window is an isolated development instance
+/// (`architect-desktop dev`, `ARCHITECT_DEV`): its name is set.
+fn dev_instance() -> bool {
+    std::env::var_os("ARCHITECT_DEV_INSTANCE").is_some_and(|v| !v.is_empty())
 }
 
 /// The lab's registry folder.
@@ -1397,8 +1406,7 @@ pub fn VaultNeedsBanner(#[props(default)] status: Option<Signal<Option<StatusIte
     let needs = planned();
     // An isolated instance (`architect-desktop dev`) has the extensions it
     // was given on purpose: no offer to install what the vault names.
-    let dev_instance = std::env::var_os("ARCHITECT_DEV_INSTANCE").is_some_and(|v| !v.is_empty());
-    let shown = !needs.is_empty() && !dev_instance && !dismissed.read().contains(&target);
+    let shown = !needs.is_empty() && !dev_instance() && !dismissed.read().contains(&target);
     // What the status bar says; pressed, the dialog with the card.
     let said = match unknown_device() {
         Some((_, device)) => Some((
