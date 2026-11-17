@@ -130,7 +130,7 @@ pub(super) fn VirtualPane(
             if scrollable {
                 div {
                     class: "nv-thumb",
-                    style: "position:absolute; right:2px; width:6px; border-radius:3px; top:{thumb_top}px; height:{thumb_h}px; z-index:2; touch-action:none;",
+                    style: "position:absolute; right:2px; width:4px; border-radius:2px; top:{thumb_top}px; height:{thumb_h}px; z-index:2; touch-action:none;",
                     onpointerdown: move |e: PointerEvent| {
                         e.stop_propagation();
                         thumb_drag.set(Some((e.data().client_coordinates().y, nav.state.peek().scroll(pane).offset)));

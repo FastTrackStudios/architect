@@ -2136,7 +2136,10 @@ fn VaultFiles(providers: Vec<LoadedProvider>) -> Element {
                 }
                 return;
             }
-            let markdown = has_ext(rest, "md");
+            // A note: `.md`, or a file type an extension declared
+            // (`[[file_types]]`: the Cookbook's `.cook` recipes), which
+            // opens in the editor as one (its card at its head).
+            let markdown = vault::note_types::is_note_path(rest);
             // Another org's note: opened from its own vault, without
             // switching the app's.
             if mount != own {
@@ -2679,6 +2682,16 @@ fn VaultNote(path: String) -> Element {
             },
         );
     let core_list = is_list && !claimed;
+    // Its type's renderer (`[[renderers]]`): how its text reads in the
+    // editor (a recipe's Cooklang, as the Cookbook draws it).
+    let renderer = (!note_type.is_empty())
+        .then(|| try_consume_context::<architect_extensions::interface::ExtensionUi>())
+        .flatten()
+        .and_then(|ui| {
+            let _ = ui.revision();
+            ui.host().contributions().renderer_for(&note_type)
+        })
+        .map(|r| r.item.action);
     let hidden: Vec<String> = if core_list {
         architect_media::Collection::fields_in(&fields)
             .into_iter()
@@ -2790,6 +2803,8 @@ fn VaultNote(path: String) -> Element {
                 vault: disk.peek().clone().map(crate::note_editor::NoteVault),
                 on_link: move |href: String| open_link(href),
                 fold_listing: core_list,
+                renderer,
+                markdown_body: vault::note_types::body_is_markdown(&here),
                 on_change: move |value: String| {
                     let (mut ours, mut body) = (ours, body);
                     ours.set(format!("{}{value}", block.peek()));

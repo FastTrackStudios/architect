@@ -27,6 +27,7 @@ pub mod actions;
 pub mod backend;
 pub mod client;
 pub mod files;
+pub mod render;
 pub mod scale;
 pub mod service;
 pub mod ui;
@@ -113,6 +114,7 @@ impl Extension for Cookbook {
             .action("COOKBOOK_TIMER", actions::timer)
             .action("COOKBOOK_IMPORT", actions::import)
             .action("COOKBOOK_TIDY", actions::tidy)
+            .action("COOKBOOK_RENDER", |a| async move { render::action(&a) })
             .action("COOKBOOK_STARTED", |_| async {
                 Ok(json!({ "ready": true }))
             });

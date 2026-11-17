@@ -437,6 +437,7 @@ fn PopoutView(props: PopoutProps) -> Element {
         switch: super::switcher::Switch::new(),
         float_area: Signal::new(None),
         menu_at: Signal::new(None),
+        tip: Signal::new(None),
         mounts: CopyValue::new(HashMap::new()),
         held: Signal::new(false),
         latched: Signal::new(false),
@@ -469,6 +470,7 @@ fn PopoutView(props: PopoutProps) -> Element {
         // A pop-out writes nothing back to the shipped sets.
         shipped: CopyValue::new(Vec::new()),
     });
+    super::use_popup_provider(host);
     use_release_outside(host);
     let mut host = host;
     let t = host.theme.read().clone();

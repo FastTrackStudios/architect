@@ -44,7 +44,13 @@ Drizzle [[Hot Honey]]{3} over, with @waffles{4}.
 - The manifest declares the file type (`[[file_types]] extension =
   "cook"`), so a `.cook` file is a note: it syncs, opens, shows in Bases
   (as `type: recipe`, its frontmatter its properties) and travels by
-  share link like a markdown note.
+  share link like a markdown note. Its row in the navigator shows its
+  `description` and its `image` (`[[file_types]] preview`).
+- Open, it is its text, rendered as it is edited (`[[renderers]]`,
+  `COOKBOOK_RENDER`, `extensions/cookbook/src/render.rs`): `@flour{250%g}`
+  reads as a chip "250 g flour", `#bowl{}` as "bowl", `~{10%minutes}` as
+  "10 minutes", `= Batter` as a heading, and the line the caret is on as
+  it is written. Over it, its card: servings, Cook and its ingredients.
 
 The model is Task's, moved as it was: `extensions/cookbook/src/moved/model.rs`
 `Recipe`, `Ingredient`, `CookStep`, `RecipeTimer`; the projection of the

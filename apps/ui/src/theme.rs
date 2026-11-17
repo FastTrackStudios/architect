@@ -174,7 +174,9 @@ pub fn page_css(resolved: &architect_theme::Resolved) -> String {
         "html, body {{ margin: 0; padding: 0; background: {desk}; }}\
          button {{ cursor: pointer; }}\
          .lp:hover {{ box-shadow: inset 0 0 0 999px {hover}; }}\
-         .lp:active {{ background-color: {active}; }}",
+         .lp:active {{ background-color: {active}; }}\
+         [role=menuitem]:not([data-danger]):hover, [role=menuitemradio]:hover, [role=menuitemcheckbox]:hover \
+         {{ background-color: {active} !important; }}",
         desk = resolved.value("desk"),
         hover = resolved
             .color("ink")

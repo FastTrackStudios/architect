@@ -231,10 +231,8 @@ async fn open() -> Result<(), String> {
     // asked of the issuer or the node.
     // Which distribution this is, first: the demo is named for it too.
     read_distribution().await;
-    if route == Route::Showcase {
-        crate::demo::choose(crate::demo::Vault::Showcase);
-    }
-    if matches!(route, Route::Demo | Route::Showcase) {
+    if route == Route::Demo {
+        crate::demo::open();
         crate::app::mount(crate::app::Mode::Demo);
         return Ok(());
     }
@@ -257,6 +255,7 @@ async fn open() -> Result<(), String> {
     CONFIG.with(|c| *c.borrow_mut() = Some((*config).clone()));
     wire(Rc::clone(&config))?;
     let problem = match route {
+        #[allow(deprecated)]
         Route::App | Route::Demo | Route::Showcase | Route::Share { .. } => None,
         Route::Callback { code, state } => redeem(&config, &code, &state).await.err(),
         Route::Refused(why) => Some(why),

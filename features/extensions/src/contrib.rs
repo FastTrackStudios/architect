@@ -774,6 +774,7 @@ pub type LanguageDecl = architect_editor::Language;
 /// icon = "chef-hat"
 /// note_type = "recipe"
 /// body = "text"        # its body is no markdown: only its [[links]] are read
+/// preview = "description"  # a list row's preview: this property, not the body
 /// ```
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
@@ -792,6 +793,39 @@ pub struct FileTypeDecl {
     /// (Cooklang's `#pan{}` is cookware, not a tag), read only for its
     /// `[[links]]`.
     pub body: String,
+    /// The frontmatter property the navigator shows as a file's preview
+    /// in its list, in place of the body's first words (a recipe's
+    /// `description`, not its Cooklang). Unset, a markdown body is
+    /// previewed as a note's is and a `text` one not at all. A file's
+    /// picture is its `image` (or `cover`, `thumbnail`…) property's, as a
+    /// note's is.
+    pub preview: String,
+}
+
+/// How a note type's text reads in the editor (`[[renderers]]`): its
+/// live preview, as markdown's is the editor's own.
+///
+/// While a note of `note_type` is open, the app runs `action` with
+/// `{text}` (its body, without its frontmatter) each time the text
+/// changes, and draws the [`crate::render::RenderItem`]s it answers over
+/// the text: a range hidden, a range shown as other words, a range or a
+/// line in one of the app's looks. The line the caret is on shows its
+/// source as written, so it stays easy to edit. A note whose body is not
+/// markdown (`[[file_types]] body = "text"`) gets no markdown preview,
+/// only its renderer's.
+///
+/// ```toml
+/// [[renderers]]
+/// note_type = "recipe"
+/// action = "COOKBOOK_RENDER"
+/// ```
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct RendererDecl {
+    /// The `type` of the notes it renders.
+    pub note_type: String,
+    /// Its action: given `{text}`, answers `{items: [RenderItem]}`.
+    pub action: String,
 }
 
 /// Extensions a `[[file_types]]` entry may not declare: the ones the vault
@@ -845,11 +879,12 @@ impl FileTypeDecl {
     /// (`vault_proto::note_types::register_with`).
     #[cfg(feature = "host")]
     pub fn register(&self) {
-        vault_proto::note_types::register_with(
-            &self.extension,
-            &self.note_type,
-            self.markdown_body(),
-        );
+        vault_proto::note_types::register_type(vault_proto::note_types::NoteFileType {
+            extension: self.extension.clone(),
+            note_type: self.note_type.clone(),
+            markdown: self.markdown_body(),
+            preview: Some(self.preview.clone()),
+        });
     }
 }
 
@@ -1197,6 +1232,9 @@ pub struct Contribution {
     /// The host registers them as it loads the extension
     /// (`vault_proto::note_types`, `EXT_FILE_TYPES`).
     pub file_types: Vec<FileTypeDecl>,
+    /// How a note type's text reads in the editor (`[[renderers]]`): see
+    /// [`RendererDecl`].
+    pub renderers: Vec<RendererDecl>,
     /// Kinds of tab in the tab bar: scope tabs and custom tabs
     /// (`[[tab_kinds]]`).
     pub tab_kinds: Vec<TabKindDecl>,
@@ -1317,6 +1355,7 @@ impl Contribution {
             }),
             languages: join(&self.languages, &other.languages, |l| l.id.clone()),
             file_types: join(&self.file_types, &other.file_types, |f| f.extension.clone()),
+            renderers: join(&self.renderers, &other.renderers, |r| r.note_type.clone()),
             tab_kinds: join(&self.tab_kinds, &other.tab_kinds, |k| k.id.clone()),
             capture_targets: join(&self.capture_targets, &other.capture_targets, |c| {
                 c.id.clone()
@@ -1383,6 +1422,11 @@ impl Contribution {
             self.file_types
                 .iter()
                 .map(|f| format!("file_type:{}", f.extension)),
+        );
+        out.extend(
+            self.renderers
+                .iter()
+                .map(|r| format!("renderer:{}", r.note_type)),
         );
         out.extend(self.tab_kinds.iter().map(|k| format!("tab_kind:{}", k.id)));
         out.extend(
@@ -1465,6 +1509,7 @@ impl Contribution {
             self.deck_templates.len(),
             self.languages.len(),
             self.file_types.len(),
+            self.renderers.len(),
             self.tab_kinds.len(),
             self.capture_targets.len(),
             self.key_bindings.len(),
@@ -1764,6 +1809,20 @@ impl Contribution {
         for f in &self.file_types {
             if let Err(why) = f.check() {
                 return refuse(format!("file type {}", f.extension), why);
+            }
+        }
+        for r in &self.renderers {
+            if r.note_type.trim().is_empty() {
+                return refuse(
+                    "a renderer".to_owned(),
+                    "it needs the `note_type` it renders".to_owned(),
+                );
+            }
+            if r.action.trim().is_empty() {
+                return refuse(
+                    format!("renderer {}", r.note_type),
+                    "it needs the `action` that renders its text".to_owned(),
+                );
             }
         }
         for k in &self.tab_kinds {
@@ -2610,6 +2669,15 @@ impl Contributions {
             .into_iter()
             .filter(|l| seen.insert(l.item.id.clone()))
             .collect()
+    }
+
+    /// The renderer of notes of type `note_type` (`[[renderers]]`): the
+    /// first loaded that claims it.
+    #[must_use]
+    pub fn renderer_for(&self, note_type: &str) -> Option<By<RendererDecl>> {
+        self.all(|c| c.renderers.clone())
+            .into_iter()
+            .find(|r| r.item.note_type.eq_ignore_ascii_case(note_type))
     }
 
     /// Every file type an extension declares (`[[file_types]]`), in the

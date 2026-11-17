@@ -31,6 +31,10 @@ pub struct NoteFileType {
     /// headings read as such), or text the vault reads only for its
     /// `[[links]]` ([`body_is_markdown`]).
     pub markdown: bool,
+    /// The frontmatter property a list row's preview is read from, in
+    /// place of the body ([`preview_property_of`]): a recipe's
+    /// `description`, not its Cooklang.
+    pub preview: Option<String>,
 }
 
 static DECLARED: RwLock<Vec<NoteFileType>> = RwLock::new(Vec::new());
@@ -52,7 +56,27 @@ pub fn register(extension: &str, note_type: &str) -> bool {
 /// [`register`], saying whether its body is markdown (`false`: a body in
 /// another language, Cooklang's `#cookware{}` say, whose `#` is no tag:
 /// only its `[[links]]` are read).
+#[allow(clippy::must_use_candidate)]
 pub fn register_with(extension: &str, note_type: &str, markdown: bool) -> bool {
+    register_type(NoteFileType {
+        extension: extension.to_owned(),
+        note_type: note_type.to_owned(),
+        markdown,
+        preview: None,
+    })
+}
+
+/// [`register_with`], the whole declaration: with the property its rows'
+/// previews are read from ([`NoteFileType::preview`]).
+// Registering is what it is for: its answer is often not wanted.
+#[allow(clippy::must_use_candidate)]
+pub fn register_type(t: NoteFileType) -> bool {
+    let NoteFileType {
+        extension,
+        note_type,
+        markdown,
+        preview,
+    } = t;
     let ext = extension
         .trim()
         .trim_start_matches('.')
@@ -69,6 +93,9 @@ pub fn register_with(extension: &str, note_type: &str, markdown: bool) -> bool {
             extension: ext,
             note_type: note_type.trim().to_owned(),
             markdown,
+            preview: preview
+                .map(|p| p.trim().to_owned())
+                .filter(|p| !p.is_empty()),
         });
     }
     ANY.store(true, Ordering::Release);
@@ -135,6 +162,15 @@ pub fn body_is_markdown(path: &str) -> bool {
     extension_of(path)
         .and_then(|ext| with_declared(ext, |t| t.markdown))
         .unwrap_or(true)
+}
+
+/// The frontmatter property the note at `path`'s list row previews
+/// ([`NoteFileType::preview`]); `None` for `.md` and a type that names
+/// none.
+#[must_use]
+pub fn preview_property_of(path: &str) -> Option<String> {
+    let ext = extension_of(path)?;
+    with_declared(ext, |t| t.preview.clone()).flatten()
 }
 
 /// `name` without its note extension (`Songs/A.md` → `Songs/A`,

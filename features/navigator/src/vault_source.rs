@@ -519,7 +519,11 @@ fn derived(page: &VaultPage, created: Millis, modified: Millis) -> NoteFile {
         .map(|e| (e.key.clone(), property(&e.value)))
         .collect();
     file.tags = page_tags(page);
-    file.preview = Some(preview_of(&page.raw));
+    file.preview = Some(crate::markdown::preview_for(
+        &page.rel_path,
+        &page.raw,
+        &file.properties,
+    ));
     file.words = Some(u32::try_from(page_wordcount(page).words).unwrap_or(u32::MAX));
     let tasks = page_tasks(page);
     let total = u32::try_from(tasks.len()).unwrap_or(u32::MAX);
@@ -698,9 +702,13 @@ mod tests {
     fn a_preview_is_the_notes_words() {
         let text = "---\ntitle: X\ntags: [a]\n---\n# Heading\nSee [[Other note|the other]] and **[[Plain]]**.\n\
                     ![[img.png]]\n```kf\n| C | G |\n```\n- [ ] A task\n> Quoted";
+        assert_eq!(preview_of(text), "See the other and Plain. A task · Quoted");
+        // A list keeps its items apart; a lower heading stays, apart too.
         assert_eq!(
-            preview_of(text),
-            "Heading See the other and Plain. A task Quoted"
+            preview_of(
+                "# Home\nBack to [[Welcome]].\n\n- [[Garden]]\n- Sourdough\n## Later\nWrapped\nprose"
+            ),
+            "Back to Welcome. Garden · Sourdough · Later · Wrapped prose"
         );
         assert_eq!(unlink("a [link](http://x) b ![i](x.png) c"), "a link b  c");
     }

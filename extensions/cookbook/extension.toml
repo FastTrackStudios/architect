@@ -54,6 +54,9 @@ note_type = "recipe"
 # Cooklang, not markdown: `#pan{}` is cookware, no tag; its [[links]]
 # (a recipe it calls for) are read.
 body = "text"
+# Its row in the navigator's list: its `description`, not its Cooklang
+# (its picture is its `image`, as any note's is).
+preview = "description"
 
 [[views]]
 id = "cookbook"
@@ -74,6 +77,21 @@ icon = "pencil"
 id = "recipe"
 title = "Recipe"
 icon = "chef-hat"
+
+# A recipe's Cooklang reads as the recipe in the editor, the line being
+# edited as written: `@flour{250%g}` as "250 g flour", `= Batter` as a
+# heading (COOKBOOK_RENDER answers what each range reads as).
+[[renderers]]
+note_type = "recipe"
+action = "COOKBOOK_RENDER"
+
+[[actions]]
+id = "COOKBOOK_RENDER"
+name = "Render a recipe's text"
+description = "How Cooklang `text` reads in the editor: `{items}`, each a range of its bytes concealed, replaced by words (an ingredient as \"250 g flour\"), marked or a line in a look (a section as a heading). The editor draws them over every line but the one being edited."
+group = "Cookbook"
+effect = "read_only"
+params = '{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}'
 
 # A recipe note (`type: recipe`, which a .cook file is) draws its card
 # at its head: scale it, its ingredients, its steps with their timers.

@@ -1,5 +1,5 @@
 // The extension showcase in the web app (#710): `/app/?showcase` opens the
-// showcase vault (`apps/ui/showcase-vault`) in the tab's memory, the app
+// demo vault (`apps/ui/demo-vault`, the showcase's too) in the tab's memory, the app
 // itself on dioxus-web, in a real browser. Its folders (one per group of
 // capabilities, R to W) are in the navigator, and its index note and a
 // capability's note open. The web app hosts no extensions yet (#495): the
@@ -163,8 +163,8 @@ for (const scheme of ['light', 'dark']) {
       for (const [width, height, phone] of [[1280, 844, false], [390, 844, true]]) {
         await b.viewport(width, height);
         await b.go(`${f.origin}/app/?showcase`);
-        // The app, on the showcase's vault: its root is named Showcase,
-        // its folders are the capability groups.
+        // The app, on the demo vault (the showcase's too): its Showcase
+        // note at the root, the capability groups as folders.
         // A phone's navigator is behind its Files tab.
         if (phone) await until(() => tab(b, 'Files'), 60000, 'a Files tab');
         try {

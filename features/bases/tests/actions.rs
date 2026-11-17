@@ -213,7 +213,8 @@ fn every_base_in_the_labs_demo_vault_runs_every_view() {
     .unwrap();
     let bases = run(&list, "BASES_LIST", &Value::Null);
     let bases = bases.as_array().unwrap();
-    assert_eq!(bases.len(), 5, "{bases:?}");
+    // The demo vault's five, and the showcase's tasks (it is the showcase's vault).
+    assert_eq!(bases.len(), 6, "{bases:?}");
     for b in bases {
         assert!(b.get("error").is_none(), "{b}");
         for v in b["views"].as_array().unwrap() {

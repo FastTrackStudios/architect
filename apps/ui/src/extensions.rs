@@ -1400,7 +1400,7 @@ pub fn VaultNeedsBanner() -> Element {
         // Made again each round: a Blitz scroller keeps its offset when
         // what it holds shrinks (after Install all).
         for k in [round] {
-            div { key: "{k}", style: "padding: 8px 12px 0; display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; max-height: 440px; overflow-y: auto;",
+            div { key: "{k}", style: "padding: 8px 12px 4px; display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; max-height: 440px; overflow-y: auto;",
                 architect_extensions::page::MissingExtensions {
                     browse: browse.clone(),
                     plan: needs.plan.clone(),
@@ -1410,6 +1410,12 @@ pub fn VaultNeedsBanner() -> Element {
                         last.set(Some(done));
                         let next = again.peek().wrapping_add(1);
                         again.set(next);
+                    },
+                    on_dismiss: {
+                        let target = target.clone();
+                        move |()| {
+                            dismissed.write().insert(target.clone());
+                        }
                     },
                 }
                 for (file, why) in needs.refused.iter() {
@@ -1422,18 +1428,6 @@ pub fn VaultNeedsBanner() -> Element {
                 }
                 if let Some(error) = &needs.error {
                     div { style: "font-size: 12px; color: var(--destructive);", "{error}" }
-                }
-                div {
-                    button {
-                        style: "font-size: 12px; background: none; border: none; color: var(--muted-foreground); cursor: pointer; padding: 0;",
-                        onclick: {
-                            let target = target.clone();
-                            move |_| {
-                                dismissed.write().insert(target.clone());
-                            }
-                        },
-                        "Not now"
-                    }
                 }
             }
         }

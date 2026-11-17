@@ -1555,9 +1555,11 @@ const CSS: &str = "
 .nv-root .nv-tool { display:flex; align-items:center; justify-content:center; width:26px; height:26px; border:none; border-radius:6px; background:transparent; color:var(--nv-faint); cursor:pointer; padding:0; }
 .nv-root .nv-tool:hover { background: var(--nv-hover); color: var(--nv-text); }
 .nv-root .nv-tool.nv-on { color: var(--nv-open); }
+.nv-root .nv-menu-button { flex-shrink:0; display:flex; align-items:center; text-align:left; height:28px; min-height:28px; padding:0 10px; border:none; border-radius:6px; background:transparent; color:var(--nv-text); cursor:pointer; font-size:13px; font-family:inherit; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .nv-root .nv-menu-row:hover { background: var(--nv-hover); }
-.nv-root .nv-thumb { background: var(--nv-faint); opacity: 0.35; }
-.nv-root .nv-thumb:hover { opacity: 0.6; }
+.nv-root .nv-thumb { background: var(--nv-faint); opacity: 0; }
+.nv-root .nv-scroller:hover .nv-thumb { opacity: 0.3; }
+.nv-root .nv-scroller .nv-thumb:hover { opacity: 0.6; }
 .nv-root .nv-row.nv-drop-target { background: var(--nv-selected); box-shadow: inset 0 0 0 1px var(--nv-open); }
 .nv-root mark.nv-search-highlight { background: var(--nv-search-highlight); color: inherit; border-radius: 2px; }
 .nv-root .nv-search-include { color: var(--nv-open); font-weight: 600; }

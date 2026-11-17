@@ -6,7 +6,9 @@
 
 use std::rc::Rc;
 
-use architect_commands::kit::{AskPalette, CommandRow, Frame, Lit, Pick, fill, quiet, theme};
+use architect_commands::kit::{
+    AskPalette, CommandRow, Frame, Lit, Pick, Reveal, fill, quiet, theme,
+};
 use architect_commands::{Found, OpenIn, Query, Ranked, Scope, try_use_commands};
 use dioxus::prelude::*;
 
@@ -20,6 +22,8 @@ pub fn PaletteView() -> Element {
     let t = theme();
     let query = commands.palette_query();
     let mut selected = use_signal(|| 0usize);
+    // Picked with the arrows (kept in sight), or under the pointer.
+    let mut by_keys = use_signal(|| false);
     let q = Query::parse(&query.read());
     let only = commands.choice();
     let (rows, picks): (Vec<Ranked>, Vec<Pick>) = commands.palette_rows(&q).into_iter().unzip();
@@ -33,6 +37,32 @@ pub fn PaletteView() -> Element {
         return rsx! { AskPalette {} };
     }
     let enabled: Vec<bool> = rows.iter().map(|r| r.item.enabled).collect();
+    // With nothing typed: what was run lately first, under its heading,
+    // then the rest (`rank` puts them in that order).
+    let headings: Vec<Option<&str>> = {
+        let recents = commands.recents.read();
+        let browsing =
+            q.text.trim().is_empty() && only.is_none() && matches!(q.scope, Scope::Commands);
+        let recent: Vec<bool> = rows
+            .iter()
+            .map(|r| recents.rank(&r.item.id).is_some())
+            .collect();
+        let any = browsing && recent.iter().any(|r| *r);
+        let mut before = None::<bool>;
+        recent
+            .iter()
+            .map(|&now| {
+                let heading = match before {
+                    _ if !any => None,
+                    None => Some(if now { "Recent" } else { "All commands" }),
+                    Some(true) if !now => Some("All commands"),
+                    Some(_) => None,
+                };
+                before = Some(now);
+                heading
+            })
+            .collect()
+    };
     let pick = selected().min(count.saturating_sub(1));
     let run_at = move |i: usize| {
         if let (Some(p), Some(true)) = (picks.get(i), enabled.get(i)) {
@@ -43,10 +73,12 @@ pub fn PaletteView() -> Element {
     let on_key = move |e: KeyboardEvent| match e.key() {
         Key::Named(NamedKey::ArrowDown) => {
             e.prevent_default();
+            by_keys.set(true);
             selected.set((pick.saturating_add(1)).min(count.saturating_sub(1)));
         }
         Key::Named(NamedKey::ArrowUp) => {
             e.prevent_default();
+            by_keys.set(true);
             selected.set(pick.saturating_sub(1));
         }
         Key::Named(NamedKey::Enter) => run_key(pick),
@@ -71,14 +103,26 @@ pub fn PaletteView() -> Element {
                 div { style: "padding: 18px 12px; color: {t.ink_3}; font-size: 13px;", "{empty}" }
             }
             for (i, row) in rows.into_iter().enumerate() {
+                Fragment { key: "{row.item.source}:{row.item.id}",
+                if let Some(heading) = headings.get(i).copied().flatten() {
+                    div { style: "flex-shrink: 0; padding: 8px 10px 4px; color: {t.ink_3}; font-size: 11px; font-weight: 600;",
+                        "{heading}"
+                    }
+                }
+                Reveal { reveal: i == pick && by_keys(),
                 CommandRow {
-                    key: "{row.item.source}:{row.item.id}",
                     row,
                     on: i == pick,
                     onpress: {
                         let run_at = run_at.clone();
                         move |()| run_at(i)
                     },
+                    onhover: move |()| {
+                        by_keys.set(false);
+                        selected.set(i);
+                    },
+                }
+                }
                 }
             }
         }
@@ -95,6 +139,7 @@ pub fn QuickOpenView() -> Element {
     let t = theme();
     let mut query = use_signal(String::new);
     let mut selected = use_signal(|| 0usize);
+    let mut by_keys = use_signal(|| false);
     // Asked from outside (`COMMANDS_SHOW`, an extension's picker): one
     // opener's items (`theme:`), the field empty for the person to narrow;
     // or the field set.
@@ -144,10 +189,12 @@ pub fn QuickOpenView() -> Element {
     let on_key = move |e: KeyboardEvent| match e.key() {
         Key::Named(NamedKey::ArrowDown) => {
             e.prevent_default();
+            by_keys.set(true);
             selected.set((pick.saturating_add(1)).min(count.saturating_sub(1)));
         }
         Key::Named(NamedKey::ArrowUp) => {
             e.prevent_default();
+            by_keys.set(true);
             selected.set(pick.saturating_sub(1));
         }
         Key::Named(NamedKey::Enter) => {
@@ -164,6 +211,9 @@ pub fn QuickOpenView() -> Element {
         Key::Named(NamedKey::Escape) => commands.close(),
         _ => {}
     };
+    // Nothing typed: each kind's rows under its name, once; typed, they
+    // mix by score and each row says its kind.
+    let browsing = query.read().trim().is_empty();
     let titles: Vec<String> = items
         .iter()
         .map(|f| commands.open_title(&f.item.kind).unwrap_or_default())
@@ -174,24 +224,40 @@ pub fn QuickOpenView() -> Element {
                 div { style: "padding: 18px 12px; color: {t.ink_3}; font-size: 13px;", "Nothing to open matches" }
             }
             for (i, f) in items.iter().cloned().enumerate() {
+                Fragment { key: "{f.item.kind}:{f.item.id}",
+                if browsing && (i == 0 || titles.get(i) != titles.get(i.saturating_sub(1))) {
+                    div { style: "flex-shrink: 0; padding: 8px 10px 4px; color: {t.ink_3}; font-size: 11px; font-weight: 600;",
+                        "{titles.get(i).cloned().unwrap_or_default()}"
+                    }
+                }
+                Reveal { reveal: i == pick && by_keys(),
                 div {
-                    key: "{f.item.kind}:{f.item.id}",
                     class: "lp",
-                    style: "height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border-radius: 8px; \
-                            background: {fill(i == pick, &t)}; font-size: 13px; cursor: pointer;",
+                    style: "flex-shrink: 0; min-height: 34px; box-sizing: border-box; display: flex; align-items: center; gap: 10px; \
+                            padding: 5px 10px; border-radius: 7px; background: {fill(i == pick, &t)}; font-size: 13px; cursor: pointer;",
                     onclick: {
                         let open_at = open_at.clone();
                         move |_| open_at(i, OpenIn::Here)
                     },
-                    span { style: "flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden;",
-                        Lit { text: f.item.title.clone(), positions: f.positions.clone(), ink: t.ink_2.to_string(), lit: t.ink.to_string() }
+                    onmouseenter: move |_| {
+                        by_keys.set(false);
+                        selected.set(i);
+                    },
+                    span { style: "flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; overflow: hidden;",
+                        span { style: "line-height: 18px;",
+                            Lit { text: f.item.title.clone(), positions: f.positions.clone(), ink: t.ink.to_string(), lit: t.ink.to_string() }
+                        }
                         if !f.item.detail.is_empty() {
-                            span { style: "color: {quiet(i == pick, &t)}; font-size: 11px; white-space: nowrap; overflow: hidden;", "{f.item.detail}" }
+                            span { style: "line-height: 15px; color: {quiet(i == pick, &t)}; font-size: 11px; white-space: nowrap; overflow: hidden;", "{f.item.detail}" }
                         }
                     }
-                    span { style: "flex-shrink: 0; color: {quiet(i == pick, &t)}; font-size: 11px;",
-                        "{titles.get(i).cloned().unwrap_or_default()}"
+                    if !browsing {
+                        span { style: "flex-shrink: 0; color: {quiet(i == pick, &t)}; font-size: 11px;",
+                            "{titles.get(i).cloned().unwrap_or_default()}"
+                        }
                     }
+                }
+                }
                 }
             }
             div { style: "display: flex; gap: 14px; padding: 8px 10px 4px; color: {t.ink_3}; font-size: 11px;",

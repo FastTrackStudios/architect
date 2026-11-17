@@ -1024,7 +1024,9 @@ impl Default for NavigatorSettings {
             transition_ms: 150,
             show_root: true,
             show_note_count: true,
-            separate_note_counts: true,
+            // One number reads at a glance; "3 • 12" (Notebook
+            // Navigator's default) needs knowing what the dot means.
+            separate_note_counts: false,
             auto_reveal: true,
             reveal_shortest_path: true,
             smart_collapse: true,

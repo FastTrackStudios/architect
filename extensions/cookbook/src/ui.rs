@@ -393,8 +393,16 @@ fn summary_line(s: &RecipeSummary) -> String {
 
 /// A recipe to read: scale it, its ingredients, its steps with their
 /// timers, its cookware; Cook and Edit when it is a file.
+/// A recipe: its name, servings to scale it by, Cook (and Edit, when it
+/// has a path), its ingredients and cookware, and (`steps`, the default)
+/// its steps. A recipe note's head leaves the steps out: its text below,
+/// as the editor renders it (`crate::render`), is them.
 #[component]
-pub fn RecipeCard(recipe: Recipe, path: Option<String>) -> Element {
+pub fn RecipeCard(
+    recipe: Recipe,
+    path: Option<String>,
+    #[props(default = true)] steps: bool,
+) -> Element {
     let base = recipe.servings.map_or(1.0, f64::from);
     let mut servings = use_signal(|| base);
     let shown = scaled(recipe.clone(), Some(servings()));
@@ -464,6 +472,7 @@ pub fn RecipeCard(recipe: Recipe, path: Option<String>) -> Element {
                         div { style: "{MUTED}", "{shown.cookware.join(\", \")}" }
                     }
                 }
+                if steps {
                 div { class: "cb-steps", style: "flex: 2 1 300px; display: flex; flex-direction: column; gap: 10px;",
                     for (si, (label, steps)) in sections.into_iter().enumerate() {
                         div { key: "{si}", style: "display: flex; flex-direction: column; gap: 8px;",
@@ -473,6 +482,7 @@ pub fn RecipeCard(recipe: Recipe, path: Option<String>) -> Element {
                             }
                         }
                     }
+                }
                 }
             }
         }
@@ -536,7 +546,7 @@ pub fn RecipeEmbed() -> Element {
     match crate::parse::parse_cook("Recipe.cook", &source) {
         Ok(r) => rsx! {
             div { class: "cb-embed", style: "padding: 4px 0;",
-                RecipeCard { recipe: r, path: None }
+                RecipeCard { recipe: r, path: None, steps: false }
             }
         },
         Err(e) => rsx! { div { style: "{MUTED}", "Not a recipe Cooklang reads: {e}" } },

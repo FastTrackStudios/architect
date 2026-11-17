@@ -355,6 +355,53 @@ enum Menu {
         id: String,
         pane: PaneId,
     },
+    /// A view's own rows, asked for through the shell's
+    /// [`architect_shell::popup::Popup`] (a file tree's folder menu).
+    Popup(Vec<architect_shell::popup::PopupRow>),
+}
+
+/// What the host draws in the shell's cover (over the whole window): a
+/// phone's tab switcher, or a desk's menus.
+#[component]
+fn CoverLayer() -> Element {
+    let host = use_host();
+    if (host.phone)() {
+        rsx! { switcher::SwitcherLayer { cover: true } }
+    } else {
+        rsx! {
+            MenuLayer { window: true }
+            TipLayer {}
+        }
+    }
+}
+
+/// A tab's name under the pointer ([`Host::tip`]), over the window: the
+/// shell's tooltip look (`.tip`), outside the tab bar that would clip it.
+#[component]
+fn TipLayer() -> Element {
+    let host = use_host();
+    let t = host.theme.read().clone();
+    let Some((text, (x, y))) = (host.tip)() else {
+        return rsx! {};
+    };
+    rsx! {
+        div {
+            style: "position:absolute; left:{x}px; top:{y}px; z-index:{architect_shell::layer::POPOVER}; white-space:nowrap; \
+                    padding:4px 8px; border-radius:6px; background:{t.pill}; border:1px solid {t.rule}; color:{t.ink}; \
+                    font-family:{t.font}; font-size:12px; font-weight:500; pointer-events:none; box-shadow:{t.shadow_lift};",
+            "{text}"
+        }
+    }
+}
+
+/// The shell's [`architect_shell::popup::Popup`], drawn by `host`'s menu
+/// layer: what a view in a pane asks for appears over everything.
+fn use_popup_provider(host: Host) {
+    use_context_provider(|| {
+        architect_shell::popup::Popup::new(move |rows, at| {
+            host.open_menu(Menu::Popup(rows), (narrow(at.0), narrow(at.1)));
+        })
+    });
 }
 
 /// The sizes the pointer asks for: a mouse's, or a finger's.
@@ -456,6 +503,9 @@ pub struct Host {
     /// Where the menu on show was asked for (window points); `None` puts it
     /// in the middle.
     menu_at: Signal<Option<(f32, f32)>>,
+    /// A tab's name over the window, under the pointer (window points):
+    /// a squeezed tab shows its icon alone.
+    tip: Signal<Option<(String, (f32, f32))>>,
     mounts: CopyValue<HashMap<Mount, Rc<MountedData>>>,
     /// The arrange key is held: every pane can be grabbed.
     held: Signal<bool>,
@@ -1451,6 +1501,7 @@ pub fn WorkspaceView(
         switch: switcher::Switch::new(),
         float_area: Signal::new(None),
         menu_at: Signal::new(None),
+        tip: Signal::new(None),
         mounts: CopyValue::new(HashMap::new()),
         held: Signal::new(false),
         latched: Signal::new(false),
@@ -1485,6 +1536,7 @@ pub fn WorkspaceView(
         sets_noun: Signal::new("Workspace".to_owned()),
         managing: Signal::new(false),
     });
+    use_popup_provider(host);
     // Props change under a live host: keep it current.
     host.views.set(views);
     host.commands.set(commands);
@@ -1547,11 +1599,14 @@ pub fn WorkspaceView(
             out.set(items);
         }
     }
-    // A phone's tab switcher takes the whole screen in a shell (its bars
-    // too), else the host.
+    // In a shell, its cover is the window's: a phone's tab switcher takes
+    // the whole screen there (its bars too); a desk's menus open there,
+    // over the shell's sidebar as well, at the pointer (the host's own box
+    // clips what it draws). The cover is set once; it follows the form.
     let shell_cover = phone && in_a_shell;
+    let window_menus = in_a_shell && !phone;
     architect_shell::use_shell_cover(
-        shell_cover.then(|| rsx! { HostScope { host, switcher::SwitcherLayer { cover: true } } }),
+        in_a_shell.then(|| rsx! { HostScope { host, CoverLayer {} } }),
     );
     let t = theme;
     let body = if phone {
@@ -1627,7 +1682,9 @@ pub fn WorkspaceView(
             }
             DropHighlight {}
             DragLayer {}
-            MenuLayer {}
+            if !window_menus {
+                MenuLayer {}
+            }
             SheetLayer {}
             manage::ManageSheet {}
             if phone && !shell_cover {
@@ -1870,6 +1927,7 @@ fn HostScope(host: Host, children: Element) -> Element {
     // is gone (a route that leaves the workspace in its first frames: a
     // share link the app was launched with, #629): then nothing.
     use_context_provider(|| host);
+    use_popup_provider(host);
     let Ok(decks) = host.decks.try_peek().map(|d| *d) else {
         return rsx! {};
     };

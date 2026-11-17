@@ -8,7 +8,7 @@
 //!
 //! The vault is a small stand-in for the app's `VAULT_*` actions
 //! (`features/vault/vault/src/actions.rs`), holding the showcase vault's
-//! recipes (`apps/ui/showcase-vault/Recipes`).
+//! recipes (`apps/ui/demo-vault/Recipes`).
 
 #![allow(
     clippy::unwrap_used,
@@ -188,7 +188,7 @@ fn recipes(notes: &Notes) {
         "1 tsp cumin",
     ];
     for (name, servings, lines) in [("Pancakes", 4, &pancakes), ("Chili", 6, &chili)] {
-        let file = repo(&format!("apps/ui/showcase-vault/Recipes/{name}.md"));
+        let file = repo(&format!("apps/ui/demo-vault/Recipes/{name}.md"));
         let text = std::fs::read_to_string(&file).unwrap();
         assert!(text.contains(&format!("servings: {servings}")), "{name}");
         for line in lines {

@@ -1567,6 +1567,7 @@ name = "Recipe"
 icon = "chef-hat"
 note_type = "recipe"   # the `type` such a file reads as when its frontmatter has none
 body = "text"          # markdown (the default) or text: Cooklang's `#pan{}` is no tag
+preview = "description" # its navigator row's preview: this property, not its body
 ```
 
 A note, to the vault, is optional YAML `---` frontmatter and then a body
@@ -1590,6 +1591,36 @@ the extensions it loads (`features/extensions/src/node.rs`
 `NodeHost::load`). A type stays registered for the life of the process:
 its files stay notes when the extension is turned off. `EXT_FILE_TYPES`
 lists `md` and every declared type, with who declared it.
+
+**Its row in the navigator.** A note's row shows a preview and a
+picture. The picture is the first of its `thumbnail`, `feature`,
+`image`, `cover` or `banner` properties (else the first image it
+embeds), for a declared type as for `.md`: a recipe with `image:
+"[[Attachments/Recipes/pancakes.svg]]"` shows it. The preview is its
+body's first words, unless the type names a property with `preview`
+(the Cookbook's `description`); a `text` body that names none shows no
+preview, never its markup (`features/navigator/src/markdown.rs`
+`preview_for`, `vault_proto::note_types::preview_property_of`).
+
+**Its text in the editor.** `[[renderers]]` gives a note type its own
+live preview, as markdown has the editor's: the text stays what is
+edited, and the extension says how its ranges read.
+
+```toml
+[[renderers]]
+note_type = "recipe"
+action = "COOKBOOK_RENDER"   # given {text}, answers {items}
+```
+
+While such a note is open the app runs the action with its body each time
+the text changes, and draws its answer over every line but the caret's
+(`apps/ui/src/note_editor.rs` `rendered_decorations`): each item a
+`conceal`ed range, a range `replace`d by other words, or a range or a
+`line` in a look (`features/extensions/src/render.rs` `RenderItem`,
+`Look`: heading, strong, muted, accent, chip, chip-accent, code). The
+looks are the app's classes, styled by its theme, never CSS the
+extension sends. A body that is not markdown gets no markdown preview,
+only its renderer's. The Cookbook's: `extensions/cookbook/src/render.rs`.
 
 **Its body.** A declared type's body is markdown unless it says `body =
 "text"`: then the vault reads only its frontmatter and its `[[links]]`,

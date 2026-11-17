@@ -3,6 +3,7 @@
 
 use architect_shell::layer;
 use architect_shell::motion::{Spring, use_motion};
+use architect_shell::popup::PopupRow;
 use dioxus::prelude::*;
 use lucide_dioxus::{Layers, Minus, PanelRight, X};
 
@@ -663,17 +664,18 @@ pub(super) fn on_up(mut host: Host) {
     }
 }
 
-/// A menu's width, and how tall one may run before it opens upward
-/// (points).
+/// A menu's width (points).
 const MENU_W: f32 = 248.0;
-const MENU_TALL: f32 = 360.0;
 /// The menus' layer, over the floats and the drag layer.
 const Z_MENU: u8 = layer::MENU;
 
-/// The pane menu and the open-a-view menu.
+/// The pane menu, the open-a-view menu and a view's popup menus.
+/// `window`: drawn in the shell's cover, over the whole window (its
+/// points the window's), not in the host's box.
 #[component]
-pub(super) fn MenuLayer() -> Element {
+pub(super) fn MenuLayer(#[props(default)] window: bool) -> Element {
     let mut host = use_host();
+    let shell = architect_shell::try_use_shell();
     let t = host.theme.read().clone();
     let Some(menu) = (host.menu)() else {
         return rsx! {};
@@ -683,11 +685,36 @@ pub(super) fn MenuLayer() -> Element {
         Menu::Open => open_items(host),
         Menu::Tabs(group) => tab_items(host, group),
         Menu::Target { target, id, pane } => target_items(host, &target, &id, &pane),
+        Menu::Popup(rows) => rows
+            .into_iter()
+            .map(|row| match row {
+                PopupRow::Heading(t) => Item::Heading(t),
+                PopupRow::Note(t) => Item::Note(t),
+                PopupRow::Separator => Item::Separator,
+                row @ PopupRow::Act { .. } => Item::Popup(row),
+            })
+            .collect(),
     };
+    // How tall it runs, so one near the window's foot opens upward.
+    let s = (host.sizes)();
+    let tall = 12.0
+        + items
+            .iter()
+            .map(|i| match i {
+                Item::Heading(_) => 26.0,
+                Item::Separator => 9.0,
+                Item::Note(_) => 28.0,
+                _ => s.button,
+            })
+            .sum::<f32>();
     // On a desk the menu opens where it was asked for (the ⋯, the
     // pointer), kept inside the window; on a phone, or from a key, in the
     // middle over a scrim.
-    let area = (host.float_area)().unwrap_or(Rect::new(0.0, 0.0, 1200.0, 800.0));
+    let area = shell
+        .filter(|_| window)
+        .map(|s| Rect::new(0.0, 0.0, narrow(s.screen.width), narrow(s.screen.height)))
+        .or_else(|| (host.float_area)())
+        .unwrap_or(Rect::new(0.0, 0.0, 1200.0, 800.0));
     let anchored = (host.menu_at)().filter(|_| !(host.phone)());
     let (scrim, place) = anchored.map_or_else(
         || {
@@ -698,7 +725,17 @@ pub(super) fn MenuLayer() -> Element {
         },
         |(x, y)| {
             let left = (x - area.x).clamp(8.0, (area.w - MENU_W - 8.0).max(8.0));
-            let top = (y - area.y + 6.0).clamp(8.0, (area.h - MENU_TALL).max(8.0));
+            let tall = tall.min(area.h - 16.0);
+            let below = y - area.y + 2.0;
+            // Below the pointer when it fits; else above it; else as
+            // low as it fits.
+            let top = if below + tall <= area.h - 8.0 {
+                below
+            } else if below - tall - 4.0 >= 8.0 {
+                below - tall - 4.0
+            } else {
+                (area.h - 8.0 - tall).max(8.0)
+            };
             (
                 "transparent".to_owned(),
                 format!(
@@ -708,18 +745,85 @@ pub(super) fn MenuLayer() -> Element {
             )
         },
     );
+    // The row lit: under the pointer, or picked with the arrows.
+    let mut active = use_signal(|| None::<usize>);
+    let pressable: Vec<usize> = items
+        .iter()
+        .enumerate()
+        .filter(|(_, i)| i.pressable())
+        .map(|(n, _)| n)
+        .collect();
+    let lit = active().filter(|n| pressable.contains(n));
+    let keyed = items.clone();
+    let commands = architect_commands::try_use_commands();
+    let on_key = move |e: KeyboardEvent| {
+        let step = |back: bool| {
+            let at = lit.and_then(|n| pressable.iter().position(|p| *p == n));
+            let next = match (at, back) {
+                (None, false) => pressable.first(),
+                (None, true) => pressable.last(),
+                (Some(i), false) => pressable
+                    .get(i.saturating_add(1))
+                    .or_else(|| pressable.first()),
+                (Some(i), true) => i
+                    .checked_sub(1)
+                    .and_then(|j| pressable.get(j))
+                    .or_else(|| pressable.last()),
+            };
+            next.copied()
+        };
+        match e.key() {
+            Key::Named(NamedKey::Escape) => {
+                e.stop_propagation();
+                host.menu.set(None);
+            }
+            Key::Named(NamedKey::ArrowDown) => {
+                e.prevent_default();
+                active.set(step(false));
+            }
+            Key::Named(NamedKey::ArrowUp) => {
+                e.prevent_default();
+                active.set(step(true));
+            }
+            Key::Named(NamedKey::Enter) => {
+                if let Some(item) = lit.and_then(|n| keyed.get(n)) {
+                    e.prevent_default();
+                    press(host, commands, item);
+                }
+            }
+            _ => {}
+        }
+    };
     rsx! {
         div {
             style: "position:absolute; top:0; left:0; right:0; bottom:0; z-index:{Z_MENU}; background:{scrim}; \
                     display:flex;",
             onclick: move |_| host.menu.set(None),
+            // A right-click elsewhere closes it too (and opens no other).
+            oncontextmenu: move |e: MouseEvent| {
+                e.prevent_default();
+                host.menu.set(None);
+            },
             div {
-                style: "{place} width:{MENU_W}px; overflow-y:scroll; box-sizing:border-box; \
-                        display:flex; flex-direction:column; padding:5px; border-radius:10px; \
+                role: "menu",
+                tabindex: "-1",
+                style: "{place} width:{MENU_W}px; overflow-y:auto; box-sizing:border-box; outline:none; \
+                        display:flex; flex-direction:column; padding:4px; border-radius:10px; \
                         background:{t.pill}; border:1px solid {t.rule}; box-shadow:{t.shadow_float};",
                 onclick: move |e| e.stop_propagation(),
+                oncontextmenu: move |e: MouseEvent| e.prevent_default(),
+                onmouseleave: move |_| active.set(None),
+                onkeydown: on_key,
+                // The keys go to the menu while it is open (Escape closes
+                // it wherever the focus was).
+                onmounted: move |e| {
+                    spawn(async move {
+                        let _ = e.data().set_focus(true).await;
+                    });
+                },
                 for (i, item) in items.into_iter().enumerate() {
-                    MenuRow { key: "{i}", item }
+                    MenuRow { key: "{i}", item, first: i == 0, on: lit == Some(i),
+                        onhover: move |()| active.set(Some(i)) }
                 }
             }
         }
@@ -734,68 +838,133 @@ enum Item {
     Entry(String, Op, Option<bool>),
     /// A line that does nothing (a menu with no rows says so).
     Note(String),
+    /// A rule between sections.
+    Separator,
+    /// A view's own row ([`Menu::Popup`]): a [`PopupRow::Act`].
+    Popup(PopupRow),
+    /// One of a choice (a group's tabs): ticked when it is the current one.
+    Pick(String, Op, bool),
 }
 
+impl Item {
+    /// A row that does something when pressed.
+    const fn pressable(&self) -> bool {
+        matches!(
+            self,
+            Self::Act(..) | Self::Entry(..) | Self::Popup(PopupRow::Act { .. })
+        )
+    }
+}
+
+/// Runs `item` (a click or Return): the menu closes first.
+fn press(mut host: Host, commands: Option<architect_commands::Commands>, item: &Item) {
+    host.menu.set(None);
+    match item {
+        Item::Popup(PopupRow::Act { run, .. }) => run(),
+        Item::Entry(_, op, _) => {
+            host.switcher.set(false);
+            if let Op::Run {
+                command,
+                invocation,
+            } = op
+                && let Some(c) = commands
+            {
+                let _ = c.run_invoked(command, None, invocation.clone());
+            }
+        }
+        Item::Act(_, op) | Item::Pick(_, op, _) => {
+            host.switcher.set(false);
+            host.run(op.clone());
+        }
+        _ => {}
+    }
+}
+
+/// A menu's row. `first`: the menu's top row (a heading below another
+/// section gets a rule over it); `on`: lit (under the pointer, or picked
+/// with the arrows); `onhover`: the pointer came onto it.
 #[component]
-fn MenuRow(item: Item) -> Element {
-    let mut host = use_host();
+fn MenuRow(
+    item: Item,
+    #[props(default)] first: bool,
+    #[props(default)] on: bool,
+    onhover: EventHandler<()>,
+) -> Element {
+    let host = use_host();
     let commands = architect_commands::try_use_commands();
     let t = host.theme.read().clone();
     let s = (host.sizes)();
-    match item {
-        Item::Heading(text) => rsx! {
-            div { style: "padding:8px 10px 3px; color:{t.ink_2}; font-size:11px; font-weight:600;", "{text}" }
-        },
-        Item::Note(text) => rsx! {
-            div { style: "padding:6px 12px; color:{t.ink_3}; font-size:12px;", "{text}" }
-        },
-        Item::Entry(label, op, checked) => {
-            let row_font = if s.button > 40.0 { 15 } else { 13 };
-            let tick = if checked == Some(true) { "✓" } else { "" };
-            // A toggle's row keeps a column for its tick; another lines up
-            // with the menu's own rows.
-            let pad = if checked.is_some() { 6 } else { 12 };
-            rsx! {
-                button {
-                    style: "display:flex; justify-content:flex-start; align-items:center; gap:6px; text-align:left; \
-                            padding:0 12px 0 {pad}px; min-height:{s.button}px; border:none; border-radius:6px; cursor:pointer; \
-                            background:transparent; color:{t.ink}; font-size:{row_font}px;",
-                    role: if checked.is_some() { "menuitemcheckbox" } else { "menuitem" },
-                    "aria-checked": checked.map(|on| on.to_string()),
-                    onclick: move |_| {
-                        host.menu.set(None);
-                        host.switcher.set(false);
-                        if let Op::Run { command, invocation } = &op
-                            && let Some(c) = commands
-                        {
-                            let _ = c.run_invoked(command, None, invocation.clone());
-                        }
-                    },
-                    if checked.is_some() {
-                        span { style: "flex:0 0 auto; width:14px; text-align:center; color:{t.accent};", "{tick}" }
-                    }
-                    span { "{label}" }
+    // A mouse's rows (28pt, 13px) or a finger's (44pt, 15px).
+    let row_font = if s.button > 40.0 { 15 } else { 13 };
+    let (label, danger, tick) = match &item {
+        Item::Heading(text) => {
+            // A rule over a heading below another section, as a
+            // separator draws it; the text lines up with the rows'.
+            let rule = if first {
+                rsx! {}
+            } else {
+                rsx! { div { style: "flex-shrink:0; height:1px; margin:4px 6px 0; background:{t.rule};" } }
+            };
+            return rsx! {
+                {rule}
+                div { style: "flex-shrink:0; padding:8px 10px 4px; color:{t.ink_3}; \
+                              font-size:11px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;",
+                    "{text}"
                 }
-            }
+            };
         }
-        Item::Act(label, op) => {
-            // A mouse's rows (28pt, 13px) or a finger's (44pt, 15px).
-            let row_font = if s.button > 40.0 { 15 } else { 13 };
-            let danger = matches!(op, Op::Close(_) | Op::CloseOthers(_));
-            let ink = if danger { &*t.danger } else { &*t.ink };
-            rsx! {
-                button {
-                    style: "display:flex; justify-content:flex-start; text-align:left; padding:0 12px; \
-                            min-height:{s.button}px; border:none; border-radius:6px; cursor:pointer; \
-                            background:transparent; color:{ink}; font-size:{row_font}px;",
-                    onclick: move |_| {
-                        host.menu.set(None);
-                        host.switcher.set(false);
-                        host.run(op.clone());
-                    },
-                    "{label}"
-                }
+        Item::Note(text) => {
+            return rsx! {
+                div { style: "flex-shrink:0; padding:6px 10px; color:{t.ink_3}; font-size:12px;", "{text}" }
+            };
+        }
+        Item::Separator => {
+            return rsx! {
+                div { style: "flex-shrink:0; height:1px; margin:4px 6px; background:{t.rule};" }
+            };
+        }
+        Item::Popup(PopupRow::Act {
+            label,
+            danger,
+            checked,
+            ..
+        }) => (label.clone(), *danger, *checked),
+        Item::Popup(_) => return rsx! {},
+        Item::Pick(label, _, on) => (label.clone(), false, Some(*on)),
+        Item::Entry(label, _, checked) => (label.clone(), false, *checked),
+        Item::Act(label, op) => (
+            label.clone(),
+            matches!(op, Op::Close(_) | Op::CloseOthers(_)),
+            None,
+        ),
+    };
+    let fill = if !on {
+        "transparent"
+    } else if danger {
+        // A destructive row lights in its own ink, faint.
+        "rgba(248,113,113,0.14)"
+    } else {
+        &*t.active
+    };
+    let ink = if danger { &*t.danger } else { &*t.ink };
+    let tick_mark = if tick == Some(true) { "✓" } else { "" };
+    rsx! {
+        button {
+            style: "flex-shrink:0; display:flex; justify-content:flex-start; align-items:center; gap:8px; text-align:left; \
+                    padding:0 10px; min-height:{s.button}px; border:none; border-radius:6px; cursor:pointer; \
+                    background:{fill}; color:{ink}; font-size:{row_font}px; font-family:{t.font}; \
+                    white-space:nowrap; overflow:hidden;",
+            role: if tick.is_some() { "menuitemcheckbox" } else { "menuitem" },
+            "aria-checked": tick.map(|on| on.to_string()),
+            "data-menu-item": "{label}",
+            // The page's menu-row hover (`page_css`) leaves its red to it.
+            "data-danger": danger.then_some("true"),
+            onmouseenter: move |_| onhover.call(()),
+            onclick: move |_| press(host, commands, &item),
+            if tick.is_some() {
+                span { style: "flex:0 0 14px; text-align:center; color:{t.accent};", "{tick_mark}" }
             }
+            span { style: "overflow:hidden; text-overflow:ellipsis;", "{label}" }
         }
     }
 }
@@ -968,8 +1137,9 @@ fn tab_items(host: Host, group: crate::GroupId) -> Vec<Item> {
         items.extend(
             g.tabs
                 .iter()
-                .filter_map(|id| workspace.pane(id))
-                .map(|p| act(&host.title(p), Op::Show(p.id.clone()))),
+                .enumerate()
+                .filter_map(|(i, id)| workspace.pane(id).map(|p| (i, p)))
+                .map(|(i, p)| Item::Pick(host.title(p), Op::Show(p.id.clone()), i == g.current)),
         );
     }
     items

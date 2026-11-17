@@ -11,16 +11,26 @@ use crate::kinds::ViewHost;
 use crate::layout::{scroll_to, slides};
 use crate::model::{Axis, Chrome, Group, GroupId, Node, PaneId, Split, Workspace};
 
-/// How far a named tab gives way before the bar clips, points.
-const TAB_MIN: f32 = 72.0;
+/// How far the current tab gives way, points: its icon, a readable name
+/// and its close button on one line.
+const TAB_MIN: f32 = 100.0;
 /// How much wider a badged tab stays (its badges), points.
 const BADGE_ROOM: f32 = 36.0;
 /// How much of a badged tab's name always shows, points.
 const NAME_LEAST: f32 = 20.0;
+/// How much of a tab's name shows before it gives way to the icon alone,
+/// points: a couple of letters, never a sliver.
+const NAME_READABLE: f32 = 24.0;
 /// A split's child's box, filling its share.
 const FILL: &str = "flex:1 1 0; min-width:0; min-height:0; display:flex;";
 /// How wide a named tab grows, points (Obsidian's).
 const TAB_MAX: f32 = 200.0;
+/// The narrowest a tab other than the current one gets when the bar is
+/// full: its icon and its padding, as a browser's tabs squeeze to their
+/// icons. At `TAB_MIN` a full bar ran past its edge, clipping its last
+/// tabs (often the current one, cut to its icon) and leaving hidden tabs
+/// under the bar's buttons.
+const TAB_SQUEEZED: f32 = 34.0;
 /// How wide a stacked pane is, points (narrower where the strip is).
 const STACKED_W: f32 = 420.0;
 /// The narrowest a stacked pane gets, points.
@@ -332,7 +342,7 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
     let button = format!(
         "flex:0 0 auto; width:{w}px; height:{w}px; align-self:center; border:none; border-radius:6px; \
          background:transparent; color:{ink}; font-size:16px; display:flex; align-items:center; \
-         justify-content:center;",
+         justify-content:center; position:relative; z-index:1;",
         w = s.button.min(height - 4.0),
         ink = t.ink_3,
     );
@@ -383,8 +393,11 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
                 }
             }
             // The empty part of the bar: on the title row, the window's.
+            // It and the buttons are raised over the strip: Blitz
+            // hit-tests the tabs the strip hides past its edge, and a press
+            // here picked one of them.
             div {
-                style: "flex:1 1 0; min-width:8px;",
+                style: "flex:1 1 0; min-width:8px; position:relative; z-index:1;",
                 onpointerdown: move |_| {
                     if let Some(drag) = on_drag {
                         drag.call(());
@@ -559,12 +572,15 @@ fn Tab(
         .is_some_and(|(f, _)| f.width == crate::TabWidth::Wide);
     let least = if icons {
         0.0
+    } else if !on {
+        TAB_SQUEEZED
     } else if badged {
         TAB_MIN + BADGE_ROOM
     } else {
         TAB_MIN
     };
-    let name_least = if badged { NAME_LEAST } else { 0.0 };
+    // A name shows at least a few letters, or not at all.
+    let name_least = if badged { NAME_LEAST } else { NAME_READABLE };
     let (grow, most) = if icons {
         (0, 48.0)
     } else if wide_custom {
@@ -594,6 +610,13 @@ fn Tab(
         bar_colour(&host)
     };
     let fade_from = transparent_of(&fade_to);
+    let initial: String = title
+        .chars()
+        .find(|c| c.is_alphanumeric())
+        .map(|c| c.to_uppercase().collect())
+        .unwrap_or_default();
+    let mut hovering = use_signal(|| false);
+    let tip_title = title.clone();
     let key_open = menu.clone();
     let mounted = menu.clone();
     let label = if pinned {
@@ -604,7 +627,8 @@ fn Tab(
     rsx! {
         div {
             style: "flex:{grow} {shrink} {most}px; max-width:{most}px; min-width:{least}px; height:{tab_h}px; \
-                    box-sizing:border-box; display:flex; align-items:center; justify-content:{justify}; gap:6px; \
+                    box-sizing:border-box; display:flex; flex-wrap:wrap; align-content:flex-start; \
+                    align-items:center; justify-content:{justify}; column-gap:6px; \
                     padding:0 {pad_r}px 0 {pad_l}px; overflow:hidden; \
                     border-radius:8px 8px 0 0; white-space:nowrap; touch-action:none; \
                     user-select:none; color:{ink}; background:{plain_fill}; \
@@ -622,7 +646,26 @@ fn Tab(
                 }
             },
             onmounted: move |e| host.mount(Mount::Tab(mounted.clone()), e.data()),
+            // Held still over it a moment: its name, over the window.
+            onmouseenter: move |e: MouseEvent| {
+                hovering.set(true);
+                let p = e.client_coordinates();
+                let at = (super::narrow(p.x), super::narrow(p.y) + 18.0);
+                let name = tip_title.clone();
+                spawn(async move {
+                    futures_timer::Delay::new(std::time::Duration::from_millis(500)).await;
+                    if *hovering.peek() && host.lifted.peek().is_none() {
+                        host.tip.set(Some((name, at)));
+                    }
+                });
+            },
+            onmouseleave: move |_| {
+                hovering.set(false);
+                host.tip.set(None);
+            },
             onpointerdown: move |e| {
+                hovering.set(false);
+                host.tip.set(None);
                 let _ = host.edit(|w| w.activate(&press));
                 self::press(host, &press, &e);
             },
@@ -655,15 +698,30 @@ fn Tab(
                 }
                 {badges.clone()}
             } else if let Some(icon) = icon {
-                span { style: "position:relative; display:flex;",
+                span { style: "position:relative; display:flex; align-items:center; height:{tab_h}px;",
                     {icon(architect_shell::Icon { size: icon_size, color: ink.into() })}
                 }
+            } else if icons {
+                // An icon-only bar's tab whose view has no icon: its
+                // initial in a tile (its name is its tooltip), not its name
+                // crammed into an icon's room.
+                span { style: "position:relative; display:flex; align-items:center; height:{tab_h}px;",
+                    span { style: "width:{icon_size + 2}px; height:{icon_size + 2}px; box-sizing:border-box; \
+                                   display:flex; align-items:center; justify-content:center; border-radius:4px; \
+                                   border:1.5px solid {ink}; color:{ink}; font-size:{icon_size / 2 + 3}px; font-weight:700;",
+                        "{initial}"
+                    }
+                }
             }
-            if custom.is_none() && (!icons || icon.is_none()) {
+            if custom.is_none() && !icons {
                 // A long name fades out at its end (Blitz has no ellipsis).
-                span { "data-tab-name": "{tab_id}", style: "position:relative; flex:1 1 0; min-width:{name_least}px; overflow:hidden;",
+                // Too narrow to read (a full bar's squeezed tab), it wraps
+                // onto the tab's hidden second line: the icon alone, not a
+                // sliver of a letter.
+                span { "data-tab-name": "{tab_id}", style: "position:relative; flex:1 1 0; min-width:{name_least}px; \
+                                                     height:{tab_h}px; line-height:{tab_h}px; overflow:hidden;",
                     "{title}"
-                    span { style: "position:absolute; top:0; right:0; bottom:0; width:16px; \
+                    span { style: "position:absolute; top:1px; right:0; bottom:0; width:16px; \
                                    background:linear-gradient(to right, {fade_from}, {fade_to});" }
                 }
                 {badges}

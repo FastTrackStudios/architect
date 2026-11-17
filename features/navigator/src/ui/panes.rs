@@ -84,7 +84,14 @@ pub(super) fn NavPane(nav: Navigator, on_open: EventHandler<Open>, calendar: boo
                 if profiles.len() > 1 {
                     button { class: if profile_menu() { "nv-tool nv-on" } else { "nv-tool" }, "aria-label": "Profile: {profile_name}",
                         "data-testid": "nv-profile", title: "{profile_name}",
-                        onclick: move |_| profile_menu.toggle(),
+                        onclick: {
+                            let profiles = profiles.clone();
+                            let profile = profile.clone();
+                            move |e: MouseEvent| match architect_shell::popup::try_use_popup() {
+                                Some(popup) => popup.show(profile_rows(&nav, &profiles, &profile), architect_shell::popup::under(&e, 26.0)),
+                                None => profile_menu.toggle(),
+                            }
+                        },
                         UserRound { size: 16 }
                     }
                 }
@@ -521,6 +528,24 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
     }
 }
 
+/// A row's count in words, for its tooltip: "3 • 12" says little by
+/// itself ("3 notes here, 12 in folders below").
+pub(super) fn count_hint(count: &str) -> String {
+    let notes = |n: &str| {
+        if n == "1" {
+            "1 note".to_owned()
+        } else {
+            format!("{n} notes")
+        }
+    };
+    match count.split_once('•').map(|(a, b)| (a.trim(), b.trim())) {
+        Some(("", below)) => format!("{} in folders below", notes(below)),
+        Some((here, below)) => format!("{} here, {below} in folders below", notes(here)),
+        None if count.trim().is_empty() => String::new(),
+        None => notes(count.trim()),
+    }
+}
+
 /// A folder's count as Notebook Navigator writes it: "3 • 12" (its own,
 /// then below), "• 12" with none of its own, nothing at zero.
 fn count_label(c: NoteCount, show: bool, separate: bool) -> String {
@@ -633,9 +658,7 @@ fn FolderRow(
             },
             // Add to shortcuts, hide (`buildFolderMenu`'s).
             oncontextmenu: move |e: MouseEvent| {
-                e.prevent_default();
-                let mut menu = nav.menu;
-                menu.set(Some(tree_rows::RowMenu { target: NavTarget::Folder(p5.clone()), top: top + height }));
+                tree_rows::open_menu(nav, on_open, NavTarget::Folder(p5.clone()), top + height, &e);
             },
             // Dragged onto another folder: moved into it (the root stays).
             onpointerdown: move |e: PointerEvent| {
@@ -695,7 +718,7 @@ fn FolderRow(
                 }
             } else if !count.is_empty() {
                 tree_rows::Leader { nav }
-                span { class: "nv-count", style: "flex:0 0 auto; color:var(--nv-faint); font-size:11px;", "{count}" }
+                span { class: "nv-count", title: count_hint(&count), style: "flex:0 0 auto; color:var(--nv-faint); font-size:11px;", "{count}" }
             }
             tree_rows::Guides { nav, level, indent }
         }
@@ -746,7 +769,9 @@ pub(super) fn ListPane(
         NavTarget::Folder(f) => f.clone(),
         _ => String::new(),
     };
-    let empty = s.list_order().is_empty();
+    // Nothing to show: no notes, and no group header (every group
+    // folded still shows its headers, to unfold them).
+    let empty = s.list_rows().is_empty();
     let writable = nav.source().can_write();
     let searching = s.search_open || !s.search().text().is_empty();
     drop(s);
@@ -798,7 +823,10 @@ pub(super) fn ListPane(
                     Rows3 { size: 16 }
                 }
                 button { class: if menu() { "nv-tool nv-on" } else { "nv-tool" }, "aria-label": "Sort and group",
-                    onclick: move |_| menu.toggle(),
+                    onclick: move |e: MouseEvent| match architect_shell::popup::try_use_popup() {
+                        Some(popup) => popup.show(sort_rows(&nav, &shown, place, own), architect_shell::popup::under(&e, 26.0)),
+                        None => menu.toggle(),
+                    },
                     ArrowDownWideNarrow { size: 16 }
                 }
                 if menu() {
@@ -858,6 +886,76 @@ pub(super) fn ListPane(
             }
         }
     }
+}
+
+/// The list's Sort and group menu, as the window's popup rows.
+fn sort_rows(
+    nav: &Navigator,
+    shown: &crate::NavigatorSettings,
+    place: &'static str,
+    own: bool,
+) -> Vec<architect_shell::popup::PopupRow> {
+    use architect_shell::popup::PopupRow;
+    let nav = *nav;
+    let mut rows = vec![PopupRow::Heading("Sort by".to_owned())];
+    for option in SortOption::ALL {
+        rows.push(PopupRow::check(
+            option.label(),
+            option == shown.sort,
+            move || {
+                nav.edit_list(move |_, s| s.sort = option);
+            },
+        ));
+    }
+    rows.push(PopupRow::Heading("Group by".to_owned()));
+    for g in Grouping::ALL {
+        let label = if g == Grouping::Property && !shown.group_property.trim().is_empty() {
+            format!("Property: {}", shown.group_property.trim())
+        } else {
+            g.label().to_owned()
+        };
+        rows.push(PopupRow::check(label, g == shown.grouping, move || {
+            nav.edit_list(move |_, s| s.grouping = g);
+        }));
+    }
+    rows.push(PopupRow::Heading("Applies to".to_owned()));
+    rows.push(PopupRow::check(format!("Only {place}"), own, move || {
+        let mut o = nav.own;
+        if own {
+            let target = nav.state.peek().target();
+            nav.update(|s| s.set_appearance(&target, crate::Appearance::default()));
+            o.set(false);
+        } else {
+            o.set(true);
+        }
+    }));
+    rows
+}
+
+/// The vault profiles' menu, as the window's popup rows.
+fn profile_rows(
+    nav: &Navigator,
+    profiles: &[(String, String)],
+    current: &str,
+) -> Vec<architect_shell::popup::PopupRow> {
+    use architect_shell::popup::PopupRow;
+    let nav = *nav;
+    let mut rows = vec![PopupRow::Heading("Vault profile".to_owned())];
+    for (id, name) in profiles {
+        let id = id.clone();
+        rows.push(PopupRow::check(name.clone(), id == current, move || {
+            if let Err(e) = nav.update(|s| s.select_profile(&id)) {
+                nav.say(e);
+            }
+        }));
+    }
+    rows.push(PopupRow::Separator);
+    rows.push(PopupRow::act("Edit profiles…", move || {
+        if !super::profiles_page::open_profiles_page() {
+            nav.say("No settings page to edit the profiles on");
+        }
+    }));
+    rows
 }
 
 #[component]

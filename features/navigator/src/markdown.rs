@@ -28,6 +28,11 @@ const PREVIEW_CHARS: usize = 300;
 /// A note's text as its preview: its words, without its frontmatter, its
 /// fences, headings' and tasks' marks, or links' brackets (a link's alias
 /// when it has one); embeds left out.
+///
+/// A first line that is a top heading is left out too (the row shows the
+/// note's title already), and list items and headings are kept apart with
+/// " · ", so a list does not read as one run-on line ("Garden · Sourdough
+/// · Lentil soup").
 #[must_use]
 pub fn preview_of(text: &str) -> String {
     let body = text
@@ -38,6 +43,10 @@ pub fn preview_of(text: &str) -> String {
         });
     let mut out = String::new();
     let mut in_fence = false;
+    let mut first = true;
+    // The line before was a list item or a heading: the next one is kept
+    // apart from it.
+    let mut apart = false;
     for line in body.lines() {
         let t = line.trim();
         if t.starts_with("```") || t.starts_with("~~~") {
@@ -47,23 +56,34 @@ pub fn preview_of(text: &str) -> String {
         if in_fence || t.is_empty() || t.starts_with('|') {
             continue;
         }
+        let heading = t.starts_with('#') && t.trim_start_matches('#').starts_with(' ');
+        if std::mem::take(&mut first) && t.starts_with("# ") {
+            continue;
+        }
         let t = t
             .trim_start_matches('#')
             .trim_start_matches('>')
             .trim_start();
-        let t = ["- [ ] ", "- [x] ", "- [X] ", "- ", "* ", "+ "]
+        let item = ["- [ ] ", "- [x] ", "- [X] ", "- ", "* ", "+ "]
             .iter()
-            .find_map(|m| t.strip_prefix(m))
-            .unwrap_or(t);
-        if !out.is_empty() {
-            out.push(' ');
-        }
+            .find_map(|m| t.strip_prefix(m));
+        let t = item.unwrap_or(t);
         // Emphasis and code marks are not words.
         let plain: String = unlink(t)
             .chars()
             .filter(|c| !matches!(c, '*' | '`' | '=' | '~'))
             .collect();
-        out.push_str(&plain);
+        // A line of embeds alone says nothing.
+        if plain.trim().is_empty() {
+            continue;
+        }
+        if !out.is_empty() {
+            let sentence_ended = out.ends_with(['.', '!', '?', ':']);
+            let opens = (item.is_some() || heading) && !sentence_ended;
+            out.push_str(if apart || opens { " · " } else { " " });
+        }
+        apart = item.is_some() || heading;
+        out.push_str(plain.trim());
         if out.chars().count() >= PREVIEW_CHARS {
             break;
         }
@@ -71,6 +91,31 @@ pub fn preview_of(text: &str) -> String {
     let words: Vec<&str> = out.split_whitespace().collect();
     let joined = words.join(" ");
     joined.chars().take(PREVIEW_CHARS).collect()
+}
+
+/// The preview a list row shows for the note at `path`.
+///
+/// The property its file type names (`[[file_types]] preview`, a
+/// recipe's `description`) when it has one, else its body's words
+/// ([`preview_of`]); a body in another language (`body = "text"`,
+/// Cooklang) gives none rather than its markup.
+#[must_use]
+pub fn preview_for(path: &str, text: &str, properties: &[(String, PropertyValue)]) -> String {
+    let named = vault_proto::note_types::preview_property_of(path).and_then(|key| {
+        properties
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(&key))
+            .and_then(|(_, v)| match v {
+                PropertyValue::Text(t) if !t.trim().is_empty() => Some(t.trim().to_owned()),
+                PropertyValue::List(l) if !l.is_empty() => Some(l.join(", ")),
+                _ => None,
+            })
+    });
+    match named {
+        Some(p) => p.chars().take(PREVIEW_CHARS).collect(),
+        None if vault_proto::note_types::body_is_markdown(path) => preview_of(text),
+        None => String::new(),
+    }
 }
 
 /// `[[a|b]]` as `b`, `[[a]]` as `a`, `![[x]]` and `![](x)` dropped,
@@ -178,9 +223,9 @@ pub fn note_from_markdown(path: &str, text: &str, created: Millis, modified: Mil
             })
     });
     file.feature_image = named.or_else(|| embeds(text).next());
+    file.preview = Some(preview_for(path, text, &properties));
     file.properties = properties;
     file.tags = tags;
-    file.preview = Some(preview_of(text));
     file.words = Some(words);
     file.tasks = Some(tasks);
     file
@@ -350,6 +395,31 @@ mod tests {
     }
 
     #[test]
+    fn a_note_type_previews_the_property_it_names_and_never_its_markup() {
+        vault_proto::note_types::register_type(vault_proto::note_types::NoteFileType {
+            extension: "zznavprev".to_owned(),
+            note_type: "recipe".to_owned(),
+            markdown: false,
+            preview: Some("description".to_owned()),
+        });
+        vault_proto::note_types::register_with("zznavbare", "recipe", false);
+        let text = "---\ndescription: Fluffy weekend pancakes.\nimage: \"[[Attachments/p.svg]]\"\n---\nWhisk @flour{250%g}.\n";
+        let named = note_from_markdown("C/Pancakes.zznavprev", text, 0, 0);
+        assert_eq!(named.preview.as_deref(), Some("Fluffy weekend pancakes."));
+        assert_eq!(
+            named.feature_image.as_deref(),
+            Some("[[Attachments/p.svg]]")
+        );
+        // No such property: nothing, rather than `@flour{250%g}`.
+        let bare = "---\ntitle: Toast\n---\nWhisk @flour{250%g}.\n";
+        let none = note_from_markdown("C/Toast.zznavprev", bare, 0, 0);
+        assert_eq!(none.preview.as_deref(), Some(""));
+        // A text body that names no property: no preview either.
+        let plain = note_from_markdown("C/Toast.zznavbare", bare, 0, 0);
+        assert_eq!(plain.preview.as_deref(), Some(""));
+    }
+
+    #[test]
     fn a_note_reads_its_frontmatter_tags_preview_words_and_tasks() {
         let text = "---\ntitle: Welcome\ntags: [lab/demo, start]\nstatus: active\ncount: 3\ndone: false\ncover: \"[[Attachments/a.png]]\"\n---\n# Welcome\n\nSome words here #inline and `#not` a tag.\n\n- [ ] one\n- [x] two\n\n```\n#nope\n```\n";
         let f = note_from_markdown("Notes/Welcome.md", text, 1, 2);
@@ -378,7 +448,7 @@ mod tests {
             f.preview
                 .as_deref()
                 .unwrap_or_default()
-                .starts_with("Welcome Some words here")
+                .starts_with("Some words here")
         );
         assert!(f.words.unwrap_or_default() > 5);
     }

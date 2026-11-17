@@ -40,13 +40,37 @@ pub(crate) fn pane_views(ui: ExtensionUi) -> Vec<View> {
                 ToolbarPlace::Dock(side) => Target::Dock(dock_side(&side)),
                 _ => Target::Tab,
             };
+            let caption = toolbar_caption(&ui.host(), &t);
             View::new(pane_kind(&t.key), t.decl.title.clone(), move |_| {
-                rsx! { ToolbarStrip { ui, toolbar: key.clone() } }
+                let th = crate::window_ui::shell_theme();
+                // The strip, then what it is: a pane of buttons alone
+                // read as a view that had not drawn.
+                rsx! {
+                    div { style: "display:flex; flex-direction:column; gap:6px; min-width:0;",
+                        ToolbarStrip { ui, toolbar: key.clone() }
+                        div { style: "padding:2px 12px; color:{th.ink_3}; font-size:12px; line-height:1.4;",
+                            "{caption}"
+                        }
+                    }
+                }
             })
             .home(home)
             .headless()
         })
         .collect()
+}
+
+/// What a docked toolbar's pane says under its buttons: whose it is.
+fn toolbar_caption(host: &Host, t: &Toolbar) -> String {
+    let name = host
+        .loaded()
+        .into_iter()
+        .find(|l| l.manifest.id == t.owner)
+        .map(|l| l.manifest.name);
+    name.map_or_else(
+        || format!("{} toolbar", t.decl.title),
+        |name| format!("{} toolbar, from {name}", t.decl.title),
+    )
 }
 
 fn pane_toolbars(host: &Host) -> Vec<(Toolbar, ToolbarPlace)> {

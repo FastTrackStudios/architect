@@ -5,7 +5,10 @@
 //! The first run offers three: a folder the person has, a new vault
 //! ([`create`], `~/Documents/Architect`), or the demo vault ([`demo`]: the
 //! made-up vault in `apps/ui/demo-vault`, built into the app and written
-//! out to `<app dir>/Demo vault` to explore and edit).
+//! out to `<app dir>/Demo vault` to explore and edit). The demo vault is
+//! also the extension showcase (#710): its `Showcase` note, a note per
+//! capability, and `.architect/extensions.toml` naming the showcase
+//! extensions ("Install all" takes them from `crate::showcase::source`).
 
 use std::path::{Path, PathBuf};
 
@@ -16,31 +19,8 @@ const KEPT: &str = "vaults.json";
 static DEMO: include_dir::Dir<'static> =
     include_dir::include_dir!("$CARGO_MANIFEST_DIR/demo-vault");
 
-/// The extension showcase's vault (#710), as built into the app: a note
-/// per capability, and `.architect/extensions.toml` naming the showcase
-/// extensions ("Install all" takes them from `crate::showcase::source`).
-static SHOWCASE: include_dir::Dir<'static> =
-    include_dir::include_dir!("$CARGO_MANIFEST_DIR/showcase-vault");
-
 #[cfg(test)]
-pub(crate) static SHOWCASE_FOR_TESTS: &include_dir::Dir<'static> = &SHOWCASE;
-
-/// The showcase vault, written into the app's folder the first time
-/// (`<app dir>/Showcase`): where the first run's "Explore the showcase"
-/// opens.
-///
-/// # Errors
-///
-/// The app has no folder, or a file cannot be written.
-pub fn showcase() -> std::io::Result<PathBuf> {
-    let app = crate::app_dir().ok_or_else(|| std::io::Error::other("the app has no folder"))?;
-    let dir = app.join("Showcase");
-    if !dir.exists() {
-        std::fs::create_dir_all(&dir)?;
-        SHOWCASE.extract(&dir)?;
-    }
-    Ok(dir)
-}
+pub(crate) static DEMO_FOR_TESTS: &include_dir::Dir<'static> = &DEMO;
 
 /// The vault the app opened last, while its folder is there.
 ///
@@ -259,6 +239,17 @@ pub fn app_vault_org(catalog: &[OrgVault], dir: Option<&Path>) -> OrgVault {
         icon: None,
         dir: dir.map(Path::to_path_buf).unwrap_or_default(),
     }
+}
+
+/// The showcase's vault: the demo vault ([`demo`]), which holds the
+/// showcase now.
+///
+/// # Errors
+///
+/// As [`demo`]'s.
+#[deprecated(note = "the demo vault is the showcase's: use `demo`")]
+pub fn showcase() -> std::io::Result<PathBuf> {
+    demo()
 }
 
 /// The demo vault, written out to `<app dir>/Demo vault` when it is not

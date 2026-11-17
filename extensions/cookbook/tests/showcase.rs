@@ -1,4 +1,4 @@
-//! The showcase vault's recipes (`apps/ui/showcase-vault/Cookbook`):
+//! The showcase vault's recipes (`apps/ui/demo-vault/Cookbook`):
 //! each one reads as Cooklang, with its frontmatter, and Chicken and
 //! Waffles' Hot Honey cooks out into its own ingredients.
 
@@ -17,7 +17,7 @@ use architect_cookbook::{Portion, Recipes as _, Search};
 use futures::executor::block_on;
 
 fn vault() -> Vec<(String, String)> {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/ui/showcase-vault/Cookbook");
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/ui/demo-vault/Cookbook");
     std::fs::read_dir(&dir)
         .unwrap()
         .map(|e| e.unwrap().path())

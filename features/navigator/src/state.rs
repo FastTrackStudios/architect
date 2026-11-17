@@ -2049,7 +2049,8 @@ impl NavigatorState {
     ///   calendar, which is at the foot ([`Self::foot_rows`]), then the
     ///   pinned shortcuts;
     /// - Recent Files/;
-    /// - Vaults/: every vault's top-level folders in one flat list, by
+    /// - Vaults/: a row for each vault with notes at its top (listing
+    ///   them), then every vault's top-level folders in one flat list, by
     ///   name (or as a person ordered them), each opening to its tree;
     /// - Assets/: the [`Place::Assets`] mounts' containers, flat;
     /// - Tags/ (the "Tags" row, Untagged last), then the Properties.
@@ -2133,8 +2134,39 @@ impl NavigatorState {
                 continue;
             }
             let tops = flat(place);
-            rows.push(section(id, name, !folded(id), tops.len()));
+            // A vault with notes of its own at its top (a Welcome, the
+            // showcase's index): a row for the vault itself, first, that
+            // lists them. Its folders are the flat list below it, so it
+            // opens to nothing; without it those notes had no row at all.
+            let own: Vec<(&crate::Mount, &crate::index::Folder)> = mounts
+                .iter()
+                .filter(|m| m.place == place)
+                .filter_map(|m| self.index.folder(&m.id).map(|f| (m, f)))
+                .filter(|(_, f)| !f.files.is_empty())
+                .collect();
+            rows.push(section(
+                id,
+                name,
+                !folded(id),
+                tops.len().saturating_add(own.len()),
+            ));
             if !folded(id) {
+                for (m, folder) in own {
+                    rows.push(NavRow {
+                        key: format!("folder:{}", m.id),
+                        level: 0,
+                        kind: NavRowKind::Folder {
+                            path: m.id.clone(),
+                            name: m.title.clone(),
+                            has_children: false,
+                            expanded: false,
+                            count: crate::NoteCount {
+                                current: folder.count.current,
+                                descendants: 0,
+                            },
+                        },
+                    });
+                }
                 for top in tops {
                     rows.extend(tree::subtree(&self.index, &top, 0, expanded, &opts));
                 }
@@ -2185,8 +2217,8 @@ impl NavigatorState {
     }
 
     /// The org badge a folder row shows: a vault's top-level folder's (a
-    /// row of Vaults/) or an assets mount's container's, with several
-    /// sources.
+    /// row of Vaults/) or an assets mount's container's, when the vaults
+    /// and assets come from more than one org.
     #[must_use]
     pub fn badge(&self, path: &str) -> Option<crate::OrgBadge> {
         // A container that says its org (an asset library, a shared
@@ -2203,6 +2235,19 @@ impl NavigatorState {
                     .cloned()
                     .unwrap_or_else(|| crate::OrgBadge::new(org, org, "#71717a")),
             );
+        }
+        // Where a row comes from says something only beside another org's
+        // rows: with one org's vaults, its wash would tint every row and
+        // read as a selection.
+        let orgs: std::collections::BTreeSet<&str> = self
+            .index
+            .mounts()
+            .iter()
+            .filter(|m| matches!(m.place, Place::Vaults | Place::Assets))
+            .filter_map(|m| m.org.as_ref().map(|o| o.org.as_str()))
+            .collect();
+        if orgs.len() < 2 {
+            return None;
         }
         let m = self.index.mount_of(path)?;
         let (_, rest) = crate::mounts::split(path)?;

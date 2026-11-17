@@ -343,6 +343,14 @@ Tests:
 - `features/extensions/tests/host_ui.rs` `every_interface_call_is_refused_outside_its_capabilities`.
 - `features/extensions/tests/host_device.rs` `an_extensions_notifications_go_when_it_unloads_or_loses_them`.
 
+## Note file types: files that are notes, and their navigator rows
+
+`[[file_types]]` makes files of an extension notes like `.md` ones: `extension` (no dot), `name`, `icon`, `note_type` (the `type` they read as), `body` (`text` when it is another language, Cooklang say: only its `[[links]]` are read) and `preview`, the frontmatter property its row in the navigator's list shows in place of its body's first words. A `text` body that names no `preview` shows none, never its markup. The row's picture is the note's `image` (or `thumbnail`, `feature`, `cover`, `banner`) property, as any note's. They open in the editor as notes; an `[[embeds]]` claiming the `note_type` draws a card at their head. The Cookbook's `.cook` recipes: `extensions/cookbook/extension.toml`; the rule: `features/navigator/src/markdown.rs` `preview_for`.
+
+## Renderers: how a note type's text reads in the editor
+
+`[[renderers]] note_type = "recipe", action = "X_RENDER"`: while a note of that type is open, the app runs the action with `{text}` (its body) on each change and draws its answer, `{items: [RenderItem]}`, over every line but the caret's, as markdown's live preview. Items (`features/extensions/src/render.rs`): `conceal {from, to}`, `replace {from, to, text, look}`, `mark {from, to, look}`, `line {at, look}`, byte offsets into the text; looks are the app's (`heading`, `strong`, `muted`, `accent`, `chip`, `chip-accent`, `code`), not CSS. The text stays the source of truth: never rewrite it to render it. A `text` body gets no markdown preview, only its renderer's. Example: `extensions/cookbook/src/render.rs` (Cooklang).
+
 ## Openers: a file type, a document kind, a link
 
 An `[[openers]]` table that claims something opens it with the extension:

@@ -1,7 +1,8 @@
 //! The palette kit (feature `ui`): what a palette extension draws with.
 //!
 //! The overlay's [`Frame`], a [`CommandRow`], [`Lit`] text, a [`Kbd`]
-//! chip, the [`AskPalette`] that asks an action's arguments a step at a
+//! chip, a [`Reveal`] that keeps a picked row in sight, the
+//! [`AskPalette`] that asks an action's arguments a step at a
 //! time, and a row's [`Pick`]. The Command Palette
 //! (`features/palette/extension`) is drawn with them; a replacement may
 //! use them or draw its own.
@@ -14,6 +15,33 @@ use crate::ui::try_use_commands;
 use architect_palette::Ranked;
 
 pub use crate::keys_ui::{AskPalette, Pick};
+
+/// A list's row kept in sight: scrolled the nearest way into its list's
+/// view each time `reveal` turns true (picked with the arrow keys; not
+/// under the pointer, where the list would jump as it moved).
+#[component]
+pub fn Reveal(reveal: bool, children: Element) -> Element {
+    let mut mounted = use_signal(|| None::<std::rc::Rc<MountedData>>);
+    use_effect(use_reactive!(|reveal| {
+        if reveal && let Some(m) = mounted.peek().clone() {
+            spawn(async move {
+                let _ = m
+                    .scroll_to_with_options(ScrollToOptions {
+                        behavior: ScrollBehavior::Instant,
+                        vertical: ScrollLogicalPosition::Nearest,
+                        horizontal: ScrollLogicalPosition::Nearest,
+                    })
+                    .await;
+            });
+        }
+    }));
+    rsx! {
+        div { style: "flex-shrink: 0; display: flex; flex-direction: column;",
+            onmounted: move |e| mounted.set(Some(e.data())),
+            {children}
+        }
+    }
+}
 
 /// A row's fill: lit when picked.
 #[must_use]
@@ -160,8 +188,15 @@ pub fn Lit(text: String, positions: Vec<usize>, ink: String, lit: String) -> Ele
     }
 }
 
+/// A command's row: lit when `on` (picked by the keys, or under the
+/// pointer: `onhover` asks the list to pick it, so one row is ever lit).
 #[component]
-pub fn CommandRow(row: Ranked, on: bool, onpress: EventHandler<()>) -> Element {
+pub fn CommandRow(
+    row: Ranked,
+    on: bool,
+    onpress: EventHandler<()>,
+    #[props(default)] onhover: Option<EventHandler<()>>,
+) -> Element {
     let t = theme();
     let c = row.item;
     let fill = if on { &*t.active } else { "transparent" };
@@ -171,12 +206,18 @@ pub fn CommandRow(row: Ranked, on: bool, onpress: EventHandler<()>) -> Element {
         div {
             class: "lp",
             "data-command": "{c.id}",
-            style: "height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border-radius: 8px; \
-                    background: {fill}; font-size: 13px; cursor: pointer;",
+            style: "flex-shrink: 0; height: 34px; display: flex; align-items: center; gap: 10px; padding: 0 10px; \
+                    border-radius: 7px; background: {fill}; font-size: 13px; cursor: pointer;",
             onclick: move |_| onpress.call(()),
+            onmouseenter: move |_| {
+                if let Some(h) = onhover {
+                    h.call(());
+                }
+            },
             span { style: "flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; overflow: hidden;",
                 if !c.group.is_empty() {
-                    span { style: "flex-shrink: 0; color: {quiet};", "{c.group}:" }
+                    span { style: "flex-shrink: 0; color: {quiet}; font-size: 12px;", "{c.group}" }
+                    span { style: "flex-shrink: 0; color: {quiet}; font-size: 12px;", "›" }
                 }
                 Lit { text: c.label.clone(), positions: row.positions, ink: ink.to_owned(), lit: t.ink.to_string() }
                 if let Some(why) = c.disabled_reason.clone() {

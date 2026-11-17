@@ -265,9 +265,7 @@ pub(super) fn ItemRow(
                 }
             },
             oncontextmenu: move |e: MouseEvent| {
-                e.prevent_default();
-                let mut menu = nav.menu;
-                menu.set(Some(RowMenu { target: menu_target.clone(), top: top + height }));
+                open_menu(nav, on_open, menu_target.clone(), top + height, &e);
             },
             onpointerdown: move |e: PointerEvent| {
                 if let NavTarget::Folder(f) = &target_down {
@@ -317,7 +315,7 @@ pub(super) fn ItemRow(
                 }
             } else if !count.is_empty() {
                 Leader { nav }
-                span { class: "nv-count", style: "flex:0 0 auto; color:var(--nv-faint); font-size:11px;", "{count}" }
+                span { class: "nv-count", title: super::panes::count_hint(&count), style: "flex:0 0 auto; color:var(--nv-faint); font-size:11px;", "{count}" }
             }
             Guides { nav, level, indent }
         }
@@ -610,9 +608,13 @@ pub(super) fn drag_end(nav: Navigator, on_open: EventHandler<Open>) {
 
 // ── The row menu ───────────────────────────────────────────────────────
 
-/// A tag's or a property's menu (`buildTagMenu`, the property menu).
-#[component]
-pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -> Element {
+/// A divider between a menu's sections.
+const SEP: (String, MenuAct) = (String::new(), MenuAct::Separator);
+
+/// The rows of `target`'s menu (`buildFolderMenu`, `buildTagMenu`, the
+/// property menu), then what extensions add, in sections: no divider
+/// first, last or twice in a row.
+fn menu_items(nav: Navigator, target: &NavTarget) -> Vec<(String, MenuAct)> {
     let s = nav.state.read();
     let paths: Vec<String> = s.selection().files().iter().cloned().collect();
     let n = paths.len();
@@ -622,7 +624,7 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
             .map_or_else(|| t.to_owned(), |node| node.display.clone())
     };
     let mut items: Vec<(String, MenuAct)> = Vec::new();
-    match &menu.target {
+    match target {
         NavTarget::Tag(t) if t == TAGGED => {
             items.push(("Reset tag order".to_owned(), MenuAct::ResetTagOrder));
         }
@@ -662,6 +664,7 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
                 "Reset order of tags below".to_owned(),
                 MenuAct::ResetChildOrder(format!("tag:{t}")),
             ));
+            items.push(SEP);
             items.push(("Rename tag…".to_owned(), MenuAct::Rename(t.clone())));
             items.push((format!("Delete #{t}"), MenuAct::Delete(t)));
         }
@@ -745,6 +748,7 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
                 "New base".to_owned(),
                 MenuAct::New(f.clone(), NewKind::Base),
             ));
+            items.push(SEP);
             if n > 0 {
                 items.push((
                     format!("Move {n} selected here"),
@@ -771,6 +775,7 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
                 MenuAct::FolderTemplate(f.clone()),
             ));
             // `buildFolderMenu`'s folder note rows.
+            items.push(SEP);
             if !f.is_empty() && s.settings().folder_notes {
                 if s.folder_note(&f).is_some() {
                     items.push((
@@ -790,6 +795,7 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
                     ));
                 }
             }
+            items.push(SEP);
             if !f.is_empty() {
                 items.push(("Rename…".to_owned(), MenuAct::RenameFolder(f.clone())));
                 items.push((
@@ -803,13 +809,14 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
     }
     // Every folder, tag and property but the virtual rows: a shortcut, and
     // (folders and tags) hiding it.
-    let real = match &menu.target {
+    let real = match target {
         NavTarget::Tag(t) => t != TAGGED && t != UNTAGGED,
         NavTarget::Property { key, .. } => key != ROOT,
         NavTarget::Folder(_) => true,
     };
     if real {
-        let shortcut = Shortcut::to(&menu.target);
+        items.push(SEP);
+        let shortcut = Shortcut::to(target);
         let has = s.profile().shortcuts.iter().any(|x| x.same(&shortcut));
         items.push(if has {
             (
@@ -824,7 +831,8 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
         });
         // An icon, a colour, a background (`buildFolderMenu`'s style
         // items, `styleMenuBuilder`).
-        let at = paint_target(&menu.target);
+        items.push(SEP);
+        let at = paint_target(target);
         let has_icon = s.own_icon(&at).is_some();
         let has_colour = s.colour(&at).is_some();
         let has_bg = s.background(&at).is_some();
@@ -858,7 +866,7 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
                 MenuAct::Paint(Paint::Background, at, false),
             ));
         }
-        match &menu.target {
+        match target {
             NavTarget::Folder(f) if !f.is_empty() => {
                 items.push((
                     "Hide folder".to_owned(),
@@ -874,7 +882,7 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
             _ => {}
         }
     }
-    if n == 0 && matches!(menu.target, NavTarget::Property { .. } | NavTarget::Tag(_)) {
+    if n == 0 && matches!(target, NavTarget::Property { .. } | NavTarget::Tag(_)) {
         items.push((
             "Select notes to tag them or set properties".to_owned(),
             MenuAct::Nothing,
@@ -884,8 +892,9 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
     // Extensions' rows (NN's MenusAPI `registerFolderMenu`,
     // `registerTagMenu`, `registerPropertyMenu`): their `[[context]]` on
     // `navigator:folder`, `navigator:tag`, `navigator:property`.
-    if let Some(extra) = try_use_context::<MenuExtra>() {
-        let (kind, id) = menu_extra_target(&menu.target);
+    if let Some(extra) = try_consume_context::<MenuExtra>() {
+        items.push(SEP);
+        let (kind, id) = menu_extra_target(target);
         for (label, command) in (extra.rows)(kind, &id) {
             items.push((
                 label,
@@ -893,6 +902,28 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
             ));
         }
     }
+    let mut rows: Vec<(String, MenuAct)> = Vec::with_capacity(items.len());
+    for row in items {
+        let divider = row.1 == MenuAct::Separator;
+        if divider
+            && rows
+                .last()
+                .is_none_or(|r: &(String, MenuAct)| r.1 == MenuAct::Separator)
+        {
+            continue;
+        }
+        rows.push(row);
+    }
+    if rows.last().is_some_and(|r| r.1 == MenuAct::Separator) {
+        rows.pop();
+    }
+    rows
+}
+
+/// A tag's or a property's menu (`buildTagMenu`, the property menu).
+#[component]
+pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -> Element {
+    let items = menu_items(nav, &menu.target);
     let top = menu.top;
     // Kept inside the pane, scrolled when longer (a folder's menu).
     let room = (nav
@@ -912,10 +943,16 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
         }
         div { class: "nv-menu nv-row-menu", role: "menu",
             style: "position:absolute; left:12px; right:12px; top:{top}px; max-height:{room}px; z-index:10; padding:4px; border-radius:8px; \
-                    background:var(--nv-background); border:1px solid var(--nv-divider); display:flex; flex-direction:column; overflow-y:auto;",
+                    background:var(--nv-background); border:1px solid var(--nv-divider); box-shadow:0 12px 32px rgba(0,0,0,0.35); \
+                    display:flex; flex-direction:column; overflow-y:auto;",
+            // The row's look is the sheet's (`.nv-menu-row` in `ui/mod.rs`
+            // `CSS`): a `background` set here would beat its `:hover`.
             for (label, act) in items {
-                button { class: "nv-menu-row", role: "menuitem", "data-menu-item": "{label}",
-                    style: "text-align:left; height:26px; padding:0 8px; border:none; border-radius:5px; background:transparent; color:var(--nv-text); cursor:pointer; font-size:12px;",
+                if act == MenuAct::Separator {
+                    div { class: "nv-menu-separator", style: "flex-shrink:0; height:1px; margin:4px 6px; background:var(--nv-divider);" }
+                } else {
+                button { class: "nv-menu-row nv-menu-button", role: "menuitem", "data-menu-item": "{label}",
+                    style: if act.deletes() { "color:var(--nv-danger, #e5484d);" } else { "" },
                     onclick: move |_| {
                         open.set(None);
                         if let MenuAct::Extension(command, kind, id) = &act {
@@ -928,9 +965,68 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
                     },
                     "{label}"
                 }
+                }
             }
         }
     }
+}
+
+impl MenuAct {
+    /// Whether it deletes something (drawn in the danger ink).
+    const fn deletes(&self) -> bool {
+        matches!(self, Self::Trash(_) | Self::Delete(_) | Self::DeleteKey(_))
+    }
+}
+
+/// Opens `target`'s menu where `e` was pressed: over the whole window
+/// when the app draws popups (the workspace's menu layer, so a press
+/// anywhere closes it and it is never cut off by the pane), else in the
+/// pane under the row (`top`).
+pub(super) fn open_menu(
+    nav: Navigator,
+    on_open: EventHandler<Open>,
+    target: NavTarget,
+    top: f64,
+    e: &MouseEvent,
+) {
+    e.prevent_default();
+    let Some(popup) = architect_shell::popup::try_use_popup() else {
+        let mut menu = nav.menu;
+        menu.set(Some(RowMenu { target, top }));
+        return;
+    };
+    // Taken now: the row runs from the menu layer, outside this scope.
+    let extra = try_consume_context::<MenuExtra>();
+    let rows = menu_items(nav, &target)
+        .into_iter()
+        .map(|(label, act)| {
+            use architect_shell::popup::PopupRow;
+            if act == MenuAct::Separator {
+                return PopupRow::Separator;
+            }
+            if act == MenuAct::Nothing {
+                return PopupRow::Note(label);
+            }
+            let deletes = act.deletes();
+            let extra = extra.clone();
+            let run = move || {
+                if let MenuAct::Extension(command, kind, id) = &act {
+                    if let Some(extra) = &extra {
+                        (extra.run)(command, kind, id);
+                    }
+                    return;
+                }
+                menu_act(nav, on_open, act.clone());
+            };
+            if deletes {
+                PopupRow::danger(label, run)
+            } else {
+                PopupRow::act(label, run)
+            }
+        })
+        .collect();
+    let p = e.client_coordinates();
+    popup.show(rows, (p.x, p.y));
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -974,6 +1070,8 @@ enum MenuAct {
     /// Painted (asked for a value), or (`false`) the paint taken off.
     Paint(Paint, String, bool),
     Nothing,
+    /// A divider between sections.
+    Separator,
 }
 
 /// A row's target as icons and colours key it.
@@ -1221,7 +1319,7 @@ fn menu_act(nav: Navigator, on_open: EventHandler<Open>, act: MenuAct) {
             nav.say("Hidden: show hidden items to see it again");
             return;
         }
-        MenuAct::Nothing | MenuAct::Extension(..) => return,
+        MenuAct::Nothing | MenuAct::Separator | MenuAct::Extension(..) => return,
     };
     match out {
         Ok(out) => nav.act(Some(out), on_open),
@@ -1630,14 +1728,13 @@ pub(super) fn SectionRow(
         div { class, role: "treeitem", "data-section": "{id}",
             "aria-expanded": if expanded { "true" } else { "false" },
             style: "position:absolute; left:4px; right:4px; top:{top}px; height:{height}px; display:flex; align-items:center; gap:4px; \
-                    padding:0 8px 0 6px; border-radius:6px; white-space:nowrap; color:var(--nv-muted); font-size:11px; font-weight:600; \
-                    text-transform:uppercase; letter-spacing:0.04em;",
+                    padding:0 8px 0 6px; border-radius:6px; white-space:nowrap; color:var(--nv-muted); font-size:12px; font-weight:600;",
             onclick: move |_| nav.update(|s| s.toggle_section(&toggle)),
             span { style: "flex:0 0 16px; display:flex; align-items:center; justify-content:center; color:var(--nv-faint);",
                 if expanded { ChevronDown { size: 14 } } else { ChevronRight { size: 14 } }
             }
             span { style: "flex:1 1 auto;", "{name}" }
-            span { class: "nv-count", style: "flex:0 0 auto; color:var(--nv-faint); font-weight:400;", "{count}" }
+            span { class: "nv-count", title: super::panes::count_hint(&count.to_string()), style: "flex:0 0 auto; color:var(--nv-faint); font-weight:400;", "{count}" }
         }
     }
 }

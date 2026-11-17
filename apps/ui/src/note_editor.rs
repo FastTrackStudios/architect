@@ -49,6 +49,7 @@ use architect_extensions::contrib::Claim;
 use architect_extensions::editor::{DecorationSpec, EditCommand, EditorError, EditorView, Editors};
 use architect_extensions::embeds::{EmbedView, WidgetView};
 use architect_extensions::interface::ExtensionUi;
+use architect_extensions::render::{RenderItem, Rendered};
 use dioxus::prelude::*;
 use facet::Facet;
 use futures_util::StreamExt as _;
@@ -368,6 +369,16 @@ fn redo(_: &EditorState) -> Option<TransactionSpec> {
 /// note: `--ed-scroll-height: auto`, so the pane scrolls it, not a box of
 /// its own (every line is built then; a note is not a 100k-line file).
 const LAYOUT: &str = "
+.lab-note-editor .rendered.look-strong, .lab-note-editor .rendered-line.look-strong { font-weight: 700; }
+.lab-note-editor .rendered.look-muted, .lab-note-editor .rendered-line.look-muted { color: var(--muted-foreground); }
+.lab-note-editor .rendered.look-accent { color: var(--primary); }
+.lab-note-editor .rendered.look-code { font-family: var(--font-mono, monospace); font-size: .92em; }
+.lab-note-editor .rendered-line.look-heading { font-size: 1.15em; font-weight: 700; padding-top: .6em; }
+.lab-note-editor .rendered.look-heading { font-weight: 700; }
+.lab-note-editor .rendered.look-chip, .lab-note-editor .rendered.look-chip-accent { display: inline-block; padding: 0 7px; margin: 0;
+  border-radius: 6px; line-height: 1.55; font-size: .94em; background: var(--muted); border: 1px solid var(--border); }
+.lab-note-editor .rendered.look-chip-accent { background: var(--accent); color: var(--accent-foreground); border-color: transparent; font-weight: 600; }
+.lab-note-editor .md-wikilink, .lab-note-editor .md-link { cursor: pointer; }
 .lab-note-editor { box-sizing: border-box; color: var(--foreground); position: relative;
   max-width: 760px; width: 100%; padding: 0; min-height: 0; }
 .lab-note-editor .editor-root { --ed-scroll-height: auto; padding-left: 0; min-height: 120px;
@@ -598,8 +609,56 @@ pub fn NoteEditor(
     /// each shows as one line until the caret goes into it.
     #[props(default)]
     fold_listing: bool,
+    /// The action that renders this note's type (`[[renderers]]`): its
+    /// answer is drawn over the text as its live preview.
+    #[props(default)]
+    renderer: Option<String>,
+    /// Whether its body is markdown (`.md`, and a declared type unless
+    /// `body = "text"`): only then does markdown's live preview draw.
+    #[props(default = true)]
+    markdown_body: bool,
 ) -> Element {
     let state = use_signal(|| EditorState::new(text.clone()));
+    // Its renderer's latest answer, with the text it was for: drawn only
+    // while the text is still that.
+    let mut rendered = use_signal(|| (String::new(), Vec::<RenderItem>::new()));
+    let mut renderer_now = use_signal(|| renderer.clone());
+    let mut markdown_now = use_signal(|| markdown_body);
+    let render = use_callback(move |text: String| {
+        let Some(action) = renderer_now.peek().clone() else {
+            if !rendered.peek().1.is_empty() {
+                rendered.set((String::new(), Vec::new()));
+            }
+            return;
+        };
+        let Some(ui) = try_consume_context::<ExtensionUi>() else {
+            return;
+        };
+        let list = ui.host().list().clone();
+        spawn(async move {
+            let args = serde_json::to_vec(&serde_json::json!({ "text": text })).unwrap_or_default();
+            match list
+                .run_json_async_with(&ActionCaller::app(), &action, &args)
+                .await
+            {
+                Ok(bytes) => match serde_json::from_slice::<Rendered>(&bytes) {
+                    Ok(r) if state.peek().doc.to_string() == text => rendered.set((text, r.items)),
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!(action, error = %e, "lab.note_editor.render_answer"),
+                },
+                Err(e) => tracing::warn!(action, error = %e, "lab.note_editor.render_failed"),
+            }
+        });
+    });
+    use_effect(use_reactive!(|renderer, markdown_body| {
+        if *renderer_now.peek() != renderer {
+            renderer_now.set(renderer);
+        }
+        if *markdown_now.peek() != markdown_body {
+            markdown_now.set(markdown_body);
+        }
+        render.call(state.peek().doc.to_string());
+    }));
     // Read by the decorations, so they are drawn again when the core list
     // comes or goes (the extension listing can load after the note opens).
     let mut fold = use_signal(|| fold_listing);
@@ -619,6 +678,7 @@ pub fn NoteEditor(
             let now = state.peek().doc.to_string();
             if let Some(spec) = replace_spec(&now, &new) {
                 architect_editor::ui::dispatch_with_history(state, history, spec, None);
+                render.call(state.peek().doc.to_string());
             }
         }
     }));
@@ -637,6 +697,7 @@ pub fn NoteEditor(
             decos.set(flat);
             if edited {
                 on_change.call(state.peek().doc.to_string());
+                render.call(state.peek().doc.to_string());
             }
         }
     });
@@ -697,6 +758,7 @@ pub fn NoteEditor(
         if event.is_edit() {
             decos.set(LIVE.take_flat());
             on_change.call(event.doc_after.to_string());
+            render.call(event.doc_after.to_string());
         }
     });
     // This note is the one typed in: the format commands edit it.
@@ -717,10 +779,26 @@ pub fn NoteEditor(
             let _ = *languages.read();
             let specs: Vec<DecorationSpec> = decos.read().iter().map(|(_, d)| d.clone()).collect();
             let text = s.doc.to_string();
-            let mut out = vault.as_ref().map_or_else(
-                || architect_editor::state::markdown::live_preview(s),
-                |v| v.preview(s),
-            );
+            // Markdown's live preview, for a markdown body; a body in
+            // another language (Cooklang) reads as its renderer says.
+            let mut out = if *markdown_now.read() {
+                vault.as_ref().map_or_else(
+                    || architect_editor::state::markdown::live_preview(s),
+                    |v| v.preview(s),
+                )
+            } else {
+                Vec::new()
+            };
+            {
+                let (for_text, items) = &*rendered.read();
+                if *for_text == text {
+                    out.extend(rendered_decorations(
+                        items,
+                        &text,
+                        s.selection.primary().head,
+                    ));
+                }
+            }
             out.extend(ext::decorations(&specs, &text));
             if *fold.read() {
                 out.extend(listing_folds(&text, s.selection.primary().head));
@@ -829,6 +907,80 @@ pub fn NoteEditor(
             CommandPalette { state, palette, on_action: move |a: String| run(a) }
         }
     }
+}
+
+/// A renderer's items (`[[renderers]]`) as the editor's decorations:
+/// a hidden range hidden, a replaced one hidden with its words in its
+/// place, a mark or a line in its look's class (`LAYOUT`'s `.look-*`).
+/// On the caret's line nothing is hidden or replaced: its source shows,
+/// as markdown's live preview shows a line's marks while it is edited.
+fn rendered_decorations(items: &[RenderItem], text: &str, caret: usize) -> Vec<DecoratedRange> {
+    let caret = caret.min(text.len());
+    let line_start = text
+        .get(..caret)
+        .and_then(|t| t.rfind('\n'))
+        .map_or(0, |i| i.saturating_add(1));
+    let line_end = text
+        .get(caret..)
+        .and_then(|t| t.find('\n'))
+        .map_or(text.len(), |i| caret.saturating_add(i));
+    let on_caret_line = |from: usize, to: usize| from <= line_end && to >= line_start;
+    let mut out = Vec::new();
+    for item in items {
+        if !item.fits(text) {
+            continue;
+        }
+        let (from, to) = item.range();
+        if item.hides() && on_caret_line(from, to) {
+            continue;
+        }
+        match item {
+            RenderItem::Conceal { .. } => out.push(DecoratedRange::replace(from..to)),
+            RenderItem::Replace {
+                text: words, look, ..
+            } => {
+                out.push(DecoratedRange::replace(from..to));
+                out.push(DecoratedRange::widget(
+                    from,
+                    format!(
+                        "<span class=\"rendered {}\">{}</span>",
+                        look.class(),
+                        escape_html(words)
+                    ),
+                ));
+            }
+            RenderItem::Mark { look, .. } => {
+                out.push(DecoratedRange::mark(
+                    from..to,
+                    format!("rendered {}", look.class()),
+                ));
+            }
+            RenderItem::Line { look, .. } => out.push(DecoratedRange {
+                from,
+                to: from,
+                kind: DecorationKind::Line {
+                    class: format!("rendered-line {}", look.class()),
+                },
+            }),
+        }
+    }
+    out
+}
+
+/// `text` safe inside HTML.
+fn escape_html(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// A folded listing fence's line: a row of its own under the code block's
@@ -1051,6 +1203,42 @@ pub fn register(list: &ActionList) {
 #[cfg(test)]
 mod tests {
     use super::{LAYOUT, claimed_fences, fence_index, fence_mount};
+
+    #[test]
+    fn a_renderers_items_hide_their_source_but_on_the_caret_line() {
+        use super::{DecorationKind, escape_html, rendered_decorations};
+        use architect_extensions::render::{Look, RenderItem};
+        let text = "Whisk @flour{250%g}.\nRest ~{10%min}.\n";
+        let flour = text.find('@').unwrap_or_default();
+        let timer = text.find('~').unwrap_or_default();
+        let items = vec![
+            RenderItem::Replace {
+                from: flour,
+                to: flour + 13,
+                text: "250 g flour".into(),
+                look: Look::ChipAccent,
+            },
+            RenderItem::Replace {
+                from: timer,
+                to: timer + 9,
+                text: "10 min".into(),
+                look: Look::Chip,
+            },
+            RenderItem::Conceal { from: 0, to: 99 },
+        ];
+        // The caret on the first line: its ingredient shows as written;
+        // the timer on the next line reads as words; what does not fit
+        // the text is left out.
+        let out = rendered_decorations(&items, text, 2);
+        assert!(!out.iter().any(|d| d.from == flour));
+        assert!(
+            out.iter()
+                .any(|d| d.from == timer && matches!(d.kind, DecorationKind::Replace))
+        );
+        assert!(out.iter().any(|d| matches!(&d.kind, DecorationKind::Widget { html } if html.contains("10 min") && html.contains("look-chip"))));
+        assert!(!out.iter().any(|d| d.to == 99));
+        assert_eq!(escape_html("<b>&\""), "&lt;b&gt;&amp;&quot;");
+    }
 
     /// The editor's fences are the extensions': a fence in a claimed
     /// language is found with its body and where its embed goes; one in

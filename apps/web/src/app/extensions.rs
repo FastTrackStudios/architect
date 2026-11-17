@@ -274,8 +274,6 @@ pub fn use_web_extensions(app: &Arc<ActionList>) -> ExtensionUi {
     use_extension_ui(extensions.host().clone(), Arc::clone(app))
 }
 
-/// Where this app keeps installs and grants: the org's (signed in), the
-/// showcase's (`/app/?showcase`), or nowhere past the tab (the demo).
 /// Where luau-web's `index.js` is: the bundle's folder of the app's code
 /// (`scripts/web-bundle.sh` copies apps/web/assets/luau-web there; the dev
 /// stack's public folder has it too), as an absolute URL a Web Worker
@@ -287,12 +285,13 @@ fn luau_lib() -> Option<String> {
     Some(format!("{origin}{dir}luau-web/index.js"))
 }
 
+/// Where this app keeps installs and grants: the org's (signed in), the
+/// demo's (`/app/?demo`, whose vault is the showcase's, #710), or nowhere
+/// past the tab (a share link's guest).
 fn installs_scope(web: Option<&super::vault::WebVault>) -> Option<String> {
     match web.and_then(|w| w.org.as_ref()) {
         Some(org) => Some(org.slug()),
-        None => {
-            (crate::demo::chosen() == crate::demo::Vault::Showcase).then(|| "showcase".to_owned())
-        }
+        None => crate::demo::is_open().then(|| "showcase".to_owned()),
     }
 }
 
