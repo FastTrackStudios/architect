@@ -806,6 +806,8 @@ pub fn LabApp() -> Element {
     // Capture (#352): the composer, the inbox over the vault, the capture
     // window on a system-wide key, CAPTURE_* and INBOX_* on the list.
     let capture_ui = capture::use_app_capture(&list, files, windowed);
+    // A page's dialog over the whole window (the vault's extensions).
+    let window_dialog = use_context_provider(|| extensions::WindowDialog(Signal::new(None))).0;
     // An agent's UI (A2UI): its surfaces on a document of their own, the
     // `A2UI_*` actions on the list, the Vault's "Agent UI" view drawing
     // them. Every write a surface's button makes asks first (the sheet).
@@ -1719,6 +1721,7 @@ pub fn LabApp() -> Element {
             if let Some(capture) = capture_ui {
                 architect_capture::ui::CaptureLayer { capture }
             }
+            {window_dialog()}
             architect_guide::tour::TourLayer {}
             screen::DeviceChrome {}
         }

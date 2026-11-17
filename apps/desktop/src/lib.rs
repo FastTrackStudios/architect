@@ -28,6 +28,10 @@
 #[cfg(feature = "gui")]
 mod app;
 #[cfg(feature = "gui")]
+pub mod dev;
+#[cfg(feature = "gui")]
+pub mod install;
+#[cfg(feature = "gui")]
 mod mcp_port;
 
 #[cfg(feature = "gui")]

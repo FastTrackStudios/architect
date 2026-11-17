@@ -84,6 +84,9 @@ pub(super) struct Edges {
     /// The main window's leading group (its center's first, at the top):
     /// its bar starts with the scope tabs.
     pub lead: bool,
+    /// Room kept at the end of the title row's bar for a button laid over
+    /// it (the right sidebar's, beside the open sidebar's divider).
+    pub room_right: f32,
 }
 
 impl Edges {
@@ -98,6 +101,7 @@ impl Edges {
                 right: self.right && last,
                 covered: self.covered,
                 lead: self.lead && first,
+                room_right: if last { self.room_right } else { 0.0 },
             },
             Axis::Column => Self {
                 top: self.top && first,
@@ -105,6 +109,7 @@ impl Edges {
                 right: self.right,
                 covered: self.covered,
                 lead: self.lead && first,
+                room_right: if first { self.room_right } else { 0.0 },
             },
         }
     }
@@ -314,7 +319,8 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
     let pad_right = row
         .as_ref()
         .filter(|_| edges.right)
-        .map_or(0.0, |r| r.right);
+        .map_or(0.0, |r| r.right + (host.right_toggle)())
+        + if row.is_some() { edges.room_right } else { 0.0 };
     let on_drag = row.as_ref().and_then(|r| r.on_drag);
     let on_zoom = row.as_ref().and_then(|r| r.on_zoom);
     let lift = (height - s.tabs + 6.0).max(6.0);
@@ -337,6 +343,13 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
         .map(|p| (p.id.clone(), host.title(p), p.pinned, host.icon(p)))
         .collect();
     drop(workspace);
+    // A dock's icon bar with one view has nothing to switch between: no
+    // tab, the row and its menu stay (the view's own head says what it is).
+    let tabs = if icons && tabs.len() == 1 {
+        Vec::new()
+    } else {
+        tabs
+    };
     let menu_for = current;
     let names = tab_names(&group);
     let button = format!(

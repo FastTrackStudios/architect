@@ -247,6 +247,11 @@ view in a headless Blitz document, clicks it, sends its process
 
 ## Your own
 
+To run yours in the app as you write it, see "The development loop" in
+[Writing an extension](@/extensions/authoring.md): `architect dev
+--extension <folder>` opens an instance of its own with your folder
+loaded and reloaded on save.
+
 Copy `examples/extension/registry/hello` for a Luau or data extension,
 `examples/extension/counter` for a process extension, and
 `examples/extension/host/src/lib.rs` when your app becomes a host.

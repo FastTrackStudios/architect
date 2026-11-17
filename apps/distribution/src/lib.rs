@@ -506,6 +506,14 @@ impl Distribution {
         config_dir(&self.folder)
     }
 
+    /// The environment variable that moves its folder
+    /// (`ARCHITECT_CONFIG_DIR` for the Architect app, `<FOLDER>_CONFIG_DIR`):
+    /// a folder of its own is an instance of its own (`instance_id`).
+    #[must_use]
+    pub fn folder_env(&self) -> String {
+        architect::settings::env_var(&self.folder)
+    }
+
     /// [`app_dir`](Self::app_dir), or a folder of its name under the temp
     /// dir.
     #[must_use]

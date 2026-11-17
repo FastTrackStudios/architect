@@ -42,6 +42,27 @@ Rules:
 
 How fast a save shows, by kind: data and themes instantly; Luau and TypeScript on the next run; WASM components rebuilt (seconds, state kept); processes rebuilt and restarted with state handed over. Full table: "Hot reload" in the architecture page.
 
+### An instance of your own: `architect-desktop dev`
+
+Against an installed app: `cargo run --release -p architect-desktop -- install` from a checkout installs that build (bundled, signed, notarized and stapled on a Mac; `--no-notarize` skips Apple) and links `architect` onto `PATH`, so a repo of extensions runs `architect dev --extension <folder> …` with no Architect crate in its build. A development copy is not built by the app: its program at `[entry] path` is the extension's own build's to write (a path dependency's edit included); the app reloads when a file in the folder changes, the program among them.
+
+An agent (or a worktree) gets its own Architect, apart from the person's window and from every other one: its own settings folder, vault, control socket, file secret store (never the keychain), local-only iroh, and no global capture shortcut (`apps/desktop/src/dev.rs`). As many run at once as are asked for.
+
+```sh
+architect-desktop dev --extension ./my-ext --only navigator --open Showcase.md
+architect-desktop dev --only keyflow --open "Charts/A.kf" --collapse left,right   # that view, sides folded
+architect-desktop dev --only keyflow --open "Charts/A.kf" --hide all              # the tabs and the view, nothing else
+architect-desktop dev list                 # name, pid, socket, log, vault of each
+architect-desktop dev path                 # this folder's instance, with its `drive` command
+architect-desktop dev stop [<name> | --all]
+```
+
+- **Its name** is the working folder's (its last part and a hash of the whole path), so each checkout has one; `--name` picks another. It lives in `~/Library/Caches/architect-dev/<app>/<name>/` (`$ARCHITECT_DEV_ROOT` moves it); `--fresh` starts it over.
+- **What it opens:** the demo vault, seeded fresh (`--seed <dir>` another, `--vault <dir>` an existing one); `--open <path>` a note or file beside the first tab; `--collapse left,right` (or `all`) opens with those sides folded away (the left sidebar to the rail, the docks collapsed; a press opens them again); `--hide rail,status,left,right,bottom` (or `all`) takes them away: the rail and the status bar are the shell's slots (`HOME_SLOT_SET` hidden; an extension may fill one, a layout may hide one), the docks hidden strip and all, so `--hide all` leaves the tab bar and the open view; `--layout <name>` a saved layout; `--run ACTION[=JSON]` actions after, in order.
+- **What runs:** `--extension <dir>` loads a folder as a development copy (reloaded on save, as above); `--only <id,id>` turns every other extension off (the development copies stay on); `--bare` turns them all off. With neither, everything but `updates` runs. Run again with another `--only`, what it names comes back on (off is kept in the instance's folder). With nothing loaded that fills the left dock (the navigator off), the Vault opens its sidebar folded to the rail by itself (`ExtensionUi::fills_dock`). The vault's install offer is not shown: the instance has what it was given.
+- **Driving it:** the command prints JSON with `socket`; `architect-desktop actions --app <socket> …` drives that instance only (`APP_SHOT`, `APP_STATUS`, `EXT_LOGS`). Run again with the same name, it applies the new flags to the running one. Its output, and any panic with its backtrace, is in the printed `log` (when started from the environment, the panic only; the rest stays where it was started); `--wait` blocks until it ends and exits nonzero if it died.
+- **From the environment:** `ARCHITECT_DEV=1` (or a name) makes a plain launch an isolated instance, so a devenv or a script can set it; `ARCHITECT_DEV_ONLY`, `ARCHITECT_DEV_EXTENSIONS` (a path list), `ARCHITECT_DEV_OPEN`, `ARCHITECT_DEV_COLLAPSE`, `ARCHITECT_DEV_HIDE`, `ARCHITECT_DEV_LAYOUT`, `ARCHITECT_DEV_VAULT`, `ARCHITECT_DEV_SEED`, `ARCHITECT_DEV_FRESH` and `ARCHITECT_DEV_RUN` (JSON `[["ACTION", {args}], …]`) are the flags' equivalents. The window's title says `(dev: <name>)`.
+
 ## Registries
 
 `features/extensions/src/registries.rs` `Registries` keeps the registries an app searches and installs from, kept in `<app dir>/extension-registries.json`:
@@ -131,7 +152,7 @@ required = true      # false: offered, not asked
 
 - `Extensions::open_vault` plans it (`features/extensions/src/vault_needs.rs` `VaultNeeds`); `EXT_NEEDS {folder}` gives an agent the same plan (ready, to install, to offer, missing with why, refused). Neither changes anything.
 - A registry can be compiled into the app: `features/extensions/src/bundled.rs` `BundledSource` (packages whose files the build carries, listed and installed like a folder registry's path packages, through the same consent; the app's build vouches for them). The app carries the showcase's Luau, TypeScript and data packages this way (`apps/ui/src/showcase.rs` `source`), so the showcase vault's **Install all** works on the desk and on a phone with no network.
-- The app draws it over the vault (`apps/ui/src/extensions.rs` `VaultNeedsBanner`, with `MissingExtensions`): required, optional, what cannot be had and why, and **Install all**. `Extensions::previews_for` builds one consent prompt; nothing installs before that one yes (`Extensions::accept_vault`), then everything loads without a restart. "Not now" hides it for the run.
+- The app says it in the status bar (on a phone, a row at the page's top): "17 extensions to install"; pressed, a dialog over the window holds the card (`apps/ui/src/extensions.rs` `VaultNeedsBanner`, with `MissingExtensions` `bare`): required, optional, what cannot be had and why, and **Install all**. `Extensions::previews_for` builds one consent prompt; nothing installs before that one yes (`Extensions::accept_vault`), then everything loads without a restart. "Not now" hides it for the run.
 - What cannot be installed is said, not forced: `Missing::WantsOlder`, `Missing::OutsidePin`, `Missing::CannotRun`.
 - Tests: `features/extensions/tests/vault_needs.rs`; showcase row L2.
 

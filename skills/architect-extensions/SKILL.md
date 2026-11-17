@@ -72,7 +72,7 @@ Details, minimal examples and tests for each: `references/runtimes.md`.
 ## The loop
 
 1. Scaffold: `architect-ext new --typescript <id> [dir]` (npm `@fasttrackstudio/architect-cli`, `features/extensions/web/cli/README.md`), or copy the nearest example in `examples/showcase/` or `examples/extension/`.
-2. Run it as a development copy: `just showcase` loads every `examples/showcase/*` folder; for your own, `architect-desktop extensions dev <folder>` or `EXT_CLONE` for a built-in. It reloads on save (polled).
+2. Run it as a development copy in an instance of your own: `architect dev --extension <folder> [--only <ids>] [--open <file>] [--hide all]` (the installed app: `cargo run --release -p architect-desktop -- install` from a checkout puts it in place and `architect` on `PATH`; in this repo, `cargo run -p architect-desktop -- dev …`). It reloads on save (polled); a process extension's program is its own build's to write. `just showcase` loads every `examples/showcase/*` folder; `EXT_CLONE` copies a built-in. Details: `references/install-lifecycle.md`, "An instance of your own"; the person's page: `docs/content/extensions/authoring.md`, "The development loop".
 3. Check: `EXT_CHECK`, `EXT_LOGS`, `APP_STATUS` over the actions CLI (`references/surfaces.md`).
 4. Test: the runtime's test file (`references/testing-showcase.md`), then `cargo xtask feature-tests` if you gated one.
 5. Ship: `architect-ext pack --key …` or `cargo xtask ext-pack` / `ext-sign` into a signed `.archext`; a registry entry; for the standard release, `extensions/core-extensions.toml` (`docs/content/guide/core-extensions.md`).

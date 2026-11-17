@@ -55,8 +55,10 @@ pub fn use_app_capture(list: &Arc<ActionList>, files: bool, windowed: bool) -> O
     }
     let capture = use_capture(list, Config::default());
     let spec = use_hook(shortcut);
+    // An isolated instance (`architect-desktop dev`) leaves the system-wide
+    // key to the person's own app.
     #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
-    if windowed {
+    if windowed && std::env::var_os("ARCHITECT_DEV_INSTANCE").is_none_or(|v| v.is_empty()) {
         let failed = architect_capture::shortcut::use_global_shortcut(
             &spec,
             Callback::new(move |()| capture.window("")),

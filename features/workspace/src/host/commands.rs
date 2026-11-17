@@ -436,8 +436,15 @@ pub(super) fn WorkspaceCommands() -> Element {
                 .peek()
                 .dock(side.into())
                 .map_or(Shown::Hidden, |d| d.shown);
-            let next = if shown == Shown::Open {
+            // The right sidebar closes away, unless the person keeps its
+            // rail (`WORKSPACE_RIGHT_DOCK_RAIL`); the bottom to its rail.
+            let closed = if side == DockSide::Right && !*host.right_rail.peek() {
+                DockShown::Hidden
+            } else {
                 DockShown::Collapsed
+            };
+            let next = if shown == Shown::Open {
+                closed
             } else {
                 DockShown::Open
             };
@@ -452,6 +459,47 @@ pub(super) fn WorkspaceCommands() -> Element {
             );
         });
     }
+
+    // Whether the right sidebar closes to its rail (a column of its views'
+    // icons) or away; a closed one follows at once.
+    let rail = *host.right_rail.read();
+    use_command(
+        Command::new(
+            "WORKSPACE_RIGHT_DOCK_RAIL",
+            if rail {
+                "Right sidebar: close it away"
+            } else {
+                "Right sidebar: close it to a rail"
+            },
+        )
+        .group("Docks"),
+        move || {
+            let mut keep = host.right_rail;
+            let rail = !*keep.peek();
+            keep.set(rail);
+            let shown = host
+                .workspace
+                .peek()
+                .dock(DockSide::Right.into())
+                .map_or(Shown::Hidden, |d| d.shown);
+            let now = match (shown, rail) {
+                (Shown::Hidden, true) => Some(DockShown::Collapsed),
+                (Shown::Collapsed, false) => Some(DockShown::Hidden),
+                _ => None,
+            };
+            if let Some(now) = now {
+                host.write(
+                    control::dock_set,
+                    DockSetArgs {
+                        if_revision: None,
+                        side: DockSide::Right,
+                        shown: Some(now),
+                        size: None,
+                    },
+                );
+            }
+        },
+    );
 
     // Back to the saved layout (the manage sheet's Reset layout): every
     // pop-out docked back, every dock at its saved size.
