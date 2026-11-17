@@ -497,6 +497,10 @@ impl Stack {
                     "native",
                     "--hot-patch",
                     "false",
+                    // Wasmtime in the window, as a release has it, so the
+                    // showcase's WASI counter runs (its dev copy is loaded).
+                    "--features",
+                    "wasi",
                 ])
                 .current_dir(self.root.join("apps/desktop"));
                 c
@@ -564,7 +568,12 @@ impl Stack {
             _ => self.read_fill().ok(),
         };
         match process {
-            Process::App => private_dir(&self.state.join("app"))?,
+            Process::App => {
+                private_dir(&self.state.join("app"))?;
+                if !headless {
+                    self.showcase_dev_copies();
+                }
+            }
             Process::Web => self.prepare_web()?,
             _ => {}
         }
@@ -574,6 +583,28 @@ impl Stack {
             vars.extend(self.auth_fill_env(fill));
         }
         exec(self.command(process, headless), &vars)
+    }
+
+    /// The window's vault is the demo vault, which is the extension
+    /// showcase's (#710): every showcase extension, built where it needs a
+    /// build, named as a development copy in the app's folder
+    /// (`scripts/showcase.sh dev-copies`, what `just showcase` loads), so
+    /// the app opens with them all and an edit to one reloads it. One that
+    /// does not build is left out (the vault's banner lists it); the app
+    /// starts either way.
+    fn showcase_dev_copies(&self) {
+        let ran = Command::new("bash")
+            .arg(self.root.join("scripts/showcase.sh"))
+            .arg("dev-copies")
+            .arg(self.state.join("app"))
+            .env("SHOWCASE_DIR", self.devenv_state.join("showcase"))
+            .current_dir(&self.root)
+            .status();
+        match ran {
+            Ok(s) if s.success() => {}
+            Ok(s) => eprintln!("dev app: the showcase's development copies: {s}"),
+            Err(e) => eprintln!("dev app: the showcase's development copies: {e}"),
+        }
     }
 
     /// The auth database's seed or import, when it is new.

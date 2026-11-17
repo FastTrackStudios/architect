@@ -1,4 +1,4 @@
-//! The showcase vault (`apps/ui/showcase-vault`) on disk, the Cookbook
+//! The showcase vault (`apps/ui/demo-vault`) on disk, the Cookbook
 //! and Mealplan linked in as the app links them: next week's plan
 //! (`Meal plans/2026-W47.md`) becomes a grocery list, the pantry taken
 //! off, a substitution applied, grouped by aisle, written as a checklist
@@ -54,7 +54,7 @@ async fn run(list: &ActionList, id: &str, args: Value) -> Value {
 async fn the_showcase_weeks_grocery_list() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("vault");
-    let showcase = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/ui/showcase-vault");
+    let showcase = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/ui/demo-vault");
     for dir in ["Cookbook", "Meal plans", "Pantry"] {
         copy(&showcase.join(dir), &root.join(dir));
     }

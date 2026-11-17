@@ -20,6 +20,11 @@ tasks, embeds, images, Bases and a pile of journal notes. #lab/demo
 - [[Learning hub|Learning]]: Rust and books
 - [[Home hub|Home]]: garden, recipes, budget
 
+## Extensions
+
+- [[Showcase]]: the extension showcase, a note per capability an extension
+  has, each saying what to try and what you should see
+
 ## Elsewhere
 
 - Projects: [[Projects/Album/project|Album]], [[Website Redesign]], [[Half Marathon]], [[Kitchen Remodel]]

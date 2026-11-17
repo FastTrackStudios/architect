@@ -364,7 +364,7 @@ sandbox *ARGS:
     exec devenv shell -- cargo run -q -p architect-sandbox -- {{ARGS}}
 
 # The extension showcase (#710, docs/content/guide/showcase.md): the app on
-# a fresh scratch copy of apps/ui/showcase-vault, every example in
+# a fresh scratch copy of apps/ui/demo-vault, every example in
 # examples/showcase loaded as a development copy. `plain` runs Architect's
 # own app instead of the standard distribution; ARGS go to the app.
 showcase *ARGS:

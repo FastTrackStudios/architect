@@ -17,7 +17,7 @@ All from `justfile`:
 
 | Recipe | What it does |
 |---|---|
-| `just showcase` | the app (the standard distribution) on a fresh scratch copy of `apps/ui/showcase-vault`, every showcase extension loaded as a development copy (`scripts/showcase.sh`: `examples/showcase`, the sandbox's Luau, process and WASI extensions, the example counter and the web view board, built first); `just showcase plain` runs Architect's own app. Without it, the app's first run offers "Explore the extension showcase" (`apps/ui/src/vaults.rs` `showcase`), whose **Install all** takes the Luau, TypeScript and data ones from the app itself (`apps/ui/src/showcase.rs`) |
+| `just showcase` | the app (the standard distribution) on a fresh scratch copy of `apps/ui/demo-vault`, every showcase extension loaded as a development copy (`scripts/showcase.sh`: `examples/showcase`, the sandbox's Luau, process and WASI extensions, the example counter and the web view board, built first); `just showcase plain` runs Architect's own app. `devenv up` opens the same vault (the demo vault is the showcase's) with the same development copies (`scripts/showcase.sh dev-copies`, run by `xtask/src/dev/mod.rs` before the app starts). Without either, the app's first run offers "Explore the demo vault" (`apps/ui/src/vaults.rs` `demo`), whose **Install all** takes the Luau, TypeScript and data ones from the app itself (`apps/ui/src/showcase.rs`) |
 | `just showcase-shots` | desktop screenshots: an isolated Loft session per width, light and dark, into `target/showcase/desktop/` (`scripts/showcase-shots.sh`); first arg `plain` or `standard`, then vault paths or actions |
 | `just showcase-web-shots` | the release web bundle in headless Firefox (`apps/web/test/app-showcase.test.mjs`), shots into `target/showcase/web/` |
 | `just showcase-publish` | copies `target/showcase/<platform>` onto the `media` branch under `710-showcase/`; `PUSH=1` pushes |
@@ -133,7 +133,7 @@ The matrix in `docs/content/guide/showcase.md` has one table per group (R runtim
 
 - **Id**: #710's ids (R1…, L1…, C1…, H1…, U1…, W1…, G1). Add a new id only for a capability #710 tracks.
 - **Platform cells**: ✅ works, shown by a showcase example with a test and screenshots there; ⚠️ partial (say what is missing) or tested but "not shown"; ❌ does not run (give the reason and issue); `n/a` not about that platform.
-- **Example**: the showcase example's name; it lives in `examples/showcase/<name>` (or the sandbox), and its manifest and note in `apps/ui/showcase-vault` say what it stands in for. Add it to "The example extensions" table too.
+- **Example**: the showcase example's name; it lives in `examples/showcase/<name>` (or the sandbox), and its manifest and note in `apps/ui/demo-vault` say what it stands in for. Add it to "The example extensions" table too.
 - **Evidence**: the test file paths first (code spans; they must exist), then screenshot links for each width and theme.
 
 Steps to move a cell:

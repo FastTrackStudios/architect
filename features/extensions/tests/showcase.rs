@@ -177,7 +177,7 @@ fn vault(list: &ActionList, notes: &Notes) {
     .unwrap();
 }
 
-/// The showcase vault's templates (`apps/ui/showcase-vault/Templates`).
+/// The showcase vault's templates (`apps/ui/demo-vault/Templates`).
 fn templates(notes: &Notes) {
     notes.put(
         "Templates/Meeting.md",
@@ -439,8 +439,7 @@ fn templater_lite_makes_a_prompted_title_a_safe_file_name() {
 #[test]
 fn the_showcase_vault_names_every_showcase_extension() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let needs =
-        architect_extensions::vault_needs::read(&root.join("apps/ui/showcase-vault")).unwrap();
+    let needs = architect_extensions::vault_needs::read(&root.join("apps/ui/demo-vault")).unwrap();
     let mut seen = std::collections::BTreeSet::new();
     for r in &needs.extensions {
         assert!(seen.insert(r.id.clone()), "{} named twice", r.id);

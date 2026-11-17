@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # The extension showcase on the desk (#710, docs/content/guide/showcase.md):
-# the Architect app on a fresh scratch copy of apps/ui/showcase-vault, with
+# the Architect app on a fresh scratch copy of apps/ui/demo-vault (the demo
+# vault is the showcase's: its Showcase note), with
 # a folder of its own and every showcase extension loaded as a development
 # copy (reloaded on save): examples/showcase, the sandbox's Luau
 # extensions, its process extensions and WASI component (built first), the
@@ -8,6 +9,12 @@
 #
 #   scripts/showcase.sh [standard|plain] [ARGS…]
 #   scripts/showcase.sh env      prepare the scratch folder, print the exports
+#   scripts/showcase.sh dev-copies <app folder>
+#                                build and stage the development copies and
+#                                name them in <app folder>'s
+#                                extension-registries.json, nothing else:
+#                                what `devenv up` runs before the app starts
+#                                (xtask/src/dev/mod.rs), on its own vault
 #
 # standard (the default) runs the standard distribution (dist/standard: the
 # app with its core extensions, Studio's setlists among them); plain runs
@@ -25,7 +32,7 @@ cd "$here"
 
 flavour=standard
 case "${1:-}" in
-    standard | plain | env)
+    standard | plain | env | dev-copies)
         flavour="$1"
         shift
         ;;
@@ -34,7 +41,10 @@ esac
 scratch="${SHOWCASE_DIR:-${DEVENV_STATE:-$here/.devenv/state}/showcase}"
 vault="$scratch/vault"
 config="$scratch/config"
-if [ "${SHOWCASE_KEEP:-0}" != "1" ]; then
+if [ "$flavour" = dev-copies ]; then
+    config="${1:?dev-copies: the app folder to name the development copies in}"
+    shift
+elif [ "${SHOWCASE_KEEP:-0}" != "1" ]; then
     rm -rf "$vault" "$config"
 fi
 mkdir -p "$config"
@@ -119,9 +129,14 @@ kept["dev"] = sorted(set(kept.get("dev", [])) | set(folders))
 json.dump(kept, open(out, "w"), indent=2)
 PY
 
+if [ "$flavour" = dev-copies ]; then
+    echo "showcase: ${#dev[@]} development copies named in $config/extension-registries.json"
+    exit 0
+fi
+
 export ARCHITECT_CONFIG_DIR="$config"
 export ARCHITECT_VAULT="$vault"
-export ARCHITECT_VAULT_SEED="$here/apps/ui/showcase-vault"
+export ARCHITECT_VAULT_SEED="$here/apps/ui/demo-vault"
 export ARCHITECT_FORBID_KEYCHAIN=1
 
 if [ "$flavour" = env ]; then

@@ -1,8 +1,9 @@
 //! The extension showcase in the app itself (#710): its vault, and the
 //! showcase extensions it names as a registry compiled into the app.
 //!
-//! Opening the showcase vault (`apps/ui/showcase-vault`, from the first
-//! run's "Explore the showcase", or `just showcase`) lists what it needs
+//! The showcase lives in the demo vault (`apps/ui/demo-vault`: its
+//! `Showcase` note). Opening it (the first run's "Explore the demo vault",
+//! `devenv up`, `just showcase`) lists what it needs
 //! (`.architect/extensions.toml`) with **Install all**: the Luau,
 //! TypeScript and data packages the distribution carries
 //! (`apps/distribution/src/showcase.rs`, the web app's too) install through
@@ -16,11 +17,11 @@ mod tests {
     use super::packages;
     use architect_extensions::manifest::{MANIFEST, Manifest};
 
-    /// The showcase vault, opened with nothing installed: "Install all"
+    /// The demo vault (the showcase's), opened with nothing installed: "Install all"
     /// offers every package the app carries that the vault requires, and
     /// one grant installs them all from the built-in registry (#710).
     #[test]
-    fn the_showcase_vault_installs_its_extensions_from_the_app_itself() {
+    fn the_demo_vault_installs_the_showcase_extensions_from_the_app_itself() {
         use architect::action::ActionList;
         use architect_extensions::consent::{Grants, Scope};
         use architect_extensions::extensions::Extensions;
@@ -29,8 +30,8 @@ mod tests {
         use architect_extensions::manage::Installed;
 
         let tmp = tempfile::tempdir().unwrap();
-        let vault = tmp.path().join("Showcase");
-        crate::vaults::SHOWCASE_FOR_TESTS.extract(&vault).unwrap();
+        let vault = tmp.path().join("Demo vault");
+        crate::vaults::DEMO_FOR_TESTS.extract(&vault).unwrap();
         assert!(
             vault.join(".architect/extensions.toml").is_file(),
             "its needs travel with it"

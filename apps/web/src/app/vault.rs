@@ -69,8 +69,8 @@ pub fn now() -> Millis {
     js_sys::Date::now() as Millis
 }
 
-/// The demo vault (`apps/ui/demo-vault`, or the showcase's,
-/// `crate::demo::chosen`) as an in-memory source: every
+/// The demo vault (`apps/ui/demo-vault`, the showcase's too) as an
+/// in-memory source: every
 /// folder and file, each note's text, each image's `data:` URL.
 #[must_use]
 pub fn demo_vault() -> MemorySource {

@@ -108,7 +108,9 @@ in
   # the org lane, share links) on the stack's `app` port. The window's
   # issuer is the local auth server and its orgs' node its own, with a
   # folder of its own (its sessions a file there, never the keychain), on
-  # a scratch copy of the demo vault (`just vault-reset`). Without Rust
+  # a scratch copy of the demo vault (`just vault-reset`), which is the
+  # extension showcase's too, every showcase extension loaded as a
+  # development copy (`scripts/showcase.sh dev-copies`). Without Rust
   # hot-patching: it builds a different ("fat") binary from `dx build`,
   # and dx calls it experimental. rsx hot reload stays.
   processes.app = {

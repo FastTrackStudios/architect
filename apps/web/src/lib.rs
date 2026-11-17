@@ -82,9 +82,8 @@ pub const NODE_STATUS: &str = "/node/status";
 /// The demo's URL: the app on the demo vault, in memory.
 pub const DEMO: &str = "/app/?demo";
 
-/// The extension showcase (#710): the demo, on the showcase's vault
-/// (`apps/ui/showcase-vault`). The web app hosts no extensions yet (#495),
-/// so it shows the notes and what the app itself draws.
+/// The extension showcase (#710): the demo ([`DEMO`]), whose vault is the
+/// showcase's too; kept so its links still open.
 pub const SHOWCASE: &str = "/app/?showcase";
 /// Which distribution this bundle is (#491), beside the app.
 pub const DISTRIBUTION: &str = "/app/distribution.json";
@@ -212,7 +211,9 @@ pub enum Route {
     App,
     /// The app on the demo vault, in memory ([`DEMO`]).
     Demo,
-    /// The app on the showcase's vault, in memory ([`SHOWCASE`]).
+    /// The showcase's vault: never made now, as `?showcase` opens the
+    /// demo vault ([`Route::Demo`]), which holds the showcase.
+    #[deprecated(note = "`?showcase` routes to `Route::Demo`, the showcase's vault")]
     Showcase,
     /// A share link (`/s/<code>/…`, #646): the app as the link's guest,
     /// opened at `rest` (the path below the link, from `/`, decoded).
@@ -290,9 +291,7 @@ pub fn route(path: &str, query: &str) -> Route {
         return Route::Share { code, rest };
     }
     if path.trim_end_matches('/') != CALLBACK {
-        return if param("showcase").is_some() {
-            Route::Showcase
-        } else if param("demo").is_some() {
+        return if param("demo").is_some() || param("showcase").is_some() {
             Route::Demo
         } else {
             Route::App
@@ -569,8 +568,8 @@ mod tests {
         assert_eq!(route("/app/", "x=1&demo="), Route::Demo);
         assert_eq!(route("/app/", "demonstrate"), Route::App);
         // The extension showcase (#710).
-        assert_eq!(route("/app/", "showcase"), Route::Showcase);
-        assert_eq!(route("/app/", "demo&showcase="), Route::Showcase);
+        assert_eq!(route("/app/", "showcase"), Route::Demo);
+        assert_eq!(route("/app/", "demo&showcase="), Route::Demo);
         assert!(matches!(route("/auth/callback", "demo"), Route::Refused(_)));
         assert_eq!(
             route("/auth/callback", "code=a%2Fb&state=s+1"),

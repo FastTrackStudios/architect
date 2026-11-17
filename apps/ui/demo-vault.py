@@ -5,7 +5,9 @@ Run from the repo root (needs ImageMagick for the raster images and the PDF):
 
     nix shell nixpkgs#imagemagick -c python3 -I apps/ui/demo-vault.py
 
-It deletes and rewrites apps/ui/demo-vault/ from scratch, deterministically:
+It deletes and rewrites apps/ui/demo-vault/ from scratch, deterministically,
+except for what is written by hand and kept as it is (HAND_WRITTEN: the
+extension showcase, #710, and the Cookbook's recipes, meal plans and pantry):
 the fixed reference date is 2026-11-05 (the real clock is never read) and all
 randomness comes from seeded generators, so reruns produce identical files.
 
@@ -28,6 +30,17 @@ ROOT = os.path.join(HERE, "demo-vault")
 TODAY = dt.date(2026, 11, 5)
 MTIME = dt.datetime(2026, 11, 5, 12, 0, 0, tzinfo=dt.timezone.utc).timestamp()
 EMPTY_FOLDERS = ["Archive/Empty", "Inbox/Processed"]
+# Written by hand, not by this script: set aside before the rewrite and put
+# back after it. The extension showcase (#710): its home note, a note per
+# capability under the chapter folders, the samples, templates and recipes
+# its examples use, the base of its tasks and `.architect/extensions.toml`
+# (what the vault needs, with "Install all"). The Cookbook (#800).
+HAND_WRITTEN = [
+    ".architect", "Showcase.md", "R Runtimes", "L Install and lifecycle",
+    "C Contributions", "H Host services", "U Drawing and input", "W The web app",
+    "Samples", "Templates", "Recipes", "Bases/Showcase tasks.base",
+    "Cookbook", "Meal plans", "Pantry",
+]
 
 
 class Block(list):
@@ -197,6 +210,33 @@ def make_images():
 # ------------------------------------------------------------------ main
 
 def main():
+    kept = os.path.join(HERE, ".demo-vault-hand-written")
+    if os.path.isdir(kept):
+        shutil.rmtree(kept)
+    for rel in HAND_WRITTEN:
+        src = os.path.join(ROOT, rel)
+        if os.path.exists(src):
+            os.makedirs(os.path.dirname(os.path.join(kept, rel)), exist_ok=True)
+            shutil.move(src, os.path.join(kept, rel))
+    try:
+        generate()
+    finally:
+        # Back whatever happened, so a failed run loses nothing by hand.
+        for rel in HAND_WRITTEN:
+            src = os.path.join(kept, rel)
+            if os.path.exists(src):
+                dst = os.path.join(ROOT, rel)
+                if os.path.isdir(dst):
+                    shutil.rmtree(dst)
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.move(src, dst)
+        if os.path.isdir(kept):
+            shutil.rmtree(kept)
+    count = sum(len(fs) for _, _, fs in os.walk(ROOT))
+    print(f"wrote {count} files to {ROOT}")
+
+
+def generate():
     if os.path.isdir(ROOT):
         shutil.rmtree(ROOT)
     os.makedirs(ROOT)
@@ -220,8 +260,6 @@ def main():
         f.write("\n".join(EMPTY_FOLDERS) + "\n")
     for e in EMPTY_FOLDERS:
         os.makedirs(os.path.join(ROOT, e), exist_ok=True)
-    count = sum(len(fs) for _, _, fs in os.walk(ROOT))
-    print(f"wrote {count} files to {ROOT}")
 
 
 def home():
@@ -244,6 +282,11 @@ tasks, embeds, images, Bases and a pile of journal notes. #lab/demo
 - [[Work hub|Work]]: meetings and docs
 - [[Learning hub|Learning]]: Rust and books
 - [[Home hub|Home]]: garden, recipes, budget
+
+## Extensions
+
+- [[Showcase]]: the extension showcase, a note per capability an extension
+  has, each saying what to try and what you should see
 
 ## Elsewhere
 
