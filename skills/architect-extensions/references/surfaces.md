@@ -343,6 +343,10 @@ Tests:
 - `features/extensions/tests/host_ui.rs` `every_interface_call_is_refused_outside_its_capabilities`.
 - `features/extensions/tests/host_device.rs` `an_extensions_notifications_go_when_it_unloads_or_loses_them`.
 
+## Note file types: files that are notes, and their navigator rows
+
+`[[file_types]]` makes files of an extension notes like `.md` ones: `extension` (no dot), `name`, `icon`, `note_type` (the `type` they read as), `body` (`text` when it is another language, Cooklang say: only its `[[links]]` are read) and `preview`, the frontmatter property its row in the navigator's list shows in place of its body's first words. A `text` body that names no `preview` shows none, never its markup. The row's picture is the note's `image` (or `thumbnail`, `feature`, `cover`, `banner`) property, as any note's. They open in the editor as notes; an `[[embeds]]` claiming the `note_type` draws a card at their head. The Cookbook's `.cook` recipes: `extensions/cookbook/extension.toml`; the rule: `features/navigator/src/markdown.rs` `preview_for`.
+
 ## Openers: a file type, a document kind, a link
 
 An `[[openers]]` table that claims something opens it with the extension:

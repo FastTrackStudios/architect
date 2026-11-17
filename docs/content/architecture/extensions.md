@@ -1567,6 +1567,7 @@ name = "Recipe"
 icon = "chef-hat"
 note_type = "recipe"   # the `type` such a file reads as when its frontmatter has none
 body = "text"          # markdown (the default) or text: Cooklang's `#pan{}` is no tag
+preview = "description" # its navigator row's preview: this property, not its body
 ```
 
 A note, to the vault, is optional YAML `---` frontmatter and then a body
@@ -1590,6 +1591,16 @@ the extensions it loads (`features/extensions/src/node.rs`
 `NodeHost::load`). A type stays registered for the life of the process:
 its files stay notes when the extension is turned off. `EXT_FILE_TYPES`
 lists `md` and every declared type, with who declared it.
+
+**Its row in the navigator.** A note's row shows a preview and a
+picture. The picture is the first of its `thumbnail`, `feature`,
+`image`, `cover` or `banner` properties (else the first image it
+embeds), for a declared type as for `.md`: a recipe with `image:
+"[[Attachments/Recipes/pancakes.svg]]"` shows it. The preview is its
+body's first words, unless the type names a property with `preview`
+(the Cookbook's `description`); a `text` body that names none shows no
+preview, never its markup (`features/navigator/src/markdown.rs`
+`preview_for`, `vault_proto::note_types::preview_property_of`).
 
 **Its body.** A declared type's body is markdown unless it says `body =
 "text"`: then the vault reads only its frontmatter and its `[[links]]`,

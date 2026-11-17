@@ -93,6 +93,31 @@ pub fn preview_of(text: &str) -> String {
     joined.chars().take(PREVIEW_CHARS).collect()
 }
 
+/// The preview a list row shows for the note at `path`.
+///
+/// The property its file type names (`[[file_types]] preview`, a
+/// recipe's `description`) when it has one, else its body's words
+/// ([`preview_of`]); a body in another language (`body = "text"`,
+/// Cooklang) gives none rather than its markup.
+#[must_use]
+pub fn preview_for(path: &str, text: &str, properties: &[(String, PropertyValue)]) -> String {
+    let named = vault_proto::note_types::preview_property_of(path).and_then(|key| {
+        properties
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(&key))
+            .and_then(|(_, v)| match v {
+                PropertyValue::Text(t) if !t.trim().is_empty() => Some(t.trim().to_owned()),
+                PropertyValue::List(l) if !l.is_empty() => Some(l.join(", ")),
+                _ => None,
+            })
+    });
+    match named {
+        Some(p) => p.chars().take(PREVIEW_CHARS).collect(),
+        None if vault_proto::note_types::body_is_markdown(path) => preview_of(text),
+        None => String::new(),
+    }
+}
+
 /// `[[a|b]]` as `b`, `[[a]]` as `a`, `![[x]]` and `![](x)` dropped,
 /// `[t](u)` as `t`.
 pub(crate) fn unlink(line: &str) -> String {
@@ -198,9 +223,9 @@ pub fn note_from_markdown(path: &str, text: &str, created: Millis, modified: Mil
             })
     });
     file.feature_image = named.or_else(|| embeds(text).next());
+    file.preview = Some(preview_for(path, text, &properties));
     file.properties = properties;
     file.tags = tags;
-    file.preview = Some(preview_of(text));
     file.words = Some(words);
     file.tasks = Some(tasks);
     file
@@ -367,6 +392,31 @@ mod tests {
         let n = note_from_markdown("R/Toast.zznavtext", text, 0, 0);
         assert_eq!(n.tags, ["quick"]);
         assert_eq!(n.tasks, Some(TaskCounts::default()));
+    }
+
+    #[test]
+    fn a_note_type_previews_the_property_it_names_and_never_its_markup() {
+        vault_proto::note_types::register_type(vault_proto::note_types::NoteFileType {
+            extension: "zznavprev".to_owned(),
+            note_type: "recipe".to_owned(),
+            markdown: false,
+            preview: Some("description".to_owned()),
+        });
+        vault_proto::note_types::register_with("zznavbare", "recipe", false);
+        let text = "---\ndescription: Fluffy weekend pancakes.\nimage: \"[[Attachments/p.svg]]\"\n---\nWhisk @flour{250%g}.\n";
+        let named = note_from_markdown("C/Pancakes.zznavprev", text, 0, 0);
+        assert_eq!(named.preview.as_deref(), Some("Fluffy weekend pancakes."));
+        assert_eq!(
+            named.feature_image.as_deref(),
+            Some("[[Attachments/p.svg]]")
+        );
+        // No such property: nothing, rather than `@flour{250%g}`.
+        let bare = "---\ntitle: Toast\n---\nWhisk @flour{250%g}.\n";
+        let none = note_from_markdown("C/Toast.zznavprev", bare, 0, 0);
+        assert_eq!(none.preview.as_deref(), Some(""));
+        // A text body that names no property: no preview either.
+        let plain = note_from_markdown("C/Toast.zznavbare", bare, 0, 0);
+        assert_eq!(plain.preview.as_deref(), Some(""));
     }
 
     #[test]

@@ -774,6 +774,7 @@ pub type LanguageDecl = architect_editor::Language;
 /// icon = "chef-hat"
 /// note_type = "recipe"
 /// body = "text"        # its body is no markdown: only its [[links]] are read
+/// preview = "description"  # a list row's preview: this property, not the body
 /// ```
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
@@ -792,6 +793,13 @@ pub struct FileTypeDecl {
     /// (Cooklang's `#pan{}` is cookware, not a tag), read only for its
     /// `[[links]]`.
     pub body: String,
+    /// The frontmatter property the navigator shows as a file's preview
+    /// in its list, in place of the body's first words (a recipe's
+    /// `description`, not its Cooklang). Unset, a markdown body is
+    /// previewed as a note's is and a `text` one not at all. A file's
+    /// picture is its `image` (or `cover`, `thumbnail`…) property's, as a
+    /// note's is.
+    pub preview: String,
 }
 
 /// Extensions a `[[file_types]]` entry may not declare: the ones the vault
@@ -845,11 +853,12 @@ impl FileTypeDecl {
     /// (`vault_proto::note_types::register_with`).
     #[cfg(feature = "host")]
     pub fn register(&self) {
-        vault_proto::note_types::register_with(
-            &self.extension,
-            &self.note_type,
-            self.markdown_body(),
-        );
+        vault_proto::note_types::register_type(vault_proto::note_types::NoteFileType {
+            extension: self.extension.clone(),
+            note_type: self.note_type.clone(),
+            markdown: self.markdown_body(),
+            preview: Some(self.preview.clone()),
+        });
     }
 }
 

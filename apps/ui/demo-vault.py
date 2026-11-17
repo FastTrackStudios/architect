@@ -39,7 +39,7 @@ HAND_WRITTEN = [
     ".architect", "Showcase.md", "R Runtimes", "L Install and lifecycle",
     "C Contributions", "H Host services", "U Drawing and input", "W The web app",
     "Samples", "Templates", "Recipes", "Bases/Showcase tasks.base",
-    "Cookbook", "Meal plans", "Pantry",
+    "Cookbook", "Meal plans", "Pantry", "Attachments/Recipes",
 ]
 
 

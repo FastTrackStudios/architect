@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 360" width="480" height="360">
+<defs>
+  <radialGradient id="glow" cx="50%" cy="38%" r="75%"><stop offset="0" stop-color="#fff" stop-opacity=".35"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+</defs>
+<rect width="480" height="360" fill="#f1c27d"/>
+<rect width="480" height="360" fill="url(#glow)"/>
+<ellipse cx="240" cy="260" rx="186" ry="70" fill="#000" opacity=".12"/><ellipse cx="240" cy="250" rx="180" ry="64" fill="#fbfaf7"/><ellipse cx="240" cy="250" rx="129.6" ry="46.08" fill="#f1eee8"/><g transform="rotate(-6 240 220)"><rect x="128" y="168" width="200" height="120" rx="14" fill="#c98a3a"/><rect x="164" y="168" width="8" height="120" fill="#a8692a"/><rect x="204" y="168" width="8" height="120" fill="#a8692a"/><rect x="244" y="168" width="8" height="120" fill="#a8692a"/><rect x="284" y="168" width="8" height="120" fill="#a8692a"/><rect x="128" y="204" width="200" height="8" fill="#a8692a"/><rect x="128" y="244" width="200" height="8" fill="#a8692a"/></g><path d="M170 150 q40 -60 110 -36 q60 24 40 80 q-20 40 -90 36 q-70 -6 -60 -80z" fill="#9c5a1c"/><path d="M190 150 q30 -40 86 -24 q44 16 30 58 q-16 30 -70 26 q-52 -6 -46 -60z" fill="#c4782c"/><circle cx="214" cy="146" r="7" fill="#e3a656" opacity=".8"/><circle cx="250" cy="134" r="7" fill="#e3a656" opacity=".8"/><circle cx="282" cy="160" r="7" fill="#e3a656" opacity=".8"/><circle cx="232" cy="176" r="7" fill="#e3a656" opacity=".8"/><circle cx="270" cy="186" r="7" fill="#e3a656" opacity=".8"/><path d="M160 200 q60 30 120 -10 q30 -20 70 4" stroke="#f0a020" stroke-width="7" fill="none" stroke-linecap="round" opacity=".9"/>
+</svg>

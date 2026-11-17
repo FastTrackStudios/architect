@@ -54,6 +54,9 @@ note_type = "recipe"
 # Cooklang, not markdown: `#pan{}` is cookware, no tag; its [[links]]
 # (a recipe it calls for) are read.
 body = "text"
+# Its row in the navigator's list: its `description`, not its Cooklang
+# (its picture is its `image`, as any note's is).
+preview = "description"
 
 [[views]]
 id = "cookbook"

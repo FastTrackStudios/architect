@@ -519,7 +519,11 @@ fn derived(page: &VaultPage, created: Millis, modified: Millis) -> NoteFile {
         .map(|e| (e.key.clone(), property(&e.value)))
         .collect();
     file.tags = page_tags(page);
-    file.preview = Some(preview_of(&page.raw));
+    file.preview = Some(crate::markdown::preview_for(
+        &page.rel_path,
+        &page.raw,
+        &file.properties,
+    ));
     file.words = Some(u32::try_from(page_wordcount(page).words).unwrap_or(u32::MAX));
     let tasks = page_tasks(page);
     let total = u32::try_from(tasks.len()).unwrap_or(u32::MAX);
