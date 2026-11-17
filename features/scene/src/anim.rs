@@ -327,14 +327,18 @@ pub fn install_playhead(source: impl Fn() -> Option<Reading> + Send + Sync + 'st
     *PLAYHEAD.write().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(source));
 }
 
-/// Seconds since the app first asked: the app's one wall clock.
+/// Time since the app first asked: the app's one wall clock, which a
+/// pane's frame clock reads too.
+#[must_use]
+pub fn wall_elapsed() -> std::time::Duration {
+    static EPOCH: OnceLock<web_time::Instant> = OnceLock::new();
+    EPOCH.get_or_init(web_time::Instant::now).elapsed()
+}
+
+/// [`wall_elapsed`] in seconds.
 #[must_use]
 pub fn wall_seconds() -> f64 {
-    static EPOCH: OnceLock<web_time::Instant> = OnceLock::new();
-    EPOCH
-        .get_or_init(web_time::Instant::now)
-        .elapsed()
-        .as_secs_f64()
+    wall_elapsed().as_secs_f64()
 }
 
 impl Clocks {

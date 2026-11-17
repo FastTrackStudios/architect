@@ -37,7 +37,7 @@ fn square() -> Arc<Vec<RenderCommand>> {
 
 /// A playhead's line: 120 content units a second on the playhead, on
 /// wall time when nothing plays.
-fn playhead() -> Animation {
+const fn playhead() -> Animation {
     Animation::linear(
         Property::X,
         Input::clock_or(Clock::Playhead, Clock::Wall),
