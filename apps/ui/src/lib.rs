@@ -40,7 +40,7 @@ mod pages;
 mod paint;
 pub mod presence;
 #[cfg(all(
-    feature = "process-views",
+    feature = "process-views-lab",
     any(target_os = "linux", target_os = "macos")
 ))]
 mod process_views;

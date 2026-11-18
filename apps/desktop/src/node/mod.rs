@@ -39,7 +39,10 @@
 //!   [`Config::sweep_secs`] it also pulls from and pushes to each peer
 //!   (`crdt::peer::pull_with`), the fallback for whatever a bridge missed.
 //!   A note seeded on two nodes separately is settled: the second seed
-//!   adopts the first's lineage (`crdt::peer::adopt_lineage`).
+//!   adopts the first's lineage (`crdt::peer::adopt_lineage`). A vault
+//!   file of a document kind its extensions declare ([`kinds`]: a Keyflow
+//!   `.session`) is a document of the same registry, kept in the file
+//!   itself, and travels the same lanes.
 //! - **In an issuer org** ([`org`]). With [`Config::host_org`] it serves
 //!   the org's enrolment lane (`/org/{slug}/vox`): a member enrols a
 //!   device with a role, lists and revokes; an enrolled device syncs the
@@ -59,6 +62,7 @@ pub mod catalog;
 pub mod cli;
 pub mod config;
 mod files;
+pub mod kinds;
 mod live;
 pub mod org;
 mod s3;
@@ -164,6 +168,17 @@ impl Running {
             .into_iter()
             .next()
             .map(|sock| format!("{}@{sock}", self.endpoint.id()))
+    }
+
+    /// The document `doc_id` as this node holds it now (a note's, or a
+    /// document of an extension's kind: the file's id), opened if it was
+    /// not; `None` when this node does not keep it.
+    pub fn document(
+        &self,
+        doc_id: uuid::Uuid,
+    ) -> impl Future<Output = Option<crdt::CrdtDoc>> + Send + 'static {
+        let registry = self.registry.clone();
+        async move { registry.doc(doc_id).await.ok() }
     }
 
     /// The body of note `path` in vault `vault`, as its live document
@@ -318,7 +333,7 @@ pub async fn start_with_shell(
         layers,
         islands,
         favourites,
-        account: None,
+        ..Parts::default()
     };
     Box::pin(start_parts(config, parts)).await
 }
@@ -340,6 +355,13 @@ pub struct Parts {
     /// Who it is on the account, when [`Config::issuer`] and
     /// [`Config::session_file`] do not say: those win when set.
     pub account: Option<AccountSource>,
+    /// Its compiled-in extensions' document kinds
+    /// (`Distribution::doc_kinds`): a vault file of one syncs like a note.
+    pub doc_kinds: Vec<architect_extensions::contrib::DocKindDecl>,
+    /// The kinds its vaults' documents are of, shared: the node adds its
+    /// extensions' ([`kinds`]), and an embedder (the window, as its
+    /// extensions load and unload) may register more while it runs.
+    pub kinds: crdt::SharedDocKinds,
 }
 
 impl Parts {
@@ -353,6 +375,8 @@ impl Parts {
             islands: dist.islands(),
             favourites: dist.favourites(),
             account: None,
+            doc_kinds: dist.doc_kinds(),
+            kinds: crdt::SharedDocKinds::new(),
         }
     }
 
@@ -414,6 +438,8 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
         islands,
         favourites,
         account,
+        doc_kinds,
+        kinds,
     } = parts;
     let data = &config.data_dir;
     // An installed extension draws over a compiled-in one claiming the
@@ -447,7 +473,13 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
         .map(|dir| files::engine(&config, dir, files_registry.clone()))
         .transpose()
         .map_err(StartError::Other)?;
-    let collab = vault_collab::VaultCollab::new(backend.clone(), data.join("crdt"));
+    let collab =
+        vault_collab::VaultCollab::with_kinds(backend.clone(), data.join("crdt"), kinds.clone());
+    let extension_kinds = Arc::new(kinds::ExtensionKinds::new(
+        kinds,
+        doc_kinds,
+        Some(config.extensions_dir()),
+    ));
     let collab = match &files {
         Some(engine) => {
             let engine = engine.clone();
@@ -509,7 +541,9 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
         }
     });
     let _ = files_registry.set(registry.clone());
-    let catalog = VaultCatalog::new(backend.clone()).with_files(files.clone());
+    let catalog = VaultCatalog::new(backend.clone())
+        .with_files(files.clone())
+        .with_documents(collab.clone(), extension_kinds);
     let endpoint = bind_iroh(&config).await?;
     let endpoint_id = architect_devices::endpoint_key(&endpoint.id().to_string());
     let mut tasks = Vec::new();

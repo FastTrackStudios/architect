@@ -354,4 +354,8 @@ impl DocPresence for DocsHost {
         }
         self.registry.presence(doc_id, up, down).await
     }
+
+    async fn now(&self) -> f64 {
+        self.registry.now().await
+    }
 }

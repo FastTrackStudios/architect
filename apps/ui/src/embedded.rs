@@ -108,7 +108,7 @@ pub fn views() -> Vec<View> {
         .drawn_by(PAINT),
     ];
     #[cfg(all(
-        feature = "process-views",
+        feature = "process-views-lab",
         any(target_os = "linux", target_os = "macos")
     ))]
     views.extend(crate::process_views::views());
@@ -460,7 +460,7 @@ fn shipped(args: &serde_json::Value) -> Result<serde_json::Value, String> {
 pub fn register(list: &ActionList, surfaces: &architect_a2ui::Surfaces) {
     crate::paint::register(list);
     #[cfg(all(
-        feature = "process-views",
+        feature = "process-views-lab",
         any(target_os = "linux", target_os = "macos")
     ))]
     crate::process_views::register(list);

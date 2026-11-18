@@ -18,8 +18,9 @@ use crate::persistence::{PersistError, Persistence};
 /// - `append_update` is a step named "Sync", not listed as a version (a
 ///   `CrdtDoc` does not name its commits; edit through
 ///   [`Branch`](super::Branch) to name them).
-/// - `compact` folds the branch from what the file holds (the snapshot
-///   the doc offers is not needed: every update it wrote is there).
+/// - `compact` writes the snapshot the doc offers, then folds the branch:
+///   the doc's writer task appends its commits when it runs, so the file
+///   may not hold the newest yet.
 #[derive(Debug, Clone)]
 pub struct BranchPersistence {
     file: DocFile,
@@ -70,7 +71,12 @@ impl Persistence for BranchPersistence {
         Ok(Vec::new())
     }
 
-    async fn compact(&self, _doc_id: Uuid, _snapshot: &[u8]) -> Result<(), PersistError> {
+    async fn compact(&self, doc_id: Uuid, snapshot: &[u8]) -> Result<(), PersistError> {
+        // The doc's own writer appends each commit when its task runs,
+        // so the file may not hold the newest yet: write the snapshot the
+        // doc offers first (an update already there changes nothing),
+        // then fold.
+        self.write_snapshot(doc_id, snapshot).await?;
         self.file.fold(&self.branch).await.map_err(persist)
     }
 }
