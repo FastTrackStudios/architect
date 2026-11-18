@@ -80,6 +80,18 @@ struct Sent {
     content: Arc<Vec<RenderCommand>>,
     fragment: Id,
     layer: Layer,
+    /// The last frame it was shown in ([`Sender::frame_with`]'s count).
+    seen: u64,
+}
+
+/// The same slice, by its pointer first and then by what it holds: no
+/// copy either way.
+fn same<T: PartialEq>(a: Option<&Arc<[T]>>, b: Option<&Arc<[T]>>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => Arc::ptr_eq(a, b) || a == b,
+        _ => false,
+    }
 }
 
 /// The view's side: writes what changed since the last frame.
@@ -94,6 +106,8 @@ pub struct Sender {
     sent: BTreeMap<Key, Sent>,
     /// The values the host was last told, as their bits.
     values: BTreeMap<Name, u64>,
+    /// Frames written: what each kept layer's `seen` counts against.
+    frames: u64,
 }
 
 impl std::fmt::Debug for Sender {
@@ -147,7 +161,42 @@ impl Sender {
         // The lowest version that holds what it says.
         let mut later = false;
         let mut swaps = false;
+        self.frames = self.frames.wrapping_add(1);
+        let now = self.frames;
+        // Layers it keeps that this frame shows, and whether a layer came,
+        // went or took other content (then fragments may have gone unused).
+        let mut kept = 0_usize;
+        let mut fresh = 0_usize;
+        let mut reshaped = false;
         for (key, layer) in layers {
+            // A layer the host has as it is, but for where: at most its
+            // transform, written in place. One lookup, nothing copied: a
+            // scroll of many layers costs a move each, no walk of their
+            // content, regions or animations beyond a pointer.
+            if let Some(sent) = self.sent.get_mut(key)
+                && Arc::ptr_eq(&sent.content, &layer.commands)
+                && same_placement(&sent.layer, layer)
+                && same(sent.layer.animations.as_ref(), layer.animations.as_ref())
+                && same(sent.layer.regions.as_ref(), layer.regions.as_ref())
+            {
+                if sent.seen != now {
+                    kept = kept.saturating_add(1);
+                }
+                sent.seen = now;
+                if sent.layer.transform != layer.transform {
+                    sent.layer.transform = layer.transform;
+                    w.u8(MOVE);
+                    w.u64(*key);
+                    affine(&mut w, layer.transform);
+                }
+                continue;
+            }
+            reshaped = true;
+            match self.sent.get(key) {
+                Some(sent) if sent.seen != now => kept = kept.saturating_add(1),
+                Some(_) => {}
+                None => fresh = fresh.saturating_add(1),
+            }
             let known = self
                 .sent
                 .get(key)
@@ -229,28 +278,37 @@ impl Sender {
                     content: Arc::clone(&layer.commands),
                     fragment,
                     layer: layer.clone(),
+                    seen: now,
                 },
             );
         }
-        // Layers it no longer shows, then fragments none of them draws.
-        let shown: HashSet<Key> = layers.iter().map(|(key, _)| *key).collect();
-        let gone: Vec<Key> = self
-            .sent
-            .keys()
-            .copied()
-            .filter(|key| !shown.contains(key))
-            .collect();
-        for key in gone {
-            self.sent.remove(&key);
-            w.u8(REMOVE);
-            w.u64(key);
+        // Layers it no longer shows: only when it holds more than this
+        // frame showed (each shown layer was kept or fresh), so a frame
+        // that drops none walks none.
+        if kept.saturating_add(fresh) < self.sent.len() {
+            let gone: Vec<Key> = self
+                .sent
+                .iter()
+                .filter(|(_, sent)| sent.seen != now)
+                .map(|(key, _)| *key)
+                .collect();
+            for key in gone {
+                self.sent.remove(&key);
+                w.u8(REMOVE);
+                w.u64(key);
+            }
+            reshaped = true;
         }
-        let drawn: HashSet<Id> = self.sent.values().map(|sent| sent.fragment).collect();
-        let unused: Vec<Id> = self.fragments.difference(&drawn).copied().collect();
-        for id in unused {
-            self.fragments.remove(&id);
-            w.u8(DROP);
-            w.bytes(&id.0);
+        // Fragments none of its layers draws: only after a layer came, went
+        // or took other content.
+        if reshaped {
+            let drawn: HashSet<Id> = self.sent.values().map(|sent| sent.fragment).collect();
+            let unused: Vec<Id> = self.fragments.difference(&drawn).copied().collect();
+            for id in unused {
+                self.fragments.remove(&id);
+                w.u8(DROP);
+                w.bytes(&id.0);
+            }
         }
         for (name, value) in values {
             let bits = value.to_bits();
