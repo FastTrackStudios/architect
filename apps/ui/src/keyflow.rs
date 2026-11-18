@@ -46,6 +46,8 @@ fn shared() -> Option<KeyflowChart> {
                 playhead_secs: None,
                 theme: None,
                 view: ChartView::default(),
+                // No note input in the lab's chart.
+                input: None,
             });
             let mount = chart_mount(data.clone());
             KeyflowChart { data, mount }
