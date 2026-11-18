@@ -477,7 +477,7 @@ fn App(props: AppProps) -> Element {
 struct Run {
     doc: DioxusDocument,
     out: PathBuf,
-    _host: Option<Host>,
+    host: Option<Host>,
     processes: Option<architect_extensions::process::Processes>,
 }
 
@@ -571,7 +571,7 @@ fn start_view(process: bool, dir: &Path, view: &'static str) -> Run {
     let mut run = Run {
         doc,
         out,
-        _host: host,
+        host,
         processes: kept,
     };
     if view == "memo" || view == "themed" {
@@ -1010,7 +1010,7 @@ fn a_process_view_has_the_theme_its_styles_and_its_actions() {
     };
     assert!(styled.contains("rgb(1, 2, 3)"), "no style: {styled:?}");
     // The files its code holds, sent to its host as it connected.
-    let host = run._host.clone().unwrap();
+    let host = run.host.clone().unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     while host
         .contributions()
