@@ -157,9 +157,33 @@ async fn follow(keyfile: &str, host: &str, seconds: f64) {
         let _ = driver.run(&client).await;
     });
     let clock = peer.clock().clone();
-    let (mut rtts, mut arrivals, mut offsets) = (Vec::new(), Vec::new(), Vec::new());
-    let mut last = None;
     let end = std::time::Instant::now() + Duration::from_secs_f64(seconds);
+    // Moves: watched every millisecond, apart from the pings, so a move's
+    // arrival is not the ping loop's period.
+    let watched = {
+        let (peer, clock) = (peer.clone(), clock.clone());
+        tokio::spawn(async move {
+            let (mut arrivals, mut last) = (Vec::new(), None);
+            while std::time::Instant::now() < end {
+                let stamp = peer
+                    .states()
+                    .get("lead/play")
+                    .and_then(|v| v.clone().into_double().ok());
+                if let (Some(stamp), Some(now)) = (stamp, clock.now_ms())
+                    && last != Some(stamp.to_bits())
+                {
+                    // The first is the state on joining, not a move.
+                    if last.is_some() {
+                        arrivals.push(now - stamp);
+                    }
+                    last = Some(stamp.to_bits());
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+            arrivals
+        })
+    };
+    let (mut rtts, mut offsets) = (Vec::new(), Vec::new());
     while std::time::Instant::now() < end {
         // A raw ping of the host's clock: its round trip.
         let t0 = crdt::presence::clock_ms();
@@ -169,19 +193,9 @@ async fn follow(keyfile: &str, host: &str, seconds: f64) {
         if let Some(o) = clock.offset_ms() {
             offsets.push(o);
         }
-        // A move: when it arrived, in the host's clock, after it was stamped.
-        let stamp = peer
-            .states()
-            .get("lead/play")
-            .and_then(|v| v.clone().into_double().ok());
-        if let (Some(stamp), Some(now)) = (stamp, clock.now_ms())
-            && last != Some(stamp.to_bits())
-        {
-            last = Some(stamp.to_bits());
-            arrivals.push(now - stamp);
-        }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+    let arrivals = watched.await.unwrap_or_default();
     stats("clock round trip", rtts);
     stats("move arrival (one way, by the shared clock)", arrivals);
     if let (Some(lo), Some(hi)) = (
