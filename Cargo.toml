@@ -50,6 +50,7 @@ members = [
     # ── ui ────────────────────────────────────────────────────────────
     "features/ui/architect-ui",
     "features/workspace",
+    "features/scene",
     "features/commands",
     "features/settings",
     "features/settings/derive",
@@ -349,6 +350,8 @@ dioxus-ssr = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b
 blitz-dom = "=0.3.0-beta.4"
 blitz-paint = "=0.3.0-beta.4"
 blitz-traits = "=0.3.0-beta.4"
+# A window's cursor, as Blitz sets it: what a scene's hit region asks for.
+cursor-icon = "1.2"
 # The workspace's pop-out windows drive Blitz's window views themselves
 # (architect-workspace `native`), and serve the bundle's assets to them.
 blitz-shell = "=0.3.0-beta.4"
@@ -365,6 +368,7 @@ palette = "0.7.6"
 linkme = "0.3"
 architect-shell = { path = "features/shell", default-features = false }
 architect-workspace = { path = "features/workspace" }
+architect-scene = { path = "features/scene" }
 architect-commands = { path = "features/commands" }
 # The palette and launcher engine (MIT): sources, items, ranking.
 architect-palette = { path = "features/palette" }
@@ -505,14 +509,18 @@ proptest = "1"
 # leaves an inline layout's lines as laid out); its FTS.md lists where it
 # departs from upstream's tests. dioxus git pins `=0.3.0-beta.4`. One tag
 # across all blitz crates, and anyrender (0.14 + the compositing seam)
-# from the same tag.
-blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-traits = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-net = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-html = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-anyrender = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+# from the same tag. At `fix/accessibility-unstyled` (8009ce15): the
+# keyflow-native-ime revision (db5b7ef) and two fixes, a resize and the
+# accessibility tree passing elements never styled (a viewport resize
+# panicked in Stylo's viewport-unit invalidation, style/data.rs:185, on
+# macOS in every non-bare instance).
+blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-traits = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-net = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-html = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+anyrender = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
 # The renderer and windowing forks a Blitz app needs (each one's reason is
 # in vendor's README): Vello's window renderer and the compositor, the
 # hybrid renderer's resize, Vello's surface on Metal, winit's UIKit
@@ -838,13 +846,13 @@ debug = false
 
 # Provisional Keyflow native IME integration; return to released tags later.
 [patch."https://github.com/FastTrackStudios/blitz"]
-blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-traits = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-net = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-html = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-anyrender = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-traits = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-net = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-html = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+anyrender = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
 
 [patch."https://github.com/FastTrackStudios/vendor"]
 dioxus-native-dom = { git = "https://www.github.com/FastTrackStudios/vendor", rev = "25bf4bcdfd0b6acb268ca91a93bc8ff8da683a96" }

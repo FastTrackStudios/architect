@@ -951,7 +951,12 @@ impl Verified {
                     (format!("bin/{file}"), true)
                 }
                 Some(_) => continue,
-                None => (path.clone(), false),
+                // A package that ships its program at `bin/x` (no
+                // per-platform builds): a program all the same, as `pack`
+                // wrote it (0755 under `bin/`). Written plain, a process
+                // view's or a process extension's program would install
+                // not executable.
+                None => (path.clone(), path.starts_with("bin/")),
             };
             out.push((rel, bytes.as_slice(), program));
         }

@@ -14,14 +14,14 @@ name = "architect-sandbox-sketch"
 path = "src/main.rs"
 
 [dependencies]
-architect-extensions = { workspace = true, features = ["guest", "paint"] }
+architect-extensions = { workspace = true, features = ["guest", "paint-pane"] }
 architect-workspace = { workspace = true, features = ["paint"] }
 dioxus = { workspace = true }
 
 [dev-dependencies]
 # tests/sketch.rs: its views in a pane of a headless Blitz host.
 architect = { workspace = true, features = ["action-list"] }
-architect-extensions = { workspace = true, features = ["guest", "host", "process", "remote", "paint"] }
+architect-extensions = { workspace = true, features = ["guest", "host", "process", "remote", "paint-pane"] }
 futures = "0.3"
 tempfile = "3"
 blitz-dom = { workspace = true }
@@ -34,6 +34,10 @@ architect-theme = { workspace = true, features = ["dioxus"] }
 anyrender = { workspace = true }
 anyrender_vello_cpu = { workspace = true }
 png = { workspace = true }
+# tests/scene_bench.rs: the fragment format beside today's scenes.
+architect-scene = { workspace = true }
+# tests/sketch.rs: the cursor a hit region sets on the window.
+cursor-icon = { workspace = true }
 
 [lints]
 workspace = true

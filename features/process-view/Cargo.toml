@@ -9,10 +9,10 @@ description = "Process views: another process's GPU pixels in a pane of the app'
 # docs/content/architecture/process-views.md. A process view is a view
 # drawn by a program of its own (its own wgpu device, its own crash
 # domain, built and released in its own repo) and shown in a pane of
-# Architect's window. Linux only for now: the frames come over a shared
-# dma-buf texture (Vulkan external memory) or, where that can't be
-# imported, shared memory. macOS (IOSurface) and Windows (DXGI shared
-# handles) are designed, not built.
+# Architect's window. Linux and macOS: the frames come over a texture the
+# two GPU devices share (a dma-buf on Linux, Vulkan external memory; an
+# IOSurface on macOS) or, where that can't be imported, shared memory.
+# Windows (DXGI shared handles) is designed, not built.
 #
 # The default set is the wire: the messages and the socket that carries
 # them, with the frames' file descriptors. `guest` is the program's side:
@@ -28,6 +28,10 @@ default = []
 guest = ["dep:wgpu", "dep:vello", "dep:anyrender_vello", "dep:ash", "dep:pollster", "dep:architect"]
 # The app's side: the custom widget and its pane (Blitz, Dioxus).
 host = ["dep:wgpu", "dep:ash", "architect-workspace/paint-ui", "dep:dioxus", "dep:blitz-dom", "dep:blitz-traits", "dep:dioxus-native-dom", "dep:anyrender", "dep:peniko", "dep:wgpu_context", "dep:futures-timer"]
+# Extensions' `kind = "process"` views (#838, `extension`): any
+# extension's view drawn by the pane, whichever copy is loaded; the app
+# provides `architect_extensions::interface::ProcessViews` with it.
+extension = ["host", "dep:architect-extensions", "architect-extensions/ui"]
 # The lab's demo scene (`demo::Orbits`); with `guest`, its program.
 demo = []
 
@@ -39,7 +43,7 @@ required-features = ["demo", "guest"]
 [dependencies]
 architect-workspace = { workspace = true, features = ["paint"] }
 thiserror = { workspace = true }
-rustix = { version = "1", features = ["net", "fs", "mm", "event", "process"] }
+rustix = { version = "1", features = ["net", "fs", "mm", "event", "process", "shm"] }
 wgpu = { version = "30", optional = true }
 vello = { version = "0.11", optional = true }
 anyrender_vello = { version = "0.15", optional = true }
@@ -54,12 +58,28 @@ peniko = { workspace = true, optional = true }
 wgpu_context = { version = "0.10", optional = true }
 futures-timer = { workspace = true, optional = true }
 architect = { workspace = true, optional = true, features = ["action-list"] }
+architect-extensions = { workspace = true, optional = true }
 
 [lints]
 workspace = true
+
+# macOS: frames as IOSurfaces (src/surface.rs), which travel as Mach
+# ports, and the Metal textures made over them. The same objc2 as wgpu's
+# Metal backend, so a program on another wgpu wraps the texture itself.
+[target.'cfg(target_os = "macos")'.dependencies]
+mach2 = "0.6"
+objc2 = "0.6"
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFBase", "CFDictionary", "CFNumber", "CFString"] }
+objc2-io-surface = { version = "0.3", default-features = false, features = ["std", "libc", "objc2", "objc2-core-foundation", "IOSurfaceRef", "IOSurfaceTypes"] }
+objc2-metal = { version = "0.3", default-features = false, features = ["std", "objc2-io-surface", "MTLAllocation", "MTLDevice", "MTLPixelFormat", "MTLResource", "MTLTexture"] }
 
 [target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
 architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
 pollster = "0.4"
+# tests/extension_kind.rs: an extension's process view, installed and in
+# development (#838).
+tempfile = "3"
+semver = "1"
+serde_json = { workspace = true }

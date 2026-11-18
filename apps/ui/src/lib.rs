@@ -39,7 +39,10 @@ pub mod org_vaults;
 mod pages;
 mod paint;
 pub mod presence;
-#[cfg(all(feature = "process-views", target_os = "linux"))]
+#[cfg(all(
+    feature = "process-views-lab",
+    any(target_os = "linux", target_os = "macos")
+))]
 mod process_views;
 mod properties;
 mod publish;
@@ -63,6 +66,7 @@ use lucide_dioxus::{
 };
 
 pub use distribution::{app_dir, app_dir_or_temp, distribution, sandbox};
+pub use extensions::on_contributions as on_extension_contributions;
 pub use guide::builtin_tours;
 pub use screen::{Device, use_window_chrome, use_window_screen};
 

@@ -250,10 +250,28 @@ calls after its own data changes. The app registers the kind
 (`KindSpec::paint`) for `Host::load` to accept the view. Test:
 `features/extensions/tests/linked_paint.rs`. With feature `paint-ui` it is
 drawn in-process. Served as a process (`guest`), the same view records its
-frames there, and they cross as scenes (`features/extensions/src/scene.rs`
+frames there, and they cross as layers (`features/extensions/src/scene.rs`
 `remote_paint_root`; [Remote views](@/features/remote-views.md), "Scenes"). A Frame
 surface can draw through it in-process instead of in a process of its
 own.
+
+One `PaintView`, unchanged, linked in or as a process (#840). An extension
+that draws a paint view among its own elements (Keyflow's chart beside its
+palettes) mounts it with `features/extensions/src/linked.rs` `PaintPane`
+(feature `paint-pane`): linked in, the workspace's `PaintPane`; in a
+process (`guest::in_process`), `features/extensions/src/scene.rs`
+`RemotePaint`, made at its box's first size with the same `ViewCtx`: the
+pane's id, the host's theme as tokens and kept current, `mount`'s extras
+with its `PaintWake` (a wake from any thread asks for a frame), and every
+input kind with its modifiers: pointer, wheel (in logical pixels, signed
+as the web's, at the pointer's point in the view), touch, keys down and
+up, focus, composed text. A process view is told its pane's id and state
+(`features/extensions/src/remote.rs` `RemotePaneView`,
+`linked::PANE_CLAIM`), which a view reads with `linked::use_pane_state`
+either way. Test: `apps/sandbox/sketch/tests/paint_parity.rs` (one view
+both ways, the same log). Not the same yet: a process's `ViewCtx` has an
+empty `ActionList`, and `document::Style` in a process view reaches no
+head (put a `style` element inline).
 
 ## Composite kinds
 

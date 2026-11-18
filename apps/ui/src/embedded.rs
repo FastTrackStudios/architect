@@ -60,8 +60,10 @@ pub fn kinds() -> ViewKinds {
     // Extensions' web views (#222): drawn by the native host with feature
     // `webview`, otherwise their panes say there is none.
     let _ = kinds.register(KindSpec::web());
-    #[cfg(all(feature = "process-views", target_os = "linux"))]
-    let _ = kinds.register(architect_process_view::kind_spec());
+    // Extensions' process views (#838): drawn by the process-view pane
+    // with feature `process-views` on Linux; elsewhere their extension
+    // still loads and the pane says why.
+    let _ = kinds.register(KindSpec::process());
     kinds
 }
 
@@ -105,7 +107,10 @@ pub fn views() -> Vec<View> {
         )
         .drawn_by(PAINT),
     ];
-    #[cfg(all(feature = "process-views", target_os = "linux"))]
+    #[cfg(all(
+        feature = "process-views-lab",
+        any(target_os = "linux", target_os = "macos")
+    ))]
     views.extend(crate::process_views::views());
     views
 }
@@ -454,7 +459,10 @@ fn shipped(args: &serde_json::Value) -> Result<serde_json::Value, String> {
 /// `LAB_PAINT_STATE`, the paint pane's.
 pub fn register(list: &ActionList, surfaces: &architect_a2ui::Surfaces) {
     crate::paint::register(list);
-    #[cfg(all(feature = "process-views", target_os = "linux"))]
+    #[cfg(all(
+        feature = "process-views-lab",
+        any(target_os = "linux", target_os = "macos")
+    ))]
     crate::process_views::register(list);
     crate::note_editor::register(list);
     #[cfg(feature = "keyflow-lab")]

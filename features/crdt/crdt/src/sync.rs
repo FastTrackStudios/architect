@@ -56,6 +56,10 @@ pub enum SyncError {
     BadVersion(String),
     #[error("internal error: {0}")]
     Internal(String),
+    /// The caller may read the doc but sent an update up: a read-only
+    /// session ends here, and nothing of the update is applied.
+    #[error("read-only: this session may not write the doc")]
+    Forbidden,
 }
 
 /// A frame on the sync **down** channel.
@@ -328,22 +332,47 @@ pub struct SyncSession {
     every: Arc<std::sync::atomic::AtomicU32>,
     trigger: tokio::sync::mpsc::UnboundedSender<()>,
     on_import: Option<Arc<ImportHook>>,
+    /// Follows the doc down but may not send anything up ([`Self::read_only`]).
+    read_only: bool,
     _session: SessionGuard,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl SyncSession {
+    /// Make this a read-only session: the replica still receives the doc
+    /// and every later update, but the first update it sends up ends the
+    /// session with [`SyncError::Forbidden`], and nothing of it is
+    /// applied. What a caller admitted to read but not write gets.
+    #[must_use]
+    pub const fn read_only(mut self) -> Self {
+        self.read_only = true;
+        self
+    }
+
     /// Pump this replica's local updates into the canonical doc —
     /// durably (imports don't fire the persistence subscription) — and
     /// out to everyone else. Runs until the replica's connection closes
     /// (the up channel ends). This is the body of the held-open
     /// [`DocSync::sync`] call — **do not** hold any registry/host lock
     /// across it.
-    pub async fn pump(self, mut up: vox::Rx<Vec<u8>>) {
+    ///
+    /// # Errors
+    ///
+    /// [`SyncError::Forbidden`] when a [read-only](Self::read_only)
+    /// session's replica sends an update up; the session ends there.
+    pub async fn pump(self, mut up: vox::Rx<Vec<u8>>) -> Result<(), SyncError> {
         while let Ok(Some(update)) = up.recv().await {
             let mut owned: Option<Vec<u8>> = None;
             let _ = update.map(|u| owned = Some(u));
             let Some(bytes) = owned else { continue };
+            if self.read_only {
+                tracing::warn!(
+                    doc_id = ?self.doc_id,
+                    update.bytes = bytes.len(),
+                    "doc-sync: a read-only session sent an update; ending it"
+                );
+                return Err(SyncError::Forbidden);
+            }
             if let Err(e) = self.doc.apply_remote_durable(self.doc_id, &bytes).await {
                 tracing::warn!("doc-sync: dropping bad update: {e}");
                 continue;
@@ -359,6 +388,7 @@ impl SyncSession {
                 let _ = self.trigger.send(());
             }
         }
+        Ok(())
     }
 }
 
@@ -434,6 +464,7 @@ impl DocSyncHost {
             every: self.compact_every.clone(),
             trigger: self.compact_tx.clone(),
             on_import: self.on_import.clone(),
+            read_only: false,
             _session: SessionGuard::new(self.sessions.clone()),
         })
     }
@@ -518,8 +549,7 @@ impl DocSync for DocSyncHost {
         // then hold the request open pumping until the replica's
         // connection closes.
         let session = self.attach(doc_id, from, down)?;
-        session.pump(up).await;
-        Ok(())
+        session.pump(up).await
     }
 }
 
@@ -604,22 +634,48 @@ impl PresenceHost {
 /// pump the held-open call after releasing it).
 #[cfg(not(target_arch = "wasm32"))]
 pub struct PresenceSession {
+    doc_id: Uuid,
     store: crate::awareness::EphemeralStore,
     hub: architect::PubSub<Vec<u8>>,
+    /// Sees everyone, publishes nothing ([`Self::read_only`]).
+    read_only: bool,
     _session: SessionGuard,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl PresenceSession {
+    /// Make this a read-only session: the peer still receives everyone's
+    /// state, but what it publishes is dropped — it reaches neither the
+    /// mirror store nor the others, so a reader cannot take a lead key
+    /// (the transport). The session stays open.
+    #[must_use]
+    pub const fn read_only(mut self) -> Self {
+        self.read_only = true;
+        self
+    }
+
     /// Merge this peer's updates into the mirror store and fan them out.
     /// Runs until the peer's connection closes. The body of the
     /// held-open [`DocPresence::presence`] call — **do not** hold any
     /// registry/host lock across it.
     pub async fn pump(self, mut up: vox::Rx<Vec<u8>>) {
+        let mut refused = false;
         while let Ok(Some(update)) = up.recv().await {
             let mut owned: Option<Vec<u8>> = None;
             let _ = update.map(|u| owned = Some(u));
             let Some(bytes) = owned else { continue };
+            if self.read_only {
+                // One line per session, not per frame: a reader's driver
+                // re-announces on a timer.
+                if !refused {
+                    refused = true;
+                    tracing::warn!(
+                        doc_id = ?self.doc_id,
+                        "doc-presence: a read-only peer published; dropping what it sends"
+                    );
+                }
+                continue;
+            }
             if let Err(e) = self.store.apply(&bytes) {
                 tracing::warn!("doc-presence: dropping bad update: {e}");
                 continue;
@@ -650,8 +706,10 @@ impl PresenceHost {
         self.hub.complete_attach(pending, snapshot);
 
         Ok(PresenceSession {
+            doc_id: self.doc_id,
             store: self.store.clone(),
             hub: self.hub.clone(),
+            read_only: false,
             _session: SessionGuard::new(self.sessions.clone()),
         })
     }
@@ -958,6 +1016,8 @@ pub struct SyncedDoc {
     doc_id: Uuid,
     outbox: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
     durable: bool,
+    /// Never sends anything up ([`Self::read_only`]).
+    read_only: bool,
     /// Received bytes imported into the doc but not yet written through
     /// its persistence ([`Self::durable`]): held until the write lands, so
     /// a failed or cancelled write is retried before the next attach
@@ -1002,6 +1062,7 @@ impl SyncedDoc {
             doc_id,
             outbox,
             durable: false,
+            read_only: false,
             unpersisted: Vec::new(),
             outbox_tx,
             on_import: None,
@@ -1044,6 +1105,18 @@ impl SyncedDoc {
     #[must_use]
     pub const fn durable(mut self) -> Self {
         self.durable = true;
+        self
+    }
+
+    /// Follow the doc without writing it: the replica receives the doc
+    /// and every later update, and sends nothing up — neither local edits
+    /// (they stay on this replica, dropped from the outbox) nor the
+    /// catch-up of history the server lacks. What a caller admitted only
+    /// to read runs, so it never trips the server's
+    /// [`SyncError::Forbidden`].
+    #[must_use]
+    pub const fn read_only(mut self) -> Self {
+        self.read_only = true;
         self
     }
 
@@ -1115,6 +1188,10 @@ impl SyncedDoc {
                 res = &mut call => return attach_result(res),
                 // Local edits (live, or buffered while offline) go up.
                 Some(update) = self.outbox.recv() => {
+                    // A reader drains its outbox and sends nothing.
+                    if self.read_only {
+                        continue;
+                    }
                     if up_tx.send(update).await.is_err() {
                         // Connection gone, or the attach was refused:
                         // the call says which.
@@ -1145,7 +1222,7 @@ impl SyncedDoc {
                             let server_vv = loro::VersionVector::decode(&server_vv).map_err(
                                 |e| PersistError::Backend(format!("doc sync: bad server vv: {e}")),
                             )?;
-                            if !server_vv.includes_vv(&our_vv) {
+                            if !self.read_only && !server_vv.includes_vv(&our_vv) {
                                 // In frames the link takes (MAX_FRAME).
                                 let missing = backlog_chunks(self.doc.loro(), &server_vv, MAX_FRAME)
                                     .map_err(|e| {

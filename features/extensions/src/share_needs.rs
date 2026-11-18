@@ -242,7 +242,7 @@ pub const GUEST_UI: [&str; 4] = [
 /// Given what its manifest `asks` and the `hosts` the owner approved for
 /// it: read-only documents of the share and the selection, no writes, no
 /// actions past its own, read-only effects, `fetch` only to approved hosts
-/// it also asks for, no folders, ports, language servers or peer
+/// it also asks for, no folders, ports, language servers, programs or peer
 /// connections. Secrets are never the guest's: a guest host refuses
 /// `[[secrets]]` outright.
 #[must_use]
@@ -262,6 +262,9 @@ pub fn guest_capabilities(asks: &Capabilities, hosts: &[String]) -> Capabilities
     caps.ports.clear();
     caps.languages.clear();
     caps.webrtc.clear();
+    // A guest never runs a program on the device that opened the link: the
+    // profile grants none.
+    caps.programs.clear();
     caps.effect = Reach::ReadOnly;
     caps
 }

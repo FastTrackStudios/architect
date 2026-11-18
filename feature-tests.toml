@@ -42,12 +42,15 @@ features = [
 ]
 
 # The sandbox's Keyflow editor tab (apps/ui/src/keyflow.rs): it fills its
-# pane, in the app's theme.
-[[pass]]
-name = "lab-keyflow"
-workspace = true
-packages = ["architect-app"]
-features = ["architect-app/keyflow-lab"]
+# pane, in the app's theme. Skipped: the Keyflow revision `keyflow-lab`
+# pins (apps/ui/Cargo.toml) predates `ViewInput`'s `mods` (14a88479) and no
+# longer compiles, and Keyflow's own branch that does is unreleased. Keyflow
+# is a runtime extension now (#840); the pin moves when Keyflow tags a
+# release against Architect's, and this goes back to a pass.
+[[skip]]
+package = "architect-app"
+file = "src/keyflow.rs"
+reason = "keyflow-lab's pinned Keyflow predates ViewInput's mods; repinned once Keyflow tags a release against Architect's (#840)"
 
 # `CodeEditor`'s story played headlessly on Blitz against its golden
 # (`features/editor/tests/story.rs`, #512): `architect-editor`'s `stories`
@@ -60,11 +63,13 @@ features = ["architect-editor/stories", "architect-editor/native"]
 
 # Process views (#579, #641): the demo program and the frames test, its
 # guest and host in one process tree. Without a Vulkan adapter that shares
-# dma-bufs the test says so and returns.
+# dma-bufs the test says so and returns. With `extension` (#838): an
+# extension's `kind = "process"` view loaded installed and in development
+# (tests/extension_kind.rs); without a Vulkan adapter it says so too.
 [[pass]]
 name = "process-view"
 packages = ["architect-process-view"]
-features = ["architect-process-view/demo", "architect-process-view/guest", "architect-process-view/host"]
+features = ["architect-process-view/demo", "architect-process-view/guest", "architect-process-view/host", "architect-process-view/extension"]
 
 # The whole stack started as `devenv up` starts it (#541,
 # `xtask/tests/dev_stack.rs`): the demo seed end to end (sign-in, the org's

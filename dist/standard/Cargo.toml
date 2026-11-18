@@ -71,15 +71,15 @@ architect-mobile = { path = "../../apps/mobile" }
 tempfile = "3"
 
 [patch.crates-io]
-anyrender = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+anyrender = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
 anyrender_vello = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
 anyrender_vello_hybrid = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
-blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-html = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-net = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-traits = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-html = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-net = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-traits = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
 facet-core = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.4.0" }
 phon = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.4.0" }
 phon-jit = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.2.3" }
@@ -109,11 +109,13 @@ architect-capture = { path = "../../features/capture" }
 architect-command-palette = { path = "../../features/palette/extension" }
 architect-commands = { path = "../../features/commands" }
 architect-control = { path = "../../features/control" }
+architect-cookbook = { path = "../../extensions/cookbook" }
 architect-dayplan = { path = "../../extensions/dayplan" }
 architect-derive = { path = "../../crates/architect-derive" }
 architect-desktop = { path = "../../apps/desktop" }
 architect-devices = { path = "../../features/devices" }
 architect-distribution = { path = "../../apps/distribution" }
+architect-documents = { path = "../../features/extensions/documents" }
 architect-editor = { path = "../../features/editor" }
 architect-extension-archive = { path = "../../features/extensions/archive" }
 architect-extensions = { path = "../../features/extensions" }
@@ -123,6 +125,8 @@ architect-files-extension = { path = "../../features/files/extension" }
 architect-guide = { path = "../../features/guide" }
 architect-input = { path = "../../features/input" }
 architect-mcp = { path = "../../features/mcp" }
+architect-mealplan = { path = "../../extensions/mealplan" }
+architect-media = { path = "../../features/media" }
 architect-mobile = { path = "../../apps/mobile" }
 architect-navigator = { path = "../../features/navigator" }
 architect-navigator-api = { path = "../../features/navigator-api" }
@@ -134,9 +138,11 @@ architect-palette = { path = "../../features/palette" }
 architect-permissions = { path = "../../features/permissions" }
 architect-playhead = { path = "../../features/playhead" }
 architect-presence = { path = "../../features/presence" }
+architect-process-view = { path = "../../features/process-view" }
 architect-projects = { path = "../../extensions/projects" }
 architect-rpc-derive = { path = "../../crates/architect-rpc-derive" }
 architect-sandbox-board = { path = "../../apps/sandbox/board" }
+architect-scene = { path = "../../features/scene" }
 architect-scripting = { path = "../../features/scripting" }
 architect-settings = { path = "../../features/settings" }
 architect-settings-derive = { path = "../../features/settings/derive" }
@@ -171,15 +177,16 @@ vault-doc = { path = "../../features/vault/vault-doc" }
 vault-live = { path = "../../features/vault/vault-live" }
 vault-obsidian = { path = "../../features/vault/vault-obsidian" }
 vault-proto = { path = "../../features/vault/vault-proto" }
+vault-query = { path = "../../features/vault/vault-query" }
 
 [patch."https://github.com/FastTrackStudios/blitz"]
-anyrender = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-html = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-net = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-traits = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+anyrender = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-html = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-net = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-traits = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
 
 [patch."https://github.com/FastTrackStudios/daw"]
 daw = { git = "https://github.com/FastTrackStudios/studio", tag = "v26.11.4" }
@@ -212,11 +219,13 @@ architect-capture = { path = "../../features/capture" }
 architect-command-palette = { path = "../../features/palette/extension" }
 architect-commands = { path = "../../features/commands" }
 architect-control = { path = "../../features/control" }
+architect-cookbook = { path = "../../extensions/cookbook" }
 architect-dayplan = { path = "../../extensions/dayplan" }
 architect-derive = { path = "../../crates/architect-derive" }
 architect-desktop = { path = "../../apps/desktop" }
 architect-devices = { path = "../../features/devices" }
 architect-distribution = { path = "../../apps/distribution" }
+architect-documents = { path = "../../features/extensions/documents" }
 architect-editor = { path = "../../features/editor" }
 architect-extension-archive = { path = "../../features/extensions/archive" }
 architect-extensions = { path = "../../features/extensions" }
@@ -226,6 +235,8 @@ architect-files-extension = { path = "../../features/files/extension" }
 architect-guide = { path = "../../features/guide" }
 architect-input = { path = "../../features/input" }
 architect-mcp = { path = "../../features/mcp" }
+architect-mealplan = { path = "../../extensions/mealplan" }
+architect-media = { path = "../../features/media" }
 architect-mobile = { path = "../../apps/mobile" }
 architect-navigator = { path = "../../features/navigator" }
 architect-navigator-api = { path = "../../features/navigator-api" }
@@ -237,9 +248,11 @@ architect-palette = { path = "../../features/palette" }
 architect-permissions = { path = "../../features/permissions" }
 architect-playhead = { path = "../../features/playhead" }
 architect-presence = { path = "../../features/presence" }
+architect-process-view = { path = "../../features/process-view" }
 architect-projects = { path = "../../extensions/projects" }
 architect-rpc-derive = { path = "../../crates/architect-rpc-derive" }
 architect-sandbox-board = { path = "../../apps/sandbox/board" }
+architect-scene = { path = "../../features/scene" }
 architect-scripting = { path = "../../features/scripting" }
 architect-settings = { path = "../../features/settings" }
 architect-settings-derive = { path = "../../features/settings/derive" }
@@ -274,6 +287,7 @@ vault-doc = { path = "../../features/vault/vault-doc" }
 vault-live = { path = "../../features/vault/vault-live" }
 vault-obsidian = { path = "../../features/vault/vault-obsidian" }
 vault-proto = { path = "../../features/vault/vault-proto" }
+vault-query = { path = "../../features/vault/vault-query" }
 
 # The root's profiles: a patch and a profile apply only from a workspace root.
 [profile.dev]

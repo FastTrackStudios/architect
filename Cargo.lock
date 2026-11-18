@@ -82,7 +82,7 @@ dependencies = [
 [[package]]
 name = "accesskit_xplat"
 version = "0.2.1"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=db5b7ef11e4df19ef317c23f77152ec5e1887101#db5b7ef11e4df19ef317c23f77152ec5e1887101"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -360,7 +360,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 [[package]]
 name = "anyrender"
 version = "0.14.0"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=db5b7ef11e4df19ef317c23f77152ec5e1887101#db5b7ef11e4df19ef317c23f77152ec5e1887101"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
 dependencies = [
  "kurbo 0.13.1",
  "peniko 0.6.1",
@@ -1393,6 +1393,7 @@ dependencies = [
  "architect-navigator-api",
  "architect-orgs",
  "architect-permissions",
+ "architect-scene",
  "architect-scripting",
  "architect-settings",
  "architect-shell",
@@ -1407,6 +1408,7 @@ dependencies = [
  "blitz-traits",
  "block2 0.6.2",
  "crdt",
+ "cursor-icon",
  "dioxus",
  "dioxus-html",
  "dioxus-native-dom",
@@ -1927,6 +1929,7 @@ dependencies = [
  "anyrender",
  "anyrender_vello",
  "architect",
+ "architect-extensions",
  "architect-workspace",
  "architect-workspace-hack",
  "ash",
@@ -1935,9 +1938,17 @@ dependencies = [
  "dioxus",
  "dioxus-native-dom",
  "futures-timer",
+ "mach2",
+ "objc2 0.6.5",
+ "objc2-core-foundation",
+ "objc2-io-surface",
+ "objc2-metal 0.3.2",
  "peniko 0.6.1",
  "pollster",
  "rustix 1.1.5",
+ "semver",
+ "serde_json",
+ "tempfile",
  "thiserror 2.0.20",
  "vello",
  "wgpu 30.0.1",
@@ -2084,12 +2095,14 @@ dependencies = [
  "anyrender_vello_cpu",
  "architect",
  "architect-extensions",
+ "architect-scene",
  "architect-theme",
  "architect-workspace",
  "architect-workspace-hack",
  "blitz-dom",
  "blitz-paint",
  "blitz-traits",
+ "cursor-icon",
  "dioxus",
  "dioxus-native-dom",
  "futures",
@@ -2119,6 +2132,20 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "architect-scene"
+version = "0.1.0"
+dependencies = [
+ "anyrender",
+ "architect-workspace-hack",
+ "blake3",
+ "memmap2",
+ "peniko 0.6.1",
+ "tempfile",
+ "thiserror 2.0.20",
+ "web-time",
 ]
 
 [[package]]
@@ -2611,6 +2638,7 @@ dependencies = [
  "architect",
  "architect-commands",
  "architect-mcp",
+ "architect-scene",
  "architect-shell",
  "architect-theme",
  "architect-workspace",
@@ -2621,6 +2649,7 @@ dependencies = [
  "blitz-shell",
  "blitz-traits",
  "crdt",
+ "cursor-icon",
  "dioxus",
  "dioxus-asset-resolver",
  "dioxus-devtools",
@@ -2891,6 +2920,8 @@ dependencies = [
  "objc2-core-video",
  "objc2-foundation 0.2.2",
  "objc2-foundation 0.3.2",
+ "objc2-io-surface",
+ "objc2-metal 0.3.2",
  "objc2-quartz-core 0.3.2",
  "objc2-security",
  "objc2-ui-kit",
@@ -4058,7 +4089,7 @@ dependencies = [
 [[package]]
 name = "blitz-dom"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=db5b7ef11e4df19ef317c23f77152ec5e1887101#db5b7ef11e4df19ef317c23f77152ec5e1887101"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
 dependencies = [
  "accesskit",
  "anyrender",
@@ -4069,7 +4100,7 @@ dependencies = [
  "color",
  "cssparser 0.38.0",
  "cursor-icon",
- "debug_timer 0.1.3 (git+https://www.github.com/FastTrackStudios/blitz?rev=db5b7ef11e4df19ef317c23f77152ec5e1887101)",
+ "debug_timer 0.1.3 (git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb)",
  "euclid",
  "html-escape",
  "icu_casemap",
@@ -4108,7 +4139,7 @@ dependencies = [
 [[package]]
 name = "blitz-html"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=db5b7ef11e4df19ef317c23f77152ec5e1887101#db5b7ef11e4df19ef317c23f77152ec5e1887101"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
 dependencies = [
  "blitz-dom",
  "blitz-traits",
@@ -4119,7 +4150,7 @@ dependencies = [
 [[package]]
 name = "blitz-net"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=db5b7ef11e4df19ef317c23f77152ec5e1887101#db5b7ef11e4df19ef317c23f77152ec5e1887101"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
 dependencies = [
  "blitz-traits",
  "data-url",
@@ -4131,7 +4162,7 @@ dependencies = [
 [[package]]
 name = "blitz-paint"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=db5b7ef11e4df19ef317c23f77152ec5e1887101#db5b7ef11e4df19ef317c23f77152ec5e1887101"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
 dependencies = [
  "anyrender",
  "anyrender_svg",
@@ -4153,7 +4184,7 @@ dependencies = [
 [[package]]
 name = "blitz-shell"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=db5b7ef11e4df19ef317c23f77152ec5e1887101#db5b7ef11e4df19ef317c23f77152ec5e1887101"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
 dependencies = [
  "accesskit",
  "accesskit_xplat",
@@ -4176,7 +4207,7 @@ dependencies = [
 [[package]]
 name = "blitz-traits"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=db5b7ef11e4df19ef317c23f77152ec5e1887101#db5b7ef11e4df19ef317c23f77152ec5e1887101"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
 dependencies = [
  "atomic_refcell",
  "bitflags 2.13.2",
@@ -5877,7 +5908,7 @@ checksum = "da220af51a1a335e9a930beaaef53d261e41ea9eecfb3d973a3ddae1a7284b9c"
 [[package]]
 name = "debug_timer"
 version = "0.1.3"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=db5b7ef11e4df19ef317c23f77152ec5e1887101#db5b7ef11e4df19ef317c23f77152ec5e1887101"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
 
 [[package]]
 name = "debugid"
@@ -12928,6 +12959,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "180788110936d59bab6bd83b6060ffdfffb3b922ba1396b312ae795e1de9d81d"
 dependencies = [
  "bitflags 2.13.2",
+ "libc",
  "objc2 0.6.5",
  "objc2-core-foundation",
 ]
@@ -12954,6 +12986,7 @@ dependencies = [
  "block2 0.6.2",
  "objc2 0.6.5",
  "objc2-foundation 0.3.2",
+ "objc2-io-surface",
 ]
 
 [[package]]
@@ -17950,7 +17983,7 @@ dependencies = [
 [[package]]
 name = "stylo_taffy"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=db5b7ef11e4df19ef317c23f77152ec5e1887101#db5b7ef11e4df19ef317c23f77152ec5e1887101"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
 dependencies = [
  "bitflags 2.13.2",
  "stylo",

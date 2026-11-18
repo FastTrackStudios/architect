@@ -13,6 +13,11 @@ authors = ["FastTrackStudio"]
 [entry]
 path = "architect-sandbox-sketch"
 
+# The timeline's meter is drawn from the engine's values, written
+# lock-free (`architect_scene::engine`). Declined, the meter stands.
+[capabilities]
+ui = ["engine"]
+
 # Drag to draw; Shift-drag or the middle button pans; the wheel zooms.
 [[views]]
 id = "sketch"
@@ -25,6 +30,15 @@ icon = "pencil"
 id = "graph"
 title = "Graph"
 icon = "share-2"
+kind = "paint"
+
+# The arrangement's clips with a playhead moving over them: a paint view
+# that returns layers, the playhead's motion with them, so the host runs
+# playback and a frame of it sends nothing.
+[[views]]
+id = "timeline"
+title = "Timeline"
+icon = "play"
 kind = "paint"
 
 # 50 tracks of 40 clips: the arrangement-sized scene #175 measures.

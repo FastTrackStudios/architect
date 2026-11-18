@@ -6,8 +6,10 @@
 //! key the node minted for this share ([`crate::p2p::Shares`]). The
 //! endpoint id is enough to dial the node: on the same network its
 //! address is found there, elsewhere through iroh's relays. The key is
-//! the credential: whoever holds the link may edit that one document,
-//! until the node revokes it.
+//! the credential: whoever holds the link may open that one document,
+//! until the node revokes it — edit it, or only follow it when the node
+//! minted a read link (`&access=read` says so, for display: the node
+//! decides from the key, never from the link's text).
 //!
 //! Parsing is wasm-clean, so a web page can read a link it was handed.
 //! [`DocLink::bearer`] is what the joiner presents on its `DocSync`
@@ -24,6 +26,17 @@ pub const SCHEME: &str = "fts-doc:";
 /// What a joiner's bearer token starts with: the rest is the link's key.
 pub const LINK_BEARER_PREFIX: &str = "link:";
 
+/// What a link lets its guest do to its document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Access {
+    /// Follow it live: the document and every edit, presence included;
+    /// write nothing.
+    Read,
+    /// Follow it and edit it.
+    #[default]
+    Write,
+}
+
 /// A link to one live document on one node.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DocLink {
@@ -32,6 +45,9 @@ pub struct DocLink {
     pub doc_id: Uuid,
     /// The share's key, minted by the serving node.
     pub key: String,
+    /// What the node minted the link for, as the link says it: for
+    /// display. The node decides from the key alone.
+    pub access: Access,
 }
 
 /// Why a string is not a [`DocLink`].
@@ -61,7 +77,11 @@ impl fmt::Display for DocLink {
             f,
             "{SCHEME}{}/{}?key={}",
             self.endpoint, self.doc_id, self.key
-        )
+        )?;
+        match self.access {
+            Access::Read => f.write_str("&access=read"),
+            Access::Write => Ok(()),
+        }
     }
 }
 
@@ -81,10 +101,16 @@ impl FromStr for DocLink {
             .find_map(|pair| pair.strip_prefix("key="))
             .filter(|k| is_key(k))
             .ok_or(LinkError::Key)?;
+        let access = if query.split('&').any(|pair| pair == "access=read") {
+            Access::Read
+        } else {
+            Access::Write
+        };
         Ok(Self {
             endpoint: endpoint.to_ascii_lowercase(),
             doc_id,
             key: key.to_owned(),
+            access,
         })
     }
 }
@@ -148,6 +174,7 @@ mod tests {
             endpoint: "ab".repeat(32),
             doc_id: Uuid::from_u128(7),
             key: "0123abcd".into(),
+            access: Access::Write,
         }
     }
 
@@ -155,7 +182,16 @@ mod tests {
     fn a_link_reads_back_as_itself() {
         let text = link().to_string();
         assert!(text.starts_with("fts-doc:abab"));
+        assert!(!text.contains("access"), "a write link reads as before");
         assert_eq!(text.parse::<DocLink>().unwrap(), link());
+
+        let read = DocLink {
+            access: Access::Read,
+            ..link()
+        };
+        let text = read.to_string();
+        assert!(text.ends_with("&access=read"));
+        assert_eq!(text.parse::<DocLink>().unwrap(), read);
     }
 
     #[test]

@@ -78,6 +78,7 @@ Declared in `extension.toml` `[capabilities]` (`features/extensions/src/manifest
 | `languages` | `servers` (`LANGUAGES`): run its language servers | "Run its languages' servers …" |
 | `device` | `notifications`, `camera`, `photos`, `health:read:<type>`, `health:write:<type>` | `features/extensions/src/device.rs` `words` |
 | `over` | view kinds not its own it may draw an overlay layer over (`lab.arrange`) | "Draw over the arrangement" |
+| `programs` | paths in its package its `process` views run (`bin/room`), one by one; checked again each time a pane opens (`Capabilities::may_run_program`); never a share-link guest's | "Run bin/room, a program in its package, on this computer to draw its views" |
 | `webrtc` | `peer-connections` (a share page's web view frame), granted by an operator | not in the prompt |
 
 The extension's own actions, settings (`<id>.…`), data, log, points and windows need no capability. Hosts match through `capabilities::reaches_host`, ports through `capabilities::opens_port`, device entries are validated by `features/extensions/src/device.rs` `check_entry`, and port entries by `capabilities::check_port_entry`. A manifest with a bad entry does not load.

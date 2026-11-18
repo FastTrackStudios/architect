@@ -98,6 +98,54 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// The window's extension host's contributions, once it has one
+/// ([`on_contributions`]).
+static CONTRIBUTIONS: std::sync::OnceLock<architect_extensions::contrib::Contributions> =
+    std::sync::OnceLock::new();
+
+/// What waits for the window's extension host ([`on_contributions`]).
+type WaitingContributions =
+    Vec<Box<dyn FnOnce(&architect_extensions::contrib::Contributions) + Send>>;
+static WAITING_CONTRIBUTIONS: Mutex<WaitingContributions> = Mutex::new(Vec::new());
+
+/// Calls `f` with what the window's extensions contribute, once its
+/// extension host exists: now when it does, else when the window makes it.
+///
+/// Every extension the host loads contributes there: compiled in,
+/// installed, development copies (`EXT_DEV`, `EXT_CLONE`, `dev
+/// --extension`). The app's node follows it to keep their `[[doc_kinds]]`
+/// its documents' kinds.
+pub fn on_contributions(
+    f: impl FnOnce(&architect_extensions::contrib::Contributions) + Send + 'static,
+) {
+    let mut waiting = WAITING_CONTRIBUTIONS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    if let Some(contributions) = CONTRIBUTIONS.get() {
+        drop(waiting);
+        f(contributions);
+        return;
+    }
+    waiting.push(Box::new(f));
+}
+
+/// The window's extension host is made: what waited for its
+/// contributions hears them.
+fn contributions_made(contributions: &architect_extensions::contrib::Contributions) {
+    let waiting = {
+        let mut waiting = WAITING_CONTRIBUTIONS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if CONTRIBUTIONS.set(contributions.clone()).is_err() {
+            return;
+        }
+        std::mem::take(&mut *waiting)
+    };
+    for f in waiting {
+        f(contributions);
+    }
+}
+
 /// The process extensions running, for the panes that show their views.
 pub fn processes() -> Processes {
     PROCESSES.clone()
@@ -882,6 +930,9 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         // Every extension's actions on the lab's list too, as they come
         // and go: what its control socket, CLI and MCP run.
         host.forward_actions_to(&lab);
+        // What they contribute, to whoever waits for it: the app's node
+        // keeps their `[[doc_kinds]]` as its documents' kinds.
+        contributions_made(host.contributions());
         let root = crate::app_dir_or_temp();
         // A person's toolbar files (`toolbars/*.toml`): theirs, and their
         // copies of the extensions', read again as they change.
@@ -1048,7 +1099,25 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
                 description: "A source on the playhead was set, played, paused, sought, moved to another item or removed. An extension hears its own source's state (PLAYHEAD_STATE), and of another's change only {active}: whether its own source is the active one.".to_owned(),
                 detail: None,
             });
+            // The playhead as the clock layers move on
+            // (`architect_scene::anim`, #837): read by the host each
+            // frame, so a view's playhead line follows play, pause, seek
+            // and rate with no word from its extension.
+            architect_workspace::paint::anim::install_playhead(|| {
+                let now = architect_playhead::now_ms();
+                architect_playhead::with(|deck| {
+                    deck.current()
+                        .map(|source| architect_workspace::paint::anim::Reading {
+                            time: source.time(now),
+                            rate: source.rate(now),
+                        })
+                })
+            });
             architect_playhead::on_change("app.event", move |state| {
+                // A seek, a play or a pause: every window with layers on
+                // the playhead draws them at the new reading, a pop-out
+                // whose own frames are resting too.
+                architect_workspace::paint::wake::clocks_moved();
                 let _ = architect_playhead::raise_changed(&host, state);
                 // Its source's playing, as its extension's own runtime
                 // state: a favourite's primary shows Pause by it (#607).
@@ -1238,6 +1307,13 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         )
     ))]
     let _ = architect_webview::desk::use_desk_web_views(extensions.host().clone());
+    // Extensions' `process` views (#838): a program in the package, its
+    // GPU frames in the pane. Without it their panes say why.
+    #[cfg(all(
+        feature = "process-views",
+        any(target_os = "linux", target_os = "macos")
+    ))]
+    let _ = architect_process_view::extension::use_process_views(extensions.host().clone());
     use_extension_ui(extensions.host().clone(), Arc::clone(&lab))
 }
 

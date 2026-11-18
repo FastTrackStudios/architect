@@ -275,6 +275,110 @@ arrangement_budget -- --ignored --nocapture`; debug build, THEBATTLESHIP;
 | the window's scene recorded (p50 / p99) | 0.30 / 1.31 ms |
 | a pan's round trip, pointer to new frame (p50 / p99) | 1.53 / 4.97 ms |
 
+## Layers: what the host keeps, moves and handles
+
+A paint view that keeps what it draws returns **layers**
+(`PaintView::layers`, `features/scene/src/layers.rs`): content by key,
+each with a transform, an opacity, a clip and a z. From a process they
+cross as a batch of binary operations (`features/scene/src/ops.rs`): a
+font, an image or a fragment once by its hash, a layer when it comes or
+changes, a layer that only moved as its transform alone. Linked in, the
+same layers are composed with no serialization. Either way the host keeps
+them and draws them every frame without asking the view, so at 240 fps
+(a 4 ms frame) nothing that moves every frame waits on the extension.
+Four things are the host's own:
+
+- **Animation** (`features/scene/src/anim.rs`). A layer's `X`, `Y`,
+  `ScaleX`, `ScaleY`, `Opacity` or `Visible` is a function of an input:
+  a clock (`Clock::Wall`, the app's one monotonic clock; `Clock::Playhead`,
+  the active source on the playhead, with a fallback when nothing plays)
+  or a named value. The map is a `Linear` (`scale × input + offset`,
+  wrapped, clamped) or `Steps`. A playhead line is `X` from the playhead,
+  a lyric line `Visible` in steps, a meter `ScaleY` from a value. The host
+  reads its clocks once a frame, so a pause, a seek or another rate needs
+  no word from the view. It draws every frame only while a line moves on
+  a running clock; a stepped layer rests until its next step
+  (`features/scene/src/wake.rs` `Alarm`), and a seek wakes every window
+  holding animated layers, a pop-out too (`wake::clocks_moved`, called on
+  each playhead change).
+- **Hit regions** (`features/scene/src/region.rs`). A layer may carry
+  regions: a shape in its content space, an id, a cursor, a fill drawn
+  over it while hovered or pressed. The host hit-tests them with each
+  layer placed as its animations place it now, sets the cursor and draws
+  the highlight, and the view hears `RegionEvent::Enter`, `Leave`,
+  `Press` and `Release` by id (`PaintView::region`; a `RemoteScene`'s
+  `onregion`, sent as the element's `input` named `architect-region`).
+  A press on a region is the region's: the view does not get that pointer
+  event. It still focuses the view, as a press anywhere else in it does:
+  the scene's element takes the keyboard focus and the view hears
+  `Focus(true)`, so the key typed after a first click on a chord is the
+  view's (`features/extensions/src/remote.rs` `RemoteDocument`; a linked
+  `PaintPane` is focused by Blitz; tested linked and as a process in
+  `apps/sandbox/sketch/tests/paint_parity.rs`).
+- **Drags.** A region's `Drag` turns the pointer's movement along an axis
+  (at most one per axis: a fader one, a box two) into a `host.` value,
+  scaled, clamped and stepped. A layer bound to that value follows the
+  pointer at the display's rate; the view hears the value at most once a
+  frame and then the release. It moves the value itself (automation) by
+  sending another `initial`. A drag with a `coast` (a time constant up to
+  10 s) is flicked: let go while moving, the host carries its value on,
+  `from + speed × coast × (1 − e^(−t/coast))` on its wall clock, until it
+  stops or reaches an end; a press stops it. A list or an arrangement
+  scrolls with inertia with nothing from the view.
+- **The engine's values** (`features/scene/src/engine.rs`). An engine
+  writes `engine.` values into a fixed table of atomic slots
+  (`EngineTable`, `EngineWriter::write`: two atomic stores, no lock, no
+  allocation), and a pane granted `capabilities.ui = ["engine"]` reads
+  them at compose time. Ungranted, a binding to one reads nothing and the
+  layer stands as sent.
+
+- **An engine in a process of its own** (`features/scene/src/engine/shared.rs`).
+  A DAW or a lighting renderer is a process extension, so it can't
+  write the host's table. It makes one in shared memory instead
+  (`engine::shared::create`, a file under `$XDG_RUNTIME_DIR/architect-engines/<id>.values`,
+  written whole under a temporary name and renamed in, never truncated),
+  with the same two-store writes. It may list `host.` names too: a drag on
+  a pane reading the table writes the value it makes into it as it makes
+  it (`EngineTable::write_host`, from `Values::write`), and the engine
+  reads it lock-free (`EngineWriter::read`), so a fader moves the
+  engine's gain while it is held. Which table a pane reads: a pane
+  granted `engine` reads the tables of the providers of the services
+  its extension `[uses]` or `[requires]` (`engine::read_from`), looked
+  for again every `PLACE_EVERY`, so an engine that starts later or
+  restarts is found. The host checks the header, the names and the
+  length before it maps (`engine::shared::open`).
+
+Values are named by whose they are: `view.` (the view writes them, a
+`VALUE` operation of a name and a number), `host.` (a drag, later a
+control surface), `engine.` (the engine). Each writer writes its own
+space only.
+
+What the host accepts, checked on decode: every number finite and within
+±10⁷; at most one animation per property per layer and 4,096 in a pane
+(`MAX_ANIMATIONS`); 256 steps an animation; 1,024 values a pane; names of
+64 bytes; 4,096 regions a pane and 1,024 a layer; two drags a region, on
+different axes, each with its ends in order, a step above zero and its
+initial value between them. What fails fails the view, linked in or not
+(`Painter::failed` holds the same error a process view's host gives).
+A batch is written at the lowest version that holds it: `ASO\x01` for
+the first seven operations alone, `ASO\x02` once it animates, writes a
+value or carries regions, which a host that reads only the first version
+refuses whole.
+
+Measured (`cargo test -p architect-sandbox-sketch --test sketch --
+--nocapture`, `cargo test -p architect-scene --test engine --
+--nocapture`; debug build with optimizations, voyager):
+
+| | |
+|---|---|
+| the timeline's clips and motion, once | 70,789 bytes |
+| a frame of playback, view sending its playhead's transform (before) | 85 bytes |
+| a frame of playback, run by the host | 0 bytes |
+| 60 frames of dragging a fader in a process | 0 bytes; its release 46 |
+| 40 frames of dragging a box | 0 bytes |
+| 188 engine writes at audio-callback rate, 3,436 frames drawn | 0 bytes |
+| an engine write (p50 / p99 / max) | 167 ns / 500 ns / 3.2 µs, no allocation |
+
 ## Tests to read
 
 - `features/extensions/tests/remote_view.rs` (the test binary starts itself
@@ -310,13 +414,22 @@ arrangement_budget -- --ignored --nocapture`; debug build, THEBATTLESHIP;
   `web::Pane` in headless Firefox gets a `click` and a `contextmenu` sent
   as `PointerEvent`s and passes them on as mouse data
   (`apps/sandbox/pane-events`).
+- `features/scene/tests/anim.rs`, `region.rs`, `engine.rs`: what an
+  animation, a region or a drag evaluates to; when a host draws, rests
+  and is woken; what crosses and what is refused; the engine's writer
+  timed beside a host composing, with a counting allocator.
+  `features/workspace/src/paint/anim_tests.rs`: one view linked in and
+  across the wire composes the same at every clock and every frame of a
+  drag, and fails the same way.
 - `apps/sandbox/sketch/tests/sketch.rs`: a stroke drawn in the process is
   in the window's scene; panning and zooming send the transform, not the
   scene, and tell the view no new size; a graph node drags in a paint
   view served by its process; a scene is clipped to its pane unless the
   extension may draw over the app, where it lands at its window place;
   an oversized, unbalanced or unknown scene fails the view, not the app;
-  a pan's round trip stays inside `REMOTE_BUDGET`.
+  a pan's round trip stays inside `REMOTE_BUDGET`; the timeline's playback,
+  its fader, its drag box and its meter cost the process nothing a frame,
+  and a seek wakes the window a resting view is in.
   `features/extensions/src/scene.rs` tests: a scene crosses once and then
   by its hash; both sides forget the same scenes, by count and by bytes;
   transforms round-trip; a stray pop, a scene too deep, too large or out

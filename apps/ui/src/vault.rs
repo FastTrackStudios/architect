@@ -676,7 +676,10 @@ fn screensets() -> Screensets {
         Screenset::new("Project")
             .slot(5)
             .layout(FormClass::Desk, project_workspace()),
-        #[cfg(all(feature = "process-views", target_os = "linux"))]
+        #[cfg(all(
+            feature = "process-views-lab",
+            any(target_os = "linux", target_os = "macos")
+        ))]
         Screenset::new("Process views")
             .slot(6)
             .layout(FormClass::Desk, crate::process_views::workspace()),
@@ -708,6 +711,8 @@ pub fn VaultPage() -> Element {
         architect_workspace::Bridge::new()
             .context::<architect_extensions::interface::ViewPages>()
             .context::<architect_extensions::interface::WebViews>()
+            // A process view moved to a pop-out keeps its program (#838).
+            .context::<architect_extensions::interface::ProcessViews>()
             .context::<architect_workspace::Meters>()
     });
     // The vault the navigator shows (the ribbon's "New note" adds to it).

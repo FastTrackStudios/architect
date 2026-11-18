@@ -85,13 +85,19 @@ linked-core = ["dep:dioxus"]
 # anyrender scene, carried by two attributes (content by hash, then a
 # transform). The guest's `RemoteScene`, the host's widget, the browser's
 # canvas.
-scenes = ["dep:anyrender", "dep:peniko"]
+scenes = ["dep:anyrender", "dep:peniko", "dep:architect-scene", "dep:base64"]
 # A paint view (`linked::Builder::paint`, #591): a `PaintView` that
 # records a scene for its pane and takes the pane's input. Linked in with
 # `paint-ui` it is a Blitz widget in the pane (`architect_workspace::paint`);
 # served by `guest` it is a `scene::RemoteScene`.
 paint = ["scenes", "architect-workspace/paint"]
-paint-ui = ["paint", "linked", "architect-workspace/paint-ui"]
+paint-ui = ["paint", "linked", "paint-pane", "architect-workspace/paint-ui"]
+# A view's pane, linked in or as a process (`linked::use_pane_state`).
+pane = ["linked-core", "architect-workspace/ui"]
+# `linked::PaintPane`: a `PaintView` mounted in an extension's own view,
+# `architect_workspace::PaintPane` linked in and `scene::RemotePaint` in
+# its process copy (with `guest`).
+paint-pane = ["pane", "paint", "architect-workspace/paint-ui", "dep:blitz-traits"]
 ui = [
     "host",
     # The clipboard on iOS: the general pasteboard (src/hostui.rs).
@@ -106,6 +112,7 @@ ui = [
     "architect-shell/ui",
     "architect-workspace/ui",
     "architect-commands/ui",
+    "pane",
 ]
 # The extensions page (`page`): search, install with consent, update, pin,
 # grants and logs, in architect-ui's components and the app's theme.
@@ -217,7 +224,7 @@ pickers = [
     "dep:block2",
     "dep:dispatch2",
 ]
-remote = ["process", "ui", "scenes", "architect-theme/dioxus", "dep:blitz-dom", "blitz-dom/custom-widget", "dep:blitz-traits", "dep:dioxus-native-dom", "dep:futures-timer"]
+remote = ["process", "ui", "scenes", "architect-theme/dioxus", "dep:blitz-dom", "blitz-dom/custom-widget", "dep:blitz-traits", "dep:cursor-icon", "dep:dioxus-native-dom", "dep:futures-timer"]
 
 [dependencies]
 # `[[share_layers]]` patterns and paths compared in one Unicode form (NFC).
@@ -290,8 +297,13 @@ vox-stream = { version = "0.10.0-rc.7", optional = true }
 thiserror = { workspace = true, optional = true }
 blitz-dom = { workspace = true, optional = true }
 blitz-traits = { workspace = true, optional = true }
+# A hit region's cursor, set on the window (`remote`).
+cursor-icon = { workspace = true, optional = true }
 # A remote view's scenes (`scenes`): anyrender's commands as data.
 anyrender = { workspace = true, optional = true }
+# Layers of binary fragments (`scene::LAYERS_ATTR`): what a paint view
+# sends its host, and what the host composes.
+architect-scene = { workspace = true, optional = true }
 peniko = { workspace = true, optional = true }
 dioxus-native-dom = { workspace = true, optional = true }
 dioxus-html = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["serialize"], optional = true }
