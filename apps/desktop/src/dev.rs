@@ -138,7 +138,7 @@ impl Ask {
         if let Some(layout) = &self.layout {
             // A layout file by its whole path: the window may start elsewhere.
             let file = Path::new(layout);
-            let layout = if layout.ends_with(".json") {
+            let layout = if is_layout_file(layout) {
                 file.canonicalize()
                     .map_or_else(|_| layout.clone(), |p| p.to_string_lossy().into_owned())
             } else {
@@ -934,11 +934,19 @@ fn apply(inst: &Instance, ask: &Ask) -> Result<(), String> {
     }
 }
 
+/// Whether `--layout`'s value names a layout file (`….json`, any case)
+/// rather than a layout of the app's folder.
+fn is_layout_file(layout: &str) -> bool {
+    Path::new(layout)
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("json"))
+}
+
 /// A layout file (`--layout <file>.json`): the layout's name (its file's
 /// stem) and its text. `None` for a name of a layout the app has already.
 fn layout_file(layout: &str) -> Result<Option<(String, String)>, String> {
     let path = Path::new(layout);
-    if !layout.ends_with(".json") {
+    if !is_layout_file(layout) {
         return Ok(None);
     }
     let text = std::fs::read_to_string(path).map_err(|e| format!("--layout {layout}: {e}"))?;
