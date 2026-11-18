@@ -67,6 +67,7 @@ use lucide_dioxus::{
 
 pub use distribution::{app_dir, app_dir_or_temp, distribution, sandbox};
 pub use extensions::on_contributions as on_extension_contributions;
+pub use extensions::on_host as on_extension_host;
 pub use guide::builtin_tours;
 pub use screen::{Device, use_window_chrome, use_window_screen};
 

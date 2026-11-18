@@ -75,8 +75,10 @@ architect-workspace = { workspace = true, features = ["native", "hot-reload"], o
 # `node`: the node serves installed extensions' node actions on its org
 # lane (#583); the window adds `process` and `remote` (`gui`).
 # `crdt`: an extension's `[[doc_kinds]]` as the node's document kinds
-# (`DocKindDecl::to_doc_kind`, `node::kinds`).
-architect-extensions = { workspace = true, features = ["host", "net", "node", "crdt"] }
+# (`DocKindDecl::to_doc_kind`, `node::kinds`). `doc-sync`: the window's
+# extensions, linked and process, edit the node's copy of a vault document
+# of their kind (`Running::kind_documents`, `architect_extensions::live`).
+architect-extensions = { workspace = true, features = ["host", "net", "node", "crdt", "doc-sync"] }
 dioxus = { workspace = true, optional = true }
 dioxus-native = { workspace = true, features = ["vello", "hot-reload"], optional = true }
 facet-json = { version = "0.50.0-rc.5" }

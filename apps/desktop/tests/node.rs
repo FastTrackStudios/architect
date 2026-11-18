@@ -442,6 +442,133 @@ async fn an_extensions_document_syncs_between_two_nodes_like_a_note() {
     always.stop().await;
 }
 
+/// The window's extensions edit the node's copy of a vault document of
+/// their kind (`Running::kind_documents`, given to the window's extension
+/// host): an extension declaring `test.session` names `Songs/take.session`
+/// by its vault path and syncs a replica with the node's own registry,
+/// over the in-memory lane a linked extension gets; its edit lands in the
+/// node's document and the file, and the node's reaches its replica. One
+/// that does not declare the kind is refused.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_windows_extension_edits_the_nodes_copy_of_its_document() {
+    use architect_extensions::host::{Host, SharedSections};
+    use architect_extensions::hostcall::{HostError, HostRequest};
+    use architect_extensions::live::{DocLane, serve_in_memory};
+
+    let origin = issuer().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("desk");
+    std::fs::create_dir_all(dir.join("data/vaults/notes/Songs")).unwrap();
+    let kind = install_sessions(&dir);
+    let made = dir.join("data/vaults/notes/Songs/take.session");
+    let doc_id = {
+        let file = crdt::DocFile::create(crdt::file::DiskStorage::open(&made).unwrap(), &kind)
+            .await
+            .unwrap();
+        let mut main = file.open_branch(crdt::file::MAIN).await.unwrap();
+        main.transact("Type", |doc| {
+            doc.get_text("body").insert(0, "Made here.").unwrap();
+        })
+        .await
+        .unwrap();
+        file.id().await.unwrap()
+    };
+    let desk = node::start(config("desk", &dir, &origin, session(&origin, &dir).await))
+        .await
+        .unwrap();
+
+    // The window's host, given the node's documents as `start_node` does.
+    let host = Host::new(ActionList::new(), SharedSections::default())
+        .with_kind_documents(desk.kind_documents());
+    for (id, tables) in [
+        (
+            "test.editor",
+            "[capabilities]\nreads = [\"documents\"]\nwrites = [\"documents\"]\n\n[[doc_kinds]]\nid = \"test.session\"\nname = \"Session\"\nfiles = [\"session\"]\n",
+        ),
+        (
+            "test.stranger",
+            "[capabilities]\nreads = [\"documents\"]\nwrites = [\"documents\"]\n",
+        ),
+    ] {
+        let at = tmp.path().join(id);
+        std::fs::create_dir_all(&at).unwrap();
+        std::fs::write(
+            at.join("extension.toml"),
+            format!(
+                "id = \"{id}\"\nname = \"{id}\"\nversion = \"1.0.0\"\nkind = \"data\"\n{tables}"
+            ),
+        )
+        .unwrap();
+        host.load(
+            &architect_extensions::Package::read(&at).unwrap(),
+            architect_extensions::Origin::Dev,
+        )
+        .unwrap();
+    }
+
+    // By its vault path (the node's one vault): the file's document.
+    let open = HostRequest::LiveDocument {
+        path: "Songs/take.session".to_owned(),
+    };
+    let answer = host.api("test.editor").call(open.clone()).await.unwrap();
+    let lane = DocLane::from_answer(
+        answer,
+        serve_in_memory(host.api("test.editor")).await.unwrap(),
+    )
+    .unwrap();
+    assert_eq!((lane.doc().doc_id, lane.doc().writable), (doc_id, true));
+    let replica = lane.replica();
+    replica.attached().await.unwrap();
+    assert_eq!(
+        replica.doc().loro().get_text("body").to_string(),
+        "Made here."
+    );
+
+    // Its edit: the node's document, then the file.
+    let body = replica.doc().loro().get_text("body");
+    body.insert(body.len_unicode(), " Typed by the extension.")
+        .unwrap();
+    replica.doc().loro().commit();
+    until_session(&made, &kind, "Typed by the extension.").await;
+    // The node's edit: its replica.
+    append(&desk, doc_id, " Edited on the node.").await;
+    until("the node's edit in the replica", || {
+        replica
+            .doc()
+            .loro()
+            .get_text("body")
+            .to_string()
+            .ends_with("Edited on the node.")
+    })
+    .await;
+
+    // Not its kind.
+    match host.api("test.stranger").call(open).await {
+        Err(HostError::Refused { capability, .. }) => {
+            assert_eq!(capability, "doc_kinds.test.session");
+        }
+        other => panic!("not refused: {other:?}"),
+    }
+    drop(replica);
+    desk.stop().await;
+}
+
+#[test]
+fn an_extensions_path_names_its_vault() {
+    let one = vec!["notes".to_owned()];
+    assert_eq!(
+        node::vault_path(&one, "Songs/a.session"),
+        Some(("notes", "Songs/a.session"))
+    );
+    let two = vec!["notes".to_owned(), "work".to_owned()];
+    assert_eq!(
+        node::vault_path(&two, "work/Songs/a.session"),
+        Some(("work", "Songs/a.session"))
+    );
+    assert_eq!(node::vault_path(&two, "other/a.session"), None);
+    assert_eq!(node::vault_path(&[], "a.session"), None);
+}
+
 /// A document of an extension's kind deleted on one node (its file
 /// removed outside the document, as `rm` does) is deleted on the other,
 /// and stays deleted on both through the sweeps and relistings that
