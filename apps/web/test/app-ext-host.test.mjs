@@ -314,6 +314,9 @@ function attacker() {
 
 // ── The browser ─────────────────────────────────────────────────────
 
+// Whether this user may make a namespace (`unshare -r -m`): a CI runner's service may not
+// (systemd RestrictNamespaces), and Firefox then starts without one.
+const USERNS = process.platform !== 'darwin' && (() => { try { execFileSync('unshare', ['-r', '-m', 'true'], { stdio: 'ignore' }); return true; } catch { return false; } })();
 async function firefox() {
   const profile = mkdtempSync(join(tmpdir(), 'app-ext-ff-'));
   // Nothing is heard: its output at zero; autoplay allowed, so the app's
@@ -328,7 +331,13 @@ async function firefox() {
   const args = ['--headless', '--no-remote', '--profile', profile, '--remote-debugging-port', String(port)];
   const proc = process.platform === 'darwin'
     ? spawn(browser, args, { stdio: 'ignore', env, detached: true })
-    : spawn('unshare', ['-r', '-m', 'sh', '-c', hide, browser, ...args], { stdio: 'ignore', env, detached: true });
+    : USERNS
+
+      ? spawn('unshare', ['-r', '-m', 'sh', '-c', hide, browser, ...args], { stdio: 'ignore', env, detached: true })
+
+      // No namespace to hide the audio graph in: a runtime dir of its own; the profile mutes it.
+
+      : spawn(browser, args, { stdio: 'ignore', env: { ...env, XDG_RUNTIME_DIR: mkdtempSync(join(tmpdir(), 'ff-run-')) }, detached: true });
   let ws;
   for (let i = 0; i < 80 && !ws; i++) {
     await sleep(250);
@@ -338,7 +347,9 @@ async function firefox() {
   let id = 0;
   const waiting = new Map();
   ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && waiting.has(m.id)) { const w = waiting.get(m.id); waiting.delete(m.id); m.type === 'error' ? w.no(new Error(`${m.error}: ${m.message}`)) : w.ok(m.result); } };
-  const send = (method, params = {}) => new Promise((ok, no) => { const i = ++id; waiting.set(i, { ok, no }); ws.send(JSON.stringify({ id: i, method, params })); });
+  const send = (method, params = {}) => new Promise((ok, no) => { const i = ++id; const t = setTimeout(() => { waiting.delete(i); no(new Error(`${method}: no answer from Firefox in 60 s`)); }, 60000); waiting.set(i, { ok: (v) => { clearTimeout(t); ok(v); }, no: (e) => { clearTimeout(t); no(e); } }); ws.send(JSON.stringify({ id: i, method, params })); });
+  // Firefox gone (crashed, killed): every command waiting fails, never hangs the run.
+  ws.onclose = () => { for (const [i, w] of waiting) { waiting.delete(i); w.no(new Error('Firefox closed the session')); } };
   await send('session.new', { capabilities: {} });
   const context = (await send('browsingContext.create', { type: 'tab' })).context;
   await send('browsingContext.setViewport', { context, viewport: { width: 1280, height: 900 } });
@@ -398,7 +409,7 @@ async function frameOf(b, view) {
 async function world(views, claim, opts) {
   const n = await node(glue(views), claim);
   const f = await front(n.origin, opts);
-  const b = await firefox();
+  const b = await firefox().catch((e) => { f.close(); n.close(); throw e; });
   return { n, f, b, close: async () => { await b.close(); f.close(); n.close(); } };
 }
 
@@ -562,7 +573,7 @@ test('a note\'s type picks its island from the listing; the view gets the note t
     { id: 'demo.second', bundle: glue({ second: CLAIM }), embeds: 'second=song=artist', reads: 'documents' },
   ]);
   const f = await front(n.origin);
-  const b = await firefox();
+  const b = await firefox().catch((e) => { f.close(); n.close(); throw e; });
   try {
     const listing = await (await fetch(`${n.origin}/_ext/islands.json`)).json();
     const folder = (id) => listing.islands.find((i) => i.id === id).folder;
@@ -891,7 +902,7 @@ const artSrc = (b) => b.eval(`document.querySelector('[data-testid=now-playing-a
 test('the demo setlist: each song\'s cover reaches its frame as data and the card draws it', { skip }, async () => {
   const n = await node(null, null, [{ id: 'demo.view', bundle: glue({ progress: QUIET, transport: SETLIST, lyrics: QUIET }), embeds: 'transport=setlist=', reads: 'documents' }]);
   const f = await front(n.origin);
-  const b = await firefox();
+  const b = await firefox().catch((e) => { f.close(); n.close(); throw e; });
   try {
     await openNote(b, f.origin, ['Setlists'], 'Merry & Bright');
     // Five of its nine songs have a recording; each queued with its cover.
@@ -946,7 +957,7 @@ const ROWS = `JSON.stringify([...document.querySelectorAll('.sl-row')].map((r) =
 test('Studio\'s setlist view draws the demo setlist and a row pressed plays on the card', { skip: skip || (STUDIO ? false : 'needs STUDIO_ISLAND=<Studio `just island-web` folder>') }, async () => {
   const n = await node(null, null, [{ id: 'studio.transport', folder: STUDIO, sheet: 'island.css', embeds: 'setlist.playlist=setlist=date', reads: 'documents' }]);
   const f = await front(n.origin);
-  const b = await firefox();
+  const b = await firefox().catch((e) => { f.close(); n.close(); throw e; });
   const shots = process.env.SHOTS;
   try {
     // Opened on a desk (a phone's navigator is a drawer), then seen at

@@ -238,6 +238,9 @@ async function front(nodeOrigin, { tamper = false } = {}) {
 
 // ── The browser ─────────────────────────────────────────────────────
 
+// Whether this user may make a namespace (`unshare -r -m`): a CI runner's service may not
+// (systemd RestrictNamespaces), and Firefox then starts without one.
+const USERNS = process.platform !== 'darwin' && (() => { try { execFileSync('unshare', ['-r', '-m', 'true'], { stdio: 'ignore' }); return true; } catch { return false; } })();
 async function firefox() {
   const profile = mkdtempSync(join(tmpdir(), 'app-fav-ff-'));
   const port = await freePort();
@@ -251,7 +254,13 @@ async function firefox() {
   const args = ['--headless', '--no-remote', '--profile', profile, '--remote-debugging-port', String(port)];
   const proc = process.platform === 'darwin'
     ? spawn(browser, args, { stdio: 'ignore', env, detached: true })
-    : spawn('unshare', ['-r', '-m', 'sh', '-c', hide, browser, ...args], { stdio: 'ignore', env, detached: true });
+    : USERNS
+
+      ? spawn('unshare', ['-r', '-m', 'sh', '-c', hide, browser, ...args], { stdio: 'ignore', env, detached: true })
+
+      // No namespace to hide the audio graph in: a runtime dir of its own; the profile mutes it.
+
+      : spawn(browser, args, { stdio: 'ignore', env: { ...env, XDG_RUNTIME_DIR: mkdtempSync(join(tmpdir(), 'ff-run-')) }, detached: true });
   let ws;
   for (let i = 0; i < 80 && !ws; i++) {
     await sleep(250);
@@ -261,7 +270,9 @@ async function firefox() {
   let id = 0;
   const waiting = new Map();
   ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && waiting.has(m.id)) { const w = waiting.get(m.id); waiting.delete(m.id); m.type === 'error' ? w.no(new Error(`${m.error}: ${m.message}`)) : w.ok(m.result); } };
-  const send = (method, params = {}) => new Promise((ok, no) => { const i = ++id; waiting.set(i, { ok, no }); ws.send(JSON.stringify({ id: i, method, params })); });
+  const send = (method, params = {}) => new Promise((ok, no) => { const i = ++id; const t = setTimeout(() => { waiting.delete(i); no(new Error(`${method}: no answer from Firefox in 60 s`)); }, 60000); waiting.set(i, { ok: (v) => { clearTimeout(t); ok(v); }, no: (e) => { clearTimeout(t); no(e); } }); ws.send(JSON.stringify({ id: i, method, params })); });
+  // Firefox gone (crashed, killed): every command waiting fails, never hangs the run.
+  ws.onclose = () => { for (const [i, w] of waiting) { waiting.delete(i); w.no(new Error('Firefox closed the session')); } };
   await send('session.new', { capabilities: {} });
   const context = (await send('browsingContext.create', { type: 'tab' })).context;
   await send('browsingContext.setViewport', { context, viewport: { width: 390, height: 844 } });
@@ -321,7 +332,7 @@ async function openNote(b, folder, name) {
 test('the slots follow the open note\'s type at 390 px, and a tab opens its view', { skip }, async () => {
   const n = await node();
   const f = await front(n.origin);
-  const b = await firefox();
+  const b = await firefox().catch((e) => { f.close(); n.close(); throw e; });
   try {
     await b.go(`${f.origin}/app/?demo`);
     await until(() => b.eval(`!!document.querySelector('[data-testid=note-text]')`), 60000, 'the demo');
@@ -410,7 +421,7 @@ test('the slots follow the open note\'s type at 390 px, and a tab opens its view
 test('a set naming only what its extension may not is no set, and the listing is read-only', { skip }, async () => {
   const n = await node(FOREIGN);
   const f = await front(n.origin);
-  const b = await firefox();
+  const b = await firefox().catch((e) => { f.close(); n.close(); throw e; });
   try {
     // The node lists it, with who declared it; HEAD answers, POST does not.
     const listed = await fetch(`${n.origin}/_ext/favourites.json`).then((r) => r.json());

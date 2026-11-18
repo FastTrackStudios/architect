@@ -63,23 +63,28 @@ jobs:
           cargo build -q -p auth-server
       # The browser runs outside the dev shell's libraries.
       - name: a share link opened as its guest
+        # The web bundle's build, then the tests: never the job's 45 minutes.
+        timeout-minutes: 20
         run: |
           bash scripts/web-bundle.sh target/web-bundle
           ARCHITECT_ISLAND_NODE="$CARGO_TARGET_DIR/debug/examples/island_node" ARCHITECT_AUTH_SERVER="$CARGO_TARGET_DIR/debug/auth-server" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" \
-            env -u LD_LIBRARY_PATH "$NODE" --test --test-concurrency=1 apps/web/test/app-share-guest.test.mjs apps/web/test/app-guest-content.test.mjs
+            env -u LD_LIBRARY_PATH "$NODE" --test --test-concurrency=1 --test-timeout=420000 apps/web/test/app-share-guest.test.mjs apps/web/test/app-guest-content.test.mjs
       - name: the web app's extension frames against hostile bundles
+        timeout-minutes: 12
         if: ${{ !cancelled() }}
         run: |
           test -d target/web-bundle/app || bash scripts/web-bundle.sh target/web-bundle
           ARCHITECT_ISLAND_NODE="$CARGO_TARGET_DIR/debug/examples/island_node" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" \
-            env -u LD_LIBRARY_PATH "$NODE" --test --test-concurrency=1 apps/web/test/app-ext-host.test.mjs
+            env -u LD_LIBRARY_PATH "$NODE" --test --test-concurrency=1 --test-timeout=420000 apps/web/test/app-ext-host.test.mjs
       - name: the web app's bottom slots following the open note's type
+        timeout-minutes: 12
         if: ${{ !cancelled() }}
         run: |
           test -d target/web-bundle/app || bash scripts/web-bundle.sh target/web-bundle
           ARCHITECT_ISLAND_NODE="$CARGO_TARGET_DIR/debug/examples/island_node" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" \
-            env -u LD_LIBRARY_PATH "$NODE" --test --test-concurrency=1 apps/web/test/app-favourites.test.mjs
+            env -u LD_LIBRARY_PATH "$NODE" --test --test-concurrency=1 --test-timeout=420000 apps/web/test/app-favourites.test.mjs
       - name: the web view kind's frame host against hostile web view apps
+        timeout-minutes: 12
         if: ${{ !cancelled() }}
         run: |
-          env -u LD_LIBRARY_PATH "$NODE" --test --test-concurrency=1 features/extensions/web/test/webview.test.mjs
+          env -u LD_LIBRARY_PATH "$NODE" --test --test-concurrency=1 --test-timeout=420000 features/extensions/web/test/webview.test.mjs
