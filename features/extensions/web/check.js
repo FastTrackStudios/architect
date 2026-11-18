@@ -173,7 +173,7 @@ function fetchCheck(manifest, may, fetch) {
 }
 
 const UI = { notify: 'notify', clipboard_read: 'clipboard', clipboard_write: 'clipboard', pick: 'pickers', prompt: 'prompts', menu: 'menus', decorate: 'badges' };
-const DOC_READS = ['open', 'read_document', 'list_documents', 'watch_documents'];
+const DOC_READS = ['open', 'read_document', 'live_document', 'list_documents', 'watch_documents'];
 const DOC_WRITES = ['create_document', 'edit_document', 'rename_document', 'move_document', 'delete_document'];
 
 /// Whether event pattern `pattern` covers app event `name`
@@ -270,7 +270,7 @@ export function check(manifest, may, request, effect = 'read_only', appAction = 
 
 /// Every `op` a host-service request may have (`hostcall::HostRequest`).
 export const HOST_OPS = [
-  'run', 'org', 'selection', 'open', 'read_document', 'list_documents', 'create_document', 'edit_document',
+  'run', 'org', 'selection', 'open', 'read_document', 'live_document', 'list_documents', 'create_document', 'edit_document',
   'rename_document', 'move_document', 'delete_document', 'watch_documents', 'editor_state', 'edit_editor',
   'decorate_editor', 'read_file', 'write_file', 'setting', 'set_setting', 'data', 'set_data', 'log', 'service',
   'point', 'window', 'notify', 'clipboard_read', 'clipboard_write', 'pick', 'prompt', 'menu', 'decorate',

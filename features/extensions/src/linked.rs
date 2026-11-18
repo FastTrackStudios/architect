@@ -72,6 +72,12 @@ pub trait MaybeSend {}
 #[cfg(target_family = "wasm")]
 impl<T> MaybeSend for T {}
 
+/// A `DocSync` lane to the host's answer (`Sink::doc_sync`).
+#[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
+pub type DocSyncFuture = Pin<
+    Box<dyn Future<Output = Result<crate::live::SyncClient, crate::hostcall::HostError>> + Send>,
+>;
+
 /// Where an extension's runtime additions go: the host's registry when it
 /// is linked in, the host over the wire when it runs as a process.
 pub trait Sink: Send + Sync {
@@ -86,6 +92,17 @@ pub trait Sink: Send + Sync {
         Box::pin(async {
             Err(crate::hostcall::HostError::Failed {
                 message: "no host service here".to_owned(),
+            })
+        })
+    }
+
+    /// A `DocSync` lane to the host, for live documents (`crate::live`):
+    /// an in-memory one when linked in, the connection's when a process.
+    #[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
+    fn doc_sync(&self) -> DocSyncFuture {
+        Box::pin(async {
+            Err(crate::hostcall::HostError::Unsupported {
+                what: "live documents: no documents lane here".to_owned(),
             })
         })
     }
@@ -138,6 +155,35 @@ impl Handle {
                 })
             }),
         }
+    }
+
+    /// The vault file `path`, a document of a kind its manifest declares
+    /// (`[[doc_kinds]]`), as a live document of the app's node: a lane to
+    /// sync a replica of it over, the same linked in or as a process
+    /// (`crate::live`). [`crate::live::DocLane::replica`] keeps one in
+    /// step; [`crate::live::DocLane::sync`] runs a session of the
+    /// extension's own `SyncedDoc`.
+    ///
+    /// # Errors
+    ///
+    /// The host refused it (not its kind, no `reads = ["documents"]`, no
+    /// such document), has none, or the extension is not running yet.
+    #[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
+    pub async fn document(
+        &self,
+        path: &str,
+    ) -> Result<crate::live::DocLane, crate::hostcall::HostError> {
+        let sink = self
+            .sink()
+            .ok_or_else(|| crate::hostcall::HostError::Failed {
+                message: "the extension is not running yet".to_owned(),
+            })?;
+        let answer = sink
+            .host(crate::hostcall::HostRequest::LiveDocument {
+                path: path.to_owned(),
+            })
+            .await?;
+        crate::live::DocLane::from_answer(answer, sink.doc_sync().await?)
     }
 
     /// Calls method `method` of service `service` (one its manifest
@@ -545,6 +591,10 @@ impl crate::guest::Guest {
             }
             fn host(&self, request: crate::hostcall::HostRequest) -> HostFuture {
                 Box::pin(crate::guest::host(request))
+            }
+            #[cfg(feature = "doc-sync")]
+            fn doc_sync(&self) -> DocSyncFuture {
+                Box::pin(async { crate::guest::doc_sync() })
             }
         }
         let built = Builder::of(extension);
