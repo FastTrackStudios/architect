@@ -41,7 +41,15 @@ use facet::Facet;
 use crate::control::PortableLayout;
 
 /// The shell's slots a layout names (`architect_shell::Slot`'s names).
-pub const SLOTS: [&str; 6] = ["ribbon", "left", "right", "tabs", "status", "title"];
+pub const SLOTS: [&str; 7] = [
+    "ribbon",
+    "left",
+    "right",
+    "tabs",
+    "status",
+    "title",
+    "now_playing",
+];
 
 /// What fills one slot, as a layout says.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Facet)]
@@ -659,7 +667,7 @@ pub mod actions {
     static SLOT: ActionMeta = meta(
         "HOME_SLOT_SET",
         "Change a slot",
-        "Changes slot `slot` (ribbon, left, right, tabs, status, title) of the layout shown, by \
+        "Changes slot `slot` (ribbon, left, right, tabs, status, title, now_playing) of the layout shown, by \
          hand: the view that fills it, hidden, its tokens; `clear` takes the change back. Kept in \
          layouts/.state/, apart from the layout's file; an edit of the file that names the slot \
          beats it.",

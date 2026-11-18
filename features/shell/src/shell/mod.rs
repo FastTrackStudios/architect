@@ -1266,6 +1266,8 @@ pub fn AppShell(
     let chrome = try_use_context::<Signal<Chrome>>()
         .map(|c| c())
         .unwrap_or_default();
+    // A layout (or `dev --hide now-playing`) may hide the Now Playing bar.
+    let now_playing = now_playing.filter(|_| !chrome.is_hidden(Slot::NowPlaying));
     let tabs: Vec<Tab> = if chrome.tabs.is_empty() {
         tabs
     } else {
