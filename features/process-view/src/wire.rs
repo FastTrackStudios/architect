@@ -299,6 +299,12 @@ fn input(out: &mut Out, event: &ViewInput) {
         ViewInput::Focus(on) => {
             out.u8(7).u8(u8::from(*on));
         }
+        // A move to nowhere: a program built before it read it as a move
+        // that hits nothing (its hover ends), and no tag it doesn't know
+        // stops it.
+        ViewInput::PointerLeave => {
+            out.u8(1).f32(f32::NAN).f32(f32::NAN).strs(&[]);
+        }
     }
 }
 
@@ -310,11 +316,14 @@ fn read_input(i: &mut In<'_>) -> Result<ViewInput, WireError> {
             button: button_from(i.u8()?),
             mods: i.names()?,
         },
-        1 => ViewInput::PointerMove {
-            x: i.f32()?,
-            y: i.f32()?,
-            mods: i.names()?,
-        },
+        1 => {
+            let (x, y, mods) = (i.f32()?, i.f32()?, i.names()?);
+            if x.is_nan() && y.is_nan() {
+                ViewInput::PointerLeave
+            } else {
+                ViewInput::PointerMove { x, y, mods }
+            }
+        }
         2 => ViewInput::PointerUp {
             x: i.f32()?,
             y: i.f32()?,
@@ -598,6 +607,7 @@ mod tests {
                 commit: Some("火".into()),
             },
             ViewInput::Focus(true),
+            ViewInput::PointerLeave,
         ] {
             round_trip_guest(&ToGuest::Input { seq: 9, input });
         }
@@ -607,6 +617,29 @@ mod tests {
         });
         round_trip_guest(&ToGuest::Expose);
         round_trip_guest(&ToGuest::Tick);
+    }
+
+    /// The pointer leaving is a move to nowhere on the wire: the bytes a
+    /// program built before it reads as a move (its hover ends), with no
+    /// tag it doesn't know; a program built since reads it as the leave.
+    #[test]
+    fn a_pointer_leave_is_a_move_an_older_program_reads() {
+        let leave = ToGuest::Input {
+            seq: 3,
+            input: ViewInput::PointerLeave,
+        }
+        .encode()
+        .unwrap();
+        let mut old = Out::default();
+        old.u8(3).u64(3).u8(1).f32(f32::NAN).f32(f32::NAN).strs(&[]);
+        assert_eq!(leave, old.done().unwrap());
+        assert_eq!(
+            ToGuest::decode(&leave).unwrap(),
+            ToGuest::Input {
+                seq: 3,
+                input: ViewInput::PointerLeave
+            }
+        );
     }
 
     #[test]

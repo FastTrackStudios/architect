@@ -55,8 +55,8 @@ use peniko::{Color, Fill};
 
 #[cfg(feature = "paint-ui")]
 pub use widget::{
-    PaintMount, PaintPane, PaintWake, PaintWidget, WHEEL_LINE, pane_tokens, shell_tokens,
-    view_input,
+    PaintMount, PaintPane, PaintWake, PaintWidget, WHEEL_LINE, left_view, pane_tokens,
+    shell_tokens, view_input,
 };
 
 use crate::ctx::{Geometry, ThemeTokens, ViewCtx, ViewInput};
@@ -428,7 +428,7 @@ impl Painter {
                 "end" => i.released(layers, &now, values, at(x, y)),
                 _ => i.left(),
             },
-            ViewInput::Focus(false) => i.left(),
+            ViewInput::Focus(false) | ViewInput::PointerLeave => i.left(),
             _ => return false,
         };
         if let Some(cursor) = outcome.cursor {

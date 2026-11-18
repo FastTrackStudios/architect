@@ -1171,6 +1171,11 @@ impl Widget for ProcessViewWidget {
         if let Some(input) = view_input(event) {
             self.session.input(input);
         }
+        // After the move to where it went, that it left (a move to
+        // nowhere on the wire, which an older program reads as one).
+        if let Some(gone) = architect_workspace::paint::left_view(event) {
+            self.session.input(gone);
+        }
     }
 
     fn requires_redraw(&self) -> bool {

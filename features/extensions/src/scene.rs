@@ -1586,7 +1586,12 @@ mod remote_paint_ui {
                 // Gone, as a linked pane says it: where it went, so nothing
                 // is under it.
                 onpointerleave: move |e: PointerEvent| {
+                    let finger = e.pointer_type() == "touch";
                     leave(pointer(&e, "cancel", |x, y| ViewInput::PointerMove { x, y, mods: held(e.modifiers()) }));
+                    // Then that it left, as a linked pane says it.
+                    if !finger {
+                        leave(ViewInput::PointerLeave);
+                    }
                 },
                 onwheel: move |e: WheelEvent| {
                     let (x, y) = at(e.element_coordinates());
