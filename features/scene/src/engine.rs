@@ -28,8 +28,12 @@ use std::sync::{Arc, Mutex, PoisonError, Weak};
 use crate::anim::{Name, Space};
 use crate::{Error, MAX_COORDINATE};
 
-/// The most slots a table may have.
-pub const MAX_SLOTS: usize = 1024;
+/// The most slots a table may have: 64 KB of them (#891).
+///
+/// A DAW's template writes a meter, mute, solo, arm, phase, volume and pan for
+/// each of hundreds of tracks; past the table, values cross as a view's
+/// own (a `VALUE` a frame each, ~71 KB a playing frame at 146 tracks).
+pub const MAX_SLOTS: usize = 8192;
 
 /// What a slot holds before its first write: no value.
 const UNSET: u64 = u64::MAX;
