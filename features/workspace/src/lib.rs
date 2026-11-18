@@ -91,8 +91,8 @@ pub use deck::{
     ContextLayout, ContextProperty, Deck, DeckContext, DeckError, DeckId, DeckState, DeckTemplate,
     Decks, KindDefault, Load, Outcome, Unchanged,
 };
-pub use field_focus::{FieldFocus, field_focused};
 pub use drop::{Bar, Drop, bar_drop, contains, drop_at, drop_in, float_rect, snap_at};
+pub use field_focus::{FieldFocus, field_focused};
 pub use tab_kind::{TabFace, TabKind, TabKindItem, TabKinds, TabWidth};
 #[cfg(feature = "native")]
 pub mod native;

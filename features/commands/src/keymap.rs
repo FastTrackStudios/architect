@@ -237,8 +237,7 @@ impl Keymap {
         let config = self.config();
         config.contexts.get(context).is_some_and(|c| {
             c.keys.iter().any(|(k, a)| {
-                a != UNBIND
-                    && normalize_keys(k).is_ok_and(|k| k == keys || starts(&k, &keys))
+                a != UNBIND && normalize_keys(k).is_ok_and(|k| k == keys || starts(&k, &keys))
             })
         })
     }
