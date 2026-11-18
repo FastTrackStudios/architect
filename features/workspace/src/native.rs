@@ -857,6 +857,11 @@ impl ApplicationHandler for App {
         } else if matches!(event, WindowEvent::CloseRequested) && self.kept_main() {
             // The app hid the window instead: the loop runs on.
             self.asks(event_loop);
+        } else if matches!(event, WindowEvent::RedrawRequested) {
+            // The main window's frame, timed (`APP_FRAMES`).
+            let start = std::time::Instant::now();
+            self.inner.window_event(event_loop, window, event);
+            crate::frames::record(start, std::time::Instant::now());
         } else {
             self.inner.window_event(event_loop, window, event);
         }
