@@ -64,7 +64,7 @@ use blitz_dom::{
     LocalName, Namespace, Node, NodeId, QualName, UserAgentStylesheet,
 };
 use blitz_traits::events::{
-    BlitzImeEvent, BlitzKeyEvent, BlitzPointerEvent, BlitzPointerId, BlitzWheelDelta,
+    BlitzFocusEvent, BlitzImeEvent, BlitzKeyEvent, BlitzPointerEvent, BlitzPointerId, BlitzWheelDelta,
     BlitzWheelEvent, DomEvent, DomEventData, EventState, Location, Modifiers, MouseEventButton,
     UiEvent,
 };
@@ -363,6 +363,41 @@ impl RemoteDocument {
             layer.touch();
         }
         (consumed, cursor)
+    }
+
+    /// Focuses what a press its regions took landed on, as the document's
+    /// own press would have: the nearest focusable element from the
+    /// scene's (a `RemoteScene`'s or a `RemotePaint`'s, `tabindex = 0`),
+    /// the old focus blurred and the new one told, through the view's
+    /// handlers. The press itself stays the region's.
+    fn focus_pressed(&mut self) {
+        let Some(pressed) = self.pointed else { return };
+        let mut at = Some(pressed);
+        while let Some(id) = at {
+            match self.doc.get_node(id) {
+                Some(node) if node.is_focussable() => break,
+                Some(node) => at = node.parent,
+                None => at = None,
+            }
+        }
+        let Some(target) = at else { return };
+        let old = self.doc.get_focussed_node_id();
+        if old == Some(target) || !self.doc.set_focus_to(target) {
+            return;
+        }
+        let forward = Forward {
+            listeners: &self.listeners,
+            events: &self.events,
+            held: &mut self.held,
+            composing: &mut self.composing,
+        };
+        let mut driver = EventDriver::new(&mut self.doc, forward);
+        if let Some(old) = old {
+            driver.handle_dom_event(DomEvent::new(old, DomEventData::Blur(BlitzFocusEvent)));
+            driver.handle_dom_event(DomEvent::new(old, DomEventData::FocusOut(BlitzFocusEvent)));
+        }
+        driver.handle_dom_event(DomEvent::new(target, DomEventData::Focus(BlitzFocusEvent)));
+        driver.handle_dom_event(DomEvent::new(target, DomEventData::FocusIn(BlitzFocusEvent)));
     }
 
     /// Shows the cursor the region under the pointer asks for: after the
@@ -1138,6 +1173,11 @@ impl Document for RemoteDocument {
         // host's, and the view hears what its regions heard instead.
         let (consumed, cursor) = self.regions_event(&event);
         if consumed {
+            // A press on a region is still a press on the view: it takes
+            // the keyboard focus, as a press anywhere else in it does.
+            if matches!(event, UiEvent::PointerDown(_)) {
+                self.focus_pressed();
+            }
             self.region_cursor(cursor);
             return;
         }
