@@ -2383,13 +2383,6 @@ impl Contributions {
         diff
     }
 
-    /// Puts what `owner` adds at run time (a process guest's, a script's),
-    /// in place of what it added before: what changed. `None` when it is
-    /// not loaded (nothing is put).
-    // What changed is for whoever wants it.
-    #[allow(clippy::must_use_candidate)]
-    // The guard goes to `changed`, which tells the listeners after it.
-    #[allow(clippy::significant_drop_tightening)]
     /// The files `owner`'s process copy sent (its code's
     /// `Extension::files`), in place of those it sent before.
     pub fn put_runtime_files(&self, owner: &str, files: Vec<(String, String)>) {
@@ -2412,6 +2405,13 @@ impl Contributions {
             .map(|(_, text)| text.clone())
     }
 
+    /// Puts what `owner` adds at run time (a process guest's, a script's),
+    /// in place of what it added before: what changed. `None` when it is
+    /// not loaded (nothing is put).
+    // What changed is for whoever wants it.
+    #[allow(clippy::must_use_candidate)]
+    // The guard goes to `changed`, which tells the listeners after it.
+    #[allow(clippy::significant_drop_tightening)]
     pub fn put_runtime(&self, owner: &str, runtime: Contribution) -> Option<Diff> {
         let mut inner = self.lock();
         let entry = inner.owners.get_mut(owner)?;

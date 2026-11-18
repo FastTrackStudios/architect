@@ -88,6 +88,7 @@ export type HostRequest =
   | { op: "rename_document"; path: string; to: string }
   | { op: "move_document"; path: string; folder: string }
   | { op: "delete_document"; path: string }
+  | { op: "actions" }
   | { op: "set_view_state"; pane: string; state: string }
   | { op: "undo_document"; path: string }
   | { op: "redo_document"; path: string }

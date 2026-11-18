@@ -133,10 +133,11 @@ fn files_cell() -> &'static OnceLock<Vec<(String, String)>> {
     &FILES
 }
 
-/// The files a linked extension's code holds (`Extension::files`: its
-/// toolbars' images, read from its package linked in), sent to the host
-/// with what it contributes, so its process copy's host can read them too.
-/// Set once, before it serves.
+/// Keeps the files a linked extension's code holds, to send to its host.
+///
+/// `Extension::files`: its toolbars' images, read from its package linked
+/// in. They go with what it contributes, so its process copy's host can
+/// read them too. Set once, before it serves.
 pub fn set_files(files: &[(&str, &str)]) {
     let _ = files_cell().set(
         files
