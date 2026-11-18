@@ -10,7 +10,8 @@
 # Where things are (defaults beside this checkout):
 #   SETLIST_STUDIO    a Studio checkout with extensions/{daw,arrangement,mixer} (studio#519 at
 #                     fffcf831 or later: Studio's own engine, arrangement and mixer)
-#   SETLIST_KEYFLOW   a Keyflow checkout (features/extension)
+#   SETLIST_KEYFLOW   a Keyflow checkout (features/extension; main at 6687b931 or later, which
+#                     declares [uses] "fts.session" for following the engine's session)
 #   SETLIST_IGNITION  an Ignition checkout (features/lighting/pane, Ignition#19 for the session clock)
 #   SETLIST_RECITAL   the recital folder: charts/, show/…/Sr. Recital Showcase.als
 #   SETLIST_SESSION   what Studio's engine opens (a song's .rpp, a .session, a setlist): FTS_DAW_OPEN
@@ -96,23 +97,6 @@ for p in daw:daw-extension arrangement:studio-arrangement mixer:studio-mixer; do
 done
 pack "$keyflow/features/extension" "$pkg/keyflow"
 cp "$(target_of "$keyflow")/debug/keyflow-extension" "$pkg/keyflow/"
-# Until Keyflow's manifest has it (asked of Keyflow; Architect allows it
-# since #873): Keyflow follows the engine's session as a client of
-# fts.session, which it also provides. Nothing is taken out.
-python3 -I - "$pkg/keyflow/extension.toml" <<'PY'
-import re, sys
-p = sys.argv[1]
-s = open(p).read()
-uses = re.search(r'^\[uses\]\n((?:(?!\[).*\n)*)', s, re.M)
-if uses and re.search(r'^"fts\.session"\s*=', uses.group(1), re.M):
-    sys.exit(0)  # Keyflow's own manifest has it: nothing added.
-line = '"fts.session" = "^0.1"\n'
-if uses:  # into its [uses] table, beside what else it uses
-    s = s[: uses.start(1)] + line + s[uses.start(1):]
-else:
-    s = s.rstrip("\n") + "\n\n[uses]\n" + line
-open(p, "w").write(s)
-PY
 pack "$ignition/features/lighting/pane" "$pkg/ignition"
 it=$(target_of "$ignition")/$host/desktop-dev
 mkdir -p "$pkg/ignition/bin" && cp "$it/ignition" "$it/ignition-pane" "$pkg/ignition/bin/"
