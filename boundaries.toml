@@ -105,6 +105,11 @@ layer = "L0"
 note = "the paint kind's model: anyrender and peniko, no Dioxus or Blitz"
 
 [[row]]
+package = "architect-scene"
+layer = "L0"
+note = "scenes as they cross a boundary: fragments, layers, host-run animation, hit regions and drags, the engine's lock-free values; anyrender and peniko, no Dioxus or Blitz"
+
+[[row]]
 package = "architect-process-view"
 layer = "L0"
 note = "process views' wire: messages and the socket pair; no GPU, no Dioxus"
