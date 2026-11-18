@@ -21,6 +21,9 @@ the app declares its kinds and edits. In this chapter you will:
 
 All of it is the `crdt` crate (`features/crdt/crdt`) unless said otherwise.
 Each step names the test that proves it; read the test beside the step.
+A crate that depends on `crdt` from outside the fleet's feature union (a
+library with no UI) patches architect's workspace-hack out; the recipe is
+in `skills/architect/references/xtask-tooling.md` ("Outside the union").
 
 Rows a server owns and validates (a task's status, a member list) are not
 documents: they are entities and services with optimistic updates (the
