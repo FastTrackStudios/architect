@@ -753,9 +753,19 @@ async fn launch(id: &str, launch: &Launch) -> Result<Started, String> {
                 return Err(status.map_or_else(|e| e.to_string(), |s| exited(s)));
             }
         };
-        // The host service, for the lane it opens to us.
+        // The host service, for the lane it opens to us; with live
+        // documents, a `DocSync` lane beside it, relayed to the node as
+        // this extension (`crate::live`).
+        #[cfg(feature = "doc-sync")]
+        let docs = crate::live::ExtensionDocSync::new(served.api.clone());
+        let router = architect::Services::into_router(served);
+        #[cfg(feature = "doc-sync")]
+        let router = router.with(
+            crdt::sync::doc_sync_service_descriptor(),
+            crdt::sync::DocSyncDispatcher::new(docs),
+        );
         let connection = vox_core::initiator_on(vox_stream::StreamLink::unix(stream))
-            .on_lane(architect::Services::into_router(served).acceptor())
+            .on_lane(router.acceptor())
             .establish_connection()
             .await
             .map_err(|e| format!("connecting: {e:?}"))?;

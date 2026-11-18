@@ -121,6 +121,15 @@ pub enum HostRequest {
         #[serde(default)]
         limit: Option<u32>,
     },
+    /// The vault file `path` as a live document of the node's, of a kind
+    /// the extension declares (`[[doc_kinds]]`): its `crate::live::LiveDoc`
+    /// (`doc_id`, `kind`, `path`, `writable`), which its `DocSync`
+    /// sessions to the host may then reach (`crate::live`). Needs
+    /// `reads = ["documents"]`; its edits reach the node only with
+    /// `writes = ["documents"]`.
+    LiveDocument {
+        path: String,
+    },
     /// The app's documents (`crate::documents::Documents`), every one or
     /// those under folder `under`: `[DocInfo]`.
     ListDocuments {
@@ -776,6 +785,7 @@ impl HostRequest {
             Self::Open { .. } => "open",
             Self::ReadDocument { .. } => "read_document",
             Self::QueryVault { .. } => "query_vault",
+            Self::LiveDocument { .. } => "live_document",
             Self::ListDocuments { .. } => "list_documents",
             Self::CreateDocument { .. } => "create_document",
             Self::EditDocument { .. } => "edit_document",
@@ -998,6 +1008,7 @@ pub fn check(
         HostRequest::Open { .. }
         | HostRequest::ReadDocument { .. }
         | HostRequest::QueryVault { .. }
+        | HostRequest::LiveDocument { .. }
         | HostRequest::ListDocuments { .. }
         | HostRequest::WatchDocuments { .. } => ("reads", reads(DOCUMENTS)),
         HostRequest::CreateDocument { .. }
