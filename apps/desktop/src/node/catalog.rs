@@ -11,7 +11,10 @@
 //! listed the same way, `<vault>/<path>`, by the id its own header
 //! carries and the file's sha-256 (`vault_collab::VaultCollab::document_of`);
 //! one another node names is made here on first open, empty and of its
-//! lineage (`VaultCollab::register_document`).
+//! lineage (`VaultCollab::register_document`). One whose file is gone at
+//! the next listing was deleted (`VaultCollab::notice_deletes`): its
+//! tombstone removes the file on every other node and keeps it from being
+//! made again.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -108,6 +111,11 @@ impl VaultCatalog {
                     digest: file.sha256,
                 });
             }
+        }
+        // After the whole listing, so a file renamed (found at its new
+        // path above) is not taken for one deleted.
+        if let Some(documents) = &self.documents {
+            documents.collab.notice_deletes();
         }
         out
     }
