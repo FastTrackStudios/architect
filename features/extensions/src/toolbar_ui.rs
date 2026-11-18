@@ -779,7 +779,10 @@ fn ToolButton(cx: Ctx, item: ToolItem, path: String, joined: bool) -> Element {
                 .and_then(|l| crate::toolbars::Toolbars::embedded_image(&item.image, &l.embedded)),
             beside => host.toolbars().image(&item.image, beside),
         })
-        .flatten();
+        .flatten()
+        // In the item's ink, as its icon is: `currentColor`, and with
+        // `tint` every colour it was drawn in.
+        .map(|uri| crate::toolbars::Toolbars::tinted(&uri, &ink, item.tint));
     let iconic = !item.icon.is_empty() || image.is_some();
     let show_label = !(iconic && (item.hide_label || cx.hide_labels || cx.header));
     let (size, glyph) = (cx.size, cx.glyph);

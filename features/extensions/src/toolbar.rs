@@ -295,6 +295,11 @@ pub struct ToolItem {
     /// person's toolbar folder (an extension's: its package).
     #[serde(skip_serializing_if = "String::is_empty")]
     pub image: String,
+    /// Its SVG `image` drawn in the item's ink, whatever colours it was
+    /// drawn in (a monochrome glyph): it follows the theme as a Lucide
+    /// icon does. An SVG's `currentColor` is the ink without it.
+    #[serde(skip_serializing_if = "is_false")]
+    pub tint: bool,
     /// Its label hidden (its icon alone, the label its tooltip).
     #[serde(skip_serializing_if = "is_false")]
     pub hide_label: bool,

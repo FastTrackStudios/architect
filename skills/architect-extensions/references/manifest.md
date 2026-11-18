@@ -466,13 +466,17 @@ which document it shows from its pane's state (`use_pane().state()`).
 | `items` | `[[toolbars.items]]` (`ToolItem`) | |
 
 `ToolItem` keys: `kind` (`button` default, `separator`, `group`,
-`widget`), `action`, `label`, `icon`, `image`, `hide_label`, `colors`
+`widget`), `action`, `label`, `icon`, `image`, `tint`, `hide_label`, `colors`
 (`fill`, `ink`, `on_fill`, `on_ink`, `armed_fill`, `armed_ink`),
 `right_click` (`menu`, `arm`, `none`, or an action id), `menu` (rows:
 `kind` `action`/`heading`/`separator`/`submenu`, `action`, `label`,
 `items`), `items` (a group's), `view` (a widget's), `width`, `height`,
 `newline`. An `image` is a file of the extension's package: its folder's,
 or, for one linked in, one of its `Extension::files` (`Toolbars::embedded_image`).
+An SVG `image` is drawn in the item's ink as an icon is, so it follows the
+theme: its `currentColor` is the ink, and with `tint = true` every colour
+it was drawn in too (a monochrome glyph in a fixed grey; `Toolbars::tinted`;
+`apps/sandbox/sketch/icons/nudge.svg`).
 An `icon` is a Lucide name the shell knows (`named_icon`); an unknown one draws
 a puzzle piece. Examples: `examples/showcase/toolbar-sampler/extension.toml`,
 `apps/sandbox/extensions/metronome/extension.toml`.
