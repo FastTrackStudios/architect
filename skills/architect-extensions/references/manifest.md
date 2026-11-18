@@ -417,7 +417,7 @@ one kind may not share an id.
 | table | keys (type) | example |
 |---|---|---|
 | `[[openers]]` `OpenerDecl` | `id`, `kind`, `title`, `prefix`, `action`, `open` (strings); `files`, `doc_kinds`, `urls` (string lists; `urls` are regexes); `view` | `examples/showcase/openers-sampler/extension.toml` |
-| `[[doc_kinds]]` `DocKindDecl` | `id` (`<app>.<kind>`), `name`, `files`, `icon`, `view` | `apps/sandbox/board/extension.toml` |
+| `[[doc_kinds]]` `DocKindDecl` | `id` (`<app>.<kind>`), `name`, `files`, `icon`, `view`, `schema` (default 1; no migrations). A vault file of its first `files` extension that is a document file of the kind syncs between the person's devices and through the org's node like a note, while the extension is installed (`DocKindDecl::to_doc_kind`) | `apps/sandbox/board/extension.toml` |
 | `[[tabs]]` `TabDecl` | `id`, `title`, `icon`, `view` (all required in effect) | `apps/sandbox/board/extension.toml` |
 | `[[status]]` `StatusDecl` | `id`, `text`, `icon`, `hint`, `side` (`left`/`right`, default `right`), `action` | `examples/showcase/toolbar-sampler/extension.toml` |
 | `[[menus]]` `MenuDecl` | `menu` (menu title), `action` | `extensions/projects/extension.toml` |

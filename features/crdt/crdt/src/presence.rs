@@ -326,7 +326,8 @@ pub struct PlayState {
     /// Where it was at `at_ms`, in the space's own unit (seconds for a
     /// DAW).
     pub position: f64,
-    /// When `position` was true, in the clock the two sides share.
+    /// When `position` was true, in the clock the two sides share: the
+    /// presence host's ([`crate::clock`]; [`Here::play_now`] stamps it).
     pub at_ms: f64,
     pub rate: f64,
 }
@@ -428,6 +429,12 @@ impl<T> Throttle<T> {
 pub trait PresenceSink {
     fn set(&self, key: &str, value: LoroValue);
     fn delete(&self, key: &str);
+    /// The shared clock now, milliseconds: the presence host's, as this
+    /// sink's peer estimates it. `None` when it has no estimate (yet, or
+    /// a host that serves no clock).
+    fn shared_now_ms(&self) -> Option<f64> {
+        None
+    }
 }
 
 #[cfg(feature = "vox")]
@@ -437,6 +444,9 @@ impl PresenceSink for crate::sync::PresencePeer {
     }
     fn delete(&self, key: &str) {
         Self::delete(self, key);
+    }
+    fn shared_now_ms(&self) -> Option<f64> {
+        self.clock().now_ms()
     }
 }
 
@@ -519,6 +529,25 @@ impl<S: PresenceSink> Here<S> {
     /// changes rarely and the receiver extrapolates it.
     pub fn play(&self, play: &PlayState) {
         self.sink.set(&key(&self.me, PLAY), play.encode());
+    }
+
+    /// The playhead now, stamped in the shared clock: `at_ms` is the
+    /// presence host's clock as this peer's driver estimates it, so every
+    /// other peer extrapolates it on that same clock
+    /// ([`crate::clock::SharedClock::now_ms`]). `false`, and nothing sent,
+    /// while there is no estimate yet (a host that serves no clock never
+    /// gives one: use [`Self::play`] with a stamp of your own).
+    pub fn play_now(&self, playing: bool, position: f64, rate: f64) -> bool {
+        let Some(at_ms) = self.sink.shared_now_ms() else {
+            return false;
+        };
+        self.play(&PlayState {
+            playing,
+            position,
+            at_ms,
+            rate,
+        });
+        true
     }
 
     /// Publish the state again, unthrottled: the channel (re)joined and

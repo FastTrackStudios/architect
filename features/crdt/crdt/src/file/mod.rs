@@ -137,6 +137,18 @@ pub struct Version {
     pub frontiers: Frontiers,
 }
 
+/// What a file says it is ([`DocFile::peek`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Header {
+    /// The document's id.
+    pub id: Uuid,
+    /// Its kind's id (`fts.session`).
+    pub kind: String,
+    /// The schema it was made at; `None` for a file adopted from another
+    /// device ([`DocFile::adopt`]) before that device's history arrived.
+    pub schema: Option<u32>,
+}
+
 /// What opening a file found cut short by a crash, and dropped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Recovery {
@@ -291,6 +303,34 @@ impl DocFile {
                 recovered,
             }),
         }
+    }
+
+    /// What the file at `path` says it is: its id, kind and schema.
+    ///
+    /// Read from its first records only, without opening it: what a
+    /// catalogue lists a vault's document files by.
+    ///
+    /// # Errors
+    ///
+    /// The file cannot be read, is not a document file, or names no id.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn peek(path: &std::path::Path) -> Result<Header, FileError> {
+        let file = std::fs::File::open(path).map_err(|e| FileError::Storage(format!("fs: {e}")))?;
+        let meta = format::leading_meta(&mut std::io::BufReader::new(file))?;
+        let value = |key: &str| {
+            meta.iter()
+                .rev()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| v.clone())
+        };
+        let id = value("id")
+            .and_then(|s| s.parse().ok())
+            .ok_or_else(|| FileError::NotADocument("no id".into()))?;
+        Ok(Header {
+            id,
+            kind: value("kind").unwrap_or_default(),
+            schema: value("schema").and_then(|s| s.parse().ok()),
+        })
     }
 
     #[must_use]

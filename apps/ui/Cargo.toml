@@ -15,11 +15,15 @@ keyflow-lab = ["dep:keyflow", "dep:keyflow-ui", "dep:editor-keyflow"]
 # WASI component extensions (Wasmtime): the WASI Counter
 # (`apps/sandbox/wasi-counter`) when its component was built.
 wasi = ["architect-extensions/wasi"]
-# Process views (Linux): the Vault's "Process views" screenset (⌘6), a
-# pane drawn by a program of its own (`architect-process-view`'s
-# `process-view-demo`) beside the same scene linked; and extensions'
-# `kind = "process"` views, whichever copy is loaded (#838).
+# Extensions' `kind = "process"` views (#838), whichever copy is loaded:
+# a program in the package, its GPU frames in the pane. Linux and macOS;
+# the dependency is theirs alone, so elsewhere (Windows) the feature does
+# nothing and such a pane says why. architect-desktop's `gui` turns it on.
 process-views = ["dep:architect-process-view", "architect-workspace/external-textures"]
+# The lab's "Process views" screenset (⌘6): a pane drawn by
+# `architect-process-view`'s `process-view-demo` beside the same scene
+# linked. Not in a release, which does not ship the demo program.
+process-views-lab = ["process-views", "architect-process-view?/demo"]
 
 [dependencies]
 keyflow = { git = "https://github.com/FastTrackStudios/keyflow", rev = "337842d994b8025aadd810c49281cc9cc8a10985", features = ["text", "paint"], default-features = false, optional = true }
@@ -27,7 +31,6 @@ keyflow-ui = { git = "https://github.com/FastTrackStudios/keyflow", rev = "33784
 # The source editor on its own, for the Editor tab (src/keyflow.rs).
 editor-keyflow = { git = "https://github.com/FastTrackStudios/keyflow", rev = "337842d994b8025aadd810c49281cc9cc8a10985", features = ["native"], optional = true }
 architect-shell = { workspace = true, features = ["ui"] }
-architect-process-view = { workspace = true, features = ["host", "demo", "extension"], optional = true }
 # The note editor (src/note_editor.rs): the FastTrackStudios editor on
 # Blitz, through architect's door (#512), worked by extensions through
 # architect_extensions::editor; the language registry and the `syntax.*`
@@ -178,6 +181,8 @@ objc2-foundation = { workspace = true, default-features = false, features = ["st
 objc2-ui-kit = { workspace = true, default-features = false, features = ["std", "block2", "UIApplication", "UIResponder"] }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+# Process views (feature `process-views`): Linux and macOS only.
+architect-process-view = { workspace = true, features = ["host", "extension"], optional = true }
 # The device's agent (src/files.rs): its config's defaults, and starting it
 # (systemd / launchd) when the window opens and it is not running.
 architect-files = { workspace = true, features = ["drive"] }

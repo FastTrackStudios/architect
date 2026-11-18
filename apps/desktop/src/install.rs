@@ -21,7 +21,10 @@
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, Stdio};
+use std::process::ExitCode;
+// The macOS install shells out (ditto, codesign, sips); Linux copies files.
+#[cfg(target_os = "macos")]
+use std::process::{Command, Stdio};
 
 use architect_distribution::Distribution;
 
@@ -94,6 +97,8 @@ fn say(line: impl AsRef<str>) {
     let _ = writeln!(std::io::stdout(), "{}", line.as_ref());
 }
 
+// The macOS install shells out (ditto, codesign, sips); Linux copies files.
+#[cfg(target_os = "macos")]
 fn run(cmd: &mut Command) -> Result<String, String> {
     let shown = format!("{cmd:?}");
     let out = cmd
@@ -577,11 +582,11 @@ fn place(dist: &Distribution, ask: &Ask, exe: &Path) -> Result<PathBuf, String> 
         .unwrap_or_else(|| home.join(".local/lib").join(bin));
     std::fs::create_dir_all(&root).map_err(|e| format!("{}: {e}", root.display()))?;
     // Beside the old one, then over it: a running copy keeps its file.
-    let dest = root.join(bin);
+    let installed = root.join(bin);
     let fresh = root.join(format!(".{bin}.new"));
     std::fs::copy(exe, &fresh).map_err(|e| format!("{}: {e}", fresh.display()))?;
-    std::fs::rename(&fresh, &dest).map_err(|e| format!("{}: {e}", dest.display()))?;
-    say(format!("installed {}", dest.display()));
+    std::fs::rename(&fresh, &installed).map_err(|e| format!("{}: {e}", installed.display()))?;
+    say(format!("installed {}", installed.display()));
 
     let id = dist.id();
     let icons = home.join(".local/share/icons/hicolor/scalable/apps");
@@ -598,7 +603,7 @@ fn place(dist: &Distribution, ask: &Ask, exe: &Path) -> Result<PathBuf, String> 
             "[Desktop Entry]\nType=Application\nName={name}\nExec={exec} %u\nIcon={id}\n\
              Terminal=false\nCategories=Office;\nMimeType=x-scheme-handler/architect;\nStartupWMClass={bin}\n",
             name = dist.name(),
-            exec = dest.display(),
+            exec = installed.display(),
         ),
     )
     .map_err(|e| format!("{}: {e}", entry.display()))?;
@@ -606,7 +611,7 @@ fn place(dist: &Distribution, ask: &Ask, exe: &Path) -> Result<PathBuf, String> 
     if ask.user {
         say("note: on Linux it is always the person's own (~/.local)");
     }
-    Ok(dest)
+    Ok(installed)
 }
 
 #[cfg(test)]

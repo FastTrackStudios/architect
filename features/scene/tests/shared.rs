@@ -32,8 +32,14 @@ fn the_engine_writes_what_the_host_reads_and_reads_what_its_drags_write() {
         ],
     )
     .unwrap();
-    let peak = writer.table().slot(&name("engine.daw.track.0.peak")).unwrap();
-    let volume = writer.table().slot(&name("host.daw.track.0.volume")).unwrap();
+    let peak = writer
+        .table()
+        .slot(&name("engine.daw.track.0.peak"))
+        .unwrap();
+    let volume = writer
+        .table()
+        .slot(&name("host.daw.track.0.volume"))
+        .unwrap();
 
     // The host maps the same file.
     let host = shared::open(&path).unwrap();
@@ -69,7 +75,10 @@ fn a_restarted_engine_is_found_and_the_old_mapping_stays_whole() {
     // at this moment (this is the only test touching it).
     unsafe { std::env::set_var("XDG_RUNTIME_DIR", dir.path()) };
     let path = shared::path_of("lab.engine").unwrap();
-    assert!(shared::open_engine("lab.engine").is_none(), "not running yet");
+    assert!(
+        shared::open_engine("lab.engine").is_none(),
+        "not running yet"
+    );
 
     let (_, first) = shared::create(&path, [name("engine.meter")]).unwrap();
     first.write(first.table().slot(&name("engine.meter")).unwrap(), 0.25);

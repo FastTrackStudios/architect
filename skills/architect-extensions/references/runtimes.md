@@ -29,7 +29,7 @@ Docs: `docs/content/extensions/authoring.md` (the walkthrough), `docs/content/ar
 | TypeScript actions | `kind = "typescript"`, `script = "*.ts"` | QuickJS | runner exists, no host yet (#723, #736) | QuickJS (not shown) | no |
 | WASI component | `kind = "wasm"`, `[wasm] component` | Wasmtime + Cranelift | jco + Web Workers, no host yet (#495) | Wasmtime + Pulley | not yet |
 | Process | `kind = "process"`, `[entry] path` | yes | never | never | no |
-| Process view (GPU frames) | `[[views]] kind = "process"`, `program` | Linux (`--features process-views`); macOS and Windows say why | never: the pane says why | never: the pane says why | no |
+| Process view (GPU frames) | `[[views]] kind = "process"`, `program` | Linux (dma-buf) and macOS (`IOSurface`), shared memory as the fallback, in every build of the window; Windows says why | never: the pane says why | never: the pane says why | no |
 | Web view app | `[[views]] kind = "web"`, `src` | wry child (`--features webview`) | sandboxed iframe, mounted once #495 lands | WKWebView (`--features webview`) | no |
 | Node action | `[[actions]] runs = "node"` | forwards to the node | not wired yet (#495) | forwards to the node | runs it |
 
@@ -305,7 +305,7 @@ Build it with `cargo build --target wasm32-wasip2` inside `devenv --profile wasi
 **What moves every frame is the host's.** A paint view (`linked::Builder::paint`) that returns layers (`PaintView::layers`) sends them once (`architect-scene`, `features/scene/src/ops.rs`), and the host draws them every frame without it:
 - Motion on a clock: a layer's `X`, `Y`, `ScaleX`, `ScaleY`, `Opacity` or `Visible` from `Clock::Wall` or `Clock::Playhead` (`features/scene/src/anim.rs` `Animation`, `Linear`, `Steps`). A playhead line, a scrolling arrangement, a lyric line. Don't return `animating` true for these: the view would be asked every frame.
 - Hit regions and drags (`features/scene/src/region.rs` `Region`, `Drag`): hover, cursor, highlight and a fader or drag box following the pointer, all on the host; a hover (or press) that redraws the element itself, not a box over it: `Region::hover_layer(key)` / `press_layer(key)` naming a layer you send once with `visible = false` (recorded with the rest of a layout), shown in the region's layer's space while lit; the view hears `RegionEvent`s by id (`PaintView::region`), a drag's value at most once a frame; `Press(id, mods)` and `Release(id, mods)` carry the modifiers held (`region::Mods`, `has("Shift")`, `has("Mod")`). A press on a region still gives the view the keyboard focus (`Focus(true)`), linked in or in a process.
-- Named values a layer is bound to (`PaintView::values`, `view.` names); the engine's lock-free `engine.` values with `capabilities.ui = ["engine"]` (`features/scene/src/engine.rs`).
+- Named values a layer is bound to (`PaintView::values`, `view.` names); the engine's lock-free `engine.` values with `capabilities.ui = ["engine"]` (`features/scene/src/engine.rs`). An engine in a process of its own shares its table in shared memory (`features/scene/src/engine/shared.rs` `create`, `open`), found through the service the view's extension `[uses]` or `[requires]` (`engine::read_from`).
 - The pointer leaving the pane: `ViewInput::PointerLeave`, after a move to where it went, to a linked paint view, a process copy's `RemotePaint`, a browser's canvas and a `kind = "process"` program alike (on its wire a move to NaN, so a program built before it still runs); clear a hover there. Test: `apps/sandbox/sketch/tests/paint_parity.rs` `a_view_hears_the_pointer_leave_linked_and_as_a_process`.
 - A malformed animation, region or value fails the view, linked in or not. The example: `apps/sandbox/sketch` `Timeline`.
 
@@ -396,8 +396,8 @@ architect.theme.onChange(showScheme);
 **Consent.** `capabilities.programs` is a capability like any other: asked in words ("Run bin/room, a program in its package, on this computer"), granted by a person for an installed copy, taken back at once, and never a share-link guest's (`share_needs::guest_capabilities`). A built-in or development copy (`architect dev --extension …`) runs with what it asks and is never prompted. An installed copy is asked at install; if the grant is later missing (taken back, or an update asks for a program), its pane asks again with an **Allow** button that grants that one program on this device (`process_view::needs_grant`, `grant_program`). The pane re-checks every 500 ms (`features/extensions/src/process_view.rs` `launch`); a session stopped for a revoked grant or an unload is retired, and its Restart starts nothing.
 
 **Where.**
-- Linux desktop: `architect-desktop --features process-views` (`apps/ui/src/extensions.rs` calls `architect_process_view::extension::use_process_views`). Pop-out windows draw it too (the window bridge carries `ProcessViews`). `APP_SHOT` does not show its frames (a CPU repaint); capture it with the compositor.
-- macOS and Windows: the extension loads; its pane says why (`process_view::not_here`). Designed (`IOSurface`, a DXGI shared handle), not built.
+- Linux and macOS desktop, in every build of the window: `architect-desktop`'s `gui` feature turns on `architect-app`'s `process-views` (`apps/ui/src/extensions.rs` calls `architect_process_view::extension::use_process_views`), so the release, `dist/standard` and `architect dev` from a checkout all have it. Frames are dma-buf textures on Linux and `IOSurface`s on macOS (`features/process-view/src/surface.rs`), shared memory where neither imports. Pop-out windows draw it too (the window bridge carries `ProcessViews`). `APP_SHOT` does not show its frames (a CPU repaint); capture it with the compositor. `architect-desktop --features process-views` adds only the lab's ⌘6 demo screenset.
+- Windows: the extension loads; its pane says why (`process_view::not_here`). Designed (a DXGI shared handle), not built.
 - Browser and iOS: never; the pane says why.
 
 **Lifecycle.** One program per pane (`<extension>/<view>#<pane>`). It is started when the pane opens and keeps running when the pane moves to another group or a pop-out window. It is stopped when its pane leaves the workspace (a close, checked every 250 ms; a move keeps the pane, so never a restart), and at the same check on an unload or a revoked grant. A pane with no workspace to ask stops 2 s after it went. It is restarted like a process extension's program (three tries with backoff, saying why it died). A development copy rebuilt (`EXT_DEV`) starts it again in place.
@@ -422,7 +422,7 @@ program = "bin/process-view-demo"
 
 **Tests.**
 - `features/process-view/tests/extension_kind.rs`: installed (refused, granted, frames), revoked, unloaded, as a development copy, rebuilt, killed and restarted.
-- `features/process-view/tests/frames.rs`: the wire, dma-buf and shared memory.
+- `features/process-view/tests/frames.rs`: the wire, dma-buf (Linux), `IOSurface` (macOS) and shared memory.
 - `features/extensions/src/manifest.rs` `process_view_tests`, `features/extensions/src/process_view.rs` tests.
 
 ## 8. Node actions (server-side, on the org's node)
@@ -485,7 +485,7 @@ local r = host.fetch(api .. "/item/public_token/exchange", {
 | A panel, list, form or dashboard view that can be edited live | A page (`page = "*.tsx"`) | Desktop and iOS on QuickJS, the browser on a Web Worker; not for dense or animated views |
 | Light logic with no Rust toolchain | `kind = "typescript"` | The same runtime as pages; interpreted, so not for heavy work |
 | Third-party code that needs real compute, sandboxed | WASI component | It runs on desktop, iOS (Pulley) and the browser (JSPI); no network of its own |
-| A native GPU renderer (Bevy, wgpu, another engine) in a pane | A process view (`[[views]] kind = "process"`) | Native speed and its own crash domain; Linux only for now, never phones or browsers |
+| A native GPU renderer (Bevy, wgpu, another engine) in a pane | A process view (`[[views]] kind = "process"`) | Native speed and its own crash domain; Linux and macOS (Windows not built), never phones or browsers |
 | A whole npm app, canvas or WebGL, or JIT speed on iOS | A web view (`kind = "web"`) | Full DOM and JIT, but untrusted, so it reaches the app only through the bridge |
 | Another language, a crash-prone tool, its own lifetime | Process | Desktop only, never phones or browsers |
 | A secret the devices must never hold (OAuth client secret) | A node action (`runs = "node"`) | The bar is high: everything else runs in the app |

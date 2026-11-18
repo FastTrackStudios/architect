@@ -37,7 +37,7 @@ pub mod history;
 pub mod kinds;
 pub use file::{Branch, DocFile};
 pub use history::History;
-pub use kinds::{BlobRefs, DocKind, DocKinds, Migration};
+pub use kinds::{BlobRefs, DocKind, DocKinds, Migration, SharedDocKinds};
 
 // The blobs documents point at: fetched on demand by hash, kept offline,
 // collected when nothing points at them (`architect::blob`). Native.
@@ -48,6 +48,7 @@ pub mod blobs;
 // space, selections, carets, playheads) and the text binding that puts
 // others' edits and carets in an editor. Plain data over Loro: they ride
 // the presence channel and the doc, and compile everywhere.
+pub mod clock;
 pub mod presence;
 pub mod text;
 pub use presence::{Here, PeerState, Place, PresenceSink, Roster};
