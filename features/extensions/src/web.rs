@@ -496,6 +496,7 @@ impl WebHost {
             HostRequest::Open { .. }
             | HostRequest::ReadDocument { .. }
             | HostRequest::QueryVault { .. }
+            | HostRequest::LiveDocument { .. }
             | HostRequest::ListDocuments { .. }
             | HostRequest::CreateDocument { .. }
             | HostRequest::EditDocument { .. }

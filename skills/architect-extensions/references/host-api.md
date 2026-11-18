@@ -171,6 +171,19 @@ The service is `features/vault/vault-proto/src/query.rs` `VaultQuery` (one metho
 
 `BASES_ROWS` runs on the same engine through the same client (`features/bases/src/actions.rs`). Bases is an extension over this core and uses only what a third party could. A guest's subset of the index is not built yet (#710 G1).
 
+### Live documents of its kind (the node's copy)
+
+| op | Rust (linked or process) | needs | platforms |
+|---|---|---|---|
+| `live_document {path}` | `Handle::document(path)`, `guest::document(path)` | `reads = ["documents"]`, and the file's kind in its own `[[doc_kinds]]`; edits reach the node only with `writes = ["documents"]` | desk (feature `doc-sync`; native only); not Luau, TSX, WASI or the web |
+
+- **What it is for.** A vault file of a kind the extension declares (a Keyflow `.session`) is a document of the app's node, kept in the file (`docs/content/guide/documents.md`). The file has one writer, the node. An extension edits the node's copy through the host instead of opening the file: never `crdt::file::DocFile` on a vault file, never a sync host of its own.
+- **The answer.** `features/extensions/src/live.rs` `LiveDoc` `{doc_id, kind, path, writable}`. A path that is no document of a registered kind is `not_found`. A kind the manifest does not declare is refused as `doc_kinds.<kind>`. No `reads` is refused as `reads.documents`. A host without node documents answers `unsupported`.
+- **The session.** `Handle::document` and `guest::document` return a `features/extensions/src/live.rs` `DocLane`. `DocLane::replica()` keeps an in-memory `Replica` in step on a tokio task (`doc()`, `attached().await`, `ended()`). `DocLane::sync(&mut SyncedDoc)` runs one session of the extension's own `crdt::sync::SyncedDoc` for `doc_id` over its own `CrdtDoc`; run it again after it ends and it catches up by version vector. `DocLane::client()` is the raw `crdt::sync::DocSyncClient`.
+- **The wire.** No new socket. A process's `DocSync` lane rides the connection it has to the host (`guest` opens it beside the host service, `features/extensions/src/guest.rs` `doc_sync`); a linked one gets an in-memory lane (`features/extensions/src/live.rs` `serve_in_memory`). The host's `features/extensions/src/live.rs` `ExtensionDocSync` relays each session to the node's registry through `crdt::peer::SelfLane` as `Principal::Extension` for whoever it acts for, so the registry's authorizer and the vault's write guard decide (`features/vault/vault-live/src/write_guard.rs` `account_of` holds an extension to the person it acts for). Only a document `live_document` answered that extension is reached, re-checked against its kinds and `reads` on every attach; anything else is `UnknownDoc`. Without `writes` the host drops its updates: it only follows. A share guest's `guest_capabilities` has no `writes`, so a guest only follows.
+- **The app's part.** `features/extensions/src/hostapi.rs` `Host::set_kind_documents` with a `features/extensions/src/live.rs` `KindDocuments`: `resolve(path)` to `KindDoc {doc_id, kind}`, and `registry()`. `RegistryDocuments::new(registry, resolve)` builds one from a node's `VaultCollab` (`document_of`, `kind_of`, `registry`).
+- **Tests.** `features/extensions/tests/live_documents.rs`.
+
 ### Files, settings and data
 
 | op | Luau / TSX | needs | notes |
