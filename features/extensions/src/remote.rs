@@ -191,11 +191,43 @@ fn qual(name: &str, namespace: Option<&str>) -> QualName {
     )
 }
 
+/// What a remote view's document fetches: a `data:` URI's own bytes, and
+/// nothing else. A view's `<img src="data:image/svg+xml;…">` (Keyflow's
+/// palette glyphs) draws, as it does linked into the app's document; no
+/// `file:` path, `https:` beacon or bundle asset is reachable from one.
+/// Without it the document had no provider and every image stayed blank.
+struct DataOnly;
+
+impl blitz_traits::net::NetProvider for DataOnly {
+    fn fetch(
+        &self,
+        _doc_id: usize,
+        request: blitz_traits::net::Request,
+        handler: Box<dyn blitz_traits::net::NetHandler>,
+    ) {
+        let url = request.url.to_string();
+        if request.url.scheme() != "data" {
+            handler.error(url, "a remote view fetches data: URIs only".to_owned());
+            return;
+        }
+        match data_url::DataUrl::process(&url)
+            .ok()
+            .and_then(|d| d.decode_to_vec().ok())
+        {
+            Some((bytes, _)) => handler.bytes(url, blitz_traits::net::Bytes::from(bytes)),
+            None => handler.error(url, "not a data: URI that decodes".to_owned()),
+        }
+    }
+}
+
 impl RemoteDocument {
     /// An empty view, sending its events to `events`.
     #[must_use]
     pub fn new(events: mpsc::UnboundedSender<ViewEvent>) -> Self {
-        let mut doc = BaseDocument::new(DocumentConfig::default());
+        let mut doc = BaseDocument::new(DocumentConfig {
+            net_provider: Some(Arc::new(DataOnly)),
+            ..DocumentConfig::default()
+        });
         doc.add_user_agent_stylesheet(UserAgentStylesheet::default_sheet());
         let mut m = doc.mutate();
         let html = m.create_element(qual("html", None), Vec::new());

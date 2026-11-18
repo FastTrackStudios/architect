@@ -314,6 +314,9 @@ loro = { version = "1.12", default-features = false }
 # ── Auth primitives ───────────────────────────────────────────────────
 argon2 = "0.5"
 base64 = "0.22"
+# `data:` URIs decoded for a remote view's images (architect-extensions
+# `remote`), as Blitz's own data-URI provider does.
+data-url = "0.3"
 chacha20poly1305 = "0.10"
 cookie = "0.18"
 hkdf = "0.12"
