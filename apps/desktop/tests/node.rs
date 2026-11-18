@@ -305,6 +305,143 @@ async fn a_note_syncs_between_two_headless_nodes_through_the_always_on_one() {
     always.stop().await;
 }
 
+/// An extension that declares one document kind, `.session` files, as an
+/// installed extension's package folder holds it.
+const SESSIONS_EXTENSION: &str = r#"
+id = "test.sessions"
+name = "Sessions"
+version = "0.1.0"
+kind = "data"
+
+[[doc_kinds]]
+id = "test.session"
+name = "Session"
+files = ["session"]
+schema = 1
+"#;
+
+/// Installs [`SESSIONS_EXTENSION`] where a node run in `dir` reads its
+/// extensions; the kind it declares, as the node builds it.
+fn install_sessions(dir: &Path) -> crdt::DocKind {
+    let slot = dir.join("data/extensions/test.sessions");
+    std::fs::create_dir_all(&slot).unwrap();
+    std::fs::write(slot.join("extension.toml"), SESSIONS_EXTENSION).unwrap();
+    let manifest = architect_extensions::Manifest::parse(SESSIONS_EXTENSION).unwrap();
+    manifest.contributes.doc_kinds[0].to_doc_kind()
+}
+
+/// The text of `main` in the document file at `path`, read from its bytes
+/// as they are now (`None` while it is not there or not a document yet).
+async fn session_text(path: &Path, kind: &crdt::DocKind) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    let file = crdt::DocFile::from_bytes(bytes, kind).await.ok()?;
+    let main = file.open_branch(crdt::file::MAIN).await.ok()?;
+    Some(main.loro().get_text("body").to_string())
+}
+
+async fn until_session(path: &Path, kind: &crdt::DocKind, want: &str) {
+    for _ in 0..600 {
+        if session_text(path, kind)
+            .await
+            .is_some_and(|t| t.contains(want))
+        {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!(
+        "timed out: {want:?} never reached {}: {:?}",
+        path.display(),
+        session_text(path, kind).await
+    );
+}
+
+/// Appends `text` to the body of the document `doc_id` as `node` holds it.
+async fn append(node: &Running, doc_id: uuid::Uuid, text: &str) {
+    let doc = node.document(doc_id).await.expect("the node keeps it");
+    let body = doc.loro().get_text("body");
+    body.insert(body.len_unicode(), text).unwrap();
+    doc.loro().commit();
+}
+
+/// A document of a kind an installed extension declares (not one built
+/// into the app) syncs like a note: a `.session` file made on the
+/// always-on node reaches the laptop, which holds it in a file of its own
+/// with the same id, and an edit on either node's copy reaches the
+/// other's file. Nobody runs a sync host for it.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_extensions_document_syncs_between_two_nodes_like_a_note() {
+    let origin = issuer().await;
+    let tmp = tempfile::tempdir().unwrap();
+
+    let always_dir = tmp.path().join("always-on");
+    std::fs::create_dir_all(always_dir.join("data/vaults/notes/Songs")).unwrap();
+    let kind = install_sessions(&always_dir);
+    let made = always_dir.join("data/vaults/notes/Songs/take.session");
+    let doc_id = {
+        let file = crdt::DocFile::create(crdt::file::DiskStorage::open(&made).unwrap(), &kind)
+            .await
+            .unwrap();
+        let mut main = file.open_branch(crdt::file::MAIN).await.unwrap();
+        main.transact("Type", |doc| {
+            doc.get_text("body")
+                .insert(0, "Made on the always-on node.")
+                .unwrap();
+        })
+        .await
+        .unwrap();
+        file.id().await.unwrap()
+    };
+    let always = config(
+        "always-on",
+        &always_dir,
+        &origin,
+        session(&origin, &always_dir).await,
+    );
+    let always = node::start(always).await.unwrap();
+
+    let laptop_dir = tmp.path().join("laptop");
+    install_sessions(&laptop_dir);
+    let mut laptop = config(
+        "laptop",
+        &laptop_dir,
+        &origin,
+        session(&origin, &laptop_dir).await,
+    );
+    laptop.peers = vec![always.dial().unwrap()];
+    let laptop = node::start(laptop).await.unwrap();
+    let (a, l) = (always.endpoint_id(), laptop.endpoint_id());
+    until("each node lets the other in", || {
+        always.state.admits(&l) && laptop.state.admits(&a)
+    })
+    .await;
+
+    // It reaches the laptop: a file of its own, the same document.
+    let there = laptop
+        .state
+        .vault_root("notes")
+        .unwrap()
+        .join("Songs/take.session");
+    until_session(&there, &kind, "Made on the always-on node.").await;
+    assert_eq!(crdt::DocFile::peek(&there).unwrap().id, doc_id);
+
+    // An edit of the always-on node's copy reaches the laptop's file…
+    append(&always, doc_id, " Edited on the always-on node.").await;
+    until_session(&there, &kind, "Edited on the always-on node.").await;
+    // …and one of the laptop's comes back to the always-on node's file.
+    append(&laptop, doc_id, " Edited on the laptop.").await;
+    until_session(&made, &kind, "Edited on the laptop.").await;
+    let text = session_text(&made, &kind).await.unwrap();
+    assert_eq!(
+        text.matches("Made on the always-on node.").count(),
+        1,
+        "one document, its text once: {text:?}"
+    );
+
+    laptop.stop().await;
+    always.stop().await;
+}
+
 /// The app signed in as `email`, in org `indie`, with its Action List.
 async fn app(origin: &str, email: &str) -> (Accounts, Arc<ActionList>) {
     let store = Arc::new(AccountStore::in_memory(Arc::new(MemorySecrets::new())));

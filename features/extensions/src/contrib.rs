@@ -212,14 +212,20 @@ pub struct DocKindDecl {
     pub icon: String,
     /// Its view that shows one.
     pub view: Option<String>,
+    /// The schema its documents are written at (default 1). A manifest
+    /// carries no migrations: a node keeps and syncs a document of this
+    /// kind, and refuses one a newer schema wrote.
+    pub schema: Option<u32>,
 }
 
 #[cfg(feature = "crdt")]
 impl DocKindDecl {
-    /// As the document layer takes it (no schema of its own yet: stamp 0).
+    /// As the document layer takes it: its first file extension, stamped
+    /// at its [`Self::schema`] (1 unless it says), with no migrations.
     #[must_use]
     pub fn to_doc_kind(&self) -> crdt::DocKind {
-        let kind = crdt::DocKind::new(&self.id, &self.name);
+        let kind =
+            crdt::DocKind::new(&self.id, &self.name).schema(self.schema.unwrap_or(1), Vec::new());
         match self.files.first() {
             Some(ext) => kind.extension(ext.trim_start_matches('.')),
             None => kind,
@@ -1570,6 +1576,9 @@ impl Contribution {
             }
             if let Some(v) = &d.view {
                 view(&what, v)?;
+            }
+            if d.schema == Some(0) {
+                return refuse(what, "its schema starts at 1".to_owned());
             }
         }
         for t in &self.tabs {
