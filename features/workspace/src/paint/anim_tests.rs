@@ -538,13 +538,7 @@ fn a_linked_fader_follows_the_pointer_without_its_view_and_draws_as_one_across_t
         .filter(|e| matches!(e, RegionEvent::Value(9, Axis::Y, _)))
         .count();
     assert_eq!(values, 30);
-    assert_eq!(
-        heard.last(),
-        Some(&RegionEvent::Release(
-            9,
-            architect_scene::region::Mods::NONE
-        ))
-    );
+    assert_eq!(heard.last(), Some(&RegionEvent::Release(9)));
 }
 
 #[test]
