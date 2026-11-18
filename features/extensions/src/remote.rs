@@ -64,9 +64,9 @@ use blitz_dom::{
     LocalName, Namespace, Node, NodeId, QualName, UserAgentStylesheet,
 };
 use blitz_traits::events::{
-    BlitzImeEvent, BlitzKeyEvent, BlitzPointerEvent, BlitzPointerId, BlitzWheelDelta,
-    BlitzWheelEvent, DomEvent, DomEventData, EventState, Location, Modifiers, MouseEventButton,
-    UiEvent,
+    BlitzFocusEvent, BlitzImeEvent, BlitzKeyEvent, BlitzPointerEvent, BlitzPointerId,
+    BlitzWheelDelta, BlitzWheelEvent, DomEvent, DomEventData, EventState, Location, Modifiers,
+    MouseEventButton, UiEvent,
 };
 use blitz_traits::shell::{ClipboardError, ShellProvider};
 use dioxus::prelude::*;
@@ -143,6 +143,9 @@ pub struct RemoteDocument {
     /// Whether an input method is composing (a `compositionstart` was
     /// sent and its end not yet).
     composing: bool,
+    /// Its share of `architect_workspace::field_focused`: a field of its
+    /// own has the focus (a pane's view keys leave letters to it).
+    field: architect_workspace::FieldFocus,
     /// The scenes the view sent, by hash (#175).
     scenes: crate::scene::SceneCache,
     /// Scenes decoded off the UI thread before their frame is applied
@@ -161,6 +164,9 @@ pub struct RemoteDocument {
     painted: HashMap<NodeId, Arc<Mutex<crate::scene::Painted>>>,
     /// How many bytes of scenes and transforms it sent (for a benchmark).
     scene_bytes: u64,
+    /// The frame's layers batches as bytes, by number, until the edit that
+    /// names each takes it (`crate::wire::BYTES_WIRE`).
+    batches: std::collections::HashMap<u64, Vec<u8>>,
     /// What its layers' animations read (`architect_scene::anim`): the
     /// app's clocks unless told.
     clocks: architect_scene::Clocks,
@@ -262,6 +268,7 @@ impl RemoteDocument {
             fitted: false,
             held: None,
             composing: false,
+            field: architect_workspace::FieldFocus::new(),
             scenes: crate::scene::SceneCache::new(),
             predecoded: HashMap::new(),
             holds: HashMap::new(),
@@ -270,6 +277,7 @@ impl RemoteDocument {
             resizes: Arc::default(),
             painted: HashMap::new(),
             scene_bytes: 0,
+            batches: std::collections::HashMap::new(),
             clocks: architect_scene::Clocks::app(),
             alarm: None,
             pointed: None,
@@ -395,6 +403,18 @@ impl RemoteDocument {
             layer.touch();
         }
         (consumed, cursor)
+    }
+
+    /// Whether a text field of its own has the focus, told to
+    /// `architect_workspace::field_focused`.
+    fn sync_field(&mut self) {
+        let typing = self
+            .doc
+            .get_focussed_node_id()
+            .and_then(|id| self.doc.get_node(id))
+            .and_then(Node::element_data)
+            .is_some_and(|el| el.text_input_data().is_some());
+        self.field.set(typing);
     }
 
     /// Shows the cursor the region under the pointer asks for: after the
@@ -622,10 +642,17 @@ impl RemoteDocument {
         let Some(value) = value.filter(|v| !v.is_empty()) else {
             return Ok(());
         };
+        let batch = match crate::scene::layers_named(value) {
+            // Its bytes came beside the edits: moved, not decoded.
+            Some(n) => self
+                .batches
+                .remove(&n)
+                .ok_or_else(|| format!("layers batch {n} that its frame did not carry"))?,
+            None => crate::scene::layers_batch(value)?,
+        };
         self.scene_bytes = self
             .scene_bytes
-            .saturating_add(u64::try_from(value.len()).unwrap_or(u64::MAX));
-        let batch = crate::scene::layers_batch(value)?;
+            .saturating_add(u64::try_from(batch.len()).unwrap_or(u64::MAX));
         let engine = self.engine.clone();
         if !self.painted.contains_key(&node) {
             // The widget, as a scene's.
@@ -642,7 +669,9 @@ impl RemoteDocument {
                 receiver.grant(engine.clone());
                 receiver
             })
-            .apply(&batch)
+            // Given whole: a large font or image is drawn from the batch's
+            // own bytes, not a copy of them.
+            .apply_owned(batch)
             .map_err(|e| format!("its layers: {e}"));
         p.dirty = true;
         drop(p);
@@ -792,6 +821,47 @@ impl RemoteDocument {
         self.doc.mutate().set_node_text(self.theme, css);
     }
 
+    /// A press on `node` focuses the nearest element at or above it that
+    /// takes the focus, the old one hearing `blur` and the new `focus`, as
+    /// Blitz does for a press it sees. A press a hit region takes never
+    /// reaches Blitz, so without this the view's keys went to whatever had
+    /// the focus before (or nowhere). Whether the focus moved.
+    pub fn focus_pressed(&mut self, node: NodeId) -> bool {
+        let mut at = Some(node);
+        let target = loop {
+            let Some(id) = at else { return false };
+            let Some(n) = self.doc.get_node(id) else {
+                return false;
+            };
+            if n.is_focussable() {
+                break id;
+            }
+            at = n.parent;
+        };
+        let old = self.doc.get_focussed_node_id();
+        if old == Some(target) || !self.doc.set_focus_to(target) {
+            return false;
+        }
+        let forward = Forward {
+            listeners: &self.listeners,
+            events: &self.events,
+            held: &mut self.held,
+            composing: &mut self.composing,
+        };
+        let mut driver = EventDriver::new(&mut self.doc, forward);
+        if let Some(old) = old {
+            driver.handle_dom_event(DomEvent::new(old, DomEventData::Blur(BlitzFocusEvent)));
+            driver.handle_dom_event(DomEvent::new(old, DomEventData::FocusOut(BlitzFocusEvent)));
+        }
+        driver.handle_dom_event(DomEvent::new(target, DomEventData::Focus(BlitzFocusEvent)));
+        driver.handle_dom_event(DomEvent::new(
+            target,
+            DomEventData::FocusIn(BlitzFocusEvent),
+        ));
+        self.sync_field();
+        true
+    }
+
     /// Its Blitz document, to read.
     #[must_use]
     pub const fn document(&self) -> &BaseDocument {
@@ -807,6 +877,14 @@ impl RemoteDocument {
     pub fn apply(&mut self, frame: Frame) -> Result<(), String> {
         let edits = match frame {
             Frame::Edits { edits } => edits,
+            Frame::Batches { edits, batches } => {
+                for batch in batches {
+                    if self.batches.insert(batch.n, batch.bytes).is_some() {
+                        return Err(format!("layers batch {} twice in a frame", batch.n));
+                    }
+                }
+                edits
+            }
             Frame::Failed(why) => return Err(why),
         };
         if edits.len() > MAX_EDITS {
@@ -814,6 +892,14 @@ impl RemoteDocument {
         }
         for edit in edits {
             self.edit(edit)?;
+        }
+        // Every batch is named by an edit of its frame, where it applies.
+        if !self.batches.is_empty() {
+            let mut left: Vec<u64> = self.batches.drain().map(|(n, _)| n).collect();
+            left.sort_unstable();
+            return Err(format!(
+                "layers batches {left:?} that no edit of their frame named"
+            ));
         }
         Ok(())
     }
@@ -1170,6 +1256,13 @@ impl Document for RemoteDocument {
         // host's, and the view hears what its regions heard instead.
         let (consumed, cursor) = self.regions_event(&event);
         if consumed {
+            // A press a region took still focuses the view it landed on, as
+            // a press anywhere else in it does: its keys come next.
+            if let UiEvent::PointerDown(p) = &event
+                && let Some((node, _)) = self.painted_at(p.coords.client_x, p.coords.client_y)
+            {
+                let _ = self.focus_pressed(node);
+            }
             self.region_cursor(cursor);
             return;
         }
@@ -1195,6 +1288,7 @@ impl Document for RemoteDocument {
             UiEvent::PointerMove(_) | UiEvent::PointerUp(_) | UiEvent::PointerLeave(_)
         );
         EventDriver::new(&mut self.doc, forward).handle_ui_event(event);
+        self.sync_field();
         if releases {
             self.held = None;
         }
@@ -1389,6 +1483,10 @@ impl Forward<'_> {
 #[derive(Clone)]
 pub struct HostShell {
     window: Arc<dyn ShellProvider>,
+    /// The view's frames, asked of the window at most once a refresh
+    /// (#840): a batch applied to its document asks for one, and so does
+    /// the document itself after each change it makes.
+    pacer: architect_workspace::pacing::Pacer,
     /// Where the pane is in the window, CSS pixels, and the view's last
     /// caret area while its input method is on (in its own pixels).
     state: Arc<Mutex<ShellState>>,
@@ -1404,7 +1502,11 @@ impl HostShell {
     /// The window's `shell`, for a pane at `x`, `y`.
     #[must_use]
     pub fn new(window: Arc<dyn ShellProvider>, x: f32, y: f32) -> Self {
+        let redraw = Arc::clone(&window);
         Self {
+            pacer: architect_workspace::pacing::Pacer::new(Arc::new(move || {
+                redraw.request_redraw();
+            })),
             window,
             state: Arc::new(Mutex::new(ShellState {
                 at: (x, y),
@@ -1427,9 +1529,17 @@ impl HostShell {
     }
 }
 
+impl HostShell {
+    /// What asks the window for the view's frames, paced to the display.
+    #[must_use]
+    pub const fn pacer(&self) -> &architect_workspace::pacing::Pacer {
+        &self.pacer
+    }
+}
+
 impl ShellProvider for HostShell {
     fn request_redraw(&self) {
-        self.window.request_redraw();
+        self.pacer.request();
     }
 
     fn set_cursor(&self, icon: Option<cursor_icon::CursorIcon>) {
@@ -1848,6 +1958,9 @@ async fn follow(
             shell
         })
         .await;
+        // Its frames asked of the window at most once a refresh, when the
+        // image they render into comes free (#840).
+        let pacer = shell.pacer().clone();
         // Where the pane is, now and then: an input method's caret moves
         // with the pane, not only when a frame comes.
         let placing = {
@@ -1920,7 +2033,7 @@ async fn follow(
                 // take the next present's place, and the frame that does
                 // change it waits a refresh behind (#840).
                 if changes {
-                    doc.shell_provider.request_redraw();
+                    pacer.request();
                 }
                 (applied, held)
             })
@@ -2005,7 +2118,7 @@ async fn follow(
 async fn decode_scenes(
     frame: Frame,
 ) -> (Frame, Vec<(u64, Result<crate::scene::Commands, String>)>) {
-    let has = matches!(&frame, Frame::Edits { edits } if edits.iter().any(|e| matches!(
+    let has = matches!(&frame, Frame::Edits { edits } | Frame::Batches { edits, .. } if edits.iter().any(|e| matches!(
         e,
         Edit::SetAttribute { name, value: Value::Text(v), .. }
             if name == crate::scene::SCENE_ATTR && v.contains('\n')
@@ -2018,7 +2131,9 @@ async fn decode_scenes(
         .name("scene decode".to_owned())
         .spawn(move || {
             let decoded = match &frame {
-                Frame::Edits { edits } => crate::scene::predecode(edits),
+                Frame::Edits { edits } | Frame::Batches { edits, .. } => {
+                    crate::scene::predecode(edits)
+                }
                 Frame::Failed(_) => Vec::new(),
             };
             let _ = to.send((frame, decoded));
@@ -2426,6 +2541,9 @@ fn Mount(
                             with_doc(&node, |doc, at| {
                                 if let Some(r) = remote(doc, at) {
                                     r.let_go(None);
+                                    // Its field's keys are not the app's
+                                    // to leave alone any more.
+                                    r.field.set(false);
                                 }
                             })
                             .await;
@@ -2517,4 +2635,47 @@ pub fn mounted_views(doc: &BaseDocument) -> Vec<NodeId> {
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod pacing_tests {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::time::{Duration, Instant};
+
+    use super::{Arc, HostShell, ShellProvider};
+
+    struct Counting(Arc<AtomicU32>);
+
+    impl ShellProvider for Counting {
+        fn request_redraw(&self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    /// #840: a view's document asks its window for a frame after every
+    /// change (Blitz's mutator does, and so does each batch applied). Asked
+    /// right after a frame, they wait for the display's next refresh and
+    /// share one frame, instead of each starting one that then waits for a
+    /// free swapchain image with the window's thread blocked.
+    #[test]
+    fn a_views_redraws_right_after_a_frame_share_one_at_the_next_refresh() {
+        if !architect_workspace::pacing::enabled() {
+            return;
+        }
+        let asked = Arc::new(AtomicU32::new(0));
+        let shell = HostShell::new(Arc::new(Counting(Arc::clone(&asked))), 0.0, 0.0);
+        architect_workspace::pacing::set_refresh(Duration::from_micros(8_333));
+        // A frame that waited for its image: it ended at a refresh.
+        architect_workspace::pacing::frame_ended(Instant::now(), Duration::from_millis(7));
+        for _ in 0..10 {
+            shell.request_redraw();
+        }
+        assert_eq!(
+            asked.load(Ordering::SeqCst),
+            0,
+            "a frame asked for before its refresh"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(asked.load(Ordering::SeqCst), 1, "ten changes, one frame");
+    }
 }

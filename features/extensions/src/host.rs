@@ -3075,6 +3075,16 @@ mod linked {
             let api = self.api.clone();
             Box::pin(async move { api.call(request).await })
         }
+
+        #[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
+        fn doc_sync(&self) -> crate::linked::DocSyncFuture {
+            let api = self.api.clone();
+            Box::pin(async move {
+                crate::live::serve_in_memory(api)
+                    .await
+                    .map_err(|message| crate::hostcall::HostError::Failed { message })
+            })
+        }
     }
 
     pub(super) struct Runner(pub(super) Arc<Builder>);

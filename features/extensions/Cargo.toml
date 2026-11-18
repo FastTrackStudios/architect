@@ -72,6 +72,11 @@ archive = ["dep:architect-extension-archive", "dep:sha2", "dep:hex"]
 # must not.
 wide-events = ["host", "dep:architect-telemetry"]
 crdt = ["dep:crdt"]
+# Live documents (`live`, `docs/content/guide/documents.md`): an extension
+# edits the node's copy of a vault document of a kind it declares, over
+# `crdt`'s DocSync — a process over its host connection (`process` /
+# `guest`), a linked one in memory. Native only.
+doc-sync = ["crdt", "crdt/vox", "vox", "dep:uuid", "dep:tokio"]
 # In-process extensions (`linked`): one trait a crate implements, run
 # linked into the app as a built-in (its views Dioxus components in the
 # app's document), or served as a process by `guest`.
@@ -286,6 +291,7 @@ serde_json = { workspace = true }
 tracing = { workspace = true, optional = true }
 architect-telemetry = { workspace = true, optional = true }
 crdt = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
 dioxus = { workspace = true, optional = true }
 futures = { version = "0.3", optional = true }
 base64 = { workspace = true, optional = true }
@@ -366,7 +372,7 @@ sha2 = { workspace = true }
 hex = { workspace = true }
 # Its own host, so `cargo test --workspace` builds the tests with it; the
 # guest too, since the remote-view tests spawn themselves as one.
-architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked", "manager", "wasi", "net", "person-sync", "node", "paint-ui"] }
+architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked", "manager", "wasi", "net", "person-sync", "node", "paint-ui", "doc-sync"] }
 # tests/linked_paint.rs: a linked paint view's widget painted, as the
 # window's renderer does.
 blitz-paint = { workspace = true, features = ["custom-widget"] }
@@ -388,6 +394,11 @@ dioxus-ssr = { workspace = true }
 architect = { workspace = true, features = ["action-list", "host", "connect", "local"] }
 vox = { workspace = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
+# tests/live_documents.rs: a node's documents of a kind in a vault, the
+# file their storage.
+vault-collab = { workspace = true }
+vault-live = { workspace = true }
+uuid = { workspace = true }
 
 # iOS forbids JIT: Wasmtime interprets there (Pulley).
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]

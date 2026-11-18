@@ -34,10 +34,12 @@ const fn meta(id: &'static str, label: &'static str, shortcut: &'static str) -> 
 static CLOSE: ActionMeta = meta("WORKSPACE_CLOSE_TAB", "Close tab", "⌘W");
 static SAVE: ActionMeta = meta("FILE_SAVE_ALL", "Save all", "");
 static DUPLICATE: ActionMeta = meta("ARRANGE_DUPLICATE", "Duplicate", "");
+static NOTE: ActionMeta = meta("LAB_CHART_NOTE_A", "Note A", "");
 
 static CLOSED: AtomicUsize = AtomicUsize::new(0);
 static SAVED: AtomicUsize = AtomicUsize::new(0);
 static DUPLICATED: AtomicUsize = AtomicUsize::new(0);
+static NOTED: AtomicUsize = AtomicUsize::new(0);
 
 /// The app's own keymap: a sequence, a context's key, a held-letter tool.
 const APP_KEYMAP: &str = r#"{
@@ -71,6 +73,11 @@ fn actions() -> Arc<ActionList> {
     .unwrap();
     list.register(&DUPLICATE, Effect::Mutating, |(): ()| {
         DUPLICATED.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    })
+    .unwrap();
+    list.register(&NOTE, Effect::Mutating, |(): ()| {
+        NOTED.fetch_add(1, Ordering::SeqCst);
         Ok(())
     })
     .unwrap();
@@ -202,5 +209,59 @@ fn keys_run_through_the_keymap_and_the_person_rebinds_them() {
         commands.edit_keymap(|k| k.reset("WORKSPACE_CLOSE_TAB"));
         assert!(commands.handle_chord("⌘W"));
         assert_eq!(count(&CLOSED), 7);
+    });
+}
+
+/// A plain letter an extension binds in its view's context (`[[keys]]
+/// when = "view:chart"`): the view's while it has the focus, nowhere
+/// else, and the person's to rebind there.
+#[test]
+fn a_view_key_holds_only_in_its_view_and_is_rebindable_there() {
+    const CHART: &str = "view:lab.chart/chart";
+    let (dom, commands) = mount();
+    dom.in_runtime(|| {
+        commands.set_view_keys(vec![(CHART.into(), "LAB_CHART_NOTE_A".into(), "A".into())]);
+        // Not app-wide: a letter is typing everywhere else.
+        assert!(!commands.handle_chord("A"));
+        assert!(!commands.handle_view_chord("view:lab.other/list", "A"));
+        assert_eq!(count(&NOTED), 0);
+        // In the chart: the action runs, and the view never hears it.
+        assert!(commands.handle_view_chord(CHART, "A"));
+        assert_eq!(count(&NOTED), 1);
+        // A ⌘ chord bound there is the window's to run (in the live
+        // context), not the pane's: it would run twice.
+        commands.set_view_keys(vec![
+            (CHART.into(), "LAB_CHART_NOTE_A".into(), "A".into()),
+            (CHART.into(), "LAB_CHART_NOTE_A".into(), "⌘J".into()),
+        ]);
+        assert!(!commands.handle_view_chord(CHART, "⌘J"));
+        assert_eq!(count(&NOTED), 1);
+        // A key the context doesn't bind stays the view's.
+        assert!(!commands.handle_view_chord(CHART, "B"));
+        // While the chart has the focus, the window's chords see its
+        // context too; once it is gone, they don't.
+        commands.set_view_context(Some(CHART));
+        assert!(commands.handle_chord("⌘J"));
+        assert_eq!(count(&NOTED), 2);
+        commands.set_view_context(None);
+        assert!(!commands.handle_chord("⌘J"));
+        // Shown in the keymap, in its context, and rebound there.
+        let keymap = commands.keymap();
+        assert!(
+            keymap
+                .bindings_of("LAB_CHART_NOTE_A")
+                .iter()
+                .any(|b| b.context == CHART),
+            "{:?}",
+            keymap.bindings_of("LAB_CHART_NOTE_A")
+        );
+        commands.edit_keymap(|k| {
+            k.unbind(CHART, "A").unwrap();
+            k.bind("LAB_CHART_NOTE_A", CHART, "N").unwrap();
+        });
+        assert!(!commands.handle_view_chord(CHART, "A"), "A no longer");
+        assert!(commands.handle_view_chord(CHART, "N"));
+        assert_eq!(count(&NOTED), 3);
+        commands.set_view_context(None);
     });
 }

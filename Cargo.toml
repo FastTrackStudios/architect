@@ -871,3 +871,4 @@ architect-story-core = { path = "features/story/architect-story-core" }
 architect-story-macros = { path = "features/story/architect-story-macros" }
 architect-story-runtime = { path = "features/story/architect-story-runtime" }
 architect-workspace = { path = "features/workspace" }
+architect-scene = { path = "features/scene" }

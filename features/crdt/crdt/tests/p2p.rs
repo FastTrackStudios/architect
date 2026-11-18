@@ -31,7 +31,7 @@ use architect_permissions::Principal;
 use auth_proto::device::{DeviceDirectory, PeerDevice};
 use crdt::CrdtDoc;
 use crdt::link::{DocLink, LinkKey};
-use crdt::p2p::{Admission, NodeAccess, Shares, node_router};
+use crdt::p2p::{Access, Admission, NodeAccess, Shares, node_router};
 use crdt::peer::{DocCatalog, DocPeerClient, OpenDocs, SelfLane, pull};
 use crdt::registry::DocRegistry;
 use crdt::sync::{DocSyncClient, SyncedDoc};
@@ -277,6 +277,92 @@ async fn a_link_opens_its_document_only_and_not_once_revoked() {
         attach(doc_id, &client).await.is_err(),
         "a revoked link still opens its document"
     );
+}
+
+/// A read link's guest follows the document live and writes nothing: an
+/// edit it sends ends its session and never reaches the host. A write
+/// link to the same document still edits. Revoking cuts both.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_read_link_follows_and_cannot_write() {
+    let host = serve(loopback().await);
+    let doc_id = Uuid::new_v4();
+    let at_host = host.registry.doc(doc_id).await.unwrap();
+    edit(&at_host, "title", "draft");
+
+    let read = host
+        .access
+        .shares
+        .share_with(&host.id(), doc_id, Access::Read);
+    let text = read.to_string();
+    assert!(text.ends_with("&access=read"), "{text}");
+    let write = host.access.shares.share(&host.id(), doc_id);
+    assert_eq!(write.access, Access::Write);
+
+    // The reader, as a well-behaved app runs it.
+    let guest = loopback().await;
+    let reads = sync_client(&guest, host.addr())
+        .await
+        .with_middleware(LinkKey::new(&text.parse().unwrap()));
+    let at_reader = CrdtDoc::ephemeral();
+    let mut follower = SyncedDoc::new(doc_id, at_reader.clone()).read_only();
+    let following = {
+        let reads = reads.clone();
+        tokio::spawn(async move { follower.run(&reads).await })
+    };
+    sees(&at_reader, "title", "draft", "the reader gets the document").await;
+    edit(&at_host, "title", "final");
+    sees(&at_reader, "title", "final", "the reader follows live").await;
+
+    // A replica that writes through the read link: its session ends, and
+    // the host never has its edit.
+    let at_rogue = CrdtDoc::ephemeral();
+    let mut rogue = SyncedDoc::new(doc_id, at_rogue.clone());
+    let writing = tokio::spawn(async move { rogue.run(&reads).await });
+    sees(&at_rogue, "title", "final", "the rogue reader joins").await;
+    edit(&at_rogue, "title", "defaced");
+    let ended = tokio::time::timeout(WAIT, writing)
+        .await
+        .expect("a reader's write ended its session")
+        .unwrap();
+    let err = ended.expect_err("a reader's write was refused").to_string();
+    assert!(err.contains("read-only"), "{err}");
+    assert_eq!(value(&at_host, "title").as_deref(), Some("final"));
+
+    // The write link is unchanged.
+    let editor = loopback().await;
+    let writes = sync_client(&editor, host.addr())
+        .await
+        .with_middleware(LinkKey::new(&write));
+    let at_writer = CrdtDoc::ephemeral();
+    let editing = live(doc_id, at_writer.clone(), writes);
+    sees(&at_writer, "title", "final", "the editor joins").await;
+    edit(&at_writer, "body", "from the editor");
+    sees(
+        &at_host,
+        "body",
+        "from the editor",
+        "the host gets the edit",
+    )
+    .await;
+    sees(
+        &at_reader,
+        "body",
+        "from the editor",
+        "the reader follows it",
+    )
+    .await;
+
+    // Revoking cuts both kinds.
+    host.access.shares.revoke_doc(doc_id);
+    tokio::time::timeout(WAIT, following)
+        .await
+        .expect("a revoked reader's session ended")
+        .unwrap()
+        .expect_err("a revoked reader is told");
+    tokio::time::timeout(WAIT, editing)
+        .await
+        .expect("a revoked editor's session ended")
+        .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]

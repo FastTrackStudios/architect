@@ -859,6 +859,11 @@ placement = "overlay"
 chord = "⌘T"
 action = "LAB_TOURS_OPEN"
 
+[[keys]]
+chord = "T"
+action = "LAB_TOURS_OPEN"
+when = "view:launcher"
+
 [[palette_views]]
 overlay = "palette"
 view = "launcher"
@@ -888,7 +893,11 @@ fn palette_views_keys_and_sources_are_registered_while_loaded() {
     );
     assert_eq!(
         palette["keys"],
-        json!([{ "chord": "⌘T", "action": "LAB_TOURS_OPEN", "from": "lab.tours" }])
+        json!([
+            { "chord": "⌘T", "action": "LAB_TOURS_OPEN", "from": "lab.tours" },
+            // Only while its view has the focus.
+            { "chord": "T", "action": "LAB_TOURS_OPEN", "when": "view:launcher", "from": "lab.tours" },
+        ])
     );
     assert_eq!(palette["sources"][0]["id"], "tours");
     assert_eq!(palette["sources"][0]["run"], "LAB_TOURS_START");
@@ -906,6 +915,8 @@ fn palette_views_keys_and_sources_are_registered_while_loaded() {
         ("action = \"LAB_TOURS_OPEN\"", "action = \"VAULT_DELETE\""),
         ("overlay = \"palette\"", "overlay = \"sidebar\""),
         ("view = \"launcher\"", "view = \"nope\""),
+        ("when = \"view:launcher\"", "when = \"view:nope\""),
+        ("when = \"view:launcher\"", "when = \"pane\""),
         ("id = \"tours\"", "id = \"Tours!\""),
         ("ranking = \"commands\"", "ranking = \"best\""),
         ("run = \"LAB_TOURS_START\"", "run = \"VAULT_DELETE\""),

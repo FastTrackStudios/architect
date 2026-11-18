@@ -141,6 +141,10 @@ pub struct Keymap {
     /// What each command's declared shortcut binds (action, keys), where
     /// the app's keymap does not bind the action itself.
     shortcuts: Vec<(String, String)>,
+    /// Keys bound in one context by what is loaded (an extension's
+    /// `[[keys]] when = "view:…"`): (context, keys, action), where the
+    /// app's keymap does not bind those keys there itself.
+    scoped: Vec<(String, String, String)>,
     person: PersonKeymap,
 }
 
@@ -151,6 +155,7 @@ impl Keymap {
         Self {
             app,
             shortcuts: Vec::new(),
+            scoped: Vec::new(),
             person: PersonKeymap::default(),
         }
     }
@@ -198,12 +203,59 @@ impl Keymap {
             .collect();
     }
 
+    /// Keys bound in a context by what is loaded (`(context, action,
+    /// "A")`: an extension's `[[keys]] when = "view:<ext>/<view>"`), in
+    /// that context only, under the app's own bindings there and the
+    /// person's rebinds. A context of [`EVERYWHERE`] is a shortcut's.
+    pub fn set_scoped<I, C, S, T>(&mut self, scoped: I)
+    where
+        I: IntoIterator<Item = (C, S, T)>,
+        C: Into<String>,
+        S: Into<String>,
+        T: AsRef<str>,
+    {
+        let explicit = config_bindings(&self.app);
+        self.scoped = scoped
+            .into_iter()
+            .filter_map(|(context, id, keys)| {
+                Some((context.into(), parse_shortcut(keys.as_ref())?, id.into()))
+            })
+            .filter(|(context, keys, _)| {
+                !context.is_empty() && !explicit.iter().any(|(c, k, _)| c == context && k == keys)
+            })
+            .collect();
+    }
+
+    /// Whether `keys` (one chord, `A`, `⇧Tab`), or a sequence it starts,
+    /// is bound in `context` itself: the keys a view's context takes from
+    /// the view.
+    #[must_use]
+    pub fn binds_in(&self, context: &str, keys: &str) -> bool {
+        let Ok(keys) = normalize_keys(keys) else {
+            return false;
+        };
+        let config = self.config();
+        config.contexts.get(context).is_some_and(|c| {
+            c.keys.iter().any(|(k, a)| {
+                a != UNBIND && normalize_keys(k).is_ok_and(|k| k == keys || starts(&k, &keys))
+            })
+        })
+    }
+
     /// The app's keymap with the declared shortcuts in it.
     fn base(&self) -> KeymapConfig {
         let mut base = self.app.clone();
         let normal = base.keymap.entry(NORMAL.to_owned()).or_default();
         for (id, keys) in &self.shortcuts {
             normal.entry(keys.clone()).or_insert_with(|| id.clone());
+        }
+        for (context, keys, id) in &self.scoped {
+            base.contexts
+                .entry(context.clone())
+                .or_default()
+                .keys
+                .entry(keys.clone())
+                .or_insert_with(|| id.clone());
         }
         base
     }

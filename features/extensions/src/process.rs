@@ -554,6 +554,12 @@ impl Process {
             pane,
         };
         let stream = link.stream.clone();
+        // A process at `BYTES_WIRE` sends its scene batches as bytes beside
+        // its edits when asked through `scene_view`; an older one has only
+        // `view`.
+        let bytes = self
+            .hello()
+            .is_some_and(|h| h.wire >= crate::wire::BYTES_WIRE);
         // A process at `VIEWS_WIRE` ends the view's request when the view
         // closes: the call is awaited to its answer (the frames after the
         // pane let go dropped), so the request is never abandoned, and its
@@ -563,7 +569,12 @@ impl Process {
         let slots = Arc::clone(&link.views);
         let streaming = self.inner.rt.spawn(async move {
             let (tx, mut rx) = vox::channel::<Frame>();
-            let mut call = std::pin::pin!(stream.view(open, tx));
+            let mut call: std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>> = if bytes
+            {
+                Box::pin(stream.scene_view(open, tx))
+            } else {
+                Box::pin(stream.view(open, tx))
+            };
             let mut listening = true;
             loop {
                 tokio::select! {
@@ -753,9 +764,19 @@ async fn launch(id: &str, launch: &Launch) -> Result<Started, String> {
                 return Err(status.map_or_else(|e| e.to_string(), |s| exited(s)));
             }
         };
-        // The host service, for the lane it opens to us.
+        // The host service, for the lane it opens to us; with live
+        // documents, a `DocSync` lane beside it, relayed to the node as
+        // this extension (`crate::live`).
+        #[cfg(feature = "doc-sync")]
+        let docs = crate::live::ExtensionDocSync::new(served.api.clone());
+        let router = architect::Services::into_router(served);
+        #[cfg(feature = "doc-sync")]
+        let router = router.with(
+            crdt::sync::doc_sync_service_descriptor(),
+            crdt::sync::DocSyncDispatcher::new(docs),
+        );
         let connection = vox_core::initiator_on(vox_stream::StreamLink::unix(stream))
-            .on_lane(architect::Services::into_router(served).acceptor())
+            .on_lane(router.acceptor())
             .establish_connection()
             .await
             .map_err(|e| format!("connecting: {e:?}"))?;

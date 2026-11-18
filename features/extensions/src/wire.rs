@@ -24,8 +24,9 @@ use facet::Facet;
 /// process adds at run time ([`Update`], `ProcessExtension::updates`); 5
 /// a frame for every event ([`ANSWERED_WIRE`]); 6 a closed view's place
 /// given back ([`VIEWS_WIRE`]); 7 rich input: pointer, touch, wheel,
-/// scroll and composition events ([`INPUT_WIRE`]).
-pub const WIRE: u32 = 7;
+/// scroll and composition events ([`INPUT_WIRE`]); 8 scene batches as
+/// bytes beside the edits ([`BYTES_WIRE`]).
+pub const WIRE: u32 = 8;
 
 /// The oldest wire a host still speaks: a process at 2 runs as before,
 /// its views themed through CSS only (it is never sent [`ThemeData`]).
@@ -65,6 +66,18 @@ pub const VIEWS_WIRE: u32 = 6;
 /// [`EventData::Composition`]. An older process is sent none of them
 /// ([`EventData::since`]); it never had them, so nothing it does changes.
 pub const INPUT_WIRE: u32 = 7;
+
+/// The first wire a view's scene batches cross as bytes (#835).
+///
+/// A host opens such a process's views with `ProcessExtension::scene_view`
+/// instead of `view`: their frames may be [`Frame::Batches`], each
+/// layers batch (`architect_scene::ops`) as raw bytes beside the edits,
+/// and the element's `data-architect-layers` attribute naming it by its
+/// number alone (`crate::scene::layers_marker`). The attribute's edit
+/// keeps its place among the edits, so a batch is applied exactly where
+/// its base64 attribute was before. An older host never asks for it, so
+/// a process at this wire sends it the attribute as before.
+pub const BYTES_WIRE: u32 = 8;
 
 /// The most views one process extension shows at once (each is a thread
 /// in the process). One more is refused with an error that says so;
@@ -205,6 +218,22 @@ pub enum Frame {
     Edits { edits: Vec<Edit> },
     /// It cannot render (no such view, or its component failed).
     Failed(String),
+    /// The edits, in order, and the layers batches they name
+    /// ([`BYTES_WIRE`]): each element's `data-architect-layers` set to a
+    /// batch's number takes that batch's bytes, at that edit. Every batch
+    /// is named by exactly one edit of the same frame.
+    Batches {
+        edits: Vec<Edit>,
+        batches: Vec<Batch>,
+    },
+}
+
+/// A layers batch as bytes (`architect_scene::ops`), and its number
+/// among its view's batches.
+#[derive(Clone, Debug, PartialEq, Eq, Facet)]
+pub struct Batch {
+    pub n: u64,
+    pub bytes: Vec<u8>,
 }
 
 /// An attribute's value.
