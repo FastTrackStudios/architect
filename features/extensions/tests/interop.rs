@@ -658,6 +658,21 @@ params = '{"type":"object","properties":{"from":{"type":"string"}}}'
 }
 
 #[test]
+fn a_provider_may_use_its_own_service_but_not_require_it() {
+    let base = "id = \"lab.host\"\nname = \"Host\"\nversion = \"0.1.0\"\nkind = \"data\"\n\n[provides]\n\"lab.tempo\" = \"1.2.0\"\n";
+    let uses = format!("{base}\n[uses]\n\"lab.tempo\" = \"^1\"\n");
+    let m = Manifest::parse(&uses).unwrap();
+    assert_eq!(m.uses["lab.tempo"], "^1");
+    let requires = format!("{base}\n[requires]\n\"lab.tempo\" = \"^1\"\n");
+    assert!(
+        Manifest::parse(&requires)
+            .unwrap_err()
+            .to_string()
+            .contains("provides that service itself")
+    );
+}
+
+#[test]
 fn of_two_providers_the_chosen_one_answers_and_a_tie_is_the_first_by_id() {
     let tmp = tempfile::tempdir().unwrap();
     let list = ActionList::new();

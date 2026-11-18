@@ -664,8 +664,11 @@ Maps of service name (lower case, with a `.`) to a version.
 | `[requires]` | semver requirement | loads after a provider; refused without one |
 | `[uses]` | semver requirement | optional; calls answer "no provider" when none |
 
-A service may not be in both `[requires]` and `[uses]`, nor in what it
-provides itself.
+A service may not be in both `[requires]` and `[uses]`, and an extension
+may not `[requires]` what it provides. It may `[uses]` it: when several
+extensions provide a service, the one chosen (`EXT_SERVICE_USE`) answers,
+so a provider can be a client of another's (Keyflow hosts sessions and
+follows the `daw` engine's).
 
 ```toml
 [provides]
