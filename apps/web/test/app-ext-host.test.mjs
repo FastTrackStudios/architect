@@ -314,6 +314,9 @@ function attacker() {
 
 // ── The browser ─────────────────────────────────────────────────────
 
+// Whether this user may make a namespace (`unshare -r -m`): a CI runner's service may not
+// (systemd RestrictNamespaces), and Firefox then starts without one.
+const USERNS = process.platform !== 'darwin' && (() => { try { execFileSync('unshare', ['-r', '-m', 'true'], { stdio: 'ignore' }); return true; } catch { return false; } })();
 async function firefox() {
   const profile = mkdtempSync(join(tmpdir(), 'app-ext-ff-'));
   // Nothing is heard: its output at zero; autoplay allowed, so the app's
@@ -328,7 +331,13 @@ async function firefox() {
   const args = ['--headless', '--no-remote', '--profile', profile, '--remote-debugging-port', String(port)];
   const proc = process.platform === 'darwin'
     ? spawn(browser, args, { stdio: 'ignore', env, detached: true })
-    : spawn('unshare', ['-r', '-m', 'sh', '-c', hide, browser, ...args], { stdio: 'ignore', env, detached: true });
+    : USERNS
+
+      ? spawn('unshare', ['-r', '-m', 'sh', '-c', hide, browser, ...args], { stdio: 'ignore', env, detached: true })
+
+      // No namespace to hide the audio graph in: a runtime dir of its own; the profile mutes it.
+
+      : spawn(browser, args, { stdio: 'ignore', env: { ...env, XDG_RUNTIME_DIR: mkdtempSync(join(tmpdir(), 'ff-run-')) }, detached: true });
   let ws;
   for (let i = 0; i < 80 && !ws; i++) {
     await sleep(250);
@@ -400,7 +409,7 @@ async function frameOf(b, view) {
 async function world(views, claim, opts) {
   const n = await node(glue(views), claim);
   const f = await front(n.origin, opts);
-  const b = await firefox();
+  const b = await firefox().catch((e) => { f.close(); n.close(); throw e; });
   return { n, f, b, close: async () => { await b.close(); f.close(); n.close(); } };
 }
 
@@ -564,7 +573,7 @@ test('a note\'s type picks its island from the listing; the view gets the note t
     { id: 'demo.second', bundle: glue({ second: CLAIM }), embeds: 'second=song=artist', reads: 'documents' },
   ]);
   const f = await front(n.origin);
-  const b = await firefox();
+  const b = await firefox().catch((e) => { f.close(); n.close(); throw e; });
   try {
     const listing = await (await fetch(`${n.origin}/_ext/islands.json`)).json();
     const folder = (id) => listing.islands.find((i) => i.id === id).folder;
@@ -893,7 +902,7 @@ const artSrc = (b) => b.eval(`document.querySelector('[data-testid=now-playing-a
 test('the demo setlist: each song\'s cover reaches its frame as data and the card draws it', { skip }, async () => {
   const n = await node(null, null, [{ id: 'demo.view', bundle: glue({ progress: QUIET, transport: SETLIST, lyrics: QUIET }), embeds: 'transport=setlist=', reads: 'documents' }]);
   const f = await front(n.origin);
-  const b = await firefox();
+  const b = await firefox().catch((e) => { f.close(); n.close(); throw e; });
   try {
     await openNote(b, f.origin, ['Setlists'], 'Merry & Bright');
     // Five of its nine songs have a recording; each queued with its cover.
@@ -948,7 +957,7 @@ const ROWS = `JSON.stringify([...document.querySelectorAll('.sl-row')].map((r) =
 test('Studio\'s setlist view draws the demo setlist and a row pressed plays on the card', { skip: skip || (STUDIO ? false : 'needs STUDIO_ISLAND=<Studio `just island-web` folder>') }, async () => {
   const n = await node(null, null, [{ id: 'studio.transport', folder: STUDIO, sheet: 'island.css', embeds: 'setlist.playlist=setlist=date', reads: 'documents' }]);
   const f = await front(n.origin);
-  const b = await firefox();
+  const b = await firefox().catch((e) => { f.close(); n.close(); throw e; });
   const shots = process.env.SHOTS;
   try {
     // Opened on a desk (a phone's navigator is a drawer), then seen at

@@ -58,6 +58,9 @@ async function front() {
   return { origin: `http://127.0.0.1:${port}`, close: () => srv.close() };
 }
 
+// Whether this user may make a namespace (`unshare -r -m`): a CI runner's service may not
+// (systemd RestrictNamespaces), and Firefox then starts without one.
+const USERNS = process.platform !== 'darwin' && (() => { try { execFileSync('unshare', ['-r', '-m', 'true'], { stdio: 'ignore' }); return true; } catch { return false; } })();
 /// A headless Firefox, muted, light or `dark`, at `width`.
 async function firefox(dark, width) {
   const profile = mkdtempSync(join(tmpdir(), 'app-title-ff-'));
@@ -74,7 +77,13 @@ async function firefox(dark, width) {
   const args = ['--headless', '--no-remote', '--profile', profile, '--remote-debugging-port', String(port)];
   const proc = process.platform === 'darwin'
     ? spawn(browser, args, { stdio: 'ignore', env, detached: true })
-    : spawn('unshare', ['-r', '-m', 'sh', '-c', hide, browser, ...args], { stdio: 'ignore', env, detached: true });
+    : USERNS
+
+      ? spawn('unshare', ['-r', '-m', 'sh', '-c', hide, browser, ...args], { stdio: 'ignore', env, detached: true })
+
+      // No namespace to hide the audio graph in: a runtime dir of its own; the profile mutes it.
+
+      : spawn(browser, args, { stdio: 'ignore', env: { ...env, XDG_RUNTIME_DIR: mkdtempSync(join(tmpdir(), 'ff-run-')) }, detached: true });
   let ws;
   for (let i = 0; i < 80 && !ws; i++) {
     await sleep(250);

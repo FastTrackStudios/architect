@@ -200,6 +200,9 @@ async function front(nodeOrigin) {
 
 // ── The browser ─────────────────────────────────────────────────────
 
+// Whether this user may make a namespace (`unshare -r -m`): a CI runner's service may not
+// (systemd RestrictNamespaces), and Firefox then starts without one.
+const USERNS = process.platform !== 'darwin' && (() => { try { execFileSync('unshare', ['-r', '-m', 'true'], { stdio: 'ignore' }); return true; } catch { return false; } })();
 async function firefox() {
   const profile = mkdtempSync(join(tmpdir(), 'guest-content-ff-'));
   writeFileSync(join(profile, 'user.js'), 'user_pref("media.volume_scale", "0.0");\n');
@@ -212,7 +215,13 @@ async function firefox() {
   const args = ['--headless', '--no-remote', '--profile', profile, '--remote-debugging-port', String(port)];
   const proc = process.platform === 'darwin'
     ? spawn(browser, args, { stdio: 'ignore', env, detached: true })
-    : spawn('unshare', ['-r', '-m', 'sh', '-c', hide, browser, ...args], { stdio: 'ignore', env, detached: true });
+    : USERNS
+
+      ? spawn('unshare', ['-r', '-m', 'sh', '-c', hide, browser, ...args], { stdio: 'ignore', env, detached: true })
+
+      // No namespace to hide the audio graph in: a runtime dir of its own; the profile mutes it.
+
+      : spawn(browser, args, { stdio: 'ignore', env: { ...env, XDG_RUNTIME_DIR: mkdtempSync(join(tmpdir(), 'ff-run-')) }, detached: true });
   let ws;
   for (let i = 0; i < 80 && !ws; i++) {
     await sleep(250);
@@ -264,7 +273,7 @@ async function report(b) {
 async function asGuest(reads, shot) {
   const n = await node(reads);
   const f = await front(n.origin);
-  const b = await firefox();
+  const b = await firefox().catch((e) => { f.close(); n.close(); throw e; });
   try {
     await b.go(`${f.origin}/s/${CODE}/set/`);
     await until(() => b.eval(`!!document.querySelector('[data-testid=guest-note]')`), 60000, 'the guest note');
