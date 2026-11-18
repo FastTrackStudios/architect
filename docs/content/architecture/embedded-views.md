@@ -268,7 +268,12 @@ as the web's, at the pointer's point in the view), touch, keys down and
 up, focus, composed text. A process view is told its pane's id and state
 (`features/extensions/src/remote.rs` `RemotePaneView`,
 `linked::PANE_CLAIM`), which a view reads with `linked::use_pane_state`
-either way. Test: `apps/sandbox/sketch/tests/paint_parity.rs` (one view
+either way, and where it was in it (`linked::use_view_state`: zoom,
+scroll, selection, a mode, as one string the pane keeps,
+`architect_workspace::Pane::view_state`), given back when its program
+restarts or its pane moves or pops out; `ViewState::set` keeps a new
+one (in a process, the host call `set_view_state`, taken only by a pane
+showing that extension's view). Test: `apps/sandbox/sketch/tests/paint_parity.rs` (one view
 both ways, the same log). Not the same yet: a process's `ViewCtx` has an
 empty `ActionList`, and `document::Style` in a process view reaches no
 head (put a `style` element inline).

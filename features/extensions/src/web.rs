@@ -547,6 +547,10 @@ impl WebHost {
                 self.log(level.as_deref().unwrap_or("info"), "log", text);
                 Ok(Json::Null)
             }
+            // A browser's views are its own pages, kept by the page.
+            HostRequest::SetViewState { .. } => Err(HostError::Unsupported {
+                what: "set_view_state: the browser host shows no process views".to_owned(),
+            }),
             // Services, points and windows are the native host's
             // (`crate::interop`); the browser host has no other extensions
             // to call or windows to open yet.

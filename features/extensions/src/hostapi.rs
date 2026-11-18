@@ -1488,6 +1488,20 @@ impl ExtensionApi {
                     .await?;
                 Ok(Value::Null)
             }
+            HostRequest::SetViewState { pane, state } => {
+                #[cfg(feature = "remote")]
+                {
+                    crate::remote::offer_view_state(&self.id, &pane, &state);
+                    Ok(Value::Null)
+                }
+                #[cfg(not(feature = "remote"))]
+                {
+                    let _ = (pane, state);
+                    Err(HostError::Unsupported {
+                        what: "set_view_state: this host shows no process views".to_owned(),
+                    })
+                }
+            }
             HostRequest::Log { text, level } => {
                 host.logs().push(
                     &self.id,

@@ -237,6 +237,33 @@ fn RegionsView() -> Element {
     probe(Recorder::with_regions)
 }
 
+/// A view that keeps where it is in its pane (`linked::use_view_state`):
+/// it logs what it was given when it first has its pane (in a process,
+/// the pane's input arrives just after the first render) and on every
+/// change, and keeps `zoom=2` the first time it starts with nothing kept.
+#[allow(non_snake_case)]
+fn MemoView() -> Element {
+    let kept = architect_extensions::linked::use_view_state();
+    let last = use_hook(|| std::rc::Rc::new(std::cell::RefCell::new(None::<String>)));
+    if let Some(k) = &kept {
+        let was = last.borrow().clone();
+        match was {
+            None => log(&format!("start view_state={}", k.value)),
+            Some(v) if v != k.value => log(&format!("view_state={}", k.value)),
+            Some(_) => {}
+        }
+        last.replace(Some(k.value.clone()));
+    }
+    use_effect(use_reactive((&kept,), |(kept,)| {
+        if let Some(k) = kept
+            && k.value.is_empty()
+        {
+            k.set("zoom=2");
+        }
+    }));
+    rsx! { div { {kept.map(|k| k.value).unwrap_or_default()} } }
+}
+
 fn probe(make: fn(&ViewCtx) -> Recorder) -> Element {
     let mount = use_hook(|| {
         let mount = PaintMount::new(make);
@@ -276,11 +303,17 @@ title = "Probe"
 [[views]]
 id = "regions"
 title = "Regions"
+
+[[views]]
+id = "memo"
+title = "Memo"
 "#
     }
 
     fn build(&self, ext: &mut Builder) {
-        ext.view("probe", ProbeView).view("regions", RegionsView);
+        ext.view("probe", ProbeView)
+            .view("regions", RegionsView)
+            .view("memo", MemoView);
     }
 }
 
@@ -371,6 +404,7 @@ fn App(props: AppProps) -> Element {
                     RemotePaneView { processes, extension: ID, view }
                 },
                 (None, "regions") => rsx! { RegionsView {} },
+                (None, "memo") => rsx! { MemoView {} },
                 (None, _) => rsx! { ProbeView {} },
             },
         ))
@@ -387,6 +421,7 @@ struct Run {
     doc: DioxusDocument,
     out: PathBuf,
     _host: Option<Host>,
+    processes: Option<architect_extensions::process::Processes>,
 }
 
 impl Run {
@@ -459,6 +494,7 @@ fn start_view(process: bool, dir: &Path, view: &'static str) -> Run {
     } else {
         (None, None)
     };
+    let kept = processes.clone();
     let vdom = VirtualDom::new_with_props(
         App,
         AppProps {
@@ -479,8 +515,13 @@ fn start_view(process: bool, dir: &Path, view: &'static str) -> Run {
         doc,
         out,
         _host: host,
+        processes: kept,
     };
-    run.pump_until("the view at its size", |l| l.contains("size "));
+    if view == "memo" {
+        run.pump_until("the view", |l| l.contains("start view_state="));
+    } else {
+        run.pump_until("the view at its size", |l| l.contains("size "));
+    }
     run
 }
 
@@ -740,5 +781,52 @@ fn a_key_bound_in_a_views_context_runs_its_action_and_skips_the_view() {
             !log.contains("key: \"n\""),
             "{how}: the view heard the bound key:\n{log}"
         );
+    }
+}
+
+/// Where a view is (`linked::use_view_state`) is kept by its pane and
+/// given back on start: linked in, and in a process whose program is
+/// killed and started again (a development copy rebuilt), which starts
+/// where it was.
+#[test]
+fn a_views_state_is_kept_by_its_pane_and_given_back_when_its_program_restarts() {
+    let _one = SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let dir = tempfile::tempdir().unwrap();
+    for process in [false, true] {
+        let how = if process { "process" } else { "linked" };
+        let mut run = start_view(process, dir.path(), "memo");
+        // It started with nothing kept, kept zoom=2, and was given it back.
+        run.pump_until(&format!("{how}: the kept state"), |l| {
+            l.contains("\nview_state=zoom=2")
+        });
+        assert!(
+            run.log().starts_with("start view_state=\n"),
+            "{how}: {}",
+            run.log()
+        );
+        if !process {
+            continue;
+        }
+        let processes = run.processes.clone().unwrap();
+        let p = processes.get(ID).unwrap();
+        let pid = p.pid().unwrap();
+        let killed = std::process::Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .status()
+            .unwrap();
+        assert!(killed.success());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while p.pid() == Some(pid) {
+            assert!(Instant::now() < deadline, "the process never died");
+            run.pump_until("a moment", |_| true);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        p.restart();
+        // The new program's view starts where the old one was.
+        run.pump_until("the view started again", |l| {
+            l.matches("start view_state=zoom=2").count() == 1
+        });
     }
 }

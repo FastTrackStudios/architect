@@ -777,6 +777,40 @@ impl PaneHandle {
         self.host.workspace
     }
 
+    /// Where its view is in what it shows ([`crate::Pane::view_state`]):
+    /// "" when it kept none. Read in a render, the pane redraws when it
+    /// changes.
+    #[must_use]
+    pub fn view_state(&self) -> String {
+        self.host
+            .workspace
+            .read()
+            .pane(&self.id)
+            .map(|p| p.view_state.clone())
+            .unwrap_or_default()
+    }
+
+    /// Keeps where its view is: given back when the view starts again (its
+    /// program restarted, the pane moved or popped out, the app opened
+    /// again). Write it when a gesture ends: each write is a workspace
+    /// change.
+    pub fn set_view_state(&self, view_state: impl Into<String>) {
+        let view_state = view_state.into();
+        let same = self
+            .host
+            .workspace
+            .peek()
+            .pane(&self.id)
+            .is_some_and(|p| p.view_state == view_state);
+        if !same {
+            self.host.edit(|w| {
+                if let Some(p) = w.pane_mut(&self.id) {
+                    p.view_state = view_state;
+                }
+            });
+        }
+    }
+
     /// Keeps its state. Write it when a gesture ends, not on every frame
     /// of one: each write is a workspace change.
     pub fn set_state(&self, state: impl Into<String>) {

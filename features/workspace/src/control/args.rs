@@ -431,6 +431,9 @@ pub struct TabSetArgs {
     pub link: Option<String>,
     #[facet(default)]
     pub title: Option<String>,
+    /// Where its view is in what it shows (`Pane::view_state`).
+    #[facet(default)]
+    pub view_state: Option<String>,
 }
 
 /// `WORKSPACE_NAVIGATE`: `go` back or forward, or show `state` (the old

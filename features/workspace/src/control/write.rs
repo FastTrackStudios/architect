@@ -560,6 +560,11 @@ pub fn tab_set(st: &mut State, env: &Env, a: TabSetArgs) -> Result<Answer, Strin
             p.title = title;
         }
     }
+    if let Some(view_state) = a.view_state
+        && let Some(p) = w.pane_mut(&pane)
+    {
+        p.view_state = view_state;
+    }
     Ok(finish(
         st,
         env,
