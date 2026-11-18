@@ -2136,7 +2136,9 @@ dependencies = [
  "anyrender",
  "architect-workspace-hack",
  "blake3",
+ "memmap2",
  "peniko 0.6.1",
+ "tempfile",
  "thiserror 2.0.20",
  "web-time",
 ]

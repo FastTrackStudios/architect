@@ -21,6 +21,14 @@ thiserror = { workspace = true }
 # The app's one wall clock (`anim::wall_seconds`), a browser's too.
 web-time = "1.1"
 
+# A table an engine in another process shares (`engine::shared`).
+[target.'cfg(all(unix, not(target_family = "wasm")))'.dependencies]
+memmap2 = "0.9"
+
+[dev-dependencies]
+# tests/shared.rs: a table's file in a directory of its own.
+tempfile = "3"
+
 [lints]
 workspace = true
 

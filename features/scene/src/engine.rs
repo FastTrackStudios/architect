@@ -41,16 +41,46 @@ pub struct Slot(usize);
 /// An engine's values: a fixed table of slots by name.
 pub struct EngineTable {
     names: BTreeMap<Name, usize>,
-    slots: Box<[AtomicU64]>,
-    /// Moves on with every write: what a host compares to know whether
-    /// a meter moved.
-    generation: AtomicU64,
+    store: Store,
+}
+
+/// Where a table's slots and its generation are: this process's memory,
+/// or a file another process maps too ([`shared`]).
+enum Store {
+    Owned {
+        slots: Box<[AtomicU64]>,
+        /// Moves on with every write: what a host compares to know
+        /// whether a meter moved.
+        generation: AtomicU64,
+    },
+    #[cfg(all(unix, not(target_family = "wasm")))]
+    Mapped(shared::Mapping),
+}
+
+impl Store {
+    #[inline]
+    fn slot(&self, at: usize) -> Option<&AtomicU64> {
+        match self {
+            Self::Owned { slots, .. } => slots.get(at),
+            #[cfg(all(unix, not(target_family = "wasm")))]
+            Self::Mapped(m) => m.slot(at),
+        }
+    }
+
+    #[inline]
+    fn generation(&self) -> &AtomicU64 {
+        match self {
+            Self::Owned { generation, .. } => generation,
+            #[cfg(all(unix, not(target_family = "wasm")))]
+            Self::Mapped(m) => m.generation(),
+        }
+    }
 }
 
 impl std::fmt::Debug for EngineTable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineTable")
-            .field("slots", &self.slots.len())
+            .field("slots", &self.names.len())
             .field("generation", &self.generation())
             .finish_non_exhaustive()
     }
@@ -78,8 +108,10 @@ impl EngineTable {
         let slots = (0..map.len()).map(|_| AtomicU64::new(UNSET)).collect();
         let table = Arc::new(Self {
             names: map,
-            slots,
-            generation: AtomicU64::new(0),
+            store: Store::Owned {
+                slots,
+                generation: AtomicU64::new(0),
+            },
         });
         let writer = EngineWriter {
             table: Arc::clone(&table),
@@ -98,8 +130,8 @@ impl EngineTable {
     #[must_use]
     pub fn read(&self, name: &Name) -> Option<f64> {
         let bits = self
-            .slots
-            .get(*self.names.get(name)?)?
+            .store
+            .slot(*self.names.get(name)?)?
             .load(Ordering::Acquire);
         let v = f64::from_bits(bits);
         (bits != UNSET && v.is_finite() && v.abs() <= MAX_COORDINATE).then_some(v)
@@ -108,12 +140,30 @@ impl EngineTable {
     /// How many writes it has had.
     #[must_use]
     pub fn generation(&self) -> u64 {
-        self.generation.load(Ordering::Acquire)
+        self.store.generation().load(Ordering::Acquire)
     }
 
     /// Its names.
     pub fn names(&self) -> impl Iterator<Item = &Name> {
         self.names.keys()
+    }
+
+    /// Writes `name`, one of the host's (`host.`), when the table has a
+    /// slot for it: a drag on a pane reading this table hands the engine
+    /// the value it makes, as it makes it. Whether it wrote.
+    ///
+    /// Only a shared table lists host names ([`shared::create`]); the
+    /// engine reads them with [`EngineWriter::read`], lock-free.
+    pub fn write_host(&self, name: &Name, value: f64) -> bool {
+        if name.space() != Space::Host || !value.is_finite() || value.abs() > MAX_COORDINATE {
+            return false;
+        }
+        let Some(cell) = self.names.get(name).and_then(|at| self.store.slot(*at)) else {
+            return false;
+        };
+        cell.store(value.to_bits(), Ordering::Release);
+        self.store.generation().fetch_add(1, Ordering::Release);
+        true
     }
 }
 
@@ -128,10 +178,21 @@ impl EngineWriter {
     /// slot of another table is ignored.
     #[inline]
     pub fn write(&self, slot: Slot, value: f64) {
-        if let Some(cell) = self.table.slots.get(slot.0) {
+        if let Some(cell) = self.table.store.slot(slot.0) {
             cell.store(value.to_bits(), Ordering::Release);
-            self.table.generation.fetch_add(1, Ordering::Release);
+            self.table.store.generation().fetch_add(1, Ordering::Release);
         }
+    }
+
+    /// What `slot` holds now: one atomic load, no lock, no allocation.
+    /// How an engine reads the host's values (a fader being dragged)
+    /// from a shared table. `None` before the first write.
+    #[inline]
+    #[must_use]
+    pub fn read(&self, slot: Slot) -> Option<f64> {
+        let bits = self.table.store.slot(slot.0)?.load(Ordering::Acquire);
+        let v = f64::from_bits(bits);
+        (bits != UNSET && v.is_finite()).then_some(v)
     }
 
     /// The table it writes.
@@ -241,12 +302,43 @@ pub fn publish(extension: &str, table: Arc<EngineTable>) {
         .insert(extension.to_owned(), table);
 }
 
-/// The table `extension`'s views read, if an engine published one.
+/// Which engines' shared tables `extension`'s views read, when no
+/// engine in this process published one for it: the providers of the
+/// services it uses (the host says, [`read_from`]).
+static SOURCES: Mutex<BTreeMap<String, Vec<String>>> = Mutex::new(BTreeMap::new());
+
+/// `extension`'s views read the shared tables of `engines` (extension
+/// ids), the first that exists ([`shared::open_engine`]). A host calls
+/// it with the providers of the services the extension uses.
+pub fn read_from(extension: &str, engines: Vec<String>) {
+    SOURCES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(extension.to_owned(), engines);
+}
+
+/// The table `extension`'s views read: one an engine in this process
+/// published for it, else the shared table of an engine it reads from
+/// ([`read_from`]), if one is running.
 #[must_use]
 pub fn published(extension: &str) -> Option<Arc<EngineTable>> {
-    PUBLISHED
+    let here = PUBLISHED
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .get(extension)
-        .cloned()
+        .cloned();
+    #[cfg(all(unix, not(target_family = "wasm")))]
+    if here.is_none() {
+        let engines = SOURCES
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(extension)
+            .cloned()
+            .unwrap_or_default();
+        return engines.iter().find_map(|e| shared::open_engine(e));
+    }
+    here
 }
+
+#[cfg(all(unix, not(target_family = "wasm")))]
+pub mod shared;
