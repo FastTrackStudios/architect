@@ -64,9 +64,9 @@ use blitz_dom::{
     LocalName, Namespace, Node, NodeId, QualName, UserAgentStylesheet,
 };
 use blitz_traits::events::{
-    BlitzFocusEvent, BlitzImeEvent, BlitzKeyEvent, BlitzPointerEvent, BlitzPointerId, BlitzWheelDelta,
-    BlitzWheelEvent, DomEvent, DomEventData, EventState, Location, Modifiers, MouseEventButton,
-    UiEvent,
+    BlitzFocusEvent, BlitzImeEvent, BlitzKeyEvent, BlitzPointerEvent, BlitzPointerId,
+    BlitzWheelDelta, BlitzWheelEvent, DomEvent, DomEventData, EventState, Location, Modifiers,
+    MouseEventButton, UiEvent,
 };
 use blitz_traits::shell::{ClipboardError, ShellProvider};
 use dioxus::prelude::*;
@@ -271,7 +271,7 @@ impl RemoteDocument {
         }
     }
 
-        /// The painted element whose box holds `(x, y)` (its document's CSS
+    /// The painted element whose box holds `(x, y)` (its document's CSS
     /// pixels), and the point in it.
     fn painted_at(&self, x: f32, y: f32) -> Option<(NodeId, peniko::kurbo::Point)> {
         self.painted.keys().copied().find_map(|node| {
@@ -367,42 +367,6 @@ impl RemoteDocument {
             layer.touch();
         }
         (consumed, cursor)
-    }
-
-    /// Focuses what a press its regions took landed on, as the document's
-    /// own press would have: the nearest focusable element from the
-    /// scene's (a `RemoteScene`'s or a `RemotePaint`'s, `tabindex = 0`),
-    /// the old focus blurred and the new one told, through the view's
-    /// handlers. The press itself stays the region's.
-    fn focus_pressed(&mut self) {
-        let Some(pressed) = self.pointed else { return };
-        let mut at = Some(pressed);
-        while let Some(id) = at {
-            match self.doc.get_node(id) {
-                Some(node) if node.is_focussable() => break,
-                Some(node) => at = node.parent,
-                None => at = None,
-            }
-        }
-        let Some(target) = at else { return };
-        let old = self.doc.get_focussed_node_id();
-        if old == Some(target) || !self.doc.set_focus_to(target) {
-            return;
-        }
-        let forward = Forward {
-            listeners: &self.listeners,
-            events: &self.events,
-            held: &mut self.held,
-            composing: &mut self.composing,
-        };
-        let mut driver = EventDriver::new(&mut self.doc, forward);
-        if let Some(old) = old {
-            driver.handle_dom_event(DomEvent::new(old, DomEventData::Blur(BlitzFocusEvent)));
-            driver.handle_dom_event(DomEvent::new(old, DomEventData::FocusOut(BlitzFocusEvent)));
-        }
-        driver.handle_dom_event(DomEvent::new(target, DomEventData::Focus(BlitzFocusEvent)));
-        driver.handle_dom_event(DomEvent::new(target, DomEventData::FocusIn(BlitzFocusEvent)));
-        self.sync_field();
     }
 
     /// Whether a text field of its own has the focus, told to
@@ -812,6 +776,47 @@ impl RemoteDocument {
         self.doc.mutate().set_node_text(self.theme, css);
     }
 
+    /// A press on `node` focuses the nearest element at or above it that
+    /// takes the focus, the old one hearing `blur` and the new `focus`, as
+    /// Blitz does for a press it sees. A press a hit region takes never
+    /// reaches Blitz, so without this the view's keys went to whatever had
+    /// the focus before (or nowhere). Whether the focus moved.
+    pub fn focus_pressed(&mut self, node: NodeId) -> bool {
+        let mut at = Some(node);
+        let target = loop {
+            let Some(id) = at else { return false };
+            let Some(n) = self.doc.get_node(id) else {
+                return false;
+            };
+            if n.is_focussable() {
+                break id;
+            }
+            at = n.parent;
+        };
+        let old = self.doc.get_focussed_node_id();
+        if old == Some(target) || !self.doc.set_focus_to(target) {
+            return false;
+        }
+        let forward = Forward {
+            listeners: &self.listeners,
+            events: &self.events,
+            held: &mut self.held,
+            composing: &mut self.composing,
+        };
+        let mut driver = EventDriver::new(&mut self.doc, forward);
+        if let Some(old) = old {
+            driver.handle_dom_event(DomEvent::new(old, DomEventData::Blur(BlitzFocusEvent)));
+            driver.handle_dom_event(DomEvent::new(old, DomEventData::FocusOut(BlitzFocusEvent)));
+        }
+        driver.handle_dom_event(DomEvent::new(target, DomEventData::Focus(BlitzFocusEvent)));
+        driver.handle_dom_event(DomEvent::new(
+            target,
+            DomEventData::FocusIn(BlitzFocusEvent),
+        ));
+        self.sync_field();
+        true
+    }
+
     /// Its Blitz document, to read.
     #[must_use]
     pub const fn document(&self) -> &BaseDocument {
@@ -1190,10 +1195,12 @@ impl Document for RemoteDocument {
         // host's, and the view hears what its regions heard instead.
         let (consumed, cursor) = self.regions_event(&event);
         if consumed {
-            // A press on a region is still a press on the view: it takes
-            // the keyboard focus, as a press anywhere else in it does.
-            if matches!(event, UiEvent::PointerDown(_)) {
-                self.focus_pressed();
+            // A press a region took still focuses the view it landed on, as
+            // a press anywhere else in it does: its keys come next.
+            if let UiEvent::PointerDown(p) = &event
+                && let Some((node, _)) = self.painted_at(p.coords.client_x, p.coords.client_y)
+            {
+                let _ = self.focus_pressed(node);
             }
             self.region_cursor(cursor);
             return;
@@ -1756,7 +1763,6 @@ fn same_table(
         _ => false,
     }
 }
-
 
 #[allow(clippy::too_many_arguments)]
 async fn follow(

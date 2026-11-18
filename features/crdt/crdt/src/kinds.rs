@@ -5,6 +5,8 @@
 //! schema's stamp and the migrations up to it, the blobs a document
 //! points at — and architect reads, writes, upgrades and fetches.
 
+use std::sync::{Arc, PoisonError, RwLock};
+
 use loro::LoroDoc;
 
 /// The map a document keeps its own facts in.
@@ -180,7 +182,87 @@ impl DocKinds {
             .find(|k| k.extension.eq_ignore_ascii_case(ext))
     }
 
+    /// Takes the kind `id` off; whether there was one.
+    pub fn unregister(&mut self, id: &str) -> bool {
+        let before = self.kinds.len();
+        self.kinds.retain(|k| k.id != id);
+        self.kinds.len() != before
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &DocKind> {
         self.kinds.iter()
+    }
+}
+
+/// [`DocKinds`] shared, and changed while it is used.
+///
+/// The kinds an app's extensions declare come and go as they load and
+/// unload, and whoever holds a clone (a vault's document registry, its
+/// catalogue) sees the change at its next look. Cheap to clone; clones
+/// share the kinds.
+#[derive(Debug, Clone, Default)]
+pub struct SharedDocKinds {
+    inner: Arc<RwLock<DocKinds>>,
+}
+
+impl SharedDocKinds {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn read(&self) -> std::sync::RwLockReadGuard<'_, DocKinds> {
+        self.inner.read().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn write(&self) -> std::sync::RwLockWriteGuard<'_, DocKinds> {
+        self.inner.write().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Adds `kind`; one of the same id is replaced.
+    pub fn register(&self, kind: DocKind) {
+        self.write().register(kind);
+    }
+
+    /// Takes the kind `id` off; whether there was one.
+    // Whether it was there is for whoever wants it.
+    #[allow(clippy::must_use_candidate)]
+    pub fn unregister(&self, id: &str) -> bool {
+        self.write().unregister(id)
+    }
+
+    #[must_use]
+    pub fn get(&self, id: &str) -> Option<DocKind> {
+        self.read().get(id).cloned()
+    }
+
+    /// The kind a file of this extension is.
+    #[must_use]
+    pub fn for_extension(&self, ext: &str) -> Option<DocKind> {
+        self.read().for_extension(ext).cloned()
+    }
+
+    /// The kind the file at `path` is, by its extension (the part after
+    /// the last dot of its name).
+    #[must_use]
+    pub fn for_path(&self, path: &str) -> Option<DocKind> {
+        let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+        let (stem, ext) = name.rsplit_once('.')?;
+        if stem.is_empty() || ext.is_empty() {
+            return None;
+        }
+        self.for_extension(ext)
+    }
+
+    /// The kinds now.
+    #[must_use]
+    pub fn snapshot(&self) -> DocKinds {
+        self.read().clone()
+    }
+
+    /// Whether there are none.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.read().kinds.is_empty()
     }
 }

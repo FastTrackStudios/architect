@@ -180,7 +180,10 @@ impl EngineWriter {
     pub fn write(&self, slot: Slot, value: f64) {
         if let Some(cell) = self.table.store.slot(slot.0) {
             cell.store(value.to_bits(), Ordering::Release);
-            self.table.store.generation().fetch_add(1, Ordering::Release);
+            self.table
+                .store
+                .generation()
+                .fetch_add(1, Ordering::Release);
         }
     }
 

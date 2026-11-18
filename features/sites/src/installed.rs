@@ -131,6 +131,9 @@ pub struct Package {
     pub id: String,
     /// Its rules (none: it declares none).
     pub rules: Vec<ShareLayersDecl>,
+    /// The document kinds it declares (`[[doc_kinds]]`): a vault file of
+    /// one is a document the node keeps and syncs.
+    pub doc_kinds: Vec<architect_extensions::contrib::DocKindDecl>,
 }
 
 /// The installed extensions' layer rules, as the folder was when read.
@@ -268,6 +271,7 @@ impl InstalledLayers {
                         folder: folder.clone(),
                         id: manifest.id,
                         rules: manifest.share_layers,
+                        doc_kinds: manifest.contributes.doc_kinds,
                     }),
                     Err((path, error)) => {
                         tracing::warn!(

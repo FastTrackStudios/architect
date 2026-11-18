@@ -185,6 +185,12 @@ only when both did:
 Its Rust cache (third-party crates only) is saved by the same workflow on
 each push to `main`, so a PR restores main's.
 
+A draft PR runs none of this: every job of `pr.yml` (and of the site,
+extension-index and release dry-run checks) is skipped, `check` included,
+and a skipped `check` does not block. Marking the PR ready for review
+starts the run, and every push after that runs it again, so mark a PR
+ready before waiting for its checks.
+
 The PR check runs no test, no wasm check, no `builtins` and no `tags`:
 those run on main after the merge. The self-hosted pool that runs them
 never runs a public repo's PR code.
