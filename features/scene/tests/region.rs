@@ -59,6 +59,7 @@ fn fader() -> Region {
             max: 1.0,
             step: Some(0.01),
             initial: 0.5,
+            coast: None,
         })
 }
 
@@ -377,6 +378,7 @@ fn a_box_drags_on_both_axes_and_each_value_is_heard_once_a_frame() {
         max: 300.0,
         step: None,
         initial: 0.0,
+        coast: None,
     };
     let handle = Region::new(5, Shape::Rect(Rect::new(0.0, 0.0, 20.0, 20.0)))
         .cursor(Cursor::Move)
@@ -429,4 +431,112 @@ fn a_box_drags_on_both_axes_and_each_value_is_heard_once_a_frame() {
     let mut twice = handle;
     twice.drags[1].axis = Axis::X;
     assert!(architect_scene::region::check(&[twice]).is_err());
+}
+
+#[test]
+fn a_flicked_drag_coasts_on_the_hosts_wall_clock_and_stops() {
+    let scroll = Name::new("host.list.scroll").unwrap();
+    let list = Region::new(4, Shape::Rect(Rect::new(0.0, 0.0, 100.0, 400.0))).drag(Drag {
+        value: scroll.clone(),
+        axis: Axis::Y,
+        scale: -1.0,
+        min: 0.0,
+        max: 2000.0,
+        step: None,
+        initial: 0.0,
+        coast: Some(0.3),
+    });
+    let mut layers = Layers::new();
+    layers.set(1, Layer::new(content()).regions(vec![list.clone()]));
+    let mut values = Values::new();
+    architect_scene::region::seed(None, &[list], &mut values).unwrap();
+    let at = |t: f64| Readings {
+        wall: Some(t),
+        playhead: None,
+    };
+    let mut i = Interaction::new();
+    // A flick up: 10 px every 10 ms, 1000 px a second, let go moving.
+    let _ = i.pressed(&layers, &at(0.0), &mut values, Point::new(50.0, 300.0));
+    for n in 1..=5_u8 {
+        let t = f64::from(n) * 0.01;
+        let _ = i.moved(
+            &layers,
+            &at(t),
+            &mut values,
+            Point::new(50.0, f64::from(n).mul_add(-10.0, 300.0)),
+        );
+    }
+    assert_eq!(values.get(&scroll), Some(50.0));
+    let _ = i.released(&layers, &at(0.05), &mut values, Point::new(50.0, 250.0));
+    assert!(i.coasting());
+    let _ = i.take();
+    // It goes on without the pointer, slowing: each frame less than the last.
+    let mut was = 50.0;
+    let mut step = f64::INFINITY;
+    for frame in 1..=60_u8 {
+        let t = 0.05 + f64::from(frame) / 240.0;
+        assert!(i.coast(&at(t), &mut values), "frame {frame}");
+        let now = values.get(&scroll).unwrap();
+        assert!(
+            now > was && now - was < step,
+            "frame {frame}: {was} to {now}"
+        );
+        step = now - was;
+        was = now;
+        // The view hears it go, a value a frame.
+        assert_eq!(i.take().len(), 1);
+    }
+    // ...towards 50 + 1000 × 0.3 = 350, where it stops.
+    for frame in 61..=2000_u16 {
+        let _ = i.coast(&at(0.05 + f64::from(frame) / 240.0), &mut values);
+        if !i.coasting() {
+            break;
+        }
+    }
+    assert!(!i.coasting());
+    let end = values.get(&scroll).unwrap();
+    assert!((end - 350.0).abs() < 1.0, "it stopped at {end}");
+}
+
+#[test]
+fn a_coast_stops_at_its_end_and_a_press_stops_it() {
+    let scroll = Name::new("host.list.scroll").unwrap();
+    let list = Region::new(4, Shape::Rect(Rect::new(0.0, 0.0, 100.0, 400.0))).drag(Drag {
+        value: scroll.clone(),
+        axis: Axis::Y,
+        scale: -1.0,
+        min: 0.0,
+        max: 100.0,
+        step: None,
+        initial: 0.0,
+        coast: Some(1.0),
+    });
+    let mut layers = Layers::new();
+    layers.set(1, Layer::new(content()).regions(vec![list]));
+    let mut values = Values::new();
+    let at = |t: f64| Readings {
+        wall: Some(t),
+        playhead: None,
+    };
+    let flick = |i: &mut Interaction, values: &mut Values, t0: f64| {
+        let _ = i.pressed(&layers, &at(t0), values, Point::new(50.0, 300.0));
+        let _ = i.moved(&layers, &at(t0 + 0.01), values, Point::new(50.0, 290.0));
+        let _ = i.moved(&layers, &at(t0 + 0.02), values, Point::new(50.0, 280.0));
+        let _ = i.released(&layers, &at(t0 + 0.02), values, Point::new(50.0, 280.0));
+    };
+    let mut i = Interaction::new();
+    flick(&mut i, &mut values, 0.0);
+    // 1000 a second for a second's constant: well past 100. It stops there.
+    let _ = i.coast(&at(0.5), &mut values);
+    assert_eq!(values.get(&scroll), Some(100.0));
+    assert!(!i.coasting());
+    // A flick, then a press: the coast stops where it was.
+    let _ = values.write(architect_scene::anim::Space::Host, &scroll, 0.0);
+    flick(&mut i, &mut values, 10.0);
+    let _ = i.coast(&at(10.03), &mut values);
+    let _ = i.pressed(&layers, &at(10.04), &mut values, Point::new(50.0, 200.0));
+    assert!(!i.coasting());
+    // Held still before the release: no flick.
+    let _ = i.released(&layers, &at(10.5), &mut values, Point::new(50.0, 200.0));
+    assert!(!i.coasting());
 }

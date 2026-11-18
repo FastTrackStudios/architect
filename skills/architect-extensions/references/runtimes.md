@@ -302,6 +302,12 @@ Build it with `cargo build --target wasm32-wasip2` inside `devenv --profile wasi
 - Show more than `MAX_VIEWS` (256) views at once.
 - Be called per sample or per frame. Each call costs tens of µs.
 
+**What moves every frame is the host's.** A paint view (`linked::Builder::paint`) that returns layers (`PaintView::layers`) sends them once (`architect-scene`, `features/scene/src/ops.rs`), and the host draws them every frame without it:
+- Motion on a clock: a layer's `X`, `Y`, `ScaleX`, `ScaleY`, `Opacity` or `Visible` from `Clock::Wall` or `Clock::Playhead` (`features/scene/src/anim.rs` `Animation`, `Linear`, `Steps`). A playhead line, a scrolling arrangement, a lyric line. Don't return `animating` true for these: the view would be asked every frame.
+- Hit regions and drags (`features/scene/src/region.rs` `Region`, `Drag`): hover, cursor, highlight and a fader or drag box following the pointer, all on the host; the view hears `RegionEvent`s by id (`PaintView::region`), a drag's value at most once a frame.
+- Named values a layer is bound to (`PaintView::values`, `view.` names); the engine's lock-free `engine.` values with `capabilities.ui = ["engine"]` (`features/scene/src/engine.rs`).
+- A malformed animation, region or value fails the view, linked in or not. The example: `apps/sandbox/sketch` `Timeline`.
+
 **Example** (`examples/extension/counter`):
 
 ```toml

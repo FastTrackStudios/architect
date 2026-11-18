@@ -147,7 +147,18 @@ pub struct Drag {
     /// Its value until the pointer moves it, and whenever the view sends
     /// another (automation): the view's say over a host's value.
     pub initial: f64,
+    /// Inertia: let go while moving, it coasts on, slowing with this time
+    /// constant (seconds, at most [`MAX_COAST`]), on the host's wall clock
+    /// ([`Interaction::coast`]). A scrolled list or arrangement flicked.
+    pub coast: Option<f64>,
 }
+
+/// The longest a coast's time constant may be, in seconds.
+pub const MAX_COAST: f64 = 10.0;
+
+/// How long after the pointer's last move a release still flicks: a
+/// pointer held still, then let go, does not coast.
+const FLICK_WITHIN: f64 = 0.1;
 
 impl Drag {
     fn settle(&self, v: f64) -> f64 {
@@ -264,6 +275,9 @@ pub fn check(regions: &[Region]) -> Result<(), Error> {
             ];
             if !numbers.into_iter().flatten().all(in_range) {
                 return Err(Error::OutOfRange);
+            }
+            if d.coast.is_some_and(|c| c <= 0.0 || c > MAX_COAST) {
+                return Err(Error::BadRegion("a coast of nothing, or past its limit"));
             }
             if d.min > d.max || d.step.is_some_and(|s| s <= 0.0) {
                 return Err(Error::BadRegion(
@@ -422,6 +436,21 @@ struct Dragging {
     from: f64,
     start: f64,
     last: f64,
+    /// The last two moves: wall seconds and the value they gave, for the
+    /// speed a release flicks it at.
+    moves: [Option<(f64, f64)>; 2],
+}
+
+/// A value coasting after a flick.
+struct Coast {
+    id: u64,
+    drag: Drag,
+    tau: f64,
+    from: f64,
+    /// Value units a second when let go.
+    speed: f64,
+    began: f64,
+    last: f64,
 }
 
 struct Held {
@@ -436,6 +465,7 @@ pub struct Interaction {
     hovered: Option<(Hit, Cursor)>,
     held: Option<Held>,
     queue: Vec<RegionEvent>,
+    coasting: Vec<Coast>,
 }
 
 impl std::fmt::Debug for Interaction {
@@ -551,6 +581,13 @@ impl Interaction {
                 let v = d
                     .drag
                     .settle((along - d.from).mul_add(d.drag.scale, d.start));
+                // A sample a moment: the release's own move at the last
+                // move's time adds nothing.
+                if let Some(t) = readings.wall
+                    && d.moves[1].is_none_or(|(last, _)| t > last)
+                {
+                    d.moves = [d.moves[1], Some((t, v))];
+                }
                 if v.to_bits() != d.last.to_bits()
                     && values.write(Space::Host, &d.drag.value, v).is_ok()
                 {
@@ -603,9 +640,13 @@ impl Interaction {
                 },
                 start,
                 last: start,
+                moves: [None, readings.wall.map(|t| (t, start))],
             })
         });
-        let dragging = dragging.collect();
+        let dragging: Vec<Dragging> = dragging.collect();
+        // A press stops what it coasts.
+        self.coasting
+            .retain(|c| !dragging.iter().any(|d| d.drag.value == c.drag.value));
         self.queue.push(RegionEvent::Press(hit.id));
         self.held = Some(Held { hit, dragging });
         out.consumed = true;
@@ -627,6 +668,31 @@ impl Interaction {
             return out;
         };
         self.queue.push(RegionEvent::Release(held.hit.id));
+        // Let go while moving: a drag with inertia coasts on.
+        for d in held.dragging {
+            let (Some(tau), Some(now), [Some((t0, v0)), Some((t1, v1))]) =
+                (d.drag.coast, readings.wall, d.moves)
+            else {
+                continue;
+            };
+            let dt = t1 - t0;
+            if dt <= 0.0 || now - t1 > FLICK_WITHIN {
+                continue;
+            }
+            let speed = (v1 - v0) / dt;
+            if speed.abs() > f64::EPSILON && speed.is_finite() {
+                self.coasting.push(Coast {
+                    id: held.hit.id,
+                    tau,
+                    from: d.last,
+                    speed,
+                    began: now,
+                    last: d.last,
+                    drag: d.drag,
+                });
+                out.redraw = true;
+            }
+        }
         let hover = self.hover(
             layers
                 .hit(at, readings, values)
@@ -657,6 +723,45 @@ impl Interaction {
     pub fn cursor(&self) -> Cursor {
         self.hovered.map(|(_, c)| c).unwrap_or_default()
     }
+
+    /// Whether a flicked value is still coasting: its host draws every
+    /// frame until it stops.
+    #[must_use]
+    pub const fn coasting(&self) -> bool {
+        !self.coasting.is_empty()
+    }
+
+    /// Moves what coasts to where it is at `readings`' wall time: each
+    /// `from + speed × tau × (1 − e^(−t/tau))`, settled as its drag
+    /// settles a value. One stops at an end of its drag, or once it moves
+    /// less than a thousandth of its range a second. Whether a value
+    /// changed (a frame to draw); the view hears each at most once a
+    /// frame, as a drag's.
+    pub fn coast(&mut self, readings: &Readings, values: &mut Values) -> bool {
+        let Some(now) = readings.wall else {
+            return false;
+        };
+        let mut moved = false;
+        let queue = &mut self.queue;
+        self.coasting.retain_mut(|c| {
+            let t = (now - c.began).max(0.0);
+            let decay = (-t / c.tau).exp();
+            let raw = (c.speed * c.tau).mul_add(1.0 - decay, c.from);
+            let v = c.drag.settle(raw);
+            if v.to_bits() != c.last.to_bits()
+                && values.write(Space::Host, &c.drag.value, v).is_ok()
+            {
+                c.last = v;
+                queue.push(RegionEvent::Value(c.id, c.drag.axis, v));
+                moved = true;
+            }
+            let range = (c.drag.max - c.drag.min).abs();
+            let slow = (c.speed * decay).abs() <= range * 1e-3;
+            let at_end = v <= c.drag.min && c.speed < 0.0 || v >= c.drag.max && c.speed > 0.0;
+            !(slow || at_end)
+        });
+        moved
+    }
 }
 
 // The bytes of an `ops::REGIONS`.
@@ -668,6 +773,7 @@ const HOVER: u8 = 1;
 const PRESS: u8 = 2;
 const DRAG: u8 = 4;
 const STEP: u8 = 1;
+const COAST: u8 = 2;
 
 fn color(w: &mut Writer, c: Color) {
     w.bytes(&c.to_rgba8().to_u8_array());
@@ -742,9 +848,11 @@ pub(crate) fn write(w: &mut Writer, regions: &[Region]) {
             for v in [d.scale, d.min, d.max] {
                 w.f64(v);
             }
-            w.u8(if d.step.is_some() { STEP } else { 0 });
-            if let Some(step) = d.step {
-                w.f64(step);
+            w.u8(
+                if d.step.is_some() { STEP } else { 0 } | if d.coast.is_some() { COAST } else { 0 }
+            );
+            for v in [d.step, d.coast].into_iter().flatten() {
+                w.f64(v);
             }
             w.f64(d.initial);
         }
@@ -798,10 +906,19 @@ pub(crate) fn read(r: &mut Reader<'_>) -> Result<Vec<Region>, Error> {
                 other => return Err(Error::Unknown("axis", other)),
             };
             let (scale, min, max) = (r.f64()?, r.f64()?, r.f64()?);
-            let step = match r.u8()? {
-                0 => None,
-                STEP => Some(r.f64()?),
-                other => return Err(Error::Unknown("step", other)),
+            let flags = r.u8()?;
+            if flags & !(STEP | COAST) != 0 {
+                return Err(Error::Unknown("drag", flags));
+            }
+            let step = if flags & STEP == 0 {
+                None
+            } else {
+                Some(r.f64()?)
+            };
+            let coast = if flags & COAST == 0 {
+                None
+            } else {
+                Some(r.f64()?)
             };
             drags.push(Drag {
                 value,
@@ -811,6 +928,7 @@ pub(crate) fn read(r: &mut Reader<'_>) -> Result<Vec<Region>, Error> {
                 max,
                 step,
                 initial: r.f64()?,
+                coast,
             });
         }
         out.push(Region {
