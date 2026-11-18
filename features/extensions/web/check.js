@@ -276,6 +276,7 @@ export const HOST_OPS = [
   'point', 'window', 'notify', 'clipboard_read', 'clipboard_write', 'pick', 'prompt', 'menu', 'decorate',
   'subscribe', 'unsubscribe', 'events', 'raise', 'fetch', 'read_body', 'close_body', 'secret', 'ask_secret',
   'ports', 'open_port', 'port_send', 'port_receive', 'close_port', 'targets', 'surfaces', 'surface_bank',
+  'actions',
   'set_view_state',
   'undo_document', 'redo_document',
 ];

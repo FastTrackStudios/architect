@@ -158,6 +158,9 @@ guest = [
     # with `--cfg no_workspace_hack`, the node's, failed).
     "dep:dioxus-html",
     "dep:tracing",
+    # The host's theme as the app's theme store in its views
+    # (`architect_theme::try_use_theme`), as linked in.
+    "architect-theme/dioxus",
 ]
 # WASI components (`wasi`, desktop, Android and iOS): Wasmtime with the
 # component model, Cranelift compiling, epoch interruption and a memory

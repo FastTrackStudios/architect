@@ -2112,6 +2112,7 @@ dependencies = [
  "dioxus-native-dom",
  "futures",
  "png 0.17.16",
+ "serde_json",
  "tempfile",
 ]
 

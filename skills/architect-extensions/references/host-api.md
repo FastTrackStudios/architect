@@ -114,6 +114,7 @@ The extension's own actions, settings (`<id>.…`), data, log, points and window
 | op | what | needs |
 |---|---|---|
 | `set_view_state {pane, state}` | keeps where its view in pane `pane` is, given back when the view starts again; only a pane showing one of its own views takes it | nothing |
+| `actions` | the app's actions it may run (its own, and those `capabilities.actions` reaches), as the Action List describes them: what a process view's `ViewCtx::actions` holds (`guest::app_actions`) | nothing |
 
 Call it through `linked::use_view_state()` (`ViewState::set`), which writes the pane directly linked in and sends this from a process: the same code either way.
 

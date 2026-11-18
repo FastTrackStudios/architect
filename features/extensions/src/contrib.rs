@@ -1226,6 +1226,38 @@ impl TourDecl {
     }
 }
 
+/// The key a process copy's contribution JSON carries its code's files
+/// under (`Extension::files`), beside the contribution: a host built
+/// before it reads past it.
+pub const FILES_KEY: &str = "architect_files";
+
+/// The most files, and bytes of them, a process copy may send.
+pub const MAX_FILES: usize = 256;
+pub const MAX_FILES_BYTES: usize = 8 * 1024 * 1024;
+
+/// Whether `files` are ones a host keeps: within [`MAX_FILES`] and
+/// [`MAX_FILES_BYTES`], each a relative path inside its package.
+///
+/// # Errors
+///
+/// What is wrong with them.
+pub fn check_files(files: &[(String, String)]) -> Result<(), String> {
+    if files.len() > MAX_FILES {
+        return Err(format!("its files: more than {MAX_FILES}"));
+    }
+    let bytes: usize = files
+        .iter()
+        .map(|(p, t)| p.len().saturating_add(t.len()))
+        .sum();
+    if bytes > MAX_FILES_BYTES {
+        return Err(format!("its files: more than {MAX_FILES_BYTES} bytes"));
+    }
+    if let Some((bad, _)) = files.iter().find(|(p, _)| !inside(p)) {
+        return Err(format!("its files: {bad:?} is outside its package"));
+    }
+    Ok(())
+}
+
 /// Everything an extension adds to the interface past actions, settings,
 /// views and themes: a manifest's tables, or the same sent at run time.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -2220,6 +2252,9 @@ type Listener = Arc<dyn Fn(u64) + Send + Sync>;
 #[derive(Default)]
 struct Inner {
     owners: BTreeMap<String, Owned>,
+    /// The files a process copy sent beside its contribution, by owner
+    /// (its code's `Extension::files`, [`FILES_KEY`]).
+    files: BTreeMap<String, Vec<(String, String)>>,
     state: BTreeMap<(String, String), StateEntry>,
     revision: u64,
     next_order: u64,
@@ -2348,6 +2383,28 @@ impl Contributions {
         diff
     }
 
+    /// The files `owner`'s process copy sent (its code's
+    /// `Extension::files`), in place of those it sent before.
+    pub fn put_runtime_files(&self, owner: &str, files: Vec<(String, String)>) {
+        let mut inner = self.lock();
+        if inner.files.get(owner) == Some(&files) {
+            return;
+        }
+        inner.files.insert(owner.to_owned(), files);
+        Self::changed(inner);
+    }
+
+    /// File `path` among those `owner`'s process copy sent, as text.
+    #[must_use]
+    pub fn runtime_file(&self, owner: &str, path: &str) -> Option<String> {
+        self.lock()
+            .files
+            .get(owner)?
+            .iter()
+            .find(|(p, _)| p == path)
+            .map(|(_, text)| text.clone())
+    }
+
     /// Puts what `owner` adds at run time (a process guest's, a script's),
     /// in place of what it added before: what changed. `None` when it is
     /// not loaded (nothing is put).
@@ -2378,6 +2435,7 @@ impl Contributions {
             .unwrap_or_default();
         let source = format!("ext:{owner}");
         inner.state.retain(|(s, _), _| *s != source);
+        inner.files.remove(owner);
         let diff = Diff::between(&before, &BTreeSet::new());
         Self::changed(inner);
         diff

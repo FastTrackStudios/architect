@@ -40,6 +40,9 @@ const INK: Color = Color::from_rgb8(0x2f, 0x6f, 0xeb);
 const EDGE: Color = Color::from_rgb8(0x8a, 0x8f, 0x98);
 const NODE: Color = Color::from_rgb8(0xe8, 0x6a, 0x3c);
 
+/// How many times the timeline was nudged (`LAB_SKETCH_NUDGE`).
+static NUDGED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// The extension: its views, linked in or in its process.
 pub struct Sketch;
 
@@ -53,7 +56,11 @@ impl Extension for Sketch {
             .view("arrangement", ArrangementView)
             .paint::<Graph>("graph")
             .paint::<Timeline>("timeline")
-            .paint::<LargeTimeline>("timeline-20k");
+            .paint::<LargeTimeline>("timeline-20k")
+            .action("LAB_SKETCH_NUDGE", |_| async {
+                let n = NUDGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                Ok(serde_json::json!({ "nudged": n.saturating_add(1) }))
+            });
     }
 }
 
