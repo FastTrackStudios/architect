@@ -162,6 +162,8 @@ pub fn parse(bytes: &[u8]) -> Result<Parsed, FileError> {
 ///
 /// `from` is not a document file (no header), one of a newer format, or
 /// could not be read.
+// Its one caller, `DocFile::peek`, reads a file on disk: not in a browser.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn leading_meta(from: &mut impl std::io::Read) -> Result<Vec<(String, String)>, FileError> {
     let mut head = [0_u8; HEADER_LEN];
     from.read_exact(&mut head)
