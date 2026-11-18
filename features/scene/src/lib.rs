@@ -36,6 +36,7 @@
 
 pub mod anim;
 mod bytes;
+pub mod engine;
 pub mod fragment;
 pub mod layers;
 pub mod ops;

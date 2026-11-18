@@ -1237,6 +1237,10 @@ pub fn ExtensionView(
         let overlay = host
             .capabilities(&extension)
             .is_some_and(|c| c.may_use(crate::capabilities::OVERLAY));
+        // Its scenes read the engine's values only when it was granted them.
+        let engine = host
+            .capabilities(&extension)
+            .is_some_and(|c| c.may_use(crate::capabilities::ENGINE));
         // A remote document is sized by its box: a slot's is a bar's height.
         let remote = if fill {
             "flex: 1; min-height: 0; display: flex; flex-direction: column;"
@@ -1245,7 +1249,7 @@ pub fn ExtensionView(
         };
         return rsx! {
             div { style: "{remote}",
-                crate::remote::RemoteView { processes, extension, view, overlay }
+                crate::remote::RemoteView { processes, extension, view, overlay, engine }
             }
         };
     }

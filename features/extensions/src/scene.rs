@@ -740,11 +740,13 @@ impl Painted {
         }
     }
 
-    /// Whether a layer moves on a running clock: drawn every frame.
+    /// Whether a layer moves on a running clock, or the engine's values
+    /// it reads moved since it was drawn: drawn every frame.
     pub(crate) fn moving(&self) -> bool {
-        self.layers
-            .as_ref()
-            .is_some_and(|l| l.layers().moving(&self.clocks.read()))
+        self.layers.as_ref().is_some_and(|l| {
+            l.layers().moving(&self.clocks.read())
+                || (l.values().engine().is_some() && l.values().revision() != self.drawn_values)
+        })
     }
 
     /// Whether a frame now would draw something else than the last one:

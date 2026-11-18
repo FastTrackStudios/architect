@@ -187,6 +187,13 @@ impl Alarm {
         }
     }
 
+    /// What it calls: to watch an engine's table with
+    /// ([`crate::engine::watch`]).
+    #[must_use]
+    pub const fn waker(&self) -> &Waker {
+        &self.waker
+    }
+
     /// The host drew; what it drew next changes at `next`. Whether it
     /// must draw every frame (it moves, or there is no timer to wake it).
     pub fn drawn(&self, next: crate::anim::Next) -> bool {

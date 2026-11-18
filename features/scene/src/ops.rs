@@ -25,7 +25,7 @@ use std::sync::Arc;
 use anyrender::recording::RenderCommand;
 use peniko::kurbo::{Affine, Rect};
 
-use crate::anim::{self, Access, Name, Space, Values};
+use crate::anim::{self, Name, Space, Values};
 use crate::bytes::{Reader, Writer};
 use crate::fragment::{Encoder, decode};
 use crate::layers::{Key, Layer, Layers};
@@ -293,7 +293,6 @@ pub struct Receiver {
     fragment_bytes: usize,
     layers: Layers,
     values: Values,
-    access: Access,
 }
 
 impl Receiver {
@@ -302,12 +301,11 @@ impl Receiver {
         Self::default()
     }
 
-    /// Reading the values `access` lets its pane read: an animation bound
-    /// to any other fails the view.
-    #[must_use]
-    pub const fn with_access(mut self, access: Access) -> Self {
-        self.access = access;
-        self
+    /// Reading the engine's values from `table`: its extension was
+    /// granted them (`None`: not, and an animation bound to one reads
+    /// nothing).
+    pub fn grant(&mut self, table: Option<Arc<crate::engine::EngineTable>>) {
+        self.values.set_engine(table);
     }
 
     /// The pane's named values, as its view last wrote them.
@@ -425,7 +423,7 @@ impl Receiver {
             CLEAR => self.layers.clear(),
             ANIMATE => {
                 let key = r.u64()?;
-                let animations = anim::read(r, self.access)?;
+                let animations = anim::read(r)?;
                 let had = self.layers.get(key).map_or(0, Layer::animation_count);
                 let total = self
                     .layers

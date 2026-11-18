@@ -715,6 +715,88 @@ fn a_seek_wakes_the_window_a_resting_process_view_is_in() {
     assert!(animating(&mut app));
 }
 
+/// The meter's height, as a fraction of its track: its fill's scale.
+fn meter_scale(commands: &[RenderCommand]) -> Option<f64> {
+    use architect_sandbox_sketch::METER_COLOR;
+    commands.iter().find_map(|c| match c {
+        RenderCommand::Fill(f) if matches!(&f.brush, anyrender::Paint::Solid(c) if *c == METER_COLOR) => {
+            Some(f.transform.as_coeffs()[3])
+        }
+        _ => None,
+    })
+}
+
+#[test]
+fn a_meter_moves_at_the_engines_rate_with_nothing_from_the_view() {
+    use architect_sandbox_sketch::meter_value;
+    use architect_scene::engine::EngineTable;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let (mut app, window) = mixer();
+    // The engine's table, granted to the pane (`capabilities.ui =
+    // ["engine"]`): what the app does when an engine publishes one.
+    let (table, writer) = EngineTable::new([meter_value().unwrap()]).unwrap();
+    let slot = table.slot(&meter_value().unwrap()).unwrap();
+    view_mut(&mut app.doc.inner.borrow_mut())
+        .unwrap()
+        .set_engine(Some(Arc::clone(&table)));
+    assert_eq!(
+        meter_scale(&app.window_scene()),
+        Some(1.0),
+        "unwritten: as sent"
+    );
+    assert!(!animating(&mut app), "nothing moves: it rests");
+    let once = bytes(&app.doc.inner.borrow());
+    // An audio callback writing the meter every 2.67 ms for half a
+    // second, while the window draws.
+    let done = Arc::new(AtomicBool::new(false));
+    let engine = {
+        let done = Arc::clone(&done);
+        std::thread::spawn(move || {
+            for i in 0..188_u32 {
+                writer.write(slot, (f64::from(i) * 0.07).sin().abs());
+                std::thread::sleep(Duration::from_micros(2_667));
+            }
+            done.store(true, Ordering::Release);
+            writer
+        })
+    };
+    let mut frames = 0_u32;
+    let mut levels = std::collections::BTreeSet::new();
+    while !done.load(Ordering::Acquire) {
+        app.pump("a frame", |_| true);
+        let level = meter_scale(&app.window_scene()).unwrap();
+        levels.insert((level * 1e6) as i64);
+        frames += 1;
+    }
+    let writer = engine.join().unwrap();
+    let metering = bytes(&app.doc.inner.borrow()) - once;
+    assert_eq!(metering, 0, "metering sent {metering} bytes");
+    assert!(
+        levels.len() > 20,
+        "{} levels in {frames} frames",
+        levels.len()
+    );
+    println!(
+        "meter: {frames} frames over 188 engine writes, {} levels drawn, {metering} bytes from the view",
+        levels.len()
+    );
+    // The engine stopped: once the last level is drawn, the window rests.
+    let _ = app.window_scene();
+    assert!(
+        !animating(&mut app),
+        "a still meter kept the window drawing"
+    );
+    // It writes again: the window that rested is woken.
+    let before = window.0.load(std::sync::atomic::Ordering::Relaxed);
+    writer.write(slot, 0.5);
+    let began = Instant::now();
+    while window.0.load(std::sync::atomic::Ordering::Relaxed) == before {
+        assert!(began.elapsed() < Duration::from_secs(5), "never woken");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!((meter_scale(&app.window_scene()).unwrap() - 0.5).abs() < 1e-9);
+}
+
 fn p(samples: &mut [Duration], q: usize) -> f64 {
     samples.sort();
     samples[(samples.len() - 1) * q / 100].as_secs_f64() * 1e3

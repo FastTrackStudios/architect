@@ -308,18 +308,11 @@ fn a_view_fails_the_same_way_linked_in_or_across_the_wire() {
             Linear::new(1.0, 0.0).wrap(every),
         )])
     };
-    let bound_to = |name: &str| {
-        Layer::new(Arc::clone(&content)).animated(vec![Animation::linear(
-            Property::X,
-            Input::Value(Name::new(name).unwrap()),
-            Linear::new(1.0, 0.0),
-        )])
-    };
     let cases: Vec<(Vec<(LayerKey, Layer)>, Vec<(Name, f64)>)> = vec![
         // A wrap of nothing.
         (vec![(1, wrapped(0.0))], vec![]),
-        // Bound to the engine's value, ungranted.
-        (vec![(1, bound_to("engine.peak"))], vec![]),
+        // A wrap below nothing.
+        (vec![(1, wrapped(-1.0))], vec![]),
         // Writing the host's value.
         (vec![], vec![(Name::new("host.fader").unwrap(), 1.0)]),
     ];

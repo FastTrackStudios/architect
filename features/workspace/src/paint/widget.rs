@@ -57,6 +57,9 @@ impl PaintWidget {
     fn with_wake(painter: Painter, wake: PaintWake) -> Self {
         let redraw = wake.clone();
         let alarm = architect_scene::wake::Alarm::new(Arc::new(move || redraw.redraw()));
+        if let Some(table) = painter.engine() {
+            architect_scene::engine::watch(table, alarm.waker());
+        }
         Self {
             painter,
             wake,

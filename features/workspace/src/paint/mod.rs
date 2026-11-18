@@ -45,7 +45,7 @@ use std::time::Duration;
 pub use anyrender::{PaintScene, Scene};
 pub use architect_scene::Layer;
 pub use architect_scene::anim::{self, Clocks, Readings};
-use architect_scene::anim::{Access, Name, Space, Values};
+use architect_scene::anim::{Name, Space, Values};
 pub use architect_scene::layers::Key as LayerKey;
 pub use architect_scene::region::{self, Cursor, RegionEvent};
 pub use architect_scene::wake;
@@ -285,13 +285,13 @@ pub struct Painter {
     /// What a view of layers last returned, drawn again at each frame's
     /// clocks without it.
     held: Option<Held>,
-    /// What its view may read ([`Access`]).
-    access: Access,
     /// Why its view failed: it is drawn as nothing and asked nothing
     /// again, as a view in a process that sent what its host refused.
     failed: Option<architect_scene::Error>,
     /// A cursor its regions asked for since the host last looked.
     cursor: Option<Cursor>,
+    /// The engine's values its layers read, when granted them.
+    engine: Option<Arc<architect_scene::engine::EngineTable>>,
 }
 
 /// A view's layers and values as its painter keeps them.
@@ -318,7 +318,6 @@ impl Held {
         &mut self,
         layers: Vec<(LayerKey, Layer)>,
         values: Vec<(Name, f64)>,
-        access: Access,
     ) -> Result<(), architect_scene::Error> {
         use architect_scene::Error;
         if layers.len() > architect_scene::ops::MAX_LAYERS {
@@ -327,7 +326,7 @@ impl Held {
         let mut animations = 0_usize;
         for (_, layer) in &layers {
             if let Some(a) = layer.animations.as_deref() {
-                anim::check(a, access)?;
+                anim::check(a)?;
                 animations = animations.saturating_add(a.len());
             }
         }
@@ -381,10 +380,28 @@ impl Painter {
             dirty: true,
             clocks: Clocks::app().with_wall(move || frames.now().as_secs_f64()),
             held: None,
-            access: Access::default(),
             failed: None,
             cursor: None,
+            engine: None,
         }
+    }
+
+    /// Its layers read the engine's values from `table` (its extension
+    /// was granted `engine`): drawn at the level the engine last wrote,
+    /// every frame while it writes.
+    #[must_use]
+    pub fn with_engine(mut self, table: Arc<architect_scene::engine::EngineTable>) -> Self {
+        if let Some(held) = self.held.as_mut() {
+            held.values.set_engine(Some(Arc::clone(&table)));
+        }
+        self.engine = Some(table);
+        self
+    }
+
+    /// The engine's table its layers read, if granted one.
+    #[must_use]
+    pub const fn engine(&self) -> Option<&Arc<architect_scene::engine::EngineTable>> {
+        self.engine.as_ref()
     }
 
     /// A pointer event, handled by its layers' regions first: whether it
@@ -421,14 +438,6 @@ impl Painter {
     /// ([`Cursor::Default`]: the pane's own).
     pub const fn take_cursor(&mut self) -> Option<Cursor> {
         self.cursor.take()
-    }
-
-    /// Its view may read what `access` lets it (the engine's values when
-    /// its extension was granted them).
-    #[must_use]
-    pub const fn with_access(mut self, access: Access) -> Self {
-        self.access = access;
-        self
     }
 
     /// Why its view failed, if it did: what it returned broke a rule a
@@ -532,10 +541,10 @@ impl Painter {
             return false;
         }
         self.view.animating(&self.ctx)
-            || self
-                .held
-                .as_ref()
-                .is_some_and(|h| h.layers.moving(&self.clocks.read()))
+            || self.held.as_ref().is_some_and(|h| {
+                h.layers.moving(&self.clocks.read())
+                    || (h.values.engine().is_some() && h.values.revision() != h.drawn_values)
+            })
     }
 
     /// Whether the next frame asks the view, or draws what it holds.
@@ -584,8 +593,13 @@ impl Painter {
         let held = match asked {
             Some(Some(layers)) => {
                 let values = self.view.values(&self.ctx);
-                let held = self.held.get_or_insert_with(Held::default);
-                if let Err(why) = held.keep(layers, values, self.access) {
+                let engine = self.engine.clone();
+                let held = self.held.get_or_insert_with(|| Held {
+                    values: engine
+                        .map_or_else(Values::default, |t| Values::default().with_engine(t)),
+                    ..Held::default()
+                });
+                if let Err(why) = held.keep(layers, values) {
                     self.failed = Some(why);
                     self.held = None;
                     self.dirty = false;

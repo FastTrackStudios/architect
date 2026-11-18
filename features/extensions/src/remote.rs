@@ -169,6 +169,8 @@ pub struct RemoteDocument {
     alarm: Option<Arc<architect_scene::wake::Alarm>>,
     /// The painted element the pointer is over or holds a region of.
     pointed: Option<NodeId>,
+    /// The engine's values its scenes read, when it was granted them.
+    engine: Option<Arc<architect_scene::engine::EngineTable>>,
 }
 
 impl std::fmt::Debug for RemoteDocument {
@@ -239,6 +241,29 @@ impl RemoteDocument {
             clocks: architect_scene::Clocks::app(),
             alarm: None,
             pointed: None,
+            engine: None,
+        }
+    }
+
+    /// Its scenes read the engine's values from `table` (its extension
+    /// was granted `engine`): an animation bound to one is drawn at the
+    /// level the engine last wrote, and its window wakes when the engine
+    /// writes after a rest.
+    pub fn set_engine(&mut self, table: Option<Arc<architect_scene::engine::EngineTable>>) {
+        for painted in self.painted.values() {
+            let mut p = painted.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some(layers) = p.layers.as_mut() {
+                layers.grant(table.clone());
+            }
+            p.dirty = true;
+        }
+        self.engine = table;
+        self.watch_engine();
+    }
+
+    fn watch_engine(&self) {
+        if let (Some(table), Some(alarm)) = (&self.engine, &self.alarm) {
+            architect_scene::engine::watch(table, alarm.waker());
         }
     }
 
@@ -569,6 +594,7 @@ impl RemoteDocument {
             .scene_bytes
             .saturating_add(u64::try_from(value.len()).unwrap_or(u64::MAX));
         let batch = crate::scene::layers_batch(value)?;
+        let engine = self.engine.clone();
         if !self.painted.contains_key(&node) {
             // The widget, as a scene's.
             self.paint_attr(node, crate::scene::TRANSFORM_ATTR, None)?;
@@ -579,7 +605,11 @@ impl RemoteDocument {
         let mut p = painted.lock().unwrap_or_else(PoisonError::into_inner);
         let applied = p
             .layers
-            .get_or_insert_with(architect_scene::ops::Receiver::new)
+            .get_or_insert_with(|| {
+                let mut receiver = architect_scene::ops::Receiver::new();
+                receiver.grant(engine.clone());
+                receiver
+            })
             .apply(&batch)
             .map_err(|e| format!("its layers: {e}"));
         p.dirty = true;
@@ -680,6 +710,7 @@ impl RemoteDocument {
             painted.lock().unwrap_or_else(PoisonError::into_inner).alarm = Some(Arc::clone(&alarm));
         }
         self.alarm = Some(alarm);
+        self.watch_engine();
         self.doc.set_shell_provider(Arc::new(shell));
     }
 
@@ -1644,6 +1675,7 @@ async fn follow(
     mut timing: Timing,
     fit: Option<Fit>,
     overlay: Option<crate::scene::OverlayLayer>,
+    engine: bool,
     mut slots: Signal<Vec<crate::embedded::Slot>>,
 ) {
     loop {
@@ -1730,6 +1762,11 @@ async fn follow(
         let shell = with_doc(&node, |doc, at| {
             let mut remote = RemoteDocument::new(events);
             remote.set_overlay(overlay.clone());
+            // Granted the engine's values: its scenes read the table its
+            // engine published (`architect_scene::engine`).
+            if engine {
+                remote.set_engine(architect_scene::engine::published(&extension));
+            }
             if let Some(css) = theme {
                 remote.set_theme_css(&css.peek());
             }
@@ -1968,13 +2005,15 @@ async fn next_frame(
 ///
 /// Its scenes (`crate::scene`) are clipped to their boxes unless
 /// `overlay`: the extension was granted `overlay` (`capabilities.ui`) and
-/// may draw over the whole app.
+/// may draw over the whole app. `engine`: it was granted `engine`, and
+/// its scenes read the values its engine writes lock-free.
 #[component]
 pub fn RemoteView(
     processes: Processes,
     extension: String,
     view: String,
     #[props(default)] overlay: bool,
+    #[props(default)] engine: bool,
 ) -> Element {
     // Keyed by what it shows (a one-item list: a key on a lone node does
     // not remount it): a pane that goes on to another process view (one
@@ -1983,7 +2022,7 @@ pub fn RemoteView(
     let key = format!("{extension}/{view}");
     rsx! {
         for key in [key] {
-            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: None, max_height: None, overlay }
+            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: None, max_height: None, overlay, engine }
         }
     }
 }
@@ -2003,7 +2042,7 @@ pub fn RemoteEmbed(
     let key = format!("{extension}/{view}");
     rsx! {
         for key in [key] {
-            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: Some(input), max_height: Some(max_height), overlay: false }
+            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: Some(input), max_height: Some(max_height), overlay: false, engine: false }
         }
     }
 }
@@ -2034,7 +2073,7 @@ pub fn RemoteOverlay(
     let key = format!("{extension}/{view}");
     rsx! {
         for key in [key] {
-            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: Some(signal), max_height: None, overlay: false }
+            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: Some(signal), max_height: None, overlay: false, engine: false }
         }
     }
 }
@@ -2062,7 +2101,7 @@ fn HeldView(processes: Processes, slot: crate::embedded::Slot) -> Element {
     let key = format!("{extension}/{view}");
     rsx! {
         for key in [key] {
-            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: Some(signal), max_height: None, overlay: false }
+            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: Some(signal), max_height: None, overlay: false, engine: false }
         }
     }
 }
@@ -2120,6 +2159,7 @@ fn Mount(
     input: Option<Signal<crate::contrib::EmbedInput>>,
     max_height: Option<u32>,
     overlay: bool,
+    engine: bool,
 ) -> Element {
     let shown = use_signal(|| Shown::Waiting("Starting…".to_owned()));
     let busy = use_signal(|| false);
@@ -2214,6 +2254,7 @@ fn Mount(
                     },
                     fit.clone(),
                     layer.clone(),
+                    engine,
                     slots,
                 ));
                 if fit.as_ref().is_some_and(|f| f.sized) {

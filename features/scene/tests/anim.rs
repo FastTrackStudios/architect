@@ -15,8 +15,8 @@ use anyrender::recording::RenderCommand;
 use anyrender::{PaintScene as _, Scene};
 use architect_scene::Error;
 use architect_scene::anim::{
-    Access, Animation, Clock, Input, Linear, MAX_ANIMATIONS, Map, Name, Property, Reading,
-    Readings, Space, Steps, Values, place,
+    Animation, Clock, Input, Linear, MAX_ANIMATIONS, Map, Name, Property, Reading, Readings, Space,
+    Steps, Values, place,
 };
 use architect_scene::layers::{Layer, Layers};
 use architect_scene::ops::{Receiver, Sender};
@@ -368,8 +368,8 @@ fn a_malformed_animation_fails_the_view() {
 }
 
 #[test]
-fn a_value_a_pane_may_not_read_or_write_fails_the_view() {
-    // Bound to the engine's value, ungranted.
+fn a_value_a_pane_may_not_write_fails_the_view_and_one_it_may_not_read_reads_nothing() {
+    // Bound to the engine's value, ungranted: taken, and drawn as sent.
     let engine = Name::new("engine.track.1.peak").unwrap();
     let mut sender = Sender::new();
     let bound = Layer::new(square()).animated(vec![Animation::linear(
@@ -378,13 +378,9 @@ fn a_value_a_pane_may_not_read_or_write_fails_the_view() {
         Linear::new(1.0, 0.0),
     )]);
     let batch = sender.frame(&[(1, bound)]).unwrap();
-    assert!(matches!(
-        Receiver::new().apply(&batch),
-        Err(Error::Denied("read", _))
-    ));
-    // Granted, it reads it.
-    let mut granted = Receiver::new().with_access(Access { engine: true });
-    granted.apply(&batch).unwrap();
+    let mut ungranted = Receiver::new();
+    ungranted.apply(&batch).unwrap();
+    assert_eq!(composed(&ungranted, &Readings::NONE), [0.0]);
     // A view writing another space's value.
     let host = Name::new("host.fader.1").unwrap();
     let batch = Sender::new()

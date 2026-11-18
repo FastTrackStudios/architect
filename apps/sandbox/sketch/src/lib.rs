@@ -379,6 +379,8 @@ pub const PLAYHEAD: LayerKey = 2;
 pub const TRACK: LayerKey = 3;
 pub const KNOB: LayerKey = 4;
 pub const BOX: LayerKey = 5;
+/// Its meter, drawn from the engine's value.
+pub const METER: LayerKey = 6;
 
 /// The fader's region, and the box's.
 pub const FADER: u64 = 1;
@@ -395,6 +397,8 @@ pub const BOX_AT: (f64, f64) = (48.0, 8.0);
 pub const KNOB_COLOR: Color = Color::from_rgb8(0xf2, 0xc1, 0x2e);
 /// The box's.
 pub const BOX_COLOR: Color = Color::from_rgb8(0x3c, 0xb3, 0x71);
+/// The meter's.
+pub const METER_COLOR: Color = Color::from_rgb8(0x4c, 0xd9, 0x64);
 
 /// The values the host keeps for them: the pointer writes these.
 #[must_use]
@@ -408,6 +412,13 @@ pub fn box_values() -> Option<(Name, Name)> {
         Name::new("host.timeline.box.x").ok()?,
         Name::new("host.timeline.box.y").ok()?,
     ))
+}
+
+/// What the engine writes for the meter, lock-free
+/// (`architect_scene::engine`): read only with the `engine` capability.
+#[must_use]
+pub fn meter_value() -> Option<Name> {
+    Name::new("engine.timeline.meter").ok()
 }
 
 /// What the view keeps of its fader once it is let go: its own value.
@@ -441,6 +452,7 @@ pub struct Timeline {
     track: std::sync::Arc<Vec<RenderCommand>>,
     knob: std::sync::Arc<Vec<RenderCommand>>,
     drag_box: std::sync::Arc<Vec<RenderCommand>>,
+    meter: std::sync::Arc<Vec<RenderCommand>>,
     camera: Camera,
     panning: Option<(f64, f64)>,
     /// The fader's level as the view last heard it, and once let go.
@@ -467,6 +479,8 @@ impl Default for Timeline {
             ),
             knob: filled(&Rect::new(0.0, -4.0, 24.0, 4.0), KNOB_COLOR),
             drag_box: filled(&Rect::new(0.0, 0.0, 40.0, 24.0), BOX_COLOR),
+            // Its bottom at the layer's origin: scaled down toward it.
+            meter: filled(&Rect::new(0.0, -TRACK_HEIGHT, 6.0, 0.0), METER_COLOR),
             camera: Camera::default(),
             panning: None,
             heard: 0.75,
@@ -590,6 +604,20 @@ impl PaintView for Timeline {
                         Property::Y,
                         Input::Value(fader_value()?),
                         Linear::new(-TRACK_HEIGHT, TRACK_HEIGHT),
+                    )]),
+            ),
+            (
+                METER,
+                Layer::new(std::sync::Arc::clone(&self.meter))
+                    .at(Affine::translate((
+                        TRACK_AT.0 + 28.0,
+                        TRACK_AT.1 + TRACK_HEIGHT,
+                    )))
+                    .z(2)
+                    .animated(vec![Animation::linear(
+                        Property::ScaleY,
+                        Input::Value(meter_value()?),
+                        Linear::new(1.0, 0.0).clamp(0.0, 1.0),
                     )]),
             ),
             (
