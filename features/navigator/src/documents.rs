@@ -213,22 +213,19 @@ impl VaultDocuments {
         };
         let Some(step) = taken else { return Ok(None) };
         let (base, ours) = if undo {
-            (&step.after, &step.before)
+            (step.after.clone(), step.before.clone())
         } else {
-            (&step.before, &step.after)
+            (step.before.clone(), step.after.clone())
         };
-        let mut now = match self.vault_text(path) {
-            Some(now) => now,
-            None => {
-                self.journal.put_back(path, step, undo);
-                return Err(not_found(path));
-            }
+        let Some(mut now) = self.vault_text(path) else {
+            self.journal.put_back(path, step, undo);
+            return Err(not_found(path));
         };
         for _ in 0..TRIES {
-            let text = if now == *base {
+            let text = if now == base {
                 ours.clone()
             } else {
-                vault_doc::merge3(base, ours, &now)
+                vault_doc::merge3(&base, &ours, &now)
             };
             let saved = quietly(|| self.source.save_if(path, &now, &text));
             match saved {
@@ -250,13 +247,11 @@ impl VaultDocuments {
                     return Err(DocError::Failed(e));
                 }
             }
-            match self.vault_text(path) {
-                Some(t) => now = t,
-                None => {
-                    self.journal.put_back(path, step, undo);
-                    return Err(not_found(path));
-                }
-            }
+            let Some(t) = self.vault_text(path) else {
+                self.journal.put_back(path, step, undo);
+                return Err(not_found(path));
+            };
+            now = t;
         }
         self.journal.put_back(path, step, undo);
         Err(DocError::Failed(format!(
