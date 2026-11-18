@@ -381,6 +381,73 @@ fn a_program_that_never_says_hello_does_not_load() {
     assert_eq!(error, LoadError::Start("exited with code 0".to_owned()));
 }
 
+#[test]
+fn a_press_a_region_takes_still_focuses_the_view_it_landed_on() {
+    let (events, mut heard) = futures::channel::mpsc::unbounded();
+    let mut view = RemoteDocument::new(events);
+    // `<input id="field">` and `<div id="pane" tabindex="0"><span id="in">`:
+    // the field focused first (the syntax field a view had open), then a
+    // press lands on the span inside the pane.
+    let element = |tag: &str, id: u64, html_id: &str| {
+        vec![
+            Edit::CreateElement {
+                tag: tag.to_owned(),
+                namespace: None,
+            },
+            Edit::SetId { id },
+            Edit::SetAttribute {
+                name: "id".to_owned(),
+                namespace: None,
+                value: Value::Text(html_id.to_owned()),
+            },
+        ]
+    };
+    let mut edits = vec![Edit::PushId { id: 0 }];
+    edits.extend(element("input", 1, "field"));
+    edits.push(Edit::AppendChildren { m: 1 });
+    edits.extend(element("div", 2, "pane"));
+    edits.push(Edit::SetAttribute {
+        name: "tabindex".to_owned(),
+        namespace: None,
+        value: Value::Text("0".to_owned()),
+    });
+    edits.push(Edit::Listen {
+        name: "focus".to_owned(),
+    });
+    edits.extend(element("span", 3, "in"));
+    edits.push(Edit::AppendChildren { m: 1 });
+    edits.push(Edit::AppendChildren { m: 1 });
+    edits.push(Edit::Pop);
+    view.apply(Frame::Edits { edits }).unwrap();
+    let node = |id: &str| {
+        view.document()
+            .query_selector(&format!("#{id}"))
+            .unwrap()
+            .unwrap()
+    };
+    let (field, pane, inner) = (node("field"), node("pane"), node("in"));
+
+    assert!(view.focus_pressed(field));
+    assert_eq!(view.document().get_focussed_node_id(), Some(field));
+    while heard.try_recv().is_ok() {}
+
+    assert!(view.focus_pressed(inner), "the press moves the focus");
+    assert_eq!(
+        view.document().get_focussed_node_id(),
+        Some(pane),
+        "to the pane the press landed in, not the span"
+    );
+    let mut names = Vec::new();
+    while let Ok(e) = heard.try_recv() {
+        names.push((e.element, e.name));
+    }
+    assert!(
+        names.contains(&(2, "focus".to_owned())),
+        "the pane hears its focus: {names:?}"
+    );
+    assert!(!view.focus_pressed(inner), "pressed again: already there");
+}
+
 /// A frame that builds `<div id="a">x</div>` under the root, as element 1.
 fn div() -> Frame {
     Frame::Edits {
