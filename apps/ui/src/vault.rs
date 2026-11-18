@@ -676,7 +676,7 @@ fn screensets() -> Screensets {
         Screenset::new("Project")
             .slot(5)
             .layout(FormClass::Desk, project_workspace()),
-        #[cfg(all(feature = "process-views", target_os = "linux"))]
+        #[cfg(all(feature = "process-views", any(target_os = "linux", target_os = "macos")))]
         Screenset::new("Process views")
             .slot(6)
             .layout(FormClass::Desk, crate::process_views::workspace()),
