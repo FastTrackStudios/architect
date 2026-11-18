@@ -19702,6 +19702,7 @@ version = "0.1.0"
 dependencies = [
  "architect-telemetry",
  "architect-workspace-hack",
+ "async-trait",
  "crdt",
  "sha2 0.10.9",
  "tempfile",

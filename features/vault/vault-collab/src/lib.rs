@@ -60,6 +60,11 @@
 //! vault's write guard for the file. [`VaultCollab::document_of`] lists one
 //! by its path, [`VaultCollab::register_document`] names one another node
 //! holds, made here (empty, of that lineage) when it is first opened.
+//! A file deleted outside the document ([`VaultCollab::notice_deletes`])
+//! tombstones it as a note's delete does, and the tombstone removes the
+//! file on every other holder and keeps it from being made again; a copy
+//! of the file (the same id) is not a second document. `documents.rs` has
+//! the whole story, renames included.
 //!
 //! ## Locking & lifetime rules
 //!
@@ -98,6 +103,8 @@
     clippy::too_long_first_doc_paragraph
 )]
 
+mod documents;
+
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -110,10 +117,13 @@ use std::time::Duration;
 // change
 use architect_telemetry::wide;
 use crdt::codec::TextOp;
-use crdt::file::{DiskStorage, DocFile, MAIN};
+use crdt::file::DocFile;
+#[cfg(test)]
+use crdt::file::{DiskStorage, MAIN};
 use crdt::registry::DocRegistry;
 use crdt::sync::{DocSync, SyncDown, SyncError};
 use crdt::{CrdtDoc, DocKind, FilePersistence, PersistError, SharedDocKinds, WeakCrdtDoc};
+use documents::document_route;
 use sha2::{Digest, Sha256};
 use tokio::sync::broadcast;
 use uuid::Uuid;
@@ -174,10 +184,13 @@ struct Shared {
     /// The kinds whose files are documents of their own
     /// ([`VaultCollab::kinds`]), changed while it runs.
     kinds: SharedDocKinds,
-    /// Each such document's file: doc id → `(vault_id, path)`, recorded
-    /// as the file is listed ([`VaultCollab::document_of`]) or named by
-    /// another node ([`VaultCollab::register_document`]).
-    documents: Mutex<HashMap<Uuid, (String, String)>>,
+    /// Each such document's file: doc id → where it is, recorded as the
+    /// file is listed ([`VaultCollab::document_of`]) or named by another
+    /// node ([`VaultCollab::register_document`]).
+    documents: Mutex<documents::Routes>,
+    /// Second files of one document (copies) already said, so each is
+    /// said once.
+    copies: Mutex<HashSet<(Uuid, String, String)>>,
     /// Tests only: each open document's write-behind progress, and a pause
     /// in [`apply_delete`] between fetching the document and locking it.
     #[cfg(test)]
@@ -252,6 +265,7 @@ impl VaultCollab {
             plain: std::sync::RwLock::new(None),
             kinds,
             documents: Mutex::new(HashMap::new()),
+            copies: Mutex::new(HashSet::new()),
             #[cfg(test)]
             probes: test_probes::Probes::default(),
         });
@@ -331,8 +345,16 @@ impl VaultCollab {
         if header.kind != kind.id {
             return None;
         }
-        record_document(&self.shared, header.id, vault_id, path);
-        Some(header.id)
+        documents::list(&self.shared, header.id, vault_id, path).then_some(header.id)
+    }
+
+    /// After a listing ([`Self::document_of`] for every file there is):
+    /// each document of a kind whose listed file is gone was deleted
+    /// outside the document, and is tombstoned so the delete travels to
+    /// every other holder (module docs, "Documents of a kind"). A file
+    /// renamed was listed at its new path first, so it is not one.
+    pub fn notice_deletes(&self) {
+        documents::notice_deletes(&self.shared, &self.registry);
     }
 
     /// Records that the document `doc_id` (another node holds it) is the
@@ -362,7 +384,7 @@ impl VaultCollab {
                 return Err(SyncError::UnknownDoc);
             }
         }
-        record_document(&self.shared, doc_id, vault_id, path);
+        documents::register(&self.shared, doc_id, vault_id, path);
         Ok(())
     }
 
@@ -465,64 +487,6 @@ fn document_path(backend: &Backend, vault_id: &str, path: &str) -> Option<PathBu
     Some(root.join(path))
 }
 
-fn record_document(shared: &Shared, doc_id: Uuid, vault_id: &str, path: &str) {
-    shared
-        .documents
-        .lock()
-        .expect("documents lock poisoned")
-        .insert(doc_id, (vault_id.to_owned(), path.to_owned()));
-}
-
-/// The vault file the document `doc_id` of a kind is, while its kind is
-/// registered.
-fn document_route(shared: &Shared, doc_id: Uuid) -> Option<(String, String)> {
-    let route = shared
-        .documents
-        .lock()
-        .expect("documents lock poisoned")
-        .get(&doc_id)
-        .cloned()?;
-    shared.kinds.for_path(&route.1).is_some().then_some(route)
-}
-
-/// Opens the document of a kind kept in the vault file `path`: the file
-/// itself is its storage (its `main` branch), made empty for `doc_id`
-/// when it is not there yet.
-async fn open_document(
-    shared: &Shared,
-    doc_id: Uuid,
-    vault_id: &str,
-    path: &str,
-) -> Result<CrdtDoc, PersistError> {
-    let backend = |e: crdt::file::FileError| PersistError::Backend(format!("{path}: {e}"));
-    let kind = shared
-        .kinds
-        .for_path(path)
-        .ok_or_else(|| PersistError::Backend(format!("{path}: no kind registered for it")))?;
-    let abs = document_path(&shared.backend, vault_id, path)
-        .ok_or_else(|| PersistError::Backend(format!("{path}: not a file of the vault")))?;
-    let file = if abs.exists() {
-        let file = DocFile::open(DiskStorage::open(&abs).map_err(backend)?, &kind)
-            .await
-            .map_err(backend)?;
-        if file.id().await != Some(doc_id) {
-            return Err(PersistError::Backend(format!(
-                "{path} is another document than {doc_id}"
-            )));
-        }
-        file
-    } else {
-        if let Some(dir) = abs.parent() {
-            std::fs::create_dir_all(dir)
-                .map_err(|e| PersistError::Backend(format!("{path}: {e}")))?;
-        }
-        DocFile::adopt(DiskStorage::open(&abs).map_err(backend)?, &kind, doc_id)
-            .await
-            .map_err(backend)?
-    };
-    CrdtDoc::open(doc_id, file.persistence(MAIN)).await
-}
-
 fn is_plain(shared: &Shared, doc_id: Uuid) -> bool {
     shared
         .plain
@@ -542,7 +506,7 @@ async fn open_doc(
 ) -> Result<CrdtDoc, PersistError> {
     if shared.backend.collab_route(doc_id).is_none() {
         if let Some((vault_id, path)) = document_route(shared, doc_id) {
-            return open_document(shared, doc_id, &vault_id, &path).await;
+            return documents::open_document(shared, doc_id, &vault_id, &path).await;
         }
     }
     if shared.backend.collab_route(doc_id).is_none() && is_plain(shared, doc_id) {
@@ -1424,6 +1388,187 @@ mod tests {
 
         assert!(collab.kinds().unregister("test.session"));
         assert_eq!(collab.document_of("v1", "Songs/a.session"), None);
+    }
+
+    /// A `.session` document made at `vault/<path>` holding `text`.
+    async fn make_session(root: &std::path::Path, path: &str, text: &str) -> Uuid {
+        let at = root.join(path);
+        if let Some(dir) = at.parent() {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let file = DocFile::create(DiskStorage::open(&at).unwrap(), &session_kind())
+            .await
+            .unwrap();
+        let mut main = file.open_branch(MAIN).await.unwrap();
+        main.transact("Type", |doc| {
+            doc.get_text("body").insert(0, text).unwrap();
+        })
+        .await
+        .unwrap();
+        file.id().await.unwrap()
+    }
+
+    fn kinded(tmp: &tempfile::TempDir) -> VaultCollab {
+        let backend = Backend::single("v1", tmp.path().join("vault")).unwrap();
+        let collab = VaultCollab::with_debounce(backend, tmp.path().join("crdt"), DEBOUNCE);
+        collab.kinds().register(session_kind());
+        collab
+    }
+
+    /// A document of a kind whose file is deleted outside it is tombstoned
+    /// (the delete is in the document, to travel with it), and from then
+    /// on neither a listing nor another node naming it makes its file
+    /// again — not even after a restart.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_kinded_document_deleted_is_tombstoned_and_not_made_again() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("vault");
+        let collab = kinded(&tmp);
+        let id = make_session(&root, "Songs/a.session", "made here").await;
+        assert_eq!(collab.document_of("v1", "Songs/a.session"), Some(id));
+        let doc = collab.registry().doc(id).await.unwrap();
+
+        std::fs::remove_file(root.join("Songs/a.session")).unwrap();
+        collab.notice_deletes();
+        eventually("the tombstone", async || vault_doc::is_deleted(doc.loro())).await;
+        assert!(documents::is_tombstoned(&collab.shared, id));
+        assert_eq!(doc.loro().get_text("body").to_string(), "made here");
+
+        // Listed again (nothing there) or named by a peer: not made again.
+        assert_eq!(collab.document_of("v1", "Songs/a.session"), None);
+        collab
+            .register_document("v1", "Songs/a.session", id)
+            .unwrap();
+        collab.registry().doc(id).await.unwrap();
+        tokio::time::sleep(DEBOUNCE * 3).await;
+        assert!(!root.join("Songs/a.session").exists(), "made again");
+
+        // A restart: the tombstone is kept, and still makes no file.
+        drop(doc);
+        let again = kinded(&tmp);
+        again
+            .register_document("v1", "Songs/a.session", id)
+            .unwrap();
+        let doc = again.registry().doc(id).await.unwrap();
+        assert!(vault_doc::is_deleted(doc.loro()), "the tombstone was lost");
+        assert_eq!(doc.loro().get_text("body").to_string(), "made here");
+        tokio::time::sleep(DEBOUNCE * 3).await;
+        assert!(!root.join("Songs/a.session").exists(), "made again");
+    }
+
+    /// A tombstone that arrives from another holder removes this holder's
+    /// file, and the document is not made again here either.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_kinded_documents_tombstone_from_a_peer_removes_its_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("vault");
+        let collab = kinded(&tmp);
+        let id = make_session(&root, "Songs/a.session", "made here").await;
+        assert_eq!(collab.document_of("v1", "Songs/a.session"), Some(id));
+        let doc = collab.registry().doc(id).await.unwrap();
+
+        // The peer's copy: the same history, then its delete.
+        let peer = crdt::loro::LoroDoc::new();
+        peer.import(
+            &doc.loro()
+                .export(crdt::loro::ExportMode::all_updates())
+                .unwrap(),
+        )
+        .unwrap();
+        vault_doc::set_deleted(&peer, true);
+        vault_doc::commit_as(&peer, "deleted: vault file");
+        let delete = peer
+            .export(crdt::loro::ExportMode::updates(&doc.loro().oplog_vv()))
+            .unwrap();
+        doc.apply_remote_durable(id, &delete).await.unwrap();
+
+        let at = root.join("Songs/a.session");
+        eventually("the file removed", async || !at.exists()).await;
+        assert!(documents::is_tombstoned(&collab.shared, id));
+        collab.notice_deletes();
+        assert_eq!(collab.document_of("v1", "Songs/a.session"), None);
+        collab
+            .register_document("v1", "Songs/a.session", id)
+            .unwrap();
+        tokio::time::sleep(DEBOUNCE * 3).await;
+        assert!(!at.exists(), "made again");
+    }
+
+    /// A document deleted while nobody had it open keeps no history here
+    /// to tombstone: the tombstone is set as soon as a peer's history
+    /// reaches it (after that history, so never a second lineage).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_closed_kinded_document_deleted_is_tombstoned_when_a_history_arrives() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("vault");
+        let collab = kinded(&tmp);
+        let id = make_session(&root, "Songs/a.session", "made here").await;
+        assert_eq!(collab.document_of("v1", "Songs/a.session"), Some(id));
+        let history = {
+            let bytes = std::fs::read(root.join("Songs/a.session")).unwrap();
+            let file = DocFile::from_bytes(bytes, &session_kind()).await.unwrap();
+            let main = file.open_branch(MAIN).await.unwrap();
+            main.loro()
+                .export(crdt::loro::ExportMode::all_updates())
+                .unwrap()
+        };
+
+        std::fs::remove_file(root.join("Songs/a.session")).unwrap();
+        collab.notice_deletes();
+        assert!(documents::is_tombstoned(&collab.shared, id));
+
+        let doc = collab.registry().doc(id).await.unwrap();
+        assert!(doc.loro().oplog_vv().is_empty());
+        doc.apply_remote_durable(id, &history).await.unwrap();
+        eventually("the tombstone", async || vault_doc::is_deleted(doc.loro())).await;
+        assert!(!root.join("Songs/a.session").exists(), "made again");
+    }
+
+    /// One document is one file: a copy (the same id at another path) is
+    /// not listed while the first is there, and a rename (the first gone,
+    /// the same id at a new path) moves the document rather than deleting
+    /// it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_copy_is_not_a_second_file_and_a_rename_is_no_delete() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("vault");
+        let collab = kinded(&tmp);
+        let id = make_session(&root, "Songs/a.session", "made here").await;
+        assert_eq!(collab.document_of("v1", "Songs/a.session"), Some(id));
+        std::fs::copy(
+            root.join("Songs/a.session"),
+            root.join("Songs/copy.session"),
+        )
+        .unwrap();
+        assert_eq!(collab.document_of("v1", "Songs/copy.session"), None);
+        assert_eq!(collab.document_of("v1", "Songs/a.session"), Some(id));
+        std::fs::remove_file(root.join("Songs/copy.session")).unwrap();
+
+        let doc = collab.registry().doc(id).await.unwrap();
+        std::fs::rename(root.join("Songs/a.session"), root.join("Songs/b.session")).unwrap();
+        assert_eq!(collab.document_of("v1", "Songs/b.session"), Some(id));
+        collab.notice_deletes();
+        // Another node still naming the old path makes no second file.
+        collab
+            .register_document("v1", "Songs/a.session", id)
+            .unwrap();
+
+        let body = doc.loro().get_text("body");
+        body.insert(body.len_unicode(), ", renamed").unwrap();
+        doc.loro().commit();
+        let at = root.join("Songs/b.session");
+        let mut text = String::new();
+        for _ in 0..200 {
+            text = file_text(&at).await;
+            if text == "made here, renamed" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert_eq!(text, "made here, renamed", "the edit follows the file");
+        assert!(!vault_doc::is_deleted(doc.loro()));
+        assert!(!documents::is_tombstoned(&collab.shared, id));
+        assert!(!root.join("Songs/a.session").exists());
     }
 
     #[tokio::test(flavor = "multi_thread")]
