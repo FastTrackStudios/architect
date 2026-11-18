@@ -168,6 +168,19 @@ One host per org, mounted on the org's lane behind the permissions gate
 (the [identity chapter](@/guide/identity.md)). Every refusal answers
 "unknown document", so a caller cannot tell forbidden from absent.
 
+A caller who may `read` a document but not `write` it **follows** it on
+the registry: its sync session brings the document and every later edit
+down, and the first update it sends up ends the session with
+`SyncError::Forbidden`, nothing of it applied. Its presence shows it
+everyone (a leader's transport included) and drops what it publishes, and
+`DocPresence::now` answers it as anyone. A reader's app runs
+`SyncedDoc::new(doc_id, doc).read_only()`, which never sends up. Without
+`DocPermissions`, `registry.with_authorizer(..)` says who may open (read)
+and `with_write_authorizer(..)` who may also write; the second defaults to
+the first (`a_reader_follows_live_and_cannot_write`,
+`a_readers_presence_reads_and_publishes_nothing` in
+`features/crdt/crdt/tests/registry.rs`).
+
 ### Lineage
 
 A document is created once, on one device, and adopted by the others. Two
@@ -197,8 +210,15 @@ architect_devices::serve(&endpoint, access.devices.clone(), move |remote| {
   Whoever holds it edits that one document until `shares.revoke(&link)`. The
   other side parses it, dials the endpoint, presents the key with
   `LinkKey::new(&link)` as middleware on a `DocSyncClient`, and runs
-  `SyncedDoc::new(link.doc_id, doc).run(&client)`. A link is a credential;
-  there are no read-only links yet.
+  `SyncedDoc::new(link.doc_id, doc).run(&client)`. A link is a credential.
+  `shares.share_with(&endpoint_id, doc_id, Access::Read)` makes a **read
+  link**: its guest follows the document live and writes nothing (an edit
+  it sends ends its session), so it joins with `SyncedDoc::read_only()`.
+  Its text carries `&access=read`, for display only: the node decides from
+  the key. Hand `access.admits` to the registry's `with_authorizer` and
+  `access.admits_write` to `with_write_authorizer`; `node_router` holds a
+  read link's guest to reading either way. Revoking cuts both kinds
+  (`a_read_link_follows_and_cannot_write`).
 - **The person's devices.** Run the account pass,
   `architect_devices::account::pass(&devices_client, &token, &this_device, &node, &access.devices)`
   (or `drive`, on every reconnect): it registers this device and lets the
