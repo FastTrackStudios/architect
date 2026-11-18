@@ -148,6 +148,10 @@ pub struct Running {
     pub drive: Option<architect_files::drive::Mounted>,
     tasks: Vec<JoinHandle<()>>,
     registry: crdt::DocRegistry,
+    /// Its vaults' documents, for [`Running::kind_documents`].
+    collab: vault_collab::VaultCollab,
+    /// Its vaults' ids.
+    vaults: Vec<String>,
     _watching: Option<vault_live::sync::WatcherHandle>,
     _self_lane: Arc<SelfLane>,
 }
@@ -179,6 +183,28 @@ impl Running {
     ) -> impl Future<Output = Option<crdt::CrdtDoc>> + Send + 'static {
         let registry = self.registry.clone();
         async move { registry.doc(doc_id).await.ok() }
+    }
+
+    /// Its vaults' documents of a kind, as the window's extensions reach
+    /// them (`Host::set_kind_documents`, `architect_extensions::live`): a
+    /// vault path ([`vault_path`]) names the document its file is, and an
+    /// extension's session attaches to the vaults' registry as the
+    /// extension, under the vault's write guard (not the node's lanes'
+    /// device check: the window is this device).
+    #[must_use]
+    pub fn kind_documents(&self) -> architect_extensions::live::RegistryDocuments {
+        let (collab, vaults) = (self.collab.clone(), self.vaults.clone());
+        architect_extensions::live::RegistryDocuments::new(
+            self.collab.registry().clone(),
+            move |path| {
+                let (vault, path) = vault_path(&vaults, path)?;
+                let doc_id = collab.document_of(vault, path)?;
+                Some(architect_extensions::live::KindDoc {
+                    doc_id,
+                    kind: collab.kind_of(path)?.id,
+                })
+            },
+        )
     }
 
     /// The body of note `path` in vault `vault`, as its live document
@@ -919,9 +945,29 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
         drive,
         tasks,
         registry,
+        collab,
+        vaults: config.vaults.keys().cloned().collect(),
         _watching: watching,
         _self_lane: self_lane,
     })
+}
+
+/// Which of `vaults` the extension's path `path` is in, and the path in
+/// it: with one vault, the path is in it (as the window's vault-relative
+/// paths are); with several, its first folder names the vault
+/// (`notes/Songs/a.session`).
+#[must_use]
+pub fn vault_path<'a>(vaults: &'a [String], path: &'a str) -> Option<(&'a str, &'a str)> {
+    match vaults {
+        [only] => Some((only.as_str(), path)),
+        _ => {
+            let (vault, rest) = path.split_once('/')?;
+            vaults
+                .iter()
+                .find(|v| *v == vault)
+                .map(|v| (v.as_str(), rest))
+        }
+    }
 }
 
 /// `architect-desktop serve [--config <file>]`: the node of `dist` until

@@ -146,6 +146,43 @@ fn contributions_made(contributions: &architect_extensions::contrib::Contributio
     }
 }
 
+/// The window's extension host, once it has one ([`on_host`]).
+static HOST: std::sync::OnceLock<Host> = std::sync::OnceLock::new();
+
+/// What waits for the window's extension host ([`on_host`]).
+type WaitingHost = Vec<Box<dyn FnOnce(&Host) + Send>>;
+static WAITING_HOST: Mutex<WaitingHost> = Mutex::new(Vec::new());
+
+/// Calls `f` with the window's extension host, once it exists: now when
+/// it does, else when the window makes it.
+///
+/// The app's node gives it its documents of a kind here
+/// (`Host::set_kind_documents`), so an extension edits the node's copy of
+/// a vault document of its kind (`architect_extensions::live`).
+pub fn on_host(f: impl FnOnce(&Host) + Send + 'static) {
+    let mut waiting = lock(&WAITING_HOST);
+    if let Some(host) = HOST.get() {
+        drop(waiting);
+        f(host);
+        return;
+    }
+    waiting.push(Box::new(f));
+}
+
+/// The window's extension host is made: what waited for it hears it.
+fn host_made(host: &Host) {
+    let waiting = {
+        let mut waiting = lock(&WAITING_HOST);
+        if HOST.set(host.clone()).is_err() {
+            return;
+        }
+        std::mem::take(&mut *waiting)
+    };
+    for f in waiting {
+        f(host);
+    }
+}
+
 /// The process extensions running, for the panes that show their views.
 pub fn processes() -> Processes {
     PROCESSES.clone()
@@ -933,6 +970,9 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         // What they contribute, to whoever waits for it: the app's node
         // keeps their `[[doc_kinds]]` as its documents' kinds.
         contributions_made(host.contributions());
+        // The host itself, to whoever waits for it: the app's node gives
+        // it the node's documents of a kind (live documents).
+        host_made(&host);
         let root = crate::app_dir_or_temp();
         // A person's toolbar files (`toolbars/*.toml`): theirs, and their
         // copies of the extensions', read again as they change.

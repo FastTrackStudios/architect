@@ -291,9 +291,17 @@ the registry's authorizer and the vault's write guard decide
 (`features/extensions/src/live.rs` `ExtensionDocSync`). The app gives its
 host the node's documents with `Host::set_kind_documents`
 (`features/extensions/src/live.rs` `RegistryDocuments` over a
-`VaultCollab`). `features/extensions/tests/live_documents.rs` is a process
-extension editing a `.session` in a vault and following the node's edits,
-a linked one that may only read, and the refusals.
+`VaultCollab`). The Architect app does it as its node starts
+(`apps/desktop/src/node/mod.rs` `Running::kind_documents`, handed to the
+window's host by `apps/ui/src/extensions.rs` `on_host`): a path is in the
+node's one vault, or, when it holds several, its first folder names the
+vault (`apps/desktop/src/node/mod.rs` `vault_path`), and a session attaches
+under the vault's write guard. `features/extensions/tests/live_documents.rs`
+is a process extension editing a `.session` in a vault and following the
+node's edits, a linked one that may only read, and the refusals;
+`apps/desktop/tests/node.rs`
+`the_windows_extension_edits_the_nodes_copy_of_its_document` is the same
+against a running node.
 
 <!-- media: doc-share-link-join — a share link copied on one device and opened on another, the document joining live -->
 <!-- media: lan-device-found — a device on the same network appearing by name, ready to sync -->

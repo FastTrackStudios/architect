@@ -477,6 +477,12 @@ fn start_node(dist: &'static Distribution) {
                             http = %running.http,
                             "the app's node is up"
                         );
+                        // The window's extensions edit the node's copy of a
+                        // vault document of their kind, not its file.
+                        let documents = Arc::new(running.kind_documents());
+                        architect_app::on_extension_host(move |host| {
+                            host.set_kind_documents(documents);
+                        });
                         // Until the process ends, with the app.
                         std::future::pending::<()>().await;
                         drop(running);
