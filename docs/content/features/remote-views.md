@@ -315,7 +315,11 @@ Four things are the host's own:
   scaled, clamped and stepped. A layer bound to that value follows the
   pointer at the display's rate; the view hears the value at most once a
   frame and then the release. It moves the value itself (automation) by
-  sending another `initial`.
+  sending another `initial`. A drag with a `coast` (a time constant up to
+  10 s) is flicked: let go while moving, the host carries its value on,
+  `from + speed × coast × (1 − e^(−t/coast))` on its wall clock, until it
+  stops or reaches an end; a press stops it. A list or an arrangement
+  scrolls with inertia with nothing from the view.
 - **The engine's values** (`features/scene/src/engine.rs`). An engine
   writes `engine.` values into a fixed table of atomic slots
   (`EngineTable`, `EngineWriter::write`: two atomic stores, no lock, no

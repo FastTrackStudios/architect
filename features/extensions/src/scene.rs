@@ -696,8 +696,13 @@ impl Painted {
     #[allow(clippy::arithmetic_side_effects)]
     pub(crate) fn draw(&mut self, scene: &mut Scene, at: Affine) {
         match &self.layers {
-            Some(layers) => {
+            Some(_) => {
                 let now = self.clocks.read();
+                // A flicked value coasts on: the host's, as a drag is.
+                if let Some(receiver) = self.layers.as_mut() {
+                    self.interaction.coast(&now, receiver.parts_mut().1);
+                }
+                let Some(layers) = &self.layers else { return };
                 let lit = self.interaction.lit();
                 layers
                     .layers()
@@ -745,6 +750,7 @@ impl Painted {
     pub(crate) fn moving(&self) -> bool {
         self.layers.as_ref().is_some_and(|l| {
             l.layers().moving(&self.clocks.read())
+                || self.interaction.coasting()
                 || (l.values().engine().is_some() && l.values().revision() != self.drawn_values)
         })
     }

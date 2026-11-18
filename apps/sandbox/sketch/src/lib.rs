@@ -558,6 +558,7 @@ impl PaintView for Timeline {
                 max: 1.0,
                 step: None,
                 initial: 0.75,
+                coast: None,
             });
         let (bx, by) = box_values()?;
         let along = |value: Name, axis, max| Drag {
@@ -568,6 +569,7 @@ impl PaintView for Timeline {
             max,
             step: None,
             initial: 0.0,
+            coast: None,
         };
         let handle = Region::new(DRAG_BOX, Shape::Rect(Rect::new(0.0, 0.0, 40.0, 24.0)))
             .cursor(Cursor::Move)
