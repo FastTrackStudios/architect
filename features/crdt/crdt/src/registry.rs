@@ -539,4 +539,8 @@ impl DocPresence for DocRegistry {
         session.pump(up).await;
         Ok(())
     }
+
+    async fn now(&self) -> f64 {
+        crate::presence::clock_ms()
+    }
 }

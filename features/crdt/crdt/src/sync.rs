@@ -121,6 +121,11 @@ pub trait DocPresence {
         up: vox::Rx<Vec<u8>>,
         down: vox::Tx<Vec<u8>>,
     ) -> Result<(), SyncError>;
+
+    /// The host's clock now ([`crate::presence::clock_ms`]), milliseconds:
+    /// the shared clock a playhead is stamped in. Each peer's
+    /// [`PresenceDriver`] pings it into its [`crate::clock::SharedClock`].
+    async fn now(&self) -> f64;
 }
 
 // ── Server ──────────────────────────────────────────────────────────────
@@ -535,6 +540,9 @@ pub struct PresenceHost {
     /// Live presence sessions — same lifecycle as
     /// [`DocSyncHost::active_sessions`].
     sessions: Arc<std::sync::atomic::AtomicUsize>,
+    /// The clock it serves ([`DocPresence::now`]): `clock_ms` unless a
+    /// test gives it another ([`Self::with_clock`]).
+    clock: Arc<dyn Fn() -> f64 + Send + Sync>,
     // Keeps the server-local-presence → hub bridge alive.
     _local_sub: Arc<loro::Subscription>,
 }
@@ -562,8 +570,18 @@ impl PresenceHost {
             store,
             hub,
             sessions: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            clock: Arc::new(crate::presence::clock_ms),
             _local_sub: Arc::new(sub),
         }
+    }
+
+    /// Serves `clock` (milliseconds) as the shared clock instead of this
+    /// process's: a host that already keeps one (a session host's), or a
+    /// test that puts the host's clock elsewhere.
+    #[must_use]
+    pub fn with_clock(mut self, clock: Arc<dyn Fn() -> f64 + Send + Sync>) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// The mirror store (e.g. for server-side "who's online" reads).
@@ -653,6 +671,10 @@ impl DocPresence for PresenceHost {
         session.pump(up).await;
         Ok(())
     }
+
+    async fn now(&self) -> f64 {
+        (self.clock)()
+    }
 }
 
 // ── Presence client ─────────────────────────────────────────────────────
@@ -674,6 +696,8 @@ pub struct PresencePeer {
     /// `delete` waits until that millisecond has passed (#401). Locked
     /// after `local_keys`, never alone around a store write.
     written: Arc<std::sync::Mutex<std::collections::HashMap<String, i64>>>,
+    /// The host's clock, as its driver estimates it ([`Self::clock`]).
+    clock: crate::clock::SharedClock,
 }
 
 /// The store's clock: `EphemeralStore` stamps entries with the wall
@@ -699,6 +723,7 @@ impl PresencePeer {
             store,
             local_keys: Arc::new(std::sync::Mutex::new(std::collections::BTreeSet::new())),
             written: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            clock: crate::clock::SharedClock::default(),
         };
         let driver = PresenceDriver {
             doc_id,
@@ -748,6 +773,14 @@ impl PresencePeer {
         }
         self.store.delete(key);
         drop(keys);
+    }
+
+    /// The presence host's clock as this peer's driver estimates it: the
+    /// shared clock a playhead is stamped in ([`crate::presence::Here::play_now`])
+    /// and read back with ([`crate::clock::SharedClock::now_ms`]).
+    #[must_use]
+    pub const fn clock(&self) -> &crate::clock::SharedClock {
+        &self.clock
     }
 
     /// Everyone's current state. Expired peers are pruned by the
@@ -884,6 +917,21 @@ impl PresenceDriver {
             }
         };
 
+        // The host's clock, ten times a second, into this peer's estimate.
+        // A host from before `now` answers an error: the estimate stays
+        // empty and presence goes on.
+        let clock = self.peer.clock.clone();
+        let pings = async move {
+            loop {
+                let sent = crate::presence::clock_ms();
+                match client.now().await {
+                    Ok(there) => clock.record(sent, there, crate::presence::clock_ms()),
+                    Err(_) => std::future::pending::<()>().await,
+                }
+                architect::platform::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        };
+
         tokio::select! {
             res = call => match res {
                 Ok(()) => Ok(()),
@@ -892,6 +940,7 @@ impl PresenceDriver {
             () = up => Ok(()),   // up channel gone — connection closed
             () = down => Ok(()), // down stream ended
             () = housekeeping => Ok(()),
+            () = pings => Ok(()),
         }
     }
 }

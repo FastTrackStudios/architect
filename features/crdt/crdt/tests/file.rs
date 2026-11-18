@@ -563,3 +563,154 @@ async fn memory_storage_is_a_storage() {
     let dir = tempfile::tempdir().unwrap();
     round_trip(&DiskStorage::open(dir.path().join("f")).unwrap()).await;
 }
+
+/// A file replica that syncs keeps what it received across a restart when
+/// its `SyncedDoc` is `durable`; by default it keeps only its own edits
+/// (a browser tab's choice: it re-learns the rest by version vector).
+/// Backing a `CrdtDoc` with `DocFile::persistence` is not enough on its
+/// own: imports fire no local-update subscription, so nothing else writes
+/// them.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_synced_file_replica_keeps_what_it_received_only_when_durable() {
+    use crdt::sync::{
+        DocSyncClient, DocSyncDispatcher, DocSyncHost, SyncedDoc, doc_sync_service_descriptor,
+    };
+    for durable in [true, false] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("b.note");
+        let id = Uuid::new_v4();
+        // The hub, holding an edit made elsewhere.
+        let hub = CrdtDoc::ephemeral();
+        type_at(hub.loro(), 0, "from elsewhere");
+        hub.loro().commit();
+        let router = architect::LayerRouter::new().with(
+            doc_sync_service_descriptor(),
+            DocSyncDispatcher::new(DocSyncHost::new(id, hub.clone())),
+        );
+        let local = architect::LocalServer::serve(router, architect::Scope::new());
+
+        // B: this device's file for the document, synced from the hub.
+        {
+            let file = DocFile::adopt(DiskStorage::open(&path).unwrap(), &note(), id)
+                .await
+                .unwrap();
+            let doc = CrdtDoc::open(id, file.persistence(MAIN)).await.unwrap();
+            let synced = SyncedDoc::new(id, doc.clone());
+            let mut synced = if durable { synced.durable() } else { synced };
+            let client: DocSyncClient = local.establish().await.unwrap();
+            let run = tokio::spawn(async move {
+                let _ = synced.run(&client).await;
+            });
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+            while text(doc.loro()) != "from elsewhere" {
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "B never received it"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            // The process ends: no save, no close.
+            run.abort();
+        }
+
+        let again = DocFile::open(DiskStorage::open(&path).unwrap(), &note())
+            .await
+            .unwrap();
+        let reopened = again.open_branch(MAIN).await.unwrap();
+        if durable {
+            assert_eq!(text(reopened.loro()), "from elsewhere", "durable keeps it");
+        } else {
+            assert_eq!(
+                text(reopened.loro()),
+                "",
+                "the default keeps own edits only"
+            );
+        }
+    }
+}
+
+/// A `CrdtDoc` over a file branch persists each commit on a writer task
+/// of its own. `compact` (a save) must not depend on that task having
+/// run: on one thread it never runs between the commit and the save, and
+/// a save that only folded what the file already held lost the commit,
+/// so the file opened again read nothing (Keyflow's chart file, one run
+/// in three on many threads; keyflow#95).
+#[tokio::test(flavor = "current_thread")]
+async fn a_save_holds_every_commit_whether_or_not_the_writer_ran() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("Song.note");
+    {
+        let file = DocFile::create(DiskStorage::open(&path).unwrap(), &note())
+            .await
+            .unwrap();
+        let id = file.id().await.unwrap();
+        let doc = CrdtDoc::open(id, file.persistence(MAIN)).await.unwrap();
+        type_at(doc.loro(), 0, "hello");
+        doc.loro().commit();
+        doc.compact(id).await.unwrap();
+    }
+    let again = DocFile::open(DiskStorage::open(&path).unwrap(), &note())
+        .await
+        .unwrap();
+    let main = again.open_branch(MAIN).await.unwrap();
+    assert_eq!(text(main.loro()), "hello");
+}
+
+/// A catalogue lists a vault's document files by what their first
+/// records say, without opening them: the id, the kind and the schema,
+/// before and after a save folds the file, and for a file adopted from
+/// another device (no schema yet). A file that is not a document is not
+/// taken for one.
+#[tokio::test]
+async fn a_file_says_its_id_and_kind_without_being_opened() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("a.note");
+    let kind = note().schema(3, Vec::new());
+    let file = DocFile::create(DiskStorage::open(&path).unwrap(), &kind)
+        .await
+        .unwrap();
+    let id = file.id().await.unwrap();
+    let mut main = file.open_branch(MAIN).await.unwrap();
+    main.transact("Type", |doc| {
+        doc.get_text("body").insert(0, "hello").unwrap();
+    })
+    .await
+    .unwrap();
+    let header = DocFile::peek(&path).unwrap();
+    assert_eq!(header.id, id);
+    assert_eq!(header.kind, "test.note");
+    assert_eq!(header.schema, Some(3));
+    main.save("Saved").await.unwrap();
+    assert_eq!(DocFile::peek(&path).unwrap().id, id, "after a fold too");
+
+    let adopted = dir.path().join("b.note");
+    let other = Uuid::new_v4();
+    DocFile::adopt(DiskStorage::open(&adopted).unwrap(), &kind, other)
+        .await
+        .unwrap();
+    let header = DocFile::peek(&adopted).unwrap();
+    assert_eq!((header.id, header.schema), (other, None));
+
+    let text = dir.path().join("c.note");
+    std::fs::write(&text, "not a document").unwrap();
+    assert!(DocFile::peek(&text).is_err());
+}
+
+/// The kinds an app's extensions declare are added and taken off while
+/// the app runs, and every holder of the shared set sees it.
+#[test]
+fn shared_kinds_follow_what_is_registered() {
+    let kinds = crdt::SharedDocKinds::new();
+    let holder = kinds.clone();
+    assert!(holder.for_path("Songs/a.session").is_none());
+    kinds.register(DocKind::new("fts.session", "Session").extension("session"));
+    assert_eq!(
+        holder.for_path("Songs/a.SESSION").map(|k| k.id),
+        Some("fts.session".to_owned())
+    );
+    assert!(holder.for_path("Songs/.session").is_none(), "no name");
+    assert!(holder.for_path("Songs/session").is_none(), "no extension");
+    assert!(kinds.unregister("fts.session"));
+    assert!(holder.for_path("Songs/a.session").is_none());
+    assert!(holder.is_empty());
+}

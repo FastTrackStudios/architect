@@ -15,6 +15,10 @@ name: pr
 # On a push to main `lint` lints the whole workspace, only to save the
 # hosted Rust cache PRs restore: a PR's own cache is visible to that PR
 # alone, so main has to be the one that saves it.
+#
+# A draft PR runs nothing: every job is skipped (`check` too, and a skipped
+# required check passes). Marking the PR ready (`ready_for_review`) starts
+# the run; every push after that runs it again.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, labeled]
@@ -38,6 +42,7 @@ jobs:
   # Everything that compiles at most xtask.
   fast:
     name: fast checks
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -198,7 +203,7 @@ jobs:
   lint:
     name: ${{ github.event_name == 'push' && 'lint (warms the PR cache)' || 'lint' }}
     # Opt-in on a PR (the `full-checks` label); always on main.
-    if: ${{ github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'full-checks') }}
+    if: ${{ (github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'full-checks')) && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -261,10 +266,10 @@ jobs:
 
   # The status branch protection requires. It passes when `fast` succeeded
   # and `lint` succeeded or was skipped (no `full-checks` label); a
-  # cancelled or failed one fails it.
+  # cancelled or failed one fails it. Skipped on a draft PR, as its needs are.
   check:
     name: check
-    if: ${{ always() && github.event_name == 'pull_request' }}
+    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.draft == false }}
     needs: [fast, lint]
     runs-on: ubuntu-latest
     steps:
@@ -278,7 +283,7 @@ jobs:
 
   npm-package:
     name: npm package
-    if: ${{ github.event_name == 'pull_request' }}
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

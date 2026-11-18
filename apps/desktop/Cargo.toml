@@ -35,14 +35,22 @@ gui = [
     "dep:dioxus",
     "dep:dioxus-native",
     "architect-mcp/bridge",
+    # Extensions' `kind = "process"` views (#838): a program in the
+    # package draws the pane on its own GPU device. On Linux and macOS;
+    # a Windows build has none and the pane says why. In the window's
+    # feature, not the release's list, so every build of the window has
+    # it: the release (`cargo xtask dist desktop`), a distribution crate
+    # (`dist/standard`'s `gui`), and `architect dev` from a checkout.
+    "architect-app/process-views",
 ]
 keyflow-lab = ["gui", "architect-app/keyflow-lab"]
 # Extensions' web views (#222) in a native child web view (wry).
 webview = ["gui", "architect-app/webview"]
 # WASI component extensions: Wasmtime and Cranelift in the binary.
 wasi = ["gui", "architect-app/wasi", "node-wasi"]
-# The lab's process views (Linux, off by default): architect-app's.
-process-views = ["gui", "architect-app/process-views"]
+# The lab's "Process views" screenset (⌘6) and its demo scene, off by
+# default. Extensions' process views are in `gui`, without it.
+process-views = ["gui", "architect-app/process-views-lab"]
 # The node draws the fences an installed WASI component's embed view
 # claims on share links and Sites (#488): Wasmtime in the node, without
 # the window. The release's node and its image have it.
@@ -66,7 +74,9 @@ architect-workspace = { workspace = true, features = ["native", "hot-reload"], o
 # `net`, extensions' fetches (#310): the app turns the client on, not its UI crates.
 # `node`: the node serves installed extensions' node actions on its org
 # lane (#583); the window adds `process` and `remote` (`gui`).
-architect-extensions = { workspace = true, features = ["host", "net", "node"] }
+# `crdt`: an extension's `[[doc_kinds]]` as the node's document kinds
+# (`DocKindDecl::to_doc_kind`, `node::kinds`).
+architect-extensions = { workspace = true, features = ["host", "net", "node", "crdt"] }
 dioxus = { workspace = true, optional = true }
 dioxus-native = { workspace = true, features = ["vello", "hot-reload"], optional = true }
 facet-json = { version = "0.50.0-rc.5" }
