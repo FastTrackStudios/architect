@@ -37,7 +37,7 @@ pub mod history;
 pub mod kinds;
 pub use file::{Branch, DocFile};
 pub use history::History;
-pub use kinds::{BlobRefs, DocKind, DocKinds, Migration};
+pub use kinds::{BlobRefs, DocKind, DocKinds, Migration, SharedDocKinds};
 
 // The blobs documents point at: fetched on demand by hash, kept offline,
 // collected when nothing points at them (`architect::blob`). Native.

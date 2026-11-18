@@ -6,8 +6,15 @@
 //! sha-256, so two nodes whose files agree skip it. A name this node does
 //! not hold yet is registered on first ask (`resolve`), so the session
 //! that follows makes the file here: `vault_collab` writes it behind.
+//!
+//! A vault file of a kind an extension declares (`super::kinds`) is
+//! listed the same way, `<vault>/<path>`, by the id its own header
+//! carries and the file's sha-256 (`vault_collab::VaultCollab::document_of`);
+//! one another node names is made here on first open, empty and of its
+//! lineage (`VaultCollab::register_document`).
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use architect_files::sync::{Engine, LedgerDoc, manifest};
 use crdt::peer::{DocAt, DocCatalog, HeldDoc};
@@ -22,6 +29,15 @@ use vault_proto::{VaultSync as _, collab_doc_id};
 pub struct VaultCatalog {
     backend: Backend,
     files: Option<Engine>,
+    documents: Option<Documents>,
+}
+
+/// The vaults' documents of a kind: the reconciler that keeps them, and
+/// what keeps its kinds up to the extensions installed.
+#[derive(Clone)]
+struct Documents {
+    collab: vault_collab::VaultCollab,
+    kinds: Arc<super::kinds::ExtensionKinds>,
 }
 
 impl VaultCatalog {
@@ -30,7 +46,20 @@ impl VaultCatalog {
         Self {
             backend,
             files: None,
+            documents: None,
         }
+    }
+
+    /// The same, listing the vault files of the kinds `kinds` declares as
+    /// the documents `collab` keeps.
+    #[must_use]
+    pub fn with_documents(
+        mut self,
+        collab: vault_collab::VaultCollab,
+        kinds: Arc<super::kinds::ExtensionKinds>,
+    ) -> Self {
+        self.documents = Some(Documents { collab, kinds });
+        self
     }
 
     /// The same, listing `files`' manifests too.
@@ -40,10 +69,13 @@ impl VaultCatalog {
         self
     }
 
-    /// Every note this node holds, and every manifest, as the peer lane
-    /// lists them.
+    /// Every note this node holds, every document of an extension's
+    /// kind, and every manifest, as the peer lane lists them.
     #[must_use]
     pub fn notes(&self) -> Vec<HeldDoc> {
+        if let Some(documents) = &self.documents {
+            documents.kinds.refresh();
+        }
         let mut out: Vec<HeldDoc> = self
             .files
             .iter()
@@ -59,13 +91,22 @@ impl VaultCatalog {
                 continue;
             };
             for file in manifest.files {
-                if is_note(&file.path) {
-                    out.push(HeldDoc {
-                        doc_id: collab_doc_id(&vault, &file.path),
-                        name: name(&vault, &file.path),
-                        digest: file.sha256,
-                    });
-                }
+                let doc_id = if is_note(&file.path) {
+                    collab_doc_id(&vault, &file.path)
+                } else if let Some(id) = self
+                    .documents
+                    .as_ref()
+                    .and_then(|d| d.collab.document_of(&vault, &file.path))
+                {
+                    id
+                } else {
+                    continue;
+                };
+                out.push(HeldDoc {
+                    doc_id,
+                    name: name(&vault, &file.path),
+                    digest: file.sha256,
+                });
             }
         }
         out
@@ -84,8 +125,9 @@ impl VaultCatalog {
     ///
     /// # Errors
     ///
-    /// `at` names no vault this node holds, is not a note, or its id is
-    /// not the one its name derives to.
+    /// `at` names no vault this node holds, is neither a note nor a file
+    /// of a registered kind, or its id is not the one its name derives to
+    /// (a note's) or the one its file carries (a document's).
     pub fn register(&self, at: &DocAt) -> Result<Uuid, SyncError> {
         if let Some(which) = LedgerDoc::parse(&at.name) {
             let files = self.files.as_ref().ok_or(SyncError::UnknownDoc)?;
@@ -103,10 +145,19 @@ impl VaultCatalog {
             return Ok(at.doc_id);
         }
         let (vault, path) = at.name.split_once('/').ok_or(SyncError::UnknownDoc)?;
-        if !is_note(path) || collab_doc_id(vault, path) != at.doc_id {
+        if !self.backend.vault_ids().iter().any(|v| v == vault) {
             return Err(SyncError::UnknownDoc);
         }
-        if !self.backend.vault_ids().iter().any(|v| v == vault) {
+        if !is_note(path) {
+            let documents = self.documents.as_ref().ok_or(SyncError::UnknownDoc)?;
+            if documents.collab.kind_of(path).is_none() {
+                // Perhaps installed since the last look.
+                documents.kinds.refresh();
+            }
+            documents.collab.register_document(vault, path, at.doc_id)?;
+            return Ok(at.doc_id);
+        }
+        if collab_doc_id(vault, path) != at.doc_id {
             return Err(SyncError::UnknownDoc);
         }
         self.backend
