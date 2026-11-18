@@ -1103,6 +1103,12 @@ pub(super) fn PaneSlot(pane: PaneId) -> Element {
             .map(|r| r.map(|v| v.render.clone()))
     });
     let focus = pane.clone();
+    // Its view's key context (`view:<kind>`): keys an extension binds
+    // there (`[[keys]] when = "view:…"`) are the keymap's while a part of
+    // it has the focus, and never reach the view.
+    let commands = architect_commands::try_use_commands();
+    let context = format!("view:{}", kind.as_deref().unwrap_or_default());
+    let (keyed, focused) = (context.clone(), context);
     let body = match render {
         Some(Ok(render)) => render(pane),
         Some(Err(why)) => rsx! {
@@ -1131,8 +1137,30 @@ pub(super) fn PaneSlot(pane: PaneId) -> Element {
                     let _ = host.edit(|w| w.activate(&focus));
                 }
             },
-            onfocusin: move |_| typing.focus(),
-            onfocusout: move |_| typing.blur(),
+            onfocusin: move |_| {
+                typing.focus();
+                if let Some(c) = commands {
+                    c.set_view_context(Some(&focused));
+                }
+            },
+            onfocusout: move |_| {
+                typing.blur();
+                if let Some(c) = commands {
+                    c.set_view_context(None);
+                }
+            },
+            // Before the view: a widget's or a process view's keys are
+            // handed on as the default action, which this stops.
+            onkeydown: move |e: KeyboardEvent| {
+                // A letter typed into a field is the field's.
+                if crate::field_focused() {
+                    return;
+                }
+                if commands.is_some_and(|c| c.handle_view_key(&keyed, &e)) {
+                    e.prevent_default();
+                    e.stop_propagation();
+                }
+            },
             onmounted: move |e| track.mounted(e.data()),
             onpointermove: move |e| {
                 let p = e.data().client_coordinates();
