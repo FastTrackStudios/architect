@@ -174,7 +174,7 @@ function fetchCheck(manifest, may, fetch) {
 
 const UI = { notify: 'notify', clipboard_read: 'clipboard', clipboard_write: 'clipboard', pick: 'pickers', prompt: 'prompts', menu: 'menus', decorate: 'badges' };
 const DOC_READS = ['open', 'read_document', 'live_document', 'list_documents', 'watch_documents'];
-const DOC_WRITES = ['create_document', 'edit_document', 'rename_document', 'move_document', 'delete_document'];
+const DOC_WRITES = ['create_document', 'edit_document', 'rename_document', 'move_document', 'delete_document', 'undo_document', 'redo_document'];
 
 /// Whether event pattern `pattern` covers app event `name`
 /// (`events::covers`).
@@ -276,4 +276,5 @@ export const HOST_OPS = [
   'point', 'window', 'notify', 'clipboard_read', 'clipboard_write', 'pick', 'prompt', 'menu', 'decorate',
   'subscribe', 'unsubscribe', 'events', 'raise', 'fetch', 'read_body', 'close_body', 'secret', 'ask_secret',
   'ports', 'open_port', 'port_send', 'port_receive', 'close_port', 'targets', 'surfaces', 'surface_bank',
+  'undo_document', 'redo_document',
 ];
