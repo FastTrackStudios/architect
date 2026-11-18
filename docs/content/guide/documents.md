@@ -219,6 +219,25 @@ architect_devices::serve(&endpoint, access.devices.clone(), move |remote| {
 
 `features/crdt/crdt/tests/p2p.rs` is all three over real iroh endpoints.
 
+**A document file in a vault syncs like a note.** The app's node keeps
+each vault note as a document; a vault file of a kind an extension declares
+is one too, so a Keyflow `.session` in a vault reaches the person's other
+devices, and the org's node, with no sync host of its own. The extension
+declares the kind in its manifest (`[[doc_kinds]]` with `files` and an
+optional `schema`); the node registers it while the extension is compiled
+in or installed (`apps/desktop/src/node/kinds.rs` `ExtensionKinds`, into the
+shared `features/crdt/crdt/src/kinds.rs` `SharedDocKinds`) and takes it off
+when the extension is uninstalled. Such a file is listed by the id in its
+header (`features/crdt/crdt/src/file/mod.rs` `DocFile::peek`), opened with
+the file itself as its storage, its `main` branch, and attached to as a
+note is, under the vault's write guard for the file; another device makes
+it empty, of the same lineage, before the first session fills it
+(`features/vault/vault-collab/src/lib.rs` `VaultCollab::register_document`).
+`apps/desktop/tests/node.rs` `an_extensions_document_syncs_between_two_nodes_like_a_note`
+is two nodes doing it. An app edits the node's copy
+(`apps/desktop/src/node/mod.rs` `Running::document`), not the file: the file
+has one writer at a time.
+
 <!-- media: doc-share-link-join — a share link copied on one device and opened on another, the document joining live -->
 <!-- media: lan-device-found — a device on the same network appearing by name, ready to sync -->
 

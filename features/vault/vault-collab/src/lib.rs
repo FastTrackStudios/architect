@@ -48,6 +48,19 @@
 //! See `docs/architecture/vault-crdt-reconciliation.md` for the
 //! prose version (identity scheme, rename caveat, crash windows).
 //!
+//! ## Documents of a kind
+//!
+//! A vault file whose extension is a registered kind's
+//! ([`VaultCollab::kinds`]: an app's, or an extension's `[[doc_kinds]]`)
+//! is a document of the same registry, not a note: its id is the one in
+//! its file's header ([`crdt::file::DocFile::peek`]), and it is opened
+//! with the file itself as its storage (`DocFile` + its `main` branch's
+//! [`crdt::file::BranchPersistence`]) — no copy under the `crdt/` root, no
+//! markdown, no write-behind. Who may attach is asked as for a note: the
+//! vault's write guard for the file. [`VaultCollab::document_of`] lists one
+//! by its path, [`VaultCollab::register_document`] names one another node
+//! holds, made here (empty, of that lineage) when it is first opened.
+//!
 //! ## Locking & lifetime rules
 //!
 //! - **Never own a strong [`CrdtDoc`] inside a loro subscription
@@ -97,9 +110,10 @@ use std::time::Duration;
 // change
 use architect_telemetry::wide;
 use crdt::codec::TextOp;
+use crdt::file::{DiskStorage, DocFile, MAIN};
 use crdt::registry::DocRegistry;
 use crdt::sync::{DocSync, SyncDown, SyncError};
-use crdt::{CrdtDoc, FilePersistence, PersistError, WeakCrdtDoc};
+use crdt::{CrdtDoc, DocKind, FilePersistence, PersistError, SharedDocKinds, WeakCrdtDoc};
 use sha2::{Digest, Sha256};
 use tokio::sync::broadcast;
 use uuid::Uuid;
@@ -157,6 +171,13 @@ struct Shared {
     /// Ids of plain documents: not vault files, opened over file
     /// persistence with no reconciliation ([`VaultCollab::with_plain_docs`]).
     plain: std::sync::RwLock<Option<PlainDocs>>,
+    /// The kinds whose files are documents of their own
+    /// ([`VaultCollab::kinds`]), changed while it runs.
+    kinds: SharedDocKinds,
+    /// Each such document's file: doc id → `(vault_id, path)`, recorded
+    /// as the file is listed ([`VaultCollab::document_of`]) or named by
+    /// another node ([`VaultCollab::register_document`]).
+    documents: Mutex<HashMap<Uuid, (String, String)>>,
     /// Tests only: each open document's write-behind progress, and a pause
     /// in [`apply_delete`] between fetching the document and locking it.
     #[cfg(test)]
@@ -195,7 +216,31 @@ impl VaultCollab {
         Self::build(backend, crdt_root, debounce, IDLE_EVICTION)
     }
 
+    /// [`Self::new`], its documents of a kind those `kinds` names: a set
+    /// the app shares with whatever registers its kinds (its extensions,
+    /// as they load and unload).
+    #[must_use]
+    pub fn with_kinds(backend: Backend, crdt_root: PathBuf, kinds: SharedDocKinds) -> Self {
+        Self::build_with(
+            backend,
+            crdt_root,
+            WRITE_BEHIND_DEBOUNCE,
+            IDLE_EVICTION,
+            kinds,
+        )
+    }
+
     fn build(backend: Backend, crdt_root: PathBuf, debounce: Duration, idle: Duration) -> Self {
+        Self::build_with(backend, crdt_root, debounce, idle, SharedDocKinds::new())
+    }
+
+    fn build_with(
+        backend: Backend,
+        crdt_root: PathBuf,
+        debounce: Duration,
+        idle: Duration,
+        kinds: SharedDocKinds,
+    ) -> Self {
         let shared = Arc::new(Shared {
             backend: backend.clone(),
             debounce,
@@ -205,6 +250,8 @@ impl VaultCollab {
             pending_deletes: Mutex::new(HashSet::new()),
             crdt_root: crdt_root.clone(),
             plain: std::sync::RwLock::new(None),
+            kinds,
+            documents: Mutex::new(HashMap::new()),
             #[cfg(test)]
             probes: test_probes::Probes::default(),
         });
@@ -221,17 +268,20 @@ impl VaultCollab {
         // nothing but the Uuid — the reverse map lives on the backend.
         .with_admission({
             let (backend, shared) = (backend.clone(), shared.clone());
-            move |doc_id| backend.collab_route(doc_id).is_some() || is_plain(&shared, doc_id)
+            move |doc_id| {
+                backend.collab_route(doc_id).is_some()
+                    || is_plain(&shared, doc_id)
+                    || document_route(&shared, doc_id).is_some()
+            }
         })
         // Authorization: the file's write guard, asked for the caller
         // the permissions gate resolved, on every attach through every
         // lane (the collab lane, the peer lane, this node's own).
         .with_authorizer({
-            let (backend, shared) = (backend.clone(), shared.clone());
+            let shared = shared.clone();
             move |who, doc_id| {
                 is_plain(&shared, doc_id)
-                    || may_attach(&backend, vault_live::write_guard::account_of(who), doc_id)
-                        .is_ok()
+                    || may_attach(&shared, vault_live::write_guard::account_of(who), doc_id).is_ok()
             }
         })
         .with_idle_eviction(idle);
@@ -252,6 +302,68 @@ impl VaultCollab {
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::new(admit));
         self
+    }
+
+    /// The kinds whose files are documents of their own (module docs,
+    /// "Documents of a kind"). Shared: register a kind into it, or take
+    /// one off, while the reconciler runs (an extension loading or
+    /// unloading), and the next listing and open follow.
+    #[must_use]
+    pub fn kinds(&self) -> &SharedDocKinds {
+        &self.shared.kinds
+    }
+
+    /// The kind the vault file at `path` is a document of, if any.
+    #[must_use]
+    pub fn kind_of(&self, path: &str) -> Option<DocKind> {
+        self.shared.kinds.for_path(path)
+    }
+
+    /// The document the vault file `path` of `vault_id` is, by the id its
+    /// header carries, recorded so the registry opens it: `None` when its
+    /// extension is no registered kind's, or the file is not a document
+    /// of that kind (no header, another kind's).
+    #[must_use]
+    pub fn document_of(&self, vault_id: &str, path: &str) -> Option<Uuid> {
+        let kind = self.kind_of(path)?;
+        let abs = document_path(&self.shared.backend, vault_id, path)?;
+        let header = DocFile::peek(&abs).ok()?;
+        if header.kind != kind.id {
+            return None;
+        }
+        record_document(&self.shared, header.id, vault_id, path);
+        Some(header.id)
+    }
+
+    /// Records that the document `doc_id` (another node holds it) is the
+    /// file `path` of `vault_id`, so the registry opens it here. A file
+    /// already there must be that document; a missing one is made when
+    /// the document is first opened, empty and of the same lineage
+    /// (`DocFile::adopt`), so the session that follows fills it.
+    ///
+    /// # Errors
+    ///
+    /// [`SyncError::UnknownDoc`]: the path's extension is no registered
+    /// kind's, the path could leave the vault (or is private, or through
+    /// a symlink), the vault is not this node's, or the file there is
+    /// another document.
+    pub fn register_document(
+        &self,
+        vault_id: &str,
+        path: &str,
+        doc_id: Uuid,
+    ) -> Result<(), SyncError> {
+        let kind = self.kind_of(path).ok_or(SyncError::UnknownDoc)?;
+        let abs =
+            document_path(&self.shared.backend, vault_id, path).ok_or(SyncError::UnknownDoc)?;
+        if abs.exists() {
+            let header = DocFile::peek(&abs).map_err(|_| SyncError::UnknownDoc)?;
+            if header.id != doc_id || header.kind != kind.id {
+                return Err(SyncError::UnknownDoc);
+            }
+        }
+        record_document(&self.shared, doc_id, vault_id, path);
+        Ok(())
     }
 
     /// The registry to mount: implements `DocSync` + `DocPresence`,
@@ -332,6 +444,85 @@ impl VaultCollab {
 
 // ── Open / seed ─────────────────────────────────────────────────────────
 
+/// Where a document file of a kind is on disk: under the vault, never in
+/// a private folder or through a symlink (the rules a note's path is held
+/// to).
+fn document_path(backend: &Backend, vault_id: &str, path: &str) -> Option<PathBuf> {
+    if path.is_empty()
+        || path.starts_with('/')
+        || path.starts_with('\\')
+        || path.contains("..")
+        || path.contains(':')
+    {
+        return None;
+    }
+    let root = backend.root(vault_id).ok()?;
+    if vault_live::private::is_within_private(&root, path)
+        || vault_live::own::through_symlink(&root, path)
+    {
+        return None;
+    }
+    Some(root.join(path))
+}
+
+fn record_document(shared: &Shared, doc_id: Uuid, vault_id: &str, path: &str) {
+    shared
+        .documents
+        .lock()
+        .expect("documents lock poisoned")
+        .insert(doc_id, (vault_id.to_owned(), path.to_owned()));
+}
+
+/// The vault file the document `doc_id` of a kind is, while its kind is
+/// registered.
+fn document_route(shared: &Shared, doc_id: Uuid) -> Option<(String, String)> {
+    let route = shared
+        .documents
+        .lock()
+        .expect("documents lock poisoned")
+        .get(&doc_id)
+        .cloned()?;
+    shared.kinds.for_path(&route.1).is_some().then_some(route)
+}
+
+/// Opens the document of a kind kept in the vault file `path`: the file
+/// itself is its storage (its `main` branch), made empty for `doc_id`
+/// when it is not there yet.
+async fn open_document(
+    shared: &Shared,
+    doc_id: Uuid,
+    vault_id: &str,
+    path: &str,
+) -> Result<CrdtDoc, PersistError> {
+    let backend = |e: crdt::file::FileError| PersistError::Backend(format!("{path}: {e}"));
+    let kind = shared
+        .kinds
+        .for_path(path)
+        .ok_or_else(|| PersistError::Backend(format!("{path}: no kind registered for it")))?;
+    let abs = document_path(&shared.backend, vault_id, path)
+        .ok_or_else(|| PersistError::Backend(format!("{path}: not a file of the vault")))?;
+    let file = if abs.exists() {
+        let file = DocFile::open(DiskStorage::open(&abs).map_err(backend)?, &kind)
+            .await
+            .map_err(backend)?;
+        if file.id().await != Some(doc_id) {
+            return Err(PersistError::Backend(format!(
+                "{path} is another document than {doc_id}"
+            )));
+        }
+        file
+    } else {
+        if let Some(dir) = abs.parent() {
+            std::fs::create_dir_all(dir)
+                .map_err(|e| PersistError::Backend(format!("{path}: {e}")))?;
+        }
+        DocFile::adopt(DiskStorage::open(&abs).map_err(backend)?, &kind, doc_id)
+            .await
+            .map_err(backend)?
+    };
+    CrdtDoc::open(doc_id, file.persistence(MAIN)).await
+}
+
 fn is_plain(shared: &Shared, doc_id: Uuid) -> bool {
     shared
         .plain
@@ -349,6 +540,11 @@ async fn open_doc(
     doc_id: Uuid,
     crdt_root: PathBuf,
 ) -> Result<CrdtDoc, PersistError> {
+    if shared.backend.collab_route(doc_id).is_none() {
+        if let Some((vault_id, path)) = document_route(shared, doc_id) {
+            return open_document(shared, doc_id, &vault_id, &path).await;
+        }
+    }
     if shared.backend.collab_route(doc_id).is_none() && is_plain(shared, doc_id) {
         return CrdtDoc::open(doc_id, FilePersistence::new(crdt_root)).await;
     }
@@ -945,13 +1141,18 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// [`vault_live::WriteGuard`] itself) and a live session, whose edits
 /// reach disk through the write-behind, which runs as the server. So the
 /// rule is applied at the attach: the doc is looked back up to its file
-/// and the same guard is asked. An id no `open_collab` registered is the
-/// registry's admission to refuse.
-fn may_attach(backend: &Backend, account: Option<&str>, doc_id: Uuid) -> Result<(), SyncError> {
-    let Some((vault_id, path)) = backend.collab_route(doc_id) else {
+/// and the same guard is asked; a document of a kind, its file's. An id
+/// neither registered is the registry's admission to refuse.
+fn may_attach(shared: &Shared, account: Option<&str>, doc_id: Uuid) -> Result<(), SyncError> {
+    let Some((vault_id, path)) = shared
+        .backend
+        .collab_route(doc_id)
+        .or_else(|| document_route(shared, doc_id))
+    else {
         return Ok(());
     };
-    backend
+    shared
+        .backend
         .check_write(&vault_id, &path, account)
         .map_err(|e| SyncError::Internal(e.to_string()))
 }
@@ -977,7 +1178,7 @@ impl DocSync for VaultCollab {
     ) -> Result<(), SyncError> {
         let who = crdt::architect::permissions_gate::caller();
         if let Err(e) = may_attach(
-            &self.shared.backend,
+            &self.shared,
             vault_live::write_guard::account_of(who.as_ref()),
             doc_id,
         ) {
@@ -1130,6 +1331,99 @@ mod tests {
             read_meta_flushed(&doc).as_deref(),
             Some(ack.sha256.as_str())
         );
+    }
+
+    fn session_kind() -> DocKind {
+        DocKind::new("test.session", "Session").extension("session")
+    }
+
+    /// The text of `main` in the document file at `path`, read from its
+    /// bytes as another process would.
+    async fn file_text(path: &std::path::Path) -> String {
+        let bytes = std::fs::read(path).unwrap();
+        let file = DocFile::from_bytes(bytes, &session_kind()).await.unwrap();
+        let main = file.open_branch(MAIN).await.unwrap();
+        main.loro().get_text("body").to_string()
+    }
+
+    /// A vault file of a registered kind is a document of the registry,
+    /// kept in the file itself: listed by the id in its header, opened
+    /// from it, and an edit through the registry lands in it (no copy
+    /// under the crdt root). One another node names is made on first
+    /// open, empty and with that id; a file that is another document is
+    /// refused; and a kind taken off is no longer one.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_kinded_file_is_a_document_kept_in_its_own_file() {
+        let (tmp, _backend, collab) = setup();
+        let kind = session_kind();
+        let root = tmp.path().join("vault");
+        std::fs::create_dir_all(root.join("Songs")).unwrap();
+        let at = root.join("Songs/a.session");
+        let id = {
+            let file = DocFile::create(DiskStorage::open(&at).unwrap(), &kind)
+                .await
+                .unwrap();
+            let mut main = file.open_branch(MAIN).await.unwrap();
+            main.transact("Type", |doc| {
+                doc.get_text("body").insert(0, "made here").unwrap();
+            })
+            .await
+            .unwrap();
+            file.id().await.unwrap()
+        };
+        assert_eq!(
+            collab.document_of("v1", "Songs/a.session"),
+            None,
+            "no kind registered: a plain file"
+        );
+        assert!(collab.registry().doc(id).await.is_err());
+
+        collab.kinds().register(kind.clone());
+        assert_eq!(collab.document_of("v1", "Songs/a.session"), Some(id));
+        let doc = collab.registry().doc(id).await.unwrap();
+        assert_eq!(doc.loro().get_text("body").to_string(), "made here");
+        let body = doc.loro().get_text("body");
+        body.insert(body.len_unicode(), ", edited").unwrap();
+        doc.loro().commit();
+        let mut text = String::new();
+        for _ in 0..200 {
+            text = file_text(&at).await;
+            if text == "made here, edited" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert_eq!(text, "made here, edited", "the edit is in the file");
+        assert!(
+            !tmp.path().join("crdt").join(id.to_string()).exists(),
+            "no second copy under the crdt root"
+        );
+
+        // Named by another node: made here on first open, with its id.
+        let other = Uuid::new_v4();
+        collab
+            .register_document("v1", "Songs/b.session", other)
+            .unwrap();
+        collab.registry().doc(other).await.unwrap();
+        assert_eq!(
+            DocFile::peek(&root.join("Songs/b.session")).unwrap().id,
+            other
+        );
+        assert!(
+            collab
+                .register_document("v1", "Songs/a.session", other)
+                .is_err(),
+            "the file there is another document"
+        );
+        assert!(
+            collab
+                .register_document("v1", "../out.session", other)
+                .is_err()
+        );
+        assert!(collab.register_document("v1", "n.md", other).is_err());
+
+        assert!(collab.kinds().unregister("test.session"));
+        assert_eq!(collab.document_of("v1", "Songs/a.session"), None);
     }
 
     #[tokio::test(flavor = "multi_thread")]

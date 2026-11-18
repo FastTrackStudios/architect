@@ -628,3 +628,62 @@ async fn a_synced_file_replica_keeps_what_it_received_only_when_durable() {
         }
     }
 }
+
+/// A catalogue lists a vault's document files by what their first
+/// records say, without opening them: the id, the kind and the schema,
+/// before and after a save folds the file, and for a file adopted from
+/// another device (no schema yet). A file that is not a document is not
+/// taken for one.
+#[tokio::test]
+async fn a_file_says_its_id_and_kind_without_being_opened() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("a.note");
+    let kind = note().schema(3, Vec::new());
+    let file = DocFile::create(DiskStorage::open(&path).unwrap(), &kind)
+        .await
+        .unwrap();
+    let id = file.id().await.unwrap();
+    let mut main = file.open_branch(MAIN).await.unwrap();
+    main.transact("Type", |doc| {
+        doc.get_text("body").insert(0, "hello").unwrap();
+    })
+    .await
+    .unwrap();
+    let header = DocFile::peek(&path).unwrap();
+    assert_eq!(header.id, id);
+    assert_eq!(header.kind, "test.note");
+    assert_eq!(header.schema, Some(3));
+    main.save("Saved").await.unwrap();
+    assert_eq!(DocFile::peek(&path).unwrap().id, id, "after a fold too");
+
+    let adopted = dir.path().join("b.note");
+    let other = Uuid::new_v4();
+    DocFile::adopt(DiskStorage::open(&adopted).unwrap(), &kind, other)
+        .await
+        .unwrap();
+    let header = DocFile::peek(&adopted).unwrap();
+    assert_eq!((header.id, header.schema), (other, None));
+
+    let text = dir.path().join("c.note");
+    std::fs::write(&text, "not a document").unwrap();
+    assert!(DocFile::peek(&text).is_err());
+}
+
+/// The kinds an app's extensions declare are added and taken off while
+/// the app runs, and every holder of the shared set sees it.
+#[test]
+fn shared_kinds_follow_what_is_registered() {
+    let kinds = crdt::SharedDocKinds::new();
+    let holder = kinds.clone();
+    assert!(holder.for_path("Songs/a.session").is_none());
+    kinds.register(DocKind::new("fts.session", "Session").extension("session"));
+    assert_eq!(
+        holder.for_path("Songs/a.SESSION").map(|k| k.id),
+        Some("fts.session".to_owned())
+    );
+    assert!(holder.for_path("Songs/.session").is_none(), "no name");
+    assert!(holder.for_path("Songs/session").is_none(), "no extension");
+    assert!(kinds.unregister("fts.session"));
+    assert!(holder.for_path("Songs/a.session").is_none());
+    assert!(holder.is_empty());
+}
