@@ -517,13 +517,13 @@ proptest = "1"
 # accessibility tree passing elements never styled (a viewport resize
 # panicked in Stylo's viewport-unit invalidation, style/data.rs:185, on
 # macOS in every non-bare instance).
-blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
-blitz-traits = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
-blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
-blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
-blitz-net = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
-blitz-html = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
-anyrender = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "c995d2722c3c9ece4882d28474b70e71ee7bb277" }
+blitz-traits = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "c995d2722c3c9ece4882d28474b70e71ee7bb277" }
+blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "c995d2722c3c9ece4882d28474b70e71ee7bb277" }
+blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "c995d2722c3c9ece4882d28474b70e71ee7bb277" }
+blitz-net = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "c995d2722c3c9ece4882d28474b70e71ee7bb277" }
+blitz-html = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "c995d2722c3c9ece4882d28474b70e71ee7bb277" }
+anyrender = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "c995d2722c3c9ece4882d28474b70e71ee7bb277" }
 # The renderer and windowing forks a Blitz app needs (each one's reason is
 # in vendor's README): Vello's window renderer and the compositor, the
 # hybrid renderer's resize, Vello's surface on Metal, winit's UIKit
@@ -849,13 +849,13 @@ debug = false
 
 # Provisional Keyflow native IME integration; return to released tags later.
 [patch."https://github.com/FastTrackStudios/blitz"]
-blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
-blitz-traits = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
-blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
-blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
-blitz-net = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
-blitz-html = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
-anyrender = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "c995d2722c3c9ece4882d28474b70e71ee7bb277" }
+blitz-traits = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "c995d2722c3c9ece4882d28474b70e71ee7bb277" }
+blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "c995d2722c3c9ece4882d28474b70e71ee7bb277" }
+blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "c995d2722c3c9ece4882d28474b70e71ee7bb277" }
+blitz-net = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "c995d2722c3c9ece4882d28474b70e71ee7bb277" }
+blitz-html = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "c995d2722c3c9ece4882d28474b70e71ee7bb277" }
+anyrender = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "c995d2722c3c9ece4882d28474b70e71ee7bb277" }
 
 [patch."https://github.com/FastTrackStudios/vendor"]
 dioxus-native-dom = { git = "https://www.github.com/FastTrackStudios/vendor", rev = "25bf4bcdfd0b6acb268ca91a93bc8ff8da683a96" }

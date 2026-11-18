@@ -178,7 +178,8 @@ impl App {
             0,
             0,
         );
-        scene.commands
+        // Layers drawn by reference, copied in to be read.
+        scene.flattened()
     }
 
     fn send(&mut self, event: UiEvent) {
@@ -857,7 +858,7 @@ fn arrangement_budget() {
             &received,
             architect_extensions::scene::Affine::IDENTITY,
         );
-        assert_eq!(s.commands.len(), 2000);
+        assert_eq!(s.flattened().len(), 2000);
         builds.push(t.elapsed());
     }
 

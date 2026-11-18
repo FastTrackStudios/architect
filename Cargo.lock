@@ -82,7 +82,7 @@ dependencies = [
 [[package]]
 name = "accesskit_xplat"
 version = "0.2.1"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=c995d2722c3c9ece4882d28474b70e71ee7bb277#c995d2722c3c9ece4882d28474b70e71ee7bb277"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -360,7 +360,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 [[package]]
 name = "anyrender"
 version = "0.14.0"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=c995d2722c3c9ece4882d28474b70e71ee7bb277#c995d2722c3c9ece4882d28474b70e71ee7bb277"
 dependencies = [
  "kurbo 0.13.1",
  "peniko 0.6.1",
@@ -2872,7 +2872,6 @@ dependencies = [
  "ipnet",
  "iroh-base",
  "iroh-metrics",
- "itertools 0.12.1",
  "keyboard-types 0.8.3",
  "konst",
  "konst_macro_rules",
@@ -3950,7 +3949,7 @@ dependencies = [
  "bitflags 2.13.2",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "log",
@@ -3973,7 +3972,7 @@ dependencies = [
  "bitflags 2.13.2",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "log",
  "prettyplease 0.2.37",
  "proc-macro2",
@@ -4096,7 +4095,7 @@ dependencies = [
 [[package]]
 name = "blitz-dom"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=c995d2722c3c9ece4882d28474b70e71ee7bb277#c995d2722c3c9ece4882d28474b70e71ee7bb277"
 dependencies = [
  "accesskit",
  "anyrender",
@@ -4107,7 +4106,7 @@ dependencies = [
  "color",
  "cssparser 0.38.0",
  "cursor-icon",
- "debug_timer 0.1.3 (git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb)",
+ "debug_timer 0.1.3 (git+https://www.github.com/FastTrackStudios/blitz?rev=c995d2722c3c9ece4882d28474b70e71ee7bb277)",
  "euclid",
  "html-escape",
  "icu_casemap",
@@ -4146,7 +4145,7 @@ dependencies = [
 [[package]]
 name = "blitz-html"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=c995d2722c3c9ece4882d28474b70e71ee7bb277#c995d2722c3c9ece4882d28474b70e71ee7bb277"
 dependencies = [
  "blitz-dom",
  "blitz-traits",
@@ -4157,7 +4156,7 @@ dependencies = [
 [[package]]
 name = "blitz-net"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=c995d2722c3c9ece4882d28474b70e71ee7bb277#c995d2722c3c9ece4882d28474b70e71ee7bb277"
 dependencies = [
  "blitz-traits",
  "data-url",
@@ -4169,7 +4168,7 @@ dependencies = [
 [[package]]
 name = "blitz-paint"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=c995d2722c3c9ece4882d28474b70e71ee7bb277#c995d2722c3c9ece4882d28474b70e71ee7bb277"
 dependencies = [
  "anyrender",
  "anyrender_svg",
@@ -4191,7 +4190,7 @@ dependencies = [
 [[package]]
 name = "blitz-shell"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=c995d2722c3c9ece4882d28474b70e71ee7bb277#c995d2722c3c9ece4882d28474b70e71ee7bb277"
 dependencies = [
  "accesskit",
  "accesskit_xplat",
@@ -4214,7 +4213,7 @@ dependencies = [
 [[package]]
 name = "blitz-traits"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=c995d2722c3c9ece4882d28474b70e71ee7bb277#c995d2722c3c9ece4882d28474b70e71ee7bb277"
 dependencies = [
  "atomic_refcell",
  "bitflags 2.13.2",
@@ -5862,7 +5861,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c54e03a951783e8b327515db3f2a2fd0e3bed362a96b066f341ce66ed49b4ead"
 dependencies = [
  "data-encoding",
- "syn 3.0.6",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -5915,7 +5914,7 @@ checksum = "da220af51a1a335e9a930beaaef53d261e41ea9eecfb3d973a3ddae1a7284b9c"
 [[package]]
 name = "debug_timer"
 version = "0.1.3"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=c995d2722c3c9ece4882d28474b70e71ee7bb277#c995d2722c3c9ece4882d28474b70e71ee7bb277"
 
 [[package]]
 name = "debugid"
@@ -8895,7 +8894,7 @@ dependencies = [
  "log",
  "presser",
  "thiserror 2.0.20",
- "windows 0.62.2",
+ "windows 0.58.0",
 ]
 
 [[package]]
@@ -9573,7 +9572,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -12618,7 +12617,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 3.5.0",
+ "proc-macro-crate 2.0.2",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -14976,7 +14975,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -14989,7 +14988,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -17990,7 +17989,7 @@ dependencies = [
 [[package]]
 name = "stylo_taffy"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=c995d2722c3c9ece4882d28474b70e71ee7bb277#c995d2722c3c9ece4882d28474b70e71ee7bb277"
 dependencies = [
  "bitflags 2.13.2",
  "stylo",

@@ -173,7 +173,7 @@ fn a_view_linked_in_and_one_across_the_wire_compose_the_same_at_every_clock() {
         (12.0, playing(2.5)),
     ] {
         hands.set(wall, playhead);
-        let here = linked.frame(AT).commands;
+        let here = linked.frame(AT).flattened();
         let mut there = Scene::new();
         receiver.layers().compose_at(
             &mut there,
@@ -181,7 +181,11 @@ fn a_view_linked_in_and_one_across_the_wire_compose_the_same_at_every_clock() {
             &clocks.read(),
             receiver.values(),
         );
-        assert_eq!(here, there.commands, "at {wall} s, playhead {playhead:?}");
+        assert_eq!(
+            here,
+            there.flattened(),
+            "at {wall} s, playhead {playhead:?}"
+        );
         seen.push(format!("{here:?}"));
     }
     // ...and each of those clocks drew something else.
@@ -197,7 +201,7 @@ fn the_painter_draws_moving_layers_without_asking_its_view() {
         Painter::new(ctx(), Song::new(Arc::clone(&asked))).with_clocks(hands.clocks());
     let line_x = |scene: &Scene| -> Vec<f64> {
         scene
-            .commands
+            .flattened()
             .iter()
             .filter_map(|c| match c {
                 RenderCommand::Fill(f) => Some(f.transform.as_coeffs()[4]),
@@ -331,7 +335,7 @@ fn a_view_fails_the_same_way_linked_in_or_across_the_wire() {
         );
         let drawn = linked.frame(AT);
         assert_eq!(linked.failed(), Some(&across));
-        assert!(drawn.commands.is_empty(), "a failed view draws nothing");
+        assert!(drawn.flattened().is_empty(), "a failed view draws nothing");
         // ...and is asked nothing again, and wants no frame.
         linked.invalidate();
         assert!(!linked.wants_frame());
@@ -493,7 +497,7 @@ fn a_linked_fader_follows_the_pointer_without_its_view_and_draws_as_one_across_t
             _ => remote.moved(layers, &now, values, at),
         };
         assert_eq!(consumed, o.consumed);
-        let here = painter.frame(AT).commands;
+        let here = painter.frame(AT).flattened();
         let mut there = Scene::new();
         receiver.layers().compose_lit(
             &mut there,
@@ -502,7 +506,7 @@ fn a_linked_fader_follows_the_pointer_without_its_view_and_draws_as_one_across_t
             receiver.values(),
             remote.lit(),
         );
-        assert_eq!(here, there.commands, "at y {y}");
+        assert_eq!(here, there.flattened(), "at y {y}");
         here
     };
     let _ = both(&point(50.0), 50.0);

@@ -317,7 +317,9 @@ impl Layers {
                     None,
                 );
             }
-            replay(scene, &layer.commands, root * placed.transform);
+            // From where it is: a painter draws it by reference, a
+            // recording keeps a share (no copy of its commands a frame).
+            scene.append_shared(&layer.commands, root * placed.transform);
             if let Some(lit) = lit.filter(|l| l.hit.key == key)
                 && let Some(r) = layer
                     .regions

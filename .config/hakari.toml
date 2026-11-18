@@ -67,3 +67,15 @@ third-party = [
     { name = "wasmtime-wasi" },
     { name = "wit-parser" },
 ]
+
+# toml_edit 0.20 and its toml_datetime 0.6 (proc-macro-crate's, under
+# num_enum_derive) are in the fleet section under names of its own
+# (`toml_edit-0_20`, `toml_datetime-0_6`); hakari naming them again would
+# give the crate one package under two names, which Cargo refuses. Which
+# build hakari unifies them in shifts with git sources' revisions (a
+# Blitz repin, #876), so they stay the fleet section's.
+[final-excludes]
+third-party = [
+    { name = "toml_edit", version = "0.20" },
+    { name = "toml_datetime", version = "0.6" },
+]

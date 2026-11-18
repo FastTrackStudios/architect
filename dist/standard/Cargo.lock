@@ -94,7 +94,7 @@ dependencies = [
 [[package]]
 name = "accesskit_xplat"
 version = "0.2.1"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=c995d2722c3c9ece4882d28474b70e71ee7bb277#c995d2722c3c9ece4882d28474b70e71ee7bb277"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -382,7 +382,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 [[package]]
 name = "anyrender"
 version = "0.14.0"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=c995d2722c3c9ece4882d28474b70e71ee7bb277#c995d2722c3c9ece4882d28474b70e71ee7bb277"
 dependencies = [
  "kurbo 0.13.1",
  "peniko 0.6.1",
@@ -842,6 +842,7 @@ dependencies = [
  "architect-process-view",
  "architect-projects",
  "architect-sandbox-board",
+ "architect-sandbox-sketch",
  "architect-scripting",
  "architect-settings",
  "architect-settings-sheet",
@@ -1231,6 +1232,7 @@ dependencies = [
  "block2 0.6.2",
  "crdt",
  "cursor-icon",
+ "data-url",
  "dioxus",
  "dioxus-html",
  "dioxus-native-dom",
@@ -1263,6 +1265,7 @@ dependencies = [
  "tracing",
  "unicode-normalization",
  "url",
+ "uuid",
  "vault-proto",
  "vox",
  "vox-core",
@@ -1666,6 +1669,17 @@ dependencies = [
  "architect-workspace-hack",
  "dioxus",
  "futures-timer",
+ "serde_json",
+]
+
+[[package]]
+name = "architect-sandbox-sketch"
+version = "0.1.0"
+dependencies = [
+ "architect-extensions",
+ "architect-workspace",
+ "architect-workspace-hack",
+ "dioxus",
  "serde_json",
 ]
 
@@ -3287,7 +3301,7 @@ dependencies = [
 [[package]]
 name = "blitz-dom"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=c995d2722c3c9ece4882d28474b70e71ee7bb277#c995d2722c3c9ece4882d28474b70e71ee7bb277"
 dependencies = [
  "accesskit",
  "anyrender",
@@ -3298,7 +3312,7 @@ dependencies = [
  "color",
  "cssparser 0.38.0",
  "cursor-icon",
- "debug_timer 0.1.3 (git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb)",
+ "debug_timer 0.1.3 (git+https://www.github.com/FastTrackStudios/blitz?rev=c995d2722c3c9ece4882d28474b70e71ee7bb277)",
  "euclid",
  "html-escape",
  "icu_casemap",
@@ -3337,7 +3351,7 @@ dependencies = [
 [[package]]
 name = "blitz-html"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=c995d2722c3c9ece4882d28474b70e71ee7bb277#c995d2722c3c9ece4882d28474b70e71ee7bb277"
 dependencies = [
  "blitz-dom",
  "blitz-traits",
@@ -3348,7 +3362,7 @@ dependencies = [
 [[package]]
 name = "blitz-net"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=c995d2722c3c9ece4882d28474b70e71ee7bb277#c995d2722c3c9ece4882d28474b70e71ee7bb277"
 dependencies = [
  "blitz-traits",
  "data-url",
@@ -3360,7 +3374,7 @@ dependencies = [
 [[package]]
 name = "blitz-paint"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=c995d2722c3c9ece4882d28474b70e71ee7bb277#c995d2722c3c9ece4882d28474b70e71ee7bb277"
 dependencies = [
  "anyrender",
  "anyrender_svg",
@@ -3382,7 +3396,7 @@ dependencies = [
 [[package]]
 name = "blitz-shell"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=c995d2722c3c9ece4882d28474b70e71ee7bb277#c995d2722c3c9ece4882d28474b70e71ee7bb277"
 dependencies = [
  "accesskit",
  "accesskit_xplat",
@@ -3405,7 +3419,7 @@ dependencies = [
 [[package]]
 name = "blitz-traits"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=c995d2722c3c9ece4882d28474b70e71ee7bb277#c995d2722c3c9ece4882d28474b70e71ee7bb277"
 dependencies = [
  "atomic_refcell",
  "bitflags 2.13.2",
@@ -5150,7 +5164,7 @@ checksum = "da220af51a1a335e9a930beaaef53d261e41ea9eecfb3d973a3ddae1a7284b9c"
 [[package]]
 name = "debug_timer"
 version = "0.1.3"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=c995d2722c3c9ece4882d28474b70e71ee7bb277#c995d2722c3c9ece4882d28474b70e71ee7bb277"
 
 [[package]]
 name = "debugid"
@@ -17282,7 +17296,7 @@ dependencies = [
 [[package]]
 name = "stylo_taffy"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=c995d2722c3c9ece4882d28474b70e71ee7bb277#c995d2722c3c9ece4882d28474b70e71ee7bb277"
 dependencies = [
  "bitflags 2.13.2",
  "stylo",
@@ -19000,6 +19014,7 @@ version = "0.1.0"
 dependencies = [
  "architect-telemetry",
  "architect-workspace-hack",
+ "async-trait",
  "crdt",
  "sha2 0.10.9",
  "tokio",

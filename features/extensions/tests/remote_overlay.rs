@@ -174,7 +174,7 @@ fn pump(doc: &mut DioxusDocument, rounds: u32) {
 fn window(doc: &DioxusDocument) -> Vec<RenderCommand> {
     let mut scene = Scene::new();
     blitz_paint::paint_scene(&mut scene, &mut doc.inner.borrow_mut(), 1.0, 800, 600, 0, 0);
-    scene.commands
+    scene.flattened()
 }
 
 /// Where the mark is in the window, if drawn.
