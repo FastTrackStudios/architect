@@ -73,4 +73,24 @@ Compared with Keyflow's capture `pr-media/chart-selection-and-input-modes:captur
 
 ## Frame time
 
-(filled in from the recording run)
+`APP_FRAMES` (#863) over the recorded 32 s, all five panes playing, the
+recorder running beside it, on a heavily shared THEBATTLESHIP (load 38 at the
+start of the run, 44 at its end; CI runners and other threads' builds):
+
+| | |
+|---|---|
+| window, presented | **30.9 fps** |
+| gap between frames | p50 26.8 ms, p99 131.0 ms |
+| the recording | 752 frames in 31.8 s (the recorder's own capture, also starved) |
+
+- The same window measured 40.0 fps at load 120, and 56.4 fps (gap p99 37.6 ms, about 10 ms of window-thread CPU a frame) at load ~43 with no recorder (`stage-c-two-clocks/`).
+- So these numbers show the shared machine more than the app. The output is 60 Hz, so nothing above 60 fps can show here.
+- 240 fps on the owner's ultrawide is not shown: it needs a high-refresh display, an idle machine, and the window's work a frame under ~4 ms.
+
+The clocks during the recording, engine then chart, read one after the other:
+
+| step | engine | chart |
+|---|---|---|
+| played from 0 | 1.05 s | 1.08 s |
+| seek 66 s | 67.05 s | 67.09 s |
+| seek 93 s | 93.98 s | 94.17 s |
