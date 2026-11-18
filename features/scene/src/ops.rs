@@ -301,7 +301,15 @@ pub struct Receiver {
     fragment_bytes: usize,
     layers: Layers,
     values: Values,
+    /// The batch being applied, when it was given whole
+    /// ([`Self::apply_owned`]): a large resource is kept as a share of it.
+    whole: Option<Arc<Vec<u8>>>,
 }
+
+/// A resource this large or larger in a batch given whole
+/// ([`Receiver::apply_owned`]) is drawn from the batch's own bytes, not a
+/// copy; a smaller one is copied, so it doesn't keep its batch alive.
+pub const SHARE_AT: usize = 64 * 1024;
 
 impl Receiver {
     #[must_use]
@@ -352,6 +360,27 @@ impl Receiver {
     ///
     /// What is wrong with it. The layers keep what was applied before
     /// the fault; the view that sent it fails.
+    /// The fonts and images it holds.
+    #[must_use]
+    pub const fn resources(&self) -> &Resources {
+        &self.resources
+    }
+
+    /// [`Self::apply`], given the batch: a font or an image in it of at
+    /// least [`SHARE_AT`] bytes is kept as a share of the batch instead
+    /// of a copy (bytes that crossed the wire are copied once, there).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::apply`].
+    pub fn apply_owned(&mut self, batch: Vec<u8>) -> Result<(), Error> {
+        let whole = Arc::new(batch);
+        self.whole = Some(Arc::clone(&whole));
+        let applied = self.apply(&whole);
+        self.whole = None;
+        applied
+    }
+
     pub fn apply(&mut self, batch: &[u8]) -> Result<(), Error> {
         if batch.len() > MAX_BATCH_BYTES {
             return Err(Error::TooLarge(batch.len(), MAX_BATCH_BYTES));
@@ -377,7 +406,21 @@ impl Receiver {
             RESOURCE => {
                 let kind = r.u8()?;
                 let len = r.count()?;
-                self.resources.receive(kind, r.take(len)?.to_vec())?;
+                let at = self
+                    .whole
+                    .as_ref()
+                    .map(|w| w.len().saturating_sub(r.left()));
+                let bytes = r.take(len)?;
+                match (&self.whole, at) {
+                    (Some(whole), Some(at)) if len >= SHARE_AT => {
+                        let whole = Arc::clone(whole);
+                        self.resources
+                            .receive_shared(kind, &whole, at..at.saturating_add(len))?;
+                    }
+                    _ => {
+                        self.resources.receive(kind, bytes.to_vec())?;
+                    }
+                }
                 self.within()?;
             }
             FRAGMENT => {

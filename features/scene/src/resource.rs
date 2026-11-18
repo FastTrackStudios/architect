@@ -107,15 +107,38 @@ impl Resource {
     /// A kind it doesn't know, a font past [`MAX_FONT_BYTES`], an image
     /// past [`MAX_IMAGE_SIDE`] or whose bytes are not its size's.
     pub fn from_bytes(kind: u8, bytes: Vec<u8>) -> Result<Self, Error> {
+        let len = bytes.len();
+        Self::from_shared(kind, &std::sync::Arc::new(bytes), 0..len)
+    }
+
+    /// [`Self::from_bytes`] for the bytes at `range` of `buf`, which it
+    /// keeps a share of instead of copying them: a font or an image
+    /// carried in a batch is drawn from the batch's own bytes.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::from_bytes`]; `range` outside `buf`.
+    pub fn from_shared(
+        kind: u8,
+        buf: &std::sync::Arc<Vec<u8>>,
+        range: std::ops::Range<usize>,
+    ) -> Result<Self, Error> {
+        let bytes = buf.get(range.clone()).ok_or(Error::Truncated)?;
+        let share = |r: std::ops::Range<usize>| -> Blob<u8> {
+            Blob::new(std::sync::Arc::new(Slice {
+                buf: std::sync::Arc::clone(buf),
+                range: r,
+            }))
+        };
         match kind {
             FONT => {
                 if bytes.len() > MAX_FONT_BYTES {
                     return Err(Error::TooLarge(bytes.len(), MAX_FONT_BYTES));
                 }
-                Ok(Self::Font(Blob::from(bytes)))
+                Ok(Self::Font(share(range)))
             }
             IMAGE => {
-                let mut r = Reader::new(&bytes);
+                let mut r = Reader::new(bytes);
                 let format = match r.u8()? {
                     0 => ImageFormat::Rgba8,
                     1 => ImageFormat::Bgra8,
@@ -130,12 +153,13 @@ impl Resource {
                 if width > MAX_IMAGE_SIDE || height > MAX_IMAGE_SIDE {
                     return Err(Error::ImageSize(width, height));
                 }
-                let pixels = r.take(r.left())?;
+                let left = r.left();
+                let pixels = r.take(left)?;
                 if format.size_in_bytes(width, height) != Some(pixels.len()) {
                     return Err(Error::ImageSize(width, height));
                 }
                 Ok(Self::Image(ImageData {
-                    data: Blob::from(pixels.to_vec()),
+                    data: share(range.end.saturating_sub(left)..range.end),
                     format,
                     alpha_type,
                     width,
@@ -185,6 +209,21 @@ impl Resources {
         Ok(self.insert(Resource::from_bytes(kind, bytes)?))
     }
 
+    /// [`Self::receive`] for the bytes at `range` of `buf`, kept as a
+    /// share of it ([`Resource::from_shared`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::receive`].
+    pub fn receive_shared(
+        &mut self,
+        kind: u8,
+        buf: &std::sync::Arc<Vec<u8>>,
+        range: std::ops::Range<usize>,
+    ) -> Result<Id, Error> {
+        Ok(self.insert(Resource::from_shared(kind, buf, range)?))
+    }
+
     /// Lets go of `id`: whether it held it.
     pub fn remove(&mut self, id: Id) -> bool {
         self.held.remove(&id).is_some_and(|gone| {
@@ -227,5 +266,18 @@ impl Resources {
             Some(Resource::Image(image)) => Ok(image.clone()),
             _ => Err(Error::MissingResource(id)),
         }
+    }
+}
+
+/// Bytes at a range of a shared buffer: what a resource carried in a
+/// batch is drawn from, with no copy.
+struct Slice {
+    buf: std::sync::Arc<Vec<u8>>,
+    range: std::ops::Range<usize>,
+}
+
+impl AsRef<[u8]> for Slice {
+    fn as_ref(&self) -> &[u8] {
+        self.buf.get(self.range.clone()).unwrap_or_default()
     }
 }
