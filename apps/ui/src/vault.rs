@@ -726,9 +726,28 @@ pub fn VaultPage() -> Element {
     } else {
         architect_shell::SidebarLayout::Rail
     });
-    // The lab's views, and every view a loaded extension adds (made again
-    // when one loads or unloads).
-    let views = use_memo(move || views(ui.map(|u| u.views()).unwrap_or_default()))();
+    // The lab's views, and every view a loaded extension adds, read in
+    // this render (it renders again when one loads or unloads): a memo
+    // over them could be left behind by the last load, and a development
+    // copy's views were then no pane kind (#844). Made again only when
+    // the kinds or titles changed, so the workspace is not drawn again
+    // for nothing.
+    let extra = ui.map(|u| u.views()).unwrap_or_default();
+    let signature: Vec<(String, String)> = extra
+        .iter()
+        .map(|v| (v.kind.0.clone(), v.title.clone()))
+        .collect();
+    let mut made = use_hook(|| CopyValue::new(None::<(Vec<(String, String)>, Views)>));
+    let kept = made
+        .peek()
+        .as_ref()
+        .filter(|(was, _)| *was == signature)
+        .map(|(_, kept)| kept.clone());
+    let views = kept.unwrap_or_else(|| {
+        let fresh = views(extra);
+        made.set(Some((signature, fresh.clone())));
+        fresh
+    });
     // The workspace on the lab's Action List: every operation, run by the
     // host below; a scenario's checks read the arrangement, each change
     // is heard.
