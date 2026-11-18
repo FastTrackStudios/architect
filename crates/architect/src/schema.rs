@@ -36,10 +36,30 @@ use facet::{Def, NumericType, PrimitiveType, Shape, StructKind, TextualType, Typ
 pub const MAX_DEPTH: usize = 24;
 
 /// The JSON Schema of `shape`, as JSON text.
+///
+/// Worked out once per shape and kept: a shape is `'static` and never
+/// changes, and `ActionList::infos` asks for every action's on each call
+/// (a menu resolved again after each run asked it ten times a second,
+/// about a tenth of a 5K window's frame thread during playback).
 #[must_use]
 pub fn json_schema(shape: &'static Shape) -> String {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock, PoisonError};
+    static KEPT: OnceLock<Mutex<HashMap<usize, String>>> = OnceLock::new();
+    let key = std::ptr::from_ref(shape).addr();
+    let kept = KEPT.get_or_init(Mutex::default);
+    if let Some(s) = kept
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(&key)
+    {
+        return s.clone();
+    }
     let mut out = String::new();
     write_shape(&mut out, shape, 0);
+    kept.lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(key, out.clone());
     out
 }
 

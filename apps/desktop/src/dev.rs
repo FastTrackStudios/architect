@@ -14,11 +14,12 @@
 //! ```text
 //! architect-desktop dev                          # this folder's instance: start it, or say where it is
 //! architect-desktop dev --extension features/x   # with a development copy (reloaded on save)
-//! architect-desktop dev --only navigator,x       # every other extension off (--bare: all of them)
+//! architect-desktop dev --only navigator,x       # every other extension off (--bare: all of them; each --only adds)
 //! architect-desktop dev --open "Charts/A.kf"     # opened on a file (EXT_OPEN)
 //! architect-desktop dev --layout focus           # in a layout of the app's folder (HOME_LAYOUT_USE)
+//! architect-desktop dev --layout layouts/x.json  # a layout file, copied into its folder as `x` first
 //! architect-desktop dev --collapse left,right    # opened with those sides folded away
-//! architect-desktop dev --hide all               # no rail, docks or status bar: the tabs and the page
+//! architect-desktop dev --hide all               # no rail, docks, status or Now Playing bar: the tabs and the page
 //! architect-desktop dev --run ACTION[=JSON]      # any action, once it is up
 //! architect-desktop dev --seed <dir> | --vault <dir> | --fresh | --name <n> | --wait
 //! architect-desktop dev list                     # the instances, running or not
@@ -74,8 +75,9 @@ const COLLAPSE_ENV: &str = "ARCHITECT_DEV_COLLAPSE";
 const SIDES: [&str; 3] = ["left", "right", "bottom"];
 const HIDE_ENV: &str = "ARCHITECT_DEV_HIDE";
 /// What `--hide` takes away: the rail (the shell's ribbon slot), the
-/// status bar (its status slot), and the docks.
-const PARTS: [&str; 5] = ["rail", "status", "left", "right", "bottom"];
+/// status bar (its status slot), the Now Playing bar (its `now_playing`
+/// slot), and the docks.
+const PARTS: [&str; 6] = ["rail", "status", "now-playing", "left", "right", "bottom"];
 /// How long a start waits for the window's socket to answer.
 const READY: Duration = Duration::from_secs(180);
 
@@ -134,6 +136,14 @@ impl Ask {
             out.push((OPEN_ENV, open.into()));
         }
         if let Some(layout) = &self.layout {
+            // A layout file by its whole path: the window may start elsewhere.
+            let file = Path::new(layout);
+            let layout = if is_layout_file(layout) {
+                file.canonicalize()
+                    .map_or_else(|_| layout.clone(), |p| p.to_string_lossy().into_owned())
+            } else {
+                layout.clone()
+            };
             out.push((LAYOUT_ENV, layout.into()));
         }
         if let Some(vault) = &self.vault {
@@ -229,14 +239,18 @@ fn parse(args: &[String]) -> Result<Ask, String> {
             "--seed" => ask.seed = Some(value("--seed")?.into()),
             "--bare" => ask.only = Some(Vec::new()),
             "--only" => {
-                ask.only = Some(
-                    value("--only")?
-                        .split(',')
-                        .map(str::trim)
-                        .filter(|s| !s.is_empty())
-                        .map(str::to_owned)
-                        .collect(),
-                );
+                // Each `--only` adds to the list: `--only a --only b,c` is
+                // `--only a,b,c` (a script's own and its caller's).
+                let only = ask.only.get_or_insert_with(Vec::new);
+                for id in value("--only")?
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
+                    if !only.iter().any(|o| o == id) {
+                        only.push(id.to_owned());
+                    }
+                }
             }
             "--extension" => ask.extensions.push(value("--extension")?.into()),
             "--open" => ask.open = Some(value("--open")?),
@@ -892,10 +906,10 @@ fn apply(inst: &Instance, ask: &Ask) -> Result<(), String> {
             let _ = act(&socket, "EXT_ENABLE", &json!({ "id": id }));
         }
     }
-    if let Some(name) = &ask.layout
-        && let Err(e) = act(&socket, "HOME_LAYOUT_USE", &json!({ "name": name }))
+    if let Some(layout) = &ask.layout
+        && let Err(e) = use_layout(inst, &socket, layout)
     {
-        failed.push(format!("HOME_LAYOUT_USE {name}: {e}"));
+        failed.push(e);
     }
     if let Some(path) = &ask.open
         && let Err(e) = open(&socket, path, !ask.extensions.is_empty())
@@ -917,6 +931,60 @@ fn apply(inst: &Instance, ask: &Ask) -> Result<(), String> {
         Ok(())
     } else {
         Err(failed.join("; "))
+    }
+}
+
+/// Whether `--layout`'s value names a layout file (`….json`, any case)
+/// rather than a layout of the app's folder.
+fn is_layout_file(layout: &str) -> bool {
+    Path::new(layout)
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("json"))
+}
+
+/// A layout file (`--layout <file>.json`): the layout's name (its file's
+/// stem) and its text. `None` for a name of a layout the app has already.
+fn layout_file(layout: &str) -> Result<Option<(String, String)>, String> {
+    let path = Path::new(layout);
+    if !is_layout_file(layout) {
+        return Ok(None);
+    }
+    let text = std::fs::read_to_string(path).map_err(|e| format!("--layout {layout}: {e}"))?;
+    let name = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .filter(|s| check_name(s).is_ok())
+        .ok_or_else(|| format!("--layout {layout}: its file's name is no layout name"))?;
+    Ok(Some((name, text)))
+}
+
+/// Shows `layout`: a layout of the app's folder by name, or a layout file
+/// copied into the instance's `layouts/` first (the app reads it on its
+/// next poll, so its use waits for that).
+fn use_layout(inst: &Instance, socket: &Path, layout: &str) -> Result<(), String> {
+    let Some((name, text)) = layout_file(layout)? else {
+        return act(socket, "HOME_LAYOUT_USE", &json!({ "name": layout }))
+            .map(|_| ())
+            .map_err(|e| format!("HOME_LAYOUT_USE {layout}: {e}"));
+    };
+    let dir = inst.app().join("layouts");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let into = dir.join(format!("{name}.json"));
+    std::fs::write(&into, text).map_err(|e| format!("{}: {e}", into.display()))?;
+    let began = Instant::now();
+    loop {
+        match act(socket, "HOME_LAYOUT_USE", &json!({ "name": name })) {
+            Ok(_) => return Ok(()),
+            Err(_) if began.elapsed() < Duration::from_secs(15) => {
+                std::thread::sleep(Duration::from_millis(300));
+            }
+            Err(e) => {
+                let why = std::fs::read_to_string(dir.join(format!("{name}.error")))
+                    .map(|w| format!(" ({w})"))
+                    .unwrap_or_default();
+                return Err(format!("HOME_LAYOUT_USE {name} ({layout}): {e}{why}"));
+            }
+        }
     }
 }
 
@@ -951,6 +1019,7 @@ fn hide(inst: &Instance, socket: &Path, parts: &[String]) -> Result<(), String> 
     let slot = |part: &str| match part {
         "rail" => Some("ribbon"),
         "status" => Some("status"),
+        "now-playing" => Some("now_playing"),
         _ => None,
     };
     let record = inst.dir.join("hidden-slots");
@@ -1110,10 +1179,48 @@ mod tests {
             parse(&args("--hide rail,status")).unwrap().hide,
             ["rail", "status"]
         );
-        assert_eq!(parse(&args("--hide all")).unwrap().hide.len(), 5);
+        assert_eq!(parse(&args("--hide all")).unwrap().hide.len(), 6);
         assert!(parse(&args("--hide ribbon")).is_err());
         let env = parse(&args("--collapse right")).unwrap().to_env();
         assert!(env.iter().any(|(k, v)| *k == COLLAPSE_ENV && v == "right"));
+    }
+
+    #[test]
+    fn each_only_adds_and_extensions_all_load() {
+        let ask = parse(&args(
+            "--only playhead --only daw,studio.mixer --only daw --extension a --extension b --extension c --extension d --extension e",
+        ))
+        .unwrap();
+        assert_eq!(
+            ask.only.as_deref().unwrap(),
+            ["playhead", "daw", "studio.mixer"]
+        );
+        assert_eq!(ask.extensions.len(), 5);
+        assert_eq!(
+            parse(&args("--bare --only x")).unwrap().only.unwrap(),
+            ["x"]
+        );
+    }
+
+    #[test]
+    fn a_layout_file_is_named_for_its_file_and_a_name_is_a_name() {
+        let dir = std::env::temp_dir().join(format!("dev-layout-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("setlist-window.json");
+        std::fs::write(&file, "{\"name\":\"Setlist\"}").unwrap();
+        let (name, text) = layout_file(&file.to_string_lossy()).unwrap().unwrap();
+        assert_eq!(name, "setlist-window");
+        assert!(text.contains("Setlist"));
+        assert_eq!(layout_file("focus").unwrap(), None);
+        assert!(layout_file(&dir.join("gone.json").to_string_lossy()).is_err());
+        let env = parse(&args(&format!("--layout {}", file.display())))
+            .unwrap()
+            .to_env();
+        assert!(
+            env.iter()
+                .any(|(k, v)| *k == LAYOUT_ENV && Path::new(v).is_absolute())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

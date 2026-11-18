@@ -34,16 +34,20 @@ pub enum Slot {
     Status,
     /// A desk's title row.
     Title,
+    /// The Now Playing bar at the page's foot (only hidden or shown: the
+    /// playhead draws it).
+    NowPlaying,
 }
 
 impl Slot {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Ribbon,
         Self::Left,
         Self::Right,
         Self::Tabs,
         Self::Status,
         Self::Title,
+        Self::NowPlaying,
     ];
 
     /// Its name in a layout file and a manifest (`status`).
@@ -56,6 +60,7 @@ impl Slot {
             Self::Tabs => "tabs",
             Self::Status => "status",
             Self::Title => "title",
+            Self::NowPlaying => "now_playing",
         }
     }
 

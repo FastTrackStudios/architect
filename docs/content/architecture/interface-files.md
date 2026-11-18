@@ -30,6 +30,7 @@ The shell's regions are named slots (`Slot`):
 | `tabs` | the page's tab in a desk's title row (`DeskTab`) |
 | `status` | a desk's status bar (`StatusBar`) |
 | `title` | a desk's title row (`DeskTitleRow`) |
+| `now_playing` | the Now Playing bar (`architect_playhead::ui::NowPlayingBar`); hidden only, never filled |
 
 A `Chrome` above `AppShell` (`use_chrome`) says, per slot, who fills it
 instead of the shell (a `Filler`: an extension's view, a layout file's
