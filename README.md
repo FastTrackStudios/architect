@@ -1,81 +1,78 @@
-# The setlist window: stage (b), placeholder arrangement
+# The setlist window at 5120×1440
 
-**This is not the final picture.** The arrangement and mixer panes here are
-studio#519's first drawing (`feat/arrangement-mixer-runtime-extensions`
-`25984ea8`), which the owner rejected as a re-implementation. Studio's real
-views (`apps/session/ui`, as `studio-desktop` mounts them) replace them in
-stage (c), so every file here is named `…-placeholder-arrangement…`.
-
-One stock Architect window at 5120×1440, both sidebars, the status bar and
-the Now Playing bar hidden, playing **Drive To LA** from JT's Senior Recital:
+One stock Architect window, 5120×1440, both sidebars, the status bar and the
+Now Playing bar hidden, playing **Drive To LA** from JT's Senior Recital:
 
 | left | centre | right |
 |---|---|---|
-| Ignition's 3D room (`ignition/room`, a `kind = "process"` view, Ignition#19 `6ee81451`) | Studio's arrangement (`studio.arrangement/arrangement`) over its mixer (`studio.mixer/mixer`), the `daw` engine playing the song's multitracks into a private PipeWire null sink | Keyflow's chart text (`vault.note`) beside the chart (`keyflow/chart`, `feat/runtime-chart` `ce7dbd7`) |
+| Ignition's 3D room (`ignition/room`, a `kind = "process"` view; Ignition `main` `8f04c0a`) | **Studio's own** arrangement over **Studio's own** mixer (`studio.arrangement/arrangement`, `studio.mixer/mixer`: `session_ui`'s panels, the ones `studio-desktop` mounts), on **Studio's engine** (the `daw` extension runs `studio engine`) playing the song's multitracks into a private PipeWire null sink; studio#519 `fffcf831` | Keyflow's chart text (`vault.note`) beside the chart (`keyflow/chart` on a session; `feat/runtime-chart` `ce7dbd7`) |
 
-Nothing is compiled into the app: all five (`daw`, `studio.arrangement`,
-`studio.mixer`, `keyflow`, `ignition`) are development copies of runtime
-extensions in one isolated instance. Architect: `runtime-compositor-setlist`
-`f9f6b57a` (`runtime-compositor` plus `runtime-compositor-arrangement` and
-`runtime-compositor-process-macos`, and this work's fixes).
+Nothing is compiled into the app: `daw`, `studio.arrangement`, `studio.mixer`,
+`keyflow` and `ignition` are development copies of runtime extensions in one
+isolated instance of `architect-desktop --features process-views`, Architect
+`runtime-compositor-setlist` `d46354fc`.
 
 ## Files
 
-- `setlist-window-5120x1440-dark-playing-placeholder-arrangement.png`: dark, playing (engine at ~80 s).
-- `setlist-window-5120x1440-light-playing-placeholder-arrangement.png`: light, playing (~92 s).
-- `setlist-window-5120x1440-dark-playing-28s-placeholder-arrangement.mp4`: 28 s of playback, from 57 s.
+- `setlist-window-5120x1440-dark-playing.png`: dark, playing (the engine at 72 s).
+- `setlist-window-5120x1440-light-playing.png`: light, playing (78 s). Studio's panes stay dark as `studio-desktop` itself does under a light desktop (studio `pr-media/arrangement-mixer`, `reference-studio-desktop/studio-desktop-1280-light-desktop-stays-dark.png`).
+- `setlist-window-5120x1440-dark-playing-28s.mp4`: 28 s of playback from 57 s.
+- `stage-b-placeholder/`: the earlier stage with studio#519's rejected placeholder drawing, kept for comparison only.
 
-All captured with `loft-shot` / `wf-recorder` from a headless GPU Loft
-session (RTX 4080) whose one output is exactly 5120×1440 at 60 Hz. `APP_SHOT`
-was not used (it repaints on the CPU and draws a process view black).
+All captured from a headless GPU Loft session (RTX 4080) whose one output is
+exactly 5120×1440 at 60 Hz, with `loft-shot` and `wf-recorder`. `APP_SHOT`
+was not used: it repaints on the CPU and draws a process view black.
 
 ## Which pane follows which clock
 
-Not one transport yet.
-
-- **The engine's clock** (the app's playhead deck, which the `daw` engine leads): the arrangement's playhead and the mixer's meters.
-- **Keyflow's session clock** (presence `lead/play` of a session Keyflow hosts and serves on `ws://127.0.0.1:4143/vox`): the chart (pane `session:<id>`) and the room (`--clock session:…@drive-to-la`).
-- The launcher starts both at the same moment (`--play 60`). They agree to within the two starts, then run apart.
-
-The engine does not publish the session's transport (studio#522). Keyflow's
-session chart draws no playhead (keyflow#97, which also covers: no text
-editor beside a session chart, and the engine's session file not opening in
-Keyflow).
+- **Studio's engine:**
+  - the arrangement's playhead and the mixer's meters (Studio's own window protocol, attached to the engine);
+  - **the room**: Ignition's `studio` clock, the engine's socket (`$XDG_RUNTIME_DIR/fts/engine-<pid>.sock`, log "following the engine … a song of the night is open song=Drive To LA").
+  - Seeking the engine alone moves the room: the intro's amber wash at 5 s, magenta at 120 s.
+- **Its own clock: the chart.** It is on a session Keyflow hosts and serves (`KEYFLOW_SESSION_PLAY`), started at the same moment as the engine (`just setlist-window --play`). Keyflow cannot follow Studio's engine, and the engine publishes no session transport (studio#522). The chart also draws no playhead and stays on page 1 while playing (keyflow#97).
 
 ## Frame time, the whole window, playing
 
-`APP_FRAMES` (new, `features/workspace/src/frames.rs`): each redraw of the
-main window timed on its thread, 20 s while playing, all five panes on screen,
-fullscreen 5120×1440:
+`APP_FRAMES` (`features/workspace/src/frames.rs`), 20 s, all five panes on
+screen, fullscreen 5120×1440, the window's thread CPU from `/proc`:
 
 | | p50 | p99 | max |
 |---|---|---|---|
-| from one frame to the next (what reached the screen) | 16.7 ms | 35.6 ms | 42.9 ms |
-| each frame's work on the window's thread (includes waiting on the 60 Hz present) | 16.2 ms | 32.9 ms | 39.0 ms |
+| frame to frame (what reached the screen) | 16.7 ms | 37.6 ms | 63.4 ms |
+| each redraw on the window's thread (includes waiting on the 60 Hz present) | 14.2 ms | 32.5 ms | 55.4 ms |
 
-- **56.5 fps presented.**
-- The window's thread used **8.3 ms of CPU a frame** (44.7% busy at 53.6 fps over 10 s, from `/proc`). That's the honest work figure; the timed redraw includes the vsync wait.
-- Of that CPU (perf):
-  - Blitz painting the DOM and the sub-documents ~29%;
-  - composing the extensions' scenes ~19% (`architect_scene::layers::replay` copies every path into a new recording each frame: `memmove` alone 18%, #834);
-  - Vello's encoding (`render_to_texture`) ~20%.
-- The machine is shared (load 10–30 while measuring).
+- **56.4 fps presented.**
+- **10.0 ms of CPU a frame** on the window's thread (56.6% busy).
+- The machine was heavily shared while measuring (load ~43; another session's compositor at ~20 cores), so the p99 and max are noisy.
+- With the placeholder drawing, the same measurement gave 56.5 fps and 8.3 ms of CPU a frame. Of that CPU (perf, placeholder run):
+  - Blitz painting the page and its sub-documents ~29%;
+  - re-composing the extensions' scenes every frame ~19% (`architect_scene::layers::replay` copies each path into a fresh recording, #834);
+  - Vello's encoding ~20%.
 
-**What capped it:** the 60 Hz output first. Below that, the window's own thread: about 8 ms of CPU a frame is ~120 fps at best on this machine, half the 240 fps goal, before the GPU's raster, which is not measured.
+**What capped it:** first, the 60 Hz output (the Loft headless output offers
+only 60 Hz). Below that, the window's own thread: 10 ms of CPU a frame is
+about 100 fps at best here.
 
 **Unproven:**
-- **240 fps on the owner's ultrawide**: no high-refresh output here, and the CPU per frame must halve first.
-- **Ignition's room**: its frames come over shared memory, not dma-buf (Ignition's Bevy renderer on wgpu 29 speaks the wire itself over shared memory, `docs/content/architecture/process-views.md`). That's one copy each way at 5K.
-
-Found and fixed on the way: the dock menu's resolve serialised every action's JSON Schema after each action run, about 10% of the window's thread while playing. Fixed by caching each type's schema in `85af8196`. The gap's p99 went from 68.6 to 35.6 ms.
+- **240 fps on the ultrawide.** It needs a high-refresh output to show, and the window's CPU per frame cut to under ~4 ms first.
+- The GPU's raster time is not separated.
+- Ignition's room arrives over shared memory, not dma-buf (one copy each way at 5K).
 
 ## Run it
 
 ```sh
-SETLIST_SESSION=<drive-to-la.session> SETLIST_STUDIO=… SETLIST_KEYFLOW=… SETLIST_IGNITION=… \
+SETLIST_SESSION="<…>/Drive To LA/Drive To LA.rpp" \
+SETLIST_STUDIO=<studio at studio#519> SETLIST_KEYFLOW=<keyflow> SETLIST_IGNITION=<Ignition> \
   just setlist-window --play 60
 ```
 
-(`scripts/setlist-window.sh`: builds each program in its repo's dev shell, assembles the five packages, opens `examples/layouts/setlist-window.json`, chooses the engine for `fts.session`, makes Keyflow's session from the chart and points the chart and the room at it.)
+`scripts/setlist-window.sh`:
+- builds each program in its own repo's dev shell;
+- assembles the five packages;
+- opens `examples/layouts/setlist-window.json`;
+- makes Keyflow's session from the chart;
+- points the chart at it and the room at the engine.
 
-Gaps and fixes: architect#840 (the comment of 2026-11-18), #851, studio#522, keyflow#97.
+A window manager that opens the window smaller needs it fullscreen; a resize no longer crashes. The song folder's name is what Ignition matches to the night's song.
+
+Gaps and fixes: architect#840 (the comments of 2026-11-18), #851, studio#522, keyflow#97.
