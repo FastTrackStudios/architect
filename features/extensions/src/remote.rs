@@ -143,6 +143,9 @@ pub struct RemoteDocument {
     /// Whether an input method is composing (a `compositionstart` was
     /// sent and its end not yet).
     composing: bool,
+    /// Its share of `architect_workspace::field_focused`: a field of its
+    /// own has the focus (a pane's view keys leave letters to it).
+    field: architect_workspace::FieldFocus,
     /// The scenes the view sent, by hash (#175).
     scenes: crate::scene::SceneCache,
     /// Scenes decoded off the UI thread before their frame is applied
@@ -230,6 +233,7 @@ impl RemoteDocument {
             fitted: false,
             held: None,
             composing: false,
+            field: architect_workspace::FieldFocus::new(),
             scenes: crate::scene::SceneCache::new(),
             predecoded: HashMap::new(),
             holds: HashMap::new(),
@@ -398,6 +402,19 @@ impl RemoteDocument {
         }
         driver.handle_dom_event(DomEvent::new(target, DomEventData::Focus(BlitzFocusEvent)));
         driver.handle_dom_event(DomEvent::new(target, DomEventData::FocusIn(BlitzFocusEvent)));
+        self.sync_field();
+    }
+
+    /// Whether a text field of its own has the focus, told to
+    /// `architect_workspace::field_focused`.
+    fn sync_field(&mut self) {
+        let typing = self
+            .doc
+            .get_focussed_node_id()
+            .and_then(|id| self.doc.get_node(id))
+            .and_then(Node::element_data)
+            .is_some_and(|el| el.text_input_data().is_some());
+        self.field.set(typing);
     }
 
     /// Shows the cursor the region under the pointer asks for: after the
@@ -1203,6 +1220,7 @@ impl Document for RemoteDocument {
             UiEvent::PointerMove(_) | UiEvent::PointerUp(_) | UiEvent::PointerLeave(_)
         );
         EventDriver::new(&mut self.doc, forward).handle_ui_event(event);
+        self.sync_field();
         if releases {
             self.held = None;
         }
@@ -2435,6 +2453,9 @@ fn Mount(
                             with_doc(&node, |doc, at| {
                                 if let Some(r) = remote(doc, at) {
                                     r.let_go(None);
+                                    // Its field's keys are not the app's
+                                    // to leave alone any more.
+                                    r.field.set(false);
                                 }
                             })
                             .await;

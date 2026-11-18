@@ -1028,13 +1028,49 @@ pub struct CaptureTargetDecl {
 ///
 /// After the commands' own shortcuts and the app's keymap, under the
 /// person's rebinds; withdrawn when the extension is turned off.
+///
+/// With `when = "view:<view>"` (one of its own `[[views]]`, or another
+/// extension's as `view:<extension>/<view>`) it holds only while that
+/// view has the focus, in the keymap's `view:<extension>/<view>` context:
+/// plain letters a chart takes for note input, which can't be the app's.
+/// The view never hears a key bound there; a letter typed into a text
+/// field in it is still the field's.
+///
+/// ```toml
+/// [[keys]]
+/// chord = "A"
+/// action = "KEYFLOW_NOTE_A"
+/// when = "view:chart"
+/// ```
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct KeyDecl {
-    /// As commands show theirs (`⌘K`, `⇧⌘P`, `⌃O`).
+    /// As commands show theirs (`⌘K`, `⇧⌘P`, `⌃O`, `A`).
     pub chord: String,
     /// Its own action, or one its capabilities reach.
     pub action: String,
+    /// Where it holds: everywhere (empty), or `view:<view>` while that
+    /// view has the focus.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub when: String,
+}
+
+impl KeyDecl {
+    /// The keymap context it is bound in: `""` everywhere, else
+    /// `view:<extension>/<view>`, a view of `owner`'s named whole.
+    #[must_use]
+    pub fn context(&self, owner: &str) -> String {
+        match self.when.strip_prefix("view:") {
+            Some(view) if view.contains('/') => format!("view:{view}"),
+            Some(view) => format!("view:{owner}/{view}"),
+            None => String::new(),
+        }
+    }
+
+    /// What tells two of them apart: the context and the chord.
+    fn key(&self) -> String {
+        format!("{}|{}", self.when, self.chord)
+    }
 }
 
 /// An overlay of the shell's palette slot it draws with one of its views
@@ -1360,7 +1396,7 @@ impl Contribution {
             capture_targets: join(&self.capture_targets, &other.capture_targets, |c| {
                 c.id.clone()
             }),
-            key_bindings: join(&self.key_bindings, &other.key_bindings, |k| k.chord.clone()),
+            key_bindings: join(&self.key_bindings, &other.key_bindings, KeyDecl::key),
             palette_views: join(&self.palette_views, &other.palette_views, |p| {
                 p.overlay.clone()
             }),
@@ -1434,7 +1470,10 @@ impl Contribution {
                 .iter()
                 .map(|c| format!("capture_target:{}", c.id)),
         );
-        out.extend(self.key_bindings.iter().map(|k| format!("key:{}", k.chord)));
+        out.extend(self.key_bindings.iter().map(|k| match k.when.as_str() {
+            "" => format!("key:{}", k.chord),
+            when => format!("key:{when}:{}", k.chord),
+        }));
         out.extend(
             self.palette_views
                 .iter()
@@ -1865,6 +1904,21 @@ impl Contribution {
                 return refuse(what, "its chord is not one (`⌘K`, `⇧⌘P`)".to_owned());
             }
             action(&what, &k.action)?;
+            match k.when.strip_prefix("view:") {
+                _ if k.when.is_empty() => {}
+                Some(v) if v.contains('/') => {
+                    if v.split('/').any(str::is_empty) {
+                        return refuse(what, "its view is `<extension>/<view>`".to_owned());
+                    }
+                }
+                Some(v) => view(&what, v)?,
+                None => {
+                    return refuse(
+                        what,
+                        "`when` is empty (everywhere) or `view:<view>`".to_owned(),
+                    );
+                }
+            }
         }
         let mut drawn = BTreeSet::new();
         for p in &self.palette_views {
@@ -2597,7 +2651,7 @@ impl Contributions {
         let mut seen = BTreeSet::new();
         self.all(|c| c.key_bindings.clone())
             .into_iter()
-            .filter(|k| seen.insert(k.item.chord.clone()))
+            .filter(|k| seen.insert((k.item.context(&k.owner), k.item.chord.clone())))
             .collect()
     }
 

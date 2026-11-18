@@ -723,13 +723,19 @@ fn use_palette(ui: ExtensionUi, host: Host, revision: Signal<u64>) {
             })
             .collect();
         commands.set_palette_views(views);
+        // Everywhere, or in one view's context while it has the focus.
+        let (everywhere, in_views): (Vec<_>, Vec<_>) = contributions
+            .key_bindings()
+            .into_iter()
+            .map(|by| (by.item.context(&by.owner), by.item.action, by.item.chord))
+            .partition(|(context, _, _)| context.is_empty());
         commands.set_bound_keys(
-            contributions
-                .key_bindings()
+            everywhere
                 .into_iter()
-                .map(|by| (by.item.action, by.item.chord))
+                .map(|(_, action, chord)| (action, chord))
                 .collect(),
         );
+        commands.set_view_keys(in_views);
         let now = contributions.palette_sources();
         let ids: Vec<String> = now.iter().map(|p| p.item.id.clone()).collect();
         for gone in mine.borrow().iter().filter(|id| !ids.contains(id)) {

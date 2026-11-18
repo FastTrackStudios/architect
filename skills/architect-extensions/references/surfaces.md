@@ -97,11 +97,11 @@ There are three kinds:
 
 | Key | Fields | Where it fires |
 |---|---|---|
-| `[[keys]]` | `chord` (`⌘K`, `⇧⌘P`, `⌃O`), `action` | the app's keymap, after the commands' own shortcuts and the app keymap, under the person's rebinds (`features/extensions/src/contrib.rs` `KeyDecl`) |
+| `[[keys]]` | `chord` (`⌘K`, `⇧⌘P`, `⌃O`, `A`), `action`, `when` (empty: everywhere; `view:<view>` or `view:<extension>/<view>`: while that view has the focus) | the app's keymap, after the commands' own shortcuts and the app keymap, under the person's rebinds (`features/extensions/src/contrib.rs` `KeyDecl`) |
 | `[[actions]] shortcut` | `shortcut = "Mod-Alt-D"` | the action's own key, shown in ⌘K and the action list (`features/extensions/src/manifest.rs` `ActionDecl`) |
 | `[[keymaps]]` | `key` (`Tab`, `Shift-Tab`, `Mod-Enter`), `when` (`editor`, `node:list-item`, `node:table`), `action` | the editor only, while it has the focus and the cursor is in that node; needs `capabilities.writes = ["editor"]` |
 
-`[[keys]]` go to the shell through `commands.set_bound_keys` in `features/extensions/src/interface.rs` `use_palette`. They are withdrawn when the extension is turned off. The person rebinds any of them in the action list window (`architect_commands::BindingEditor`). The escape hatch, Ctrl+Alt+Shift+Escape, cannot be rebound.
+`[[keys]]` go to the shell through `commands.set_bound_keys` (everywhere) and `commands.set_view_keys` (`when = "view:…"`, the keymap's `view:<extension>/<view>` context) in `features/extensions/src/interface.rs` `use_palette`. A view key holds while a part of that view has the focus: plain letters bound there run their action and never reach the view, linked in, in a process copy or in a `kind = "process"` view alike; a letter typed into a text field in it still types. Use it for a view's own single-key commands (a chart's note input) instead of reading raw keys and keeping a keymap of your own. They are withdrawn when the extension is turned off. The person rebinds any of them in the action list window (`architect_commands::BindingEditor`). The escape hatch, Ctrl+Alt+Shift+Escape, cannot be rebound.
 
 **Examples.**
 - `features/palette/extension/extension.toml`: `[[keys]] chord = "⌘K"`, `action = "COMMAND_PALETTE_OPEN"`, with `⌃K`, `⇧⌘P`, `⌘O` beside it.

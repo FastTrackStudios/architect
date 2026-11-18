@@ -1420,6 +1420,11 @@ view = "palette"
 chord = "⌘K"
 action = "COMMAND_PALETTE_OPEN"
 
+[[keys]]                     # a plain letter, only while its view has the focus
+chord = "A"
+action = "KEYFLOW_NOTE_A"
+when = "view:chart"          # the keymap's `view:<extension>/chart` context
+
 [[palette_sources]]          # rows for ⌘K, ranked by the engine
 id = "tours"                 # and its prefix: tours: asks only it
 title = "Tours"

@@ -163,6 +163,9 @@ pub struct Commands {
     pub(crate) views: Signal<Vec<PaletteView>>,
     /// Keys the extensions bind (`[[keys]]`): `(action, chord)`.
     pub(crate) bound: Signal<Vec<(String, String)>>,
+    /// Keys bound in one view's context (`[[keys]] when = "view:…"`):
+    /// `(context, action, chord)`.
+    pub(crate) view_keys: Signal<Vec<(String, String, String)>>,
     /// The extensions' contributed sources.
     pub(crate) sources: CopyValue<Rc<RefCell<Contributed>>>,
 }
@@ -199,6 +202,7 @@ pub fn use_commands_provider() -> Commands {
         cache: CopyValue::new(None),
         views: Signal::new(Vec::new()),
         bound: Signal::new(Vec::new()),
+        view_keys: Signal::new(Vec::new()),
         sources: CopyValue::new(Rc::new(RefCell::new(Contributed::default()))),
     });
     // A phone's bar buttons run what the palette and the keys run.
@@ -385,6 +389,7 @@ impl Commands {
                 .map(|c| (c.id.clone(), c.shortcut.clone()))
                 .chain(self.bound.read().iter().cloned()),
         );
+        keymap.set_scoped(self.view_keys.read().iter().cloned());
         keymap
     }
 
@@ -746,6 +751,67 @@ impl Commands {
     #[must_use]
     pub fn bound_keys(&self) -> Vec<(String, String)> {
         self.bound.read().clone()
+    }
+
+    /// The keys extensions bind in one view's context (`[[keys]] when =
+    /// "view:<extension>/<view>"`, `(context, action, chord)`) from now
+    /// on: plain letters a view takes while it has the focus
+    /// ([`Self::handle_view_key`]), rebindable in that context as any
+    /// other key.
+    pub fn set_view_keys(&self, keys: Vec<(String, String, String)>) {
+        if *self.view_keys.peek() != keys {
+            let mut k = self.view_keys;
+            k.set(keys);
+            self.bump();
+        }
+    }
+
+    /// The keys bound in a view's context, `(context, action, chord)`.
+    #[must_use]
+    pub fn view_keys(&self) -> Vec<(String, String, String)> {
+        self.view_keys.read().clone()
+    }
+
+    /// The focused view's context (`view:<kind>`), or none: its bindings
+    /// win over the app's for the window's chords (⌘Z in a chart).
+    pub fn set_view_context(&self, context: Option<&str>) {
+        let mut ctx = self.context;
+        let chain: Vec<String> = context.into_iter().map(str::to_owned).collect();
+        if ctx.peek().contexts() != chain.as_slice() {
+            ctx.write().set_contexts(chain);
+        }
+    }
+
+    /// A key in a view whose context is `context` (`view:<kind>`), before
+    /// the view hears it (a chord without ⌘ or ⌃: those are the window's,
+    /// in the view's live context): when the keymap binds it in that
+    /// context itself,
+    /// its action runs and true comes back (the caller stops the key).
+    /// Any other key is the view's, untouched: plain letters bound in no
+    /// view's context still type.
+    #[must_use = "true when the key was used: stop it reaching the view"]
+    pub fn handle_view_key(&self, context: &str, e: &KeyboardEvent) -> bool {
+        chord(e).is_some_and(|chord| self.handle_view_chord(context, &chord))
+    }
+
+    /// [`Self::handle_view_key`] for a chord as commands show theirs
+    /// (`A`, `⇧Tab`).
+    #[must_use = "true when the chord was used"]
+    pub fn handle_view_chord(&self, context: &str, chord: &str) -> bool {
+        // A chord with ⌘ or ⌃ is the window's to run (`WindowKeys`, the
+        // web's document keys), in the live context the focused view set
+        // (`set_view_context`): run here too, it would run twice.
+        if chord.contains(['⌘', '⌃'])
+            || crate::keymap::is_escape_hatch(chord)
+            || self.recording.peek().is_some()
+        {
+            return false;
+        }
+        if !self.keymap_for(&self.declared()).binds_in(context, chord) {
+            return false;
+        }
+        self.set_view_context(Some(context));
+        self.key_chord(chord)
     }
 
     /// A source of the palette's rows (an extension's `[[palette_sources]]`)

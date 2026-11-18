@@ -21,6 +21,8 @@ dioxus = { workspace = true }
 [dev-dependencies]
 # tests/sketch.rs: its views in a pane of a headless Blitz host.
 architect = { workspace = true, features = ["action-list"] }
+# tests/paint_parity.rs: keys bound in a view's context, through the keymap.
+architect-commands = { workspace = true, features = ["ui"] }
 architect-extensions = { workspace = true, features = ["guest", "host", "process", "remote", "paint-pane"] }
 futures = "0.3"
 tempfile = "3"

@@ -2094,6 +2094,7 @@ dependencies = [
  "anyrender",
  "anyrender_vello_cpu",
  "architect",
+ "architect-commands",
  "architect-extensions",
  "architect-scene",
  "architect-theme",
