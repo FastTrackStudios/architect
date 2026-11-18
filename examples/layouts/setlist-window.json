@@ -1,0 +1,101 @@
+{
+  "name": "Setlist window",
+  "chrome": {
+    "ribbon": { "hidden": true },
+    "status": { "hidden": true },
+    "now_playing": { "hidden": true }
+  },
+  "workspace": {
+    "windows": [
+      {
+        "id": "main",
+        "maximized": true,
+        "center": {
+          "split": {
+            "axis": "row",
+            "children": [
+              {
+                "share": 0.25,
+                "node": {
+                  "group": {
+                    "tabs": [
+                      { "pane": "setlist-room", "view": "ignition/room", "title": "Lighting: room" }
+                    ]
+                  }
+                }
+              },
+              {
+                "share": 0.45,
+                "node": {
+                  "split": {
+                    "axis": "column",
+                    "children": [
+                      {
+                        "share": 0.62,
+                        "node": {
+                          "group": {
+                            "tabs": [
+                              { "pane": "setlist-arrangement", "view": "studio.arrangement/arrangement", "title": "Arrangement" }
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "share": 0.38,
+                        "node": {
+                          "group": {
+                            "tabs": [
+                              { "pane": "setlist-mixer", "view": "studio.mixer/mixer", "title": "Mixer" }
+                            ]
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "share": 0.30,
+                "node": {
+                  "split": {
+                    "axis": "row",
+                    "children": [
+                      {
+                        "share": 0.36,
+                        "node": {
+                          "group": {
+                            "tabs": [
+                              { "pane": "setlist-chart-text", "view": "vault.note", "state": "Charts/02 Drive To LA.kf", "title": "02 Drive To LA.kf" }
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "share": 0.64,
+                        "node": {
+                          "group": {
+                            "tabs": [
+                              { "pane": "setlist-chart", "view": "keyflow/chart", "state": "Charts/02 Drive To LA.kf", "title": "Chart" }
+                            ]
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "docks": [
+          { "side": "left", "shown": "hidden",
+            "root": { "group": { "tabs": [ { "pane": "files", "view": "files" } ], "chrome": "icons" } } },
+          { "side": "right", "shown": "hidden",
+            "root": { "group": { "tabs": [ { "pane": "outline", "view": "outline" }, { "pane": "backlinks", "view": "backlinks" } ], "chrome": "icons" } } },
+          { "side": "bottom", "shown": "hidden" }
+        ]
+      }
+    ],
+    "active": "setlist-arrangement"
+  }
+}

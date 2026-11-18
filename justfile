@@ -33,6 +33,10 @@ process-view-example:
     mkdir -p examples/extension/process-view/package/bin
     cp "${CARGO_TARGET_DIR:-target}/release/process-view-demo" examples/extension/process-view/package/bin/
 
+# The setlist window: Studio's arrangement and mixer, Keyflow's chart, Ignition's room, all runtime extensions in one stock window (scripts/setlist-window.sh: SETLIST_SESSION, --play SECONDS, --no-build)
+setlist-window *ARGS:
+    @bash scripts/setlist-window.sh {{ARGS}}
+
 # The public website (apps/site: landing, download, changelog, extensions, docs), hot reload
 website:
     devenv up site
