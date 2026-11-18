@@ -194,6 +194,8 @@ fn zero_copy(device: &wgpu::Device) -> bool {
 }
 
 /// The rendezvous stops taking surfaces from `pid` (its program ended).
+// Empty off macOS, where clippy would have it `const`; macOS's is not.
+#[cfg_attr(not(target_os = "macos"), allow(clippy::missing_const_for_fn))]
 fn forget_pid(pid: Option<u32>) {
     #[cfg(target_os = "macos")]
     if let (Some(pid), Some(r)) = (pid, crate::surface::Rendezvous::get()) {
@@ -1340,7 +1342,9 @@ pub fn ProcessViewPane(
     };
     let blur = focus.clone();
     let restart = session;
-    let line = status_line(&s);
+    // The pane's line of numbers is a developer's: shown with
+    // `ARCHITECT_PROCESS_VIEW_STATS` set (`1`), never in a person's pane.
+    let line = stats_shown().then(|| status_line(&s));
     rsx! {
         div { style: "flex: 1; display: flex; flex-direction: column; min-height: 0;",
             div { style: "flex: 1; position: relative; min-height: 0; overflow: hidden;",
@@ -1372,8 +1376,10 @@ pub fn ProcessViewPane(
                     }
                 }
             }
-            div { style: "padding: 4px 8px; font-size: 11px; color: var(--muted-foreground, #a1a1aa); font-family: monospace;",
-                "{line}"
+            if let Some(line) = line {
+                div { style: "padding: 4px 8px; font-size: 11px; color: var(--muted-foreground, #a1a1aa); font-family: monospace;",
+                    "{line}"
+                }
             }
         }
     }
@@ -1381,6 +1387,15 @@ pub fn ProcessViewPane(
 
 fn ms(d: Duration) -> f64 {
     d.as_secs_f64() * 1e3
+}
+
+/// Whether panes show their line of numbers ([`status_line`]):
+/// `ARCHITECT_PROCESS_VIEW_STATS` set, and not `0`.
+fn stats_shown() -> bool {
+    static SHOWN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *SHOWN.get_or_init(|| {
+        std::env::var("ARCHITECT_PROCESS_VIEW_STATS").is_ok_and(|v| !v.is_empty() && v != "0")
+    })
 }
 
 /// The pane's line: the program, its frames and its latency.

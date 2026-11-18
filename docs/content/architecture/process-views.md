@@ -286,6 +286,11 @@ development copy: its 3D room in its `room` pane, its arguments its
 settings (`--camera={{setting:ignition.camera}}`, a pick restarting it). The program gets the app's theme
 (`architect_workspace::paint::pane_tokens`), as a linked paint view does.
 
+The pane's line of numbers (state, pid, transport, frames, latency;
+`features/process-view/src/host.rs` `status_line`) shows only with
+`ARCHITECT_PROCESS_VIEW_STATS=1`: a person's pane is the program's
+frames alone.
+
 `APP_SHOT` does not show a process view's frames: it paints the page
 again on the CPU (`features/workspace/src/shot.rs`), and the frames are
 GPU textures of the window's own device; a pop-out window is not shot at
