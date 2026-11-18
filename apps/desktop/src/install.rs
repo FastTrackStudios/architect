@@ -94,6 +94,8 @@ fn say(line: impl AsRef<str>) {
     let _ = writeln!(std::io::stdout(), "{}", line.as_ref());
 }
 
+// The macOS install shells out (ditto, codesign, sips); Linux copies files.
+#[cfg(target_os = "macos")]
 fn run(cmd: &mut Command) -> Result<String, String> {
     let shown = format!("{cmd:?}");
     let out = cmd
