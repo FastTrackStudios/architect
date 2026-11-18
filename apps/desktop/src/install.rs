@@ -21,7 +21,10 @@
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, Stdio};
+use std::process::ExitCode;
+// The macOS install shells out (ditto, codesign, sips); Linux copies files.
+#[cfg(target_os = "macos")]
+use std::process::{Command, Stdio};
 
 use architect_distribution::Distribution;
 
