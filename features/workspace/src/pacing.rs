@@ -138,6 +138,7 @@ impl Pacer {
             Duration::ZERO
         };
         if wait.is_zero() {
+            crate::frames::asked(crate::frames::Asked::Now);
             (self.redraw)();
             return;
         }
@@ -150,6 +151,7 @@ impl Pacer {
 
     fn fire(&self) {
         self.pending.store(false, Ordering::Release);
+        crate::frames::asked(crate::frames::Asked::Paced);
         (self.redraw)();
     }
 }
