@@ -42,8 +42,8 @@ jobs:
   check:
     name: site check
     # Opt-in (the `full-checks` label): not required, and slow; the
-    # release's web job builds the site anyway.
-    if: ${{ contains(github.event.pull_request.labels.*.name, 'full-checks') }}
+    # release's web job builds the site anyway. Never on a draft PR.
+    if: ${{ contains(github.event.pull_request.labels.*.name, 'full-checks') && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:

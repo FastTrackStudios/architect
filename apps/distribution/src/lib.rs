@@ -622,6 +622,18 @@ impl Distribution {
             .collect()
     }
 
+    /// Its compiled-in extensions' `[[doc_kinds]]`: the kinds of document
+    /// a vault file of theirs is, which the node keeps and syncs like a
+    /// note.
+    #[must_use]
+    pub fn doc_kinds(&self) -> Vec<architect_extensions::contrib::DocKindDecl> {
+        self.extensions()
+            .into_iter()
+            .filter_map(|e| Manifest::parse(e.manifest()).ok())
+            .flat_map(|m| m.contributes.doc_kinds)
+            .collect()
+    }
+
     /// Its compiled-in extensions' `[[file_types]]`: the file types that
     /// are vault notes. [`Self::install`] registers them before any vault
     /// is read (`vault_proto::note_types::register_with`), as the node
