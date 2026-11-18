@@ -1,7 +1,9 @@
 //! `DocRegistry` tests: one mounted DocSync/DocPresence dispatcher pair
 //! serving many docs over the in-process vox transport — concurrent
 //! convergence per doc (with isolation between docs), the admission
-//! gate, and idle eviction followed by a persistence-backed reopen.
+//! gate, idle eviction followed by a persistence-backed reopen, and a
+//! reader (admitted to read, not to write) following a doc and its
+//! presence without changing either.
 
 // This is an integration-test crate. `clippy.toml`'s
 // `allow-*-in-tests` only reaches `#[test]` fns and `#[cfg(test)]`
@@ -18,9 +20,13 @@
 )]
 #![cfg(not(target_arch = "wasm32"))]
 
+use std::sync::Arc;
 use std::time::Duration;
 
+use architect::layer::handler_acceptor;
+use architect::permissions_gate::{PermissionsGate, StaticPrincipal, UnlistedPolicy};
 use architect::{LayerRouter, LocalServer, Scope};
+use architect_permissions::{AllowAll, Principal};
 use crdt::CrdtDoc;
 use crdt::registry::DocRegistry;
 use crdt::sync::{
@@ -316,4 +322,190 @@ async fn eviction_then_reopen_preserves_data() {
     assert!(registry.is_open(doc_id).await);
 
     scope.close().await;
+}
+
+// ── Readers ─────────────────────────────────────────────────────────────
+
+fn user(id: &str) -> Principal {
+    Principal::User {
+        user_id: id.to_owned(),
+    }
+}
+
+/// A registry everyone may open and only `writer` may write.
+fn readers_registry(writer: &str) -> DocRegistry {
+    let writer = user(writer);
+    ephemeral_registry().with_write_authorizer(move |who, _| who == Some(&writer))
+}
+
+/// A client of `registry`'s two services on its own in-process
+/// connection, calling as `who` (a real gate resolving it).
+async fn client_as<C: vox::FromVoxLane>(registry: &DocRegistry, who: &Principal) -> C {
+    let router = LayerRouter::new()
+        .with(
+            doc_sync_service_descriptor(),
+            DocSyncDispatcher::new(registry.clone()),
+        )
+        .with(
+            doc_presence_service_descriptor(),
+            DocPresenceDispatcher::new(registry.clone()),
+        );
+    let gated = PermissionsGate::new(Arc::new(AllowAll), Arc::new(StaticPrincipal(who.clone())))
+        .unlisted(UnlistedPolicy::Allow)
+        .wrap(router);
+    let (client_link, server_link) = vox::memory_link_pair(64);
+    tokio::spawn(async move {
+        if let Ok(connection) = vox::acceptor_on(server_link)
+            .on_lane(handler_acceptor(gated))
+            .establish_connection()
+            .await
+        {
+            let _hold = connection;
+            std::future::pending::<()>().await;
+        }
+    });
+    vox::initiator_on(client_link)
+        .establish::<C>()
+        .await
+        .expect("establish")
+}
+
+/// An update setting `key` to `value`, made on a doc of its own.
+fn update(key: &str, value: &str) -> Vec<u8> {
+    let doc = loro::LoroDoc::new();
+    doc.get_map("root").insert(key, value).unwrap();
+    doc.commit();
+    doc.export(loro::ExportMode::all_updates()).unwrap()
+}
+
+/// A reader follows a writer's edits live; an update it sends up anyway
+/// ends its session with `Forbidden` and leaves the doc as it was. A
+/// reader running `SyncedDoc::read_only` keeps its session: its own
+/// edits stay on its replica.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reader_follows_live_and_cannot_write() {
+    let registry = readers_registry("ann");
+    let doc_id = Uuid::new_v4();
+
+    let ann: DocSyncClient = client_as(&registry, &user("ann")).await;
+    let mut at_writer = SyncedDoc::new(doc_id, CrdtDoc::ephemeral());
+    let writes = at_writer.doc().clone();
+    tokio::spawn(async move {
+        let _ = at_writer.run(&ann).await;
+    });
+
+    // A well-behaved reader.
+    let reader: DocSyncClient = client_as(&registry, &user("bob")).await;
+    let mut at_reader = SyncedDoc::new(doc_id, CrdtDoc::ephemeral()).read_only();
+    let reads = at_reader.doc().clone();
+    let following = tokio::spawn(async move { at_reader.run(&reader).await });
+
+    writes
+        .loro()
+        .get_map("root")
+        .insert("title", "draft")
+        .unwrap();
+    writes.loro().commit();
+    converge(&reads, "the reader gets the writer's edit", |d| {
+        map_value(d, "title").as_deref() == Some("draft")
+    })
+    .await;
+    writes
+        .loro()
+        .get_map("root")
+        .insert("title", "final")
+        .unwrap();
+    writes.loro().commit();
+    converge(&reads, "the reader follows live", |d| {
+        map_value(d, "title").as_deref() == Some("final")
+    })
+    .await;
+
+    // Its own edit stays on its replica, and its session goes on.
+    reads.loro().get_map("root").insert("note", "mine").unwrap();
+    reads.loro().commit();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!following.is_finished(), "a read-only replica was cut off");
+    let at_host = registry.doc(doc_id).await.unwrap();
+    assert_eq!(map_value(at_host.loro(), "note"), None);
+
+    // A reader that sends up anyway: refused, nothing applied.
+    let rogue: DocSyncClient = client_as(&registry, &user("eve")).await;
+    let (up_tx, up_rx) = vox::channel::<Vec<u8>>();
+    let (down_tx, mut down_rx) = vox::channel::<crdt::sync::SyncDown>();
+    let mut call = std::pin::pin!(rogue.sync(doc_id, Vec::new(), up_rx, down_tx));
+    tokio::select! {
+        res = &mut call => panic!("a reader's sync ended before attaching: {res:?}"),
+        frame = down_rx.recv() => {
+            frame.expect("down channel").expect("attached");
+        }
+    }
+    let send = up_tx.send(update("title", "defaced"));
+    let (pushed, ended) = tokio::join!(send, tokio::time::timeout(Duration::from_secs(5), call));
+    pushed.expect("the update went up");
+    let err = ended
+        .expect("the reader's session ended")
+        .expect_err("a reader's write must be refused");
+    assert!(
+        matches!(&err, vox::VoxError::User(boxed) if matches!(**boxed, SyncError::Forbidden)),
+        "expected Forbidden, got: {err:?}"
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(map_value(at_host.loro(), "title").as_deref(), Some("final"));
+    assert_eq!(map_value(writes.loro(), "title").as_deref(), Some("final"));
+}
+
+/// A reader's presence shows it everyone, the leader's playhead
+/// included, and the shared clock answers it; what it publishes reaches
+/// nobody.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_readers_presence_reads_and_publishes_nothing() {
+    let registry = readers_registry("ann");
+    let doc_id = Uuid::new_v4();
+
+    let mut peers = Vec::new();
+    for who in ["ann", "bob", "cy"] {
+        let client: DocPresenceClient = client_as(&registry, &user(who)).await;
+        let (peer, mut driver) = PresencePeer::new(doc_id, 30_000);
+        tokio::spawn(async move {
+            let _ = driver.run(&client).await;
+        });
+        peers.push(peer);
+    }
+    // ann leads; bob and cy only read. Neither ann nor cy may see bob.
+    let (lead, reader) = (&peers[0], &peers[1]);
+
+    lead.set("lead/play", "playing at 10");
+    eventually("the reader sees the leader's transport", async || {
+        reader.states().contains_key("lead/play")
+    })
+    .await;
+    let clock = reader.clock().clone();
+    eventually("the shared clock answers a reader", async || {
+        clock.offset_ms().is_some()
+    })
+    .await;
+
+    // The reader tries to take the transport, then the leader publishes
+    // again: once that reaches the reader, the reader's publish has had
+    // its chance to reach the leader.
+    reader.set("lead/play", "stopped by bob");
+    reader.set("bob/state", "here");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    lead.set("ann/state", "here");
+    eventually("the reader sees the leader's next state", async || {
+        reader.states().contains_key("ann/state")
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        !lead.states().contains_key("bob/state"),
+        "a reader's presence reached the leader"
+    );
+    assert_eq!(
+        lead.states().get("lead/play"),
+        Some(&loro::LoroValue::from("playing at 10")),
+        "a reader took the transport"
+    );
+    assert!(!peers[2].states().contains_key("bob/state"));
 }
