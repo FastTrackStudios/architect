@@ -752,6 +752,8 @@ const FORWARDED: &[&str] = &[
     "EXT_EMIT",
     "EXT_ENABLE",
     "EXT_DISABLE",
+    "EXT_SERVICES",
+    "EXT_SERVICE_USE",
     "EXT_POINTS",
     "EXT_WINDOWS",
     "EXT_WINDOW_CLOSE",
