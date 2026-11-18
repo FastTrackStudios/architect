@@ -126,6 +126,7 @@ direnv exec . "$app" dev --name setlist-window --fresh --seed "$work/vault" --on
   --extension "$pkg/daw" --extension "$pkg/arrangement" --extension "$pkg/mixer" \
   --extension "$pkg/keyflow" --extension "$pkg/ignition" \
   --layout "$here/examples/layouts/setlist-window.json" --hide all \
+  --run 'KEYFLOW_SET_CHART_THEME={"follow":true}' \
   --run 'IGNITION_CAMERA_PICK={"camera":"Wide"}' "${dev_args[@]}" > "$work/dev.json"
 sock=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["socket"])' "$work/dev.json")
 act() { "$app" actions --app "$sock" run "$1" --json "$2"; }
