@@ -448,6 +448,9 @@ fn validate_at(schema: &Value, value: &Value, at: &str) -> Result<(), String> {
 
 /// A service's provider as the host chooses it: the newest loaded
 /// version that meets `req`, from `providers` (id and version).
+///
+/// Of two at the same version, the first by id (a person picks another
+/// with `EXT_SERVICE_USE`).
 #[must_use]
 pub fn choose_provider<'a>(
     providers: &'a [(String, Version)],
@@ -456,7 +459,7 @@ pub fn choose_provider<'a>(
     providers
         .iter()
         .filter(|(_, v)| req.matches(v))
-        .max_by(|a, b| a.1.cmp(&b.1))
+        .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
 }
 
 #[cfg(test)]
