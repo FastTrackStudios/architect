@@ -98,6 +98,54 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// The window's extension host's contributions, once it has one
+/// ([`on_contributions`]).
+static CONTRIBUTIONS: std::sync::OnceLock<architect_extensions::contrib::Contributions> =
+    std::sync::OnceLock::new();
+
+/// What waits for the window's extension host ([`on_contributions`]).
+type WaitingContributions =
+    Vec<Box<dyn FnOnce(&architect_extensions::contrib::Contributions) + Send>>;
+static WAITING_CONTRIBUTIONS: Mutex<WaitingContributions> = Mutex::new(Vec::new());
+
+/// Calls `f` with what the window's extensions contribute, once its
+/// extension host exists: now when it does, else when the window makes it.
+///
+/// Every extension the host loads contributes there: compiled in,
+/// installed, development copies (`EXT_DEV`, `EXT_CLONE`, `dev
+/// --extension`). The app's node follows it to keep their `[[doc_kinds]]`
+/// its documents' kinds.
+pub fn on_contributions(
+    f: impl FnOnce(&architect_extensions::contrib::Contributions) + Send + 'static,
+) {
+    let mut waiting = WAITING_CONTRIBUTIONS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    if let Some(contributions) = CONTRIBUTIONS.get() {
+        drop(waiting);
+        f(contributions);
+        return;
+    }
+    waiting.push(Box::new(f));
+}
+
+/// The window's extension host is made: what waited for its
+/// contributions hears them.
+fn contributions_made(contributions: &architect_extensions::contrib::Contributions) {
+    let waiting = {
+        let mut waiting = WAITING_CONTRIBUTIONS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if CONTRIBUTIONS.set(contributions.clone()).is_err() {
+            return;
+        }
+        std::mem::take(&mut *waiting)
+    };
+    for f in waiting {
+        f(contributions);
+    }
+}
+
 /// The process extensions running, for the panes that show their views.
 pub fn processes() -> Processes {
     PROCESSES.clone()
@@ -882,6 +930,9 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         // Every extension's actions on the lab's list too, as they come
         // and go: what its control socket, CLI and MCP run.
         host.forward_actions_to(&lab);
+        // What they contribute, to whoever waits for it: the app's node
+        // keeps their `[[doc_kinds]]` as its documents' kinds.
+        contributions_made(host.contributions());
         let root = crate::app_dir_or_temp();
         // A person's toolbar files (`toolbars/*.toml`): theirs, and their
         // copies of the extensions', read again as they change.

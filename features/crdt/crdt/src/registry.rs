@@ -59,12 +59,26 @@
 //! Every attach knows who is asking: the principal the router's
 //! permissions gate resolved ([`architect::permissions_gate::caller`]).
 //! [`DocRegistry::with_permissions`] asks the org's
-//! [`PermissionEngine`] about it on every call — `write` on
-//! `org/<org>/doc/<id>` to sync, `read` to watch presence
-//! ([`DocPermissions`]) — so a person who is not a member of the org, or
-//! whose role there does not reach the doc, is refused before anything
-//! is opened. [`DocRegistry::with_authorizer`] is the closure form, for a
-//! rule that is not an engine's.
+//! [`PermissionEngine`] about it on every call — `read` on
+//! `org/<org>/doc/<id>` to follow it or watch presence, `write` to send
+//! edits or publish presence ([`DocPermissions`]) — so a person who is
+//! not a member of the org, or whose role there does not reach the doc,
+//! is refused before anything is opened.
+//! [`DocRegistry::with_authorizer`] (may open, i.e. read) and
+//! [`DocRegistry::with_write_authorizer`] (may write) are the closure
+//! form, for a rule that is not an engine's.
+//!
+//! ## Readers
+//!
+//! A caller admitted to read but not to write **follows** the doc: its
+//! sync session streams the doc and every later update down, and the
+//! first update it sends up ends the session with
+//! [`SyncError::Forbidden`], nothing of it applied
+//! ([`crate::sync::SyncSession::read_only`]). Its presence session shows
+//! it everyone and drops what it publishes, so it cannot take a lead key
+//! (the transport); [`DocPresence::now`] answers it as anyone. A
+//! well-behaved reader runs [`crate::sync::SyncedDoc::read_only`], which
+//! never sends up.
 //!
 //! Session counts come from the hosts themselves (incremented on
 //! attach, decremented when a session's up-channel closes), not from
@@ -208,6 +222,8 @@ pub struct DocRegistry {
     shared: Arc<Shared>,
     admission: Arc<AdmissionHook>,
     authorizer: Arc<Authorizer>,
+    /// Who may write; `None` is "whoever the authorizer admits".
+    write_authorizer: Option<Arc<Authorizer>>,
     permissions: Option<DocPermissions>,
     compact_every: u32,
     shallow_bootstrap: bool,
@@ -232,6 +248,7 @@ impl DocRegistry {
             }),
             admission: Arc::new(|_| true),
             authorizer: Arc::new(|_, _| true),
+            write_authorizer: None,
             permissions: None,
             compact_every: 0,
             shallow_bootstrap: false,
@@ -281,8 +298,10 @@ impl DocRegistry {
         self
     }
 
-    /// Decide, per attach, whether **the caller** may sync or watch
-    /// presence on `doc_id`. The hook receives the principal the
+    /// Decide, per attach, whether **the caller** may open `doc_id`:
+    /// follow its content and watch its presence (read). Whether it may
+    /// also write is [`Self::with_write_authorizer`], which defaults to
+    /// this same rule. The hook receives the principal the
     /// router's [`PermissionsGate`](architect::permissions_gate::PermissionsGate)
     /// resolved for this call ([`architect::permissions_gate::caller`]) —
     /// a user, a peer node (`Principal::Host`, its iroh endpoint id), a
@@ -306,9 +325,26 @@ impl DocRegistry {
         self
     }
 
-    /// Check every call against the org's permissions: a sync attach
-    /// needs `write` on the doc, a presence attach `read`
-    /// ([`DocPermissions`]). Runs after [`Self::with_admission`] and
+    /// Decide, per attach, whether **the caller**, already admitted to
+    /// read `doc_id` ([`Self::with_authorizer`]), may also write it: send
+    /// edits up its sync session and publish its presence. A caller it
+    /// refuses follows read-only (see the module docs, "Readers"); it is
+    /// never asked about a caller the read rule refused. Default: the
+    /// [`Self::with_authorizer`] rule, so whoever may open a doc may
+    /// write it.
+    #[must_use]
+    pub fn with_write_authorizer<A>(mut self, authorize: A) -> Self
+    where
+        A: Fn(Option<&Principal>, Uuid) -> bool + Send + Sync + 'static,
+    {
+        self.write_authorizer = Some(Arc::new(authorize));
+        self
+    }
+
+    /// Check every call against the org's permissions: any attach needs
+    /// `read` on the doc, and writing to it (edits up a sync session,
+    /// presence published) `write` ([`DocPermissions`]); a reader without
+    /// `write` follows read-only. Runs after [`Self::with_admission`] and
     /// before [`Self::with_authorizer`]; a refusal is
     /// [`SyncError::UnknownDoc`], like a doc that does not exist.
     /// Server-side [`Self::doc`] is not a caller's request and is not
@@ -336,6 +372,19 @@ impl DocRegistry {
             .as_ref()
             .is_none_or(|p| p.check(who.as_ref(), doc_id, DocAccess::Read).is_ok())
             && (self.authorizer)(who.as_ref(), doc_id)
+    }
+
+    /// Whether the current caller, admitted to read `doc_id`, may also
+    /// write it: the org's permissions (`write`) and the write authorizer.
+    fn may_write(&self, doc_id: Uuid) -> bool {
+        let who = architect::permissions_gate::caller();
+        let permitted = self
+            .permissions
+            .as_ref()
+            .is_none_or(|p| p.check(who.as_ref(), doc_id, DocAccess::Write).is_ok());
+        let authorized =
+            self.write_authorizer.as_ref().unwrap_or(&self.authorizer)(who.as_ref(), doc_id);
+        permitted && authorized
     }
 
     /// Admission, then the org's permissions, then the caller's
@@ -492,15 +541,21 @@ impl DocRegistry {
     }
 }
 
-impl DocSync for DocRegistry {
-    async fn sync(
+impl DocRegistry {
+    /// [`DocSync::sync`], read-only whatever the caller may write when
+    /// `read_only`: how a lane that knows more about the caller than the
+    /// registry's rules (a read link's guest, [`crate::p2p`]) keeps it
+    /// from writing.
+    pub(crate) async fn sync_as(
         &self,
         doc_id: Uuid,
         from: Vec<u8>,
         up: vox::Rx<Vec<u8>>,
         down: vox::Tx<crate::sync::SyncDown>,
+        read_only: bool,
     ) -> Result<(), SyncError> {
-        self.admit_caller(doc_id, DocAccess::Write)?;
+        self.admit_caller(doc_id, DocAccess::Read)?;
+        let writes = !read_only && self.may_write(doc_id);
         // Attach while holding the registry lock — the session is
         // counted before any sweep can re-check — but pump the held-open
         // call AFTER releasing it: `sync` now stays in flight for the
@@ -515,8 +570,23 @@ impl DocSync for DocRegistry {
             drop(docs);
             session
         };
-        session.pump(up).await;
-        Ok(())
+        if writes {
+            session.pump(up).await
+        } else {
+            session.read_only().pump(up).await
+        }
+    }
+}
+
+impl DocSync for DocRegistry {
+    async fn sync(
+        &self,
+        doc_id: Uuid,
+        from: Vec<u8>,
+        up: vox::Rx<Vec<u8>>,
+        down: vox::Tx<crate::sync::SyncDown>,
+    ) -> Result<(), SyncError> {
+        self.sync_as(doc_id, from, up, down, false).await
     }
 }
 
@@ -528,6 +598,7 @@ impl DocPresence for DocRegistry {
         down: vox::Tx<Vec<u8>>,
     ) -> Result<(), SyncError> {
         self.admit_caller(doc_id, DocAccess::Read)?;
+        let writes = self.may_write(doc_id);
         // Same attach-under-lock / pump-after-release split as `sync`.
         let session = {
             let mut docs = self.shared.docs.lock().await;
@@ -536,7 +607,11 @@ impl DocPresence for DocRegistry {
             drop(docs);
             session
         };
-        session.pump(up).await;
+        if writes {
+            session.pump(up).await;
+        } else {
+            session.read_only().pump(up).await;
+        }
         Ok(())
     }
 
