@@ -40,7 +40,7 @@ Rules:
 - **A reload is a diff, not a restart** (`docs/content/architecture/extensions.md`, "Hot reload"): the old copy's state is saved, its contributions withdrawn as a diff, the new one gets the state back, and a view that is still there remounts in the same panes. A failed build or a panic keeps the last good copy and says why.
 - **From-source clones** use the app's `cargo` (`$CARGO`, else `PATH`), so run the app from the repo's dev shell. A failed build keeps the last good program; the error is in `APP_STATUS`, `EXT_LOGS` (source `build`) and on the page. `apps/sandbox/board/tests/dev_loop.rs` runs the whole loop (ignored by default: it builds a crate).
 
-How fast a save shows, by kind: data and themes instantly; Luau and TypeScript on the next run; WASM components rebuilt (seconds, state kept); processes rebuilt and restarted with state handed over. Full table: "Hot reload" in the architecture page.
+How fast a save shows, by kind: data and themes instantly; Luau and TypeScript on the next run; WASM components rebuilt (seconds, state kept); processes rebuilt and restarted with state handed over (a view's place: `linked::use_view_state`). Full table: "Hot reload" in the architecture page.
 
 ### An instance of your own: `architect-desktop dev`
 

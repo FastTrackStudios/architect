@@ -109,6 +109,14 @@ The extension's own actions, settings (`<id>.…`), data, log, points and window
 - **Spellings.** TSX: `actions.run(id, args)`. Web view: `architect.run`. WIT: `run-action`.
 - **Where the answers come from.** `features/extensions/src/hostapi.rs` `AppContext` supplies org and selection. With no context, both answer `null`.
 
+### A view's place
+
+| op | what | needs |
+|---|---|---|
+| `set_view_state {pane, state}` | keeps where its view in pane `pane` is, given back when the view starts again; only a pane showing one of its own views takes it | nothing |
+
+Call it through `linked::use_view_state()` (`ViewState::set`), which writes the pane directly linked in and sends this from a process: the same code either way.
+
 ### Documents (the documents service)
 
 | op | Luau / TSX `documents.` / web view `documents.` | needs |

@@ -166,6 +166,7 @@ pub(super) fn WorkspaceCommands() -> Element {
                         pinned: Some(!pinned),
                         link: None,
                         title: None,
+                        view_state: None,
                     },
                 );
             }

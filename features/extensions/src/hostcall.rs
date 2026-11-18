@@ -32,6 +32,7 @@
 //! | `setting {key}` / `set_setting {key, value}` | one of its own settings (`<id>.…`) | nothing |
 //! | `data {key}` / `set_data {key, value?}` | its own data, kept for it | nothing |
 //! | `log {text, level?}` | a line in its log (`EXT_LOGS`) | nothing |
+//! | `set_view_state {pane, state}` | keeps where its view in pane `pane` is (zoom, scroll, selection, a mode), given back when the view starts again: its program restarted, the pane moved or popped out (`linked::use_view_state`, which calls it from a process) | its own view's pane |
 //! | `service {service, method, args?}` | calls another extension's service: its provider's action `<PREFIX><METHOD>`, as this extension | `[requires] <service>`, and `capabilities.effect` |
 //! | `point {point}` | the items of one of its own points (`[[points]]`) | owning it |
 //! | `window {id, open, state?}` | opens or closes one of its own windows (`[[windows]]`) | nothing |
@@ -216,6 +217,13 @@ pub enum HostRequest {
         key: String,
         #[serde(default)]
         value: Option<Value>,
+    },
+    /// Keeps where its view in pane `pane` is (zoom, scroll, selection),
+    /// given back when the view starts again (`linked::use_view_state`):
+    /// only a pane showing one of its own views.
+    SetViewState {
+        pane: String,
+        state: String,
     },
     Log {
         text: String,
@@ -781,6 +789,7 @@ impl HostRequest {
             Self::Data { .. } => "data",
             Self::SetData { .. } => "set_data",
             Self::Log { .. } => "log",
+            Self::SetViewState { .. } => "set_view_state",
             Self::Service { .. } => "service",
             Self::Point { .. } => "point",
             Self::Window { .. } => "window",
@@ -1044,6 +1053,8 @@ pub fn check(
         HostRequest::Data { .. } | HostRequest::SetData { .. } => ("data", Ok(())),
         HostRequest::ReadFile { .. } | HostRequest::WriteFile { .. } => ("files", Ok(())),
         HostRequest::Log { .. } => ("log", Ok(())),
+        // Its own panes only: the pane that shows its view takes it.
+        HostRequest::SetViewState { .. } => ("set_view_state", Ok(())),
         // Checked by the host that answers them: a service against its
         // [requires] and the method's effect, a point and a window as its own.
         HostRequest::Service { .. } => ("requires", Ok(())),

@@ -459,17 +459,99 @@ pub fn use_embed() -> Option<crate::contrib::EmbedInput> {
 
 /// The claim a process view's pane input is sent under: its
 /// [`EmbedInput`](crate::contrib::EmbedInput)'s `props` are `{"pane",
-/// "state"}`, the pane's id and its state ([`use_pane_state`]).
+/// "state", "view_state"}`, the pane's id, its state ([`use_pane_state`])
+/// and where its view is ([`use_view_state`]).
 pub const PANE_CLAIM: &str = "pane";
 
 /// A pane's input to a process view ([`PANE_CLAIM`]).
 #[must_use]
-pub fn pane_input(pane: &str, state: &str) -> crate::contrib::EmbedInput {
+pub fn pane_input(pane: &str, state: &str, view_state: &str) -> crate::contrib::EmbedInput {
     crate::contrib::EmbedInput {
         claim: PANE_CLAIM.to_owned(),
         source: String::new(),
-        props: serde_json::json!({ "pane": pane, "state": state }),
+        props: serde_json::json!({ "pane": pane, "state": state, "view_state": view_state }),
     }
+}
+
+/// Where a view is in what it shows (zoom, scroll, selection, a mode),
+/// kept by its pane: [`use_view_state`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ViewState {
+    /// The pane it is kept for.
+    pub pane: String,
+    /// What was kept: "" when nothing was.
+    pub value: String,
+}
+
+impl ViewState {
+    /// Keeps `value` for this view's pane: given back when the view
+    /// starts again — its program restarted (a development copy rebuilt),
+    /// its pane moved or popped out, the app opened again. Write it when a
+    /// gesture ends, not every frame: each write is a workspace change.
+    /// Call it from the view (a handler, an effect).
+    #[cfg(feature = "pane")]
+    pub fn set(&self, value: impl Into<String>) {
+        let value = value.into();
+        if value == self.value {
+            return;
+        }
+        #[cfg(feature = "guest")]
+        if crate::guest::in_process() {
+            let request = crate::hostcall::HostRequest::SetViewState {
+                pane: self.pane.clone(),
+                state: value,
+            };
+            // On the view's own runtime: call it from the view (a
+            // handler, an effect).
+            dioxus::prelude::spawn(async move {
+                // Not kept (a host before this call): the view starts
+                // where it is told, as before.
+                let _ = crate::guest::host(request).await;
+            });
+            return;
+        }
+        if let Some(pane) = architect_workspace::try_use_pane_of(architect_workspace::PaneId::new(
+            self.pane.clone(),
+        )) {
+            pane.set_view_state(value);
+        }
+    }
+}
+
+/// Where this view is in what it shows, as its pane kept it.
+///
+/// The same linked in or as a process: read in a view, it draws again
+/// when it changes; [`ViewState::set`] keeps a new one. On start (a process
+/// restarted, the pane moved or popped out) it is what was kept last, so
+/// the view picks up where it was. `None` outside a pane, and in a
+/// process until its pane's input arrives (just after the first render):
+/// apply it when it first is `Some`.
+#[cfg(feature = "pane")]
+#[must_use]
+pub fn use_view_state() -> Option<ViewState> {
+    use dioxus::prelude::{ReadableExt as _, try_use_context};
+    if let Some(pane) = architect_workspace::try_use_pane() {
+        return Some(ViewState {
+            pane: pane.id.0.clone(),
+            value: pane.view_state(),
+        });
+    }
+    let input = try_use_context::<EmbedContext>()?.0;
+    let now = input.read();
+    if now.claim != PANE_CLAIM {
+        return None;
+    }
+    let text = |key: &str| {
+        now.props
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    Some(ViewState {
+        pane: text("pane"),
+        value: text("view_state"),
+    })
 }
 
 /// The pane this view is drawn in, as its id and its state (an opener's

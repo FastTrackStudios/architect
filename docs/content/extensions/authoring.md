@@ -114,8 +114,11 @@ way, and the app you use every day untouched.
    state kept and its panes where they were. Data, themes, Luau, pages
    and TypeScript take effect at once. A process extension's program (its
    `[entry] path`) is your build's to write, path dependencies and all;
-   when it changes, the app restarts the process on it. A broken save
-   keeps the last good copy and says why.
+   when it changes, the app restarts the process on it. A view keeps its
+   place across that restart with `linked::use_view_state`: what it kept
+   (zoom, scroll, selection, a mode, as a string) is its pane's, given
+   back when the new program's view starts, and when the pane moves or
+   pops out. A broken save keeps the last good copy and says why.
 4. **See and drive it.** `dev` prints the instance's `socket`;
    `architect actions --app <socket> run APP_SHOT --json '{"path":"/tmp/a.png"}'`
    draws it, `EXT_LOGS {id}` and `APP_STATUS` say what went wrong, and
