@@ -29,10 +29,10 @@ The engine's position and the chart's shown time, read one after the other
 
 | moment | engine | chart |
 |---|---|---|
-| played from 0 | 5.96 s | 6.30 s |
-| seek 66 s (Interlude) | 69.06 s | 69.29 s |
-| seek 93 s (Pre-Chorus 2) | 96.17 s | 96.67 s |
-| light theme | 101.68 s | 101.93 s |
+| played from 0 | 6.04 s | 6.08 s |
+| seek 66 s (Interlude) | 69.01 s | 69.14 s |
+| seek 93 s (Pre-Chorus 2) | 96.06 s | 96.14 s |
+| light theme | 100.70 s | 100.77 s |
 
 Read on screen at 93 s (an earlier run of the same build), the arrangement's playhead is at the start of project bar 63, and the chart's playhead is at the first bar of PRE-CH 2. That is the same bar: the song's bar 1 is project bar 5. The room changes look with each seek (amber intro wash at 5 s, magenta at 120 s), following the same session.
 
@@ -49,12 +49,11 @@ All captured with `loft-shot` / `wf-recorder` from a headless GPU Loft session (
 
 ## Builds
 
-- **Architect:** `runtime-compositor-setlist` `a2f129c9`.
-  - It is `main` `4d537fb8` plus my unmerged `dev --layout <file>.json` and `--hide now-playing`, the `now_playing` slot (the layout file hides the Now Playing bar), the opt-in process-view stats line, and the schema cache, all to come as PRs.
-  - The provider choice (#872), a provider using its own service (#873) and images in a runtime view (#874) are on `main`.
-- **Studio:** `feat/arrangement-mixer-runtime-extensions` `b434c7de`.
-- **Keyflow:** **keyflow#104's branch** `feat/uses-fts-session` `5e067131` (`[uses] "fts.session"`), not yet in Keyflow `main`. It sits on `82c6b97`, so it lacks `main`'s #102 (note input's bars, the count-in) and #103 (a session as a vault document).
-- **Ignition:** `main` `a540496`.
+Every repo at its `main`, except two things with no `main` build yet:
+- **Architect:** `runtime-compositor-setlist` `f768a769`. It is `main` `6f1fadbb` (past v0.14.0's `9bbad508`) plus my unmerged `dev --layout <file>.json`, `--hide now-playing` and the `now_playing` slot (the layout file uses both), the opt-in process-view stats line, the schema cache and the launcher and layout preset (all coming as PRs). The provider choice (#872), a provider using its own service (#873) and images in a runtime view (#874) are on `main`.
+- **Keyflow:** `main` `001c54be` (#102–#111, its `[uses] "fts.session"` included); the package is its folder with `icons/`, no manifest patching.
+- **Ignition:** `main` `628e70ad` (#24).
+- **Studio:** studio#519's branch `feat/arrangement-mixer-runtime-extensions` `d9fbb6ca`; the extensions are not on Studio `main` yet.
 - **Run:** `just setlist-window --play 0` (`scripts/setlist-window.sh`, `examples/layouts/setlist-window.json`).
 
 ## The chart column against Keyflow's own window
@@ -70,27 +69,26 @@ Compared with Keyflow's capture `pr-media/chart-selection-and-input-modes:captur
 - Keyflow's capture is in syntax mode, so its foot has the "Keyflow syntax" input row; this pane is in normal mode.
 - Keyflow's capture shows its window's chrome (title bar, a Welcome tab); the owner's layout hides the sidebars and bars.
 - The chart scrolls to follow the playhead (#100), so the page on screen moves with the song.
+- On Keyflow `main` (#109) the Tempo palette's note glyphs draw dark on the dark sheet, hard to see; the other glyph cells and the tinted toolbar icons read well. They were light on #104's branch.
 
 ## Frame time
 
 `APP_FRAMES` (#863) over the recorded 32 s, all five panes playing, the
-recorder running beside it, on a heavily shared THEBATTLESHIP (load 38 at the
-start of the run, 44 at its end; CI runners and other threads' builds):
+recorder running beside it, on a heavily shared THEBATTLESHIP (load 53 at the
+start, 66 at the end: CI runners and other threads' builds):
 
 | | |
 |---|---|
-| window, presented | **30.9 fps** |
-| gap between frames | p50 26.8 ms, p99 131.0 ms |
-| the recording | 752 frames in 31.8 s (the recorder's own capture, also starved) |
+| window, presented | **21.2 fps** |
+| gap between frames | p50 39.1 ms, p99 132.5 ms |
+| the recording | 580 frames in 31.9 s (the recorder, starved too) |
 
-- The same window measured 40.0 fps at load 120, and 56.4 fps (gap p99 37.6 ms, about 10 ms of window-thread CPU a frame) at load ~43 with no recorder (`stage-c-two-clocks/`).
-- So these numbers show the shared machine more than the app. The output is 60 Hz, so nothing above 60 fps can show here.
-- 240 fps on the owner's ultrawide is not shown: it needs a high-refresh display, an idle machine, and the window's work a frame under ~4 ms.
+The previous take of the same window (Keyflow #104's branch) measured 30.9 fps at load 38–44, and 56.4 fps at load ~43 with no recorder (`stage-c-two-clocks/`). These numbers show the shared machine, not the app. The Loft output is 60 Hz. 240 fps on the owner's ultrawide is not shown: it needs a high-refresh display, an idle machine and the window's work a frame under ~4 ms.
 
-The clocks during the recording, engine then chart, read one after the other:
+The clocks during the recording, engine then chart:
 
 | step | engine | chart |
 |---|---|---|
-| played from 0 | 1.05 s | 1.08 s |
-| seek 66 s | 67.05 s | 67.09 s |
-| seek 93 s | 93.98 s | 94.17 s |
+| played from 0 | 1.11 s | 1.19 s |
+| seek 66 s | 67.06 s | 67.15 s |
+| seek 93 s | 94.10 s | 94.19 s |
