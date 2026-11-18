@@ -884,7 +884,9 @@ impl App {
     /// [`crate::pacing`].
     fn learn_refresh(&mut self, window: OsId) {
         let os = if self.popouts.contains_key(&window) {
-            self.popouts.get(&window).map(|o| Arc::clone(&o.view.window))
+            self.popouts
+                .get(&window)
+                .map(|o| Arc::clone(&o.view.window))
         } else {
             self.desk.main.borrow().clone()
         };
@@ -898,7 +900,12 @@ impl App {
         }
     }
 
-    fn window_event_now(&mut self, event_loop: &dyn ActiveEventLoop, window: OsId, event: WindowEvent) {
+    fn window_event_now(
+        &mut self,
+        event_loop: &dyn ActiveEventLoop,
+        window: OsId,
+        event: WindowEvent,
+    ) {
         if let WindowEvent::PointerButton {
             state: ElementState::Released,
             primary: true,

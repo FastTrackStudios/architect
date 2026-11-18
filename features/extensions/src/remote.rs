@@ -2539,7 +2539,11 @@ mod pacing_tests {
         for _ in 0..10 {
             shell.request_redraw();
         }
-        assert_eq!(asked.load(Ordering::SeqCst), 0, "a frame asked for before its refresh");
+        assert_eq!(
+            asked.load(Ordering::SeqCst),
+            0,
+            "a frame asked for before its refresh"
+        );
         std::thread::sleep(Duration::from_millis(20));
         assert_eq!(asked.load(Ordering::SeqCst), 1, "ten changes, one frame");
     }

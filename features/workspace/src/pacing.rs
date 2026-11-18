@@ -105,7 +105,8 @@ pub fn wait_from(now: Instant) -> Duration {
     if last == 0 || !LAST_WAITED.load(Ordering::Relaxed) {
         return Duration::ZERO;
     }
-    let due = last.saturating_add(u64::try_from(refresh().saturating_sub(LEAD).as_micros()).unwrap_or(0));
+    let due =
+        last.saturating_add(u64::try_from(refresh().saturating_sub(LEAD).as_micros()).unwrap_or(0));
     Duration::from_micros(due.saturating_sub(micros(now)))
 }
 

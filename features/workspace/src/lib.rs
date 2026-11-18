@@ -61,7 +61,6 @@ pub mod control;
 #[cfg(feature = "ctx")]
 mod ctx;
 pub mod deck;
-pub mod pacing;
 mod drop;
 pub mod guide;
 #[cfg(feature = "home")]
@@ -73,6 +72,7 @@ mod layout;
 pub mod meter;
 mod model;
 mod ops;
+pub mod pacing;
 #[cfg(feature = "paint")]
 pub mod paint;
 #[cfg(feature = "presence")]
