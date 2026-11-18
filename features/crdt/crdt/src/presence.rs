@@ -576,6 +576,42 @@ impl<S: PresenceSink> Here<S> {
     }
 }
 
+/// The root map of a document holding where its presence is hosted.
+const PRESENCE_ROOT: &str = "presence";
+
+/// Where `doc`'s presence is hosted: the endpoint id of the node that
+/// serves its presence and the clock its peers share (a session's
+/// transport is hosted on its leader's node, session#192). A peer's node
+/// relays to it; `None`: wherever the peer's own node is.
+#[must_use]
+pub fn presence_host(doc: &loro::LoroDoc) -> Option<String> {
+    match doc.get_map(PRESENCE_ROOT).get("host")? {
+        loro::ValueOrContainer::Value(v) => v
+            .into_string()
+            .ok()
+            .map(|s| s.to_string())
+            .filter(|s| !s.is_empty()),
+        loro::ValueOrContainer::Container(_) => None,
+    }
+}
+
+/// Says which node hosts `doc`'s presence (`None`: none now); last writer
+/// wins. Commits.
+///
+/// # Errors
+///
+/// Loro refused the write.
+pub fn set_presence_host(doc: &loro::LoroDoc, host: Option<&str>) -> Result<(), loro::LoroError> {
+    let map = doc.get_map(PRESENCE_ROOT);
+    match host {
+        Some(host) => map.insert("host", host)?,
+        None if map.get("host").is_some() => map.delete("host")?,
+        None => return Ok(()),
+    }
+    doc.commit();
+    Ok(())
+}
+
 /// The local clock in milliseconds (monotonic, from the first call): what
 /// [`Here`] stamps pointers with and a [`Roster`] anchors them to.
 #[cfg(feature = "vox")]

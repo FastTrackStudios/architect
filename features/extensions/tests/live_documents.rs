@@ -288,6 +288,7 @@ fn a_process_extension_edits_the_nodes_copy_and_follows_it() {
             kind: KIND.to_owned(),
             path: "Songs/a.session".to_owned(),
             writable: true,
+            node: None,
         }
     );
     assert_eq!(run(&host, TEXT, &Value::Null).unwrap(), json!("made here"));

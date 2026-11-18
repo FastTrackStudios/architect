@@ -769,11 +769,20 @@ async fn launch(id: &str, launch: &Launch) -> Result<Started, String> {
         // this extension (`crate::live`).
         #[cfg(feature = "doc-sync")]
         let docs = crate::live::ExtensionDocSync::new(served.api.clone());
+        #[cfg(feature = "doc-sync")]
+        let presence = crate::live::ExtensionDocPresence::new(served.api.clone());
         let router = architect::Services::into_router(served);
         #[cfg(feature = "doc-sync")]
         let router = router.with(
             crdt::sync::doc_sync_service_descriptor(),
             crdt::sync::DocSyncDispatcher::new(docs),
+        );
+        // And its presence, relayed to wherever the document's presence
+        // is hosted (session#192).
+        #[cfg(feature = "doc-sync")]
+        let router = router.with(
+            crdt::sync::doc_presence_service_descriptor(),
+            crdt::sync::DocPresenceDispatcher::new(presence),
         );
         let connection = vox_core::initiator_on(vox_stream::StreamLink::unix(stream))
             .on_lane(router.acceptor())

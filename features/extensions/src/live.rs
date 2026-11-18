@@ -48,10 +48,19 @@ pub struct LiveDoc {
     /// Whether its edits reach the node (`writes = ["documents"]`); when
     /// not, the replica only follows.
     pub writable: bool,
+    /// This app's node's endpoint id, when it has one: what a leader
+    /// writes as the document's presence host
+    /// (`crdt::presence::set_presence_host`), so the org's other devices
+    /// follow its presence through this node (session#192).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<String>,
 }
 
 #[cfg(all(feature = "host", not(target_family = "wasm")))]
-pub use host_side::{ExtensionDocSync, KindDoc, KindDocuments, RegistryDocuments, serve_in_memory};
+pub use host_side::{
+    ExtensionDocPresence, ExtensionDocSync, KindDoc, KindDocuments, PresenceLink,
+    RegistryDocuments, serve_in_memory,
+};
 
 #[cfg(not(target_family = "wasm"))]
 pub use client::{DocLane, Replica, SyncClient};
@@ -201,6 +210,150 @@ mod host_side {
         }
     }
 
+    /// How this app's node reaches the presence of a document another node
+    /// hosts (session#192): the node's own endpoint id, and a presence
+    /// client of another node, dialled over the org's iroh lane by its
+    /// endpoint id alone.
+    pub trait PresenceLink: Send + Sync {
+        /// This node's endpoint id.
+        fn me(&self) -> String;
+        /// A `DocPresence` client of node `host`.
+        fn dial(
+            &self,
+            host: String,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<crdt::sync::DocPresenceClient, String>>
+                    + Send,
+            >,
+        >;
+    }
+
+    /// The host's relay of an extension's presence sessions (session#192):
+    /// to the node's own registry when the document's presence is hosted
+    /// here (or nowhere said), else to the node that hosts it
+    /// (`crdt::presence::presence_host`), over the org's iroh lane.
+    ///
+    /// The clock: `now` answers the clock of the host its last session
+    /// reached, as this node estimates it (it pings the host's `now` while
+    /// a session to it lasts), so an extension's estimate is of the host's
+    /// clock. One remote host per connection at a time.
+    #[derive(Clone)]
+    pub struct ExtensionDocPresence {
+        api: ExtensionApi,
+        remote: Arc<std::sync::Mutex<Option<crdt::clock::SharedClock>>>,
+    }
+
+    impl ExtensionDocPresence {
+        /// The relay for `api`'s extension.
+        #[must_use]
+        pub fn new(api: ExtensionApi) -> Self {
+            Self {
+                api,
+                remote: Arc::default(),
+            }
+        }
+
+        fn set_remote(&self, clock: Option<crdt::clock::SharedClock>) {
+            *self
+                .remote
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = clock;
+        }
+    }
+
+    impl crdt::sync::DocPresence for ExtensionDocPresence {
+        async fn presence(
+            &self,
+            doc_id: Uuid,
+            mut up: vox::Rx<Vec<u8>>,
+            down: vox::Tx<Vec<u8>>,
+        ) -> Result<(), SyncError> {
+            let session = self.api.live_session(doc_id)?;
+            let doc = session
+                .registry
+                .doc(doc_id)
+                .await
+                .map_err(|_| SyncError::UnknownDoc)?;
+            let host = crdt::presence::presence_host(doc.loro());
+            let remote = match (host, &session.presence) {
+                (Some(host), Some(link)) if host != link.me() => {
+                    Some(link.dial(host).await.map_err(SyncError::Internal)?)
+                }
+                (Some(_), None) => {
+                    return Err(SyncError::Internal(
+                        "hosted on another node, and this app has no node to reach it".to_owned(),
+                    ));
+                }
+                _ => None,
+            };
+            // The host's clock, estimated here while the session lasts.
+            let pinger = remote.clone().map(|client| {
+                let clock = crdt::clock::SharedClock::default();
+                self.set_remote(Some(clock.clone()));
+                tokio::spawn(async move {
+                    loop {
+                        let sent = crdt::presence::clock_ms();
+                        if let Ok(there) = client.now().await {
+                            clock.record(sent, there, crdt::presence::clock_ms());
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    }
+                })
+            });
+            let local;
+            let client = match &remote {
+                Some(client) => client,
+                None => {
+                    local = crdt::peer::SelfPresenceLane::open(session.registry, session.principal)
+                        .await
+                        .map_err(SyncError::Internal)?;
+                    local.client()
+                }
+            };
+            let (node_up, node_up_rx) = vox::channel::<Vec<u8>>();
+            let (node_down_tx, mut node_down) = vox::channel::<Vec<u8>>();
+            let mut call = std::pin::pin!(client.presence(doc_id, node_up_rx, node_down_tx));
+            let ended = loop {
+                tokio::select! {
+                    biased;
+                    res = &mut call => break res.map_err(sync_error),
+                    incoming = up.recv() => match owned!(incoming) {
+                        Some(bytes) => {
+                            // A reader's presence reaches nobody.
+                            if session.writable && node_up.send(bytes).await.is_err() {
+                                break call.await.map_err(sync_error);
+                            }
+                        }
+                        None => break Ok(()),
+                    },
+                    incoming = node_down.recv() => match owned!(incoming) {
+                        Some(frame) => {
+                            if down.send(frame).await.is_err() {
+                                break Ok(());
+                            }
+                        }
+                        None => break call.await.map_err(sync_error),
+                    },
+                }
+            };
+            if let Some(pinger) = pinger {
+                pinger.abort();
+                self.set_remote(None);
+            }
+            ended
+        }
+
+        async fn now(&self) -> f64 {
+            self.remote
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref()
+                .and_then(crdt::clock::SharedClock::now_ms)
+                .unwrap_or_else(crdt::presence::clock_ms)
+        }
+    }
+
     fn sync_error(e: vox::VoxError<SyncError>) -> SyncError {
         match e {
             vox::VoxError::User(e) => *e,
@@ -340,6 +493,15 @@ mod client {
         #[must_use]
         pub const fn doc(&self) -> &LiveDoc {
             &self.doc
+        }
+
+        /// The app's node's endpoint id, when it has one: what a leader
+        /// names as the document's presence host
+        /// (`crdt::presence::set_presence_host` on its replica), so the org's
+        /// other devices follow its presence through this node (session#192).
+        #[must_use]
+        pub fn node(&self) -> Option<&str> {
+            self.doc.node.as_deref()
         }
 
         /// The `DocSync` client to the host, for a session of one's own.
