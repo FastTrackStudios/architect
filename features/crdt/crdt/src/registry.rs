@@ -578,6 +578,62 @@ impl DocRegistry {
     }
 }
 
+impl DocRegistry {
+    /// [`DocSync::sync`] for a caller the lane knows may only read (a
+    /// vault share link's guest): it follows the doc live, and the first
+    /// update it sends up ends its session with [`SyncError::Forbidden`],
+    /// whatever the registry's write rules say. The caller is still
+    /// admitted for [`DocAccess::Read`] by the registry's rules.
+    pub async fn sync_read_only(
+        &self,
+        doc_id: Uuid,
+        from: Vec<u8>,
+        up: vox::Rx<Vec<u8>>,
+        down: vox::Tx<crate::sync::SyncDown>,
+    ) -> Result<(), SyncError> {
+        self.sync_as(doc_id, from, up, down, true).await
+    }
+
+    /// [`DocPresence::presence`] for a caller the lane knows may only
+    /// read: it sees everyone's presence, and what it publishes is
+    /// dropped, whatever the registry's write rules say.
+    pub async fn presence_read_only(
+        &self,
+        doc_id: Uuid,
+        up: vox::Rx<Vec<u8>>,
+        down: vox::Tx<Vec<u8>>,
+    ) -> Result<(), SyncError> {
+        self.presence_as(doc_id, up, down, true).await
+    }
+
+    /// [`DocPresence::presence`], read-only whatever the caller may write
+    /// when `read_only`.
+    async fn presence_as(
+        &self,
+        doc_id: Uuid,
+        up: vox::Rx<Vec<u8>>,
+        down: vox::Tx<Vec<u8>>,
+        read_only: bool,
+    ) -> Result<(), SyncError> {
+        self.admit_caller(doc_id, DocAccess::Read)?;
+        let writes = !read_only && self.may_write(doc_id);
+        // Same attach-under-lock / pump-after-release split as `sync`.
+        let session = {
+            let mut docs = self.shared.docs.lock().await;
+            let entry = self.entry(&mut docs, doc_id).await?;
+            let session = entry.presence.attach(doc_id, down)?;
+            drop(docs);
+            session
+        };
+        if writes {
+            session.pump(up).await;
+        } else {
+            session.read_only().pump(up).await;
+        }
+        Ok(())
+    }
+}
+
 impl DocSync for DocRegistry {
     async fn sync(
         &self,
@@ -597,22 +653,7 @@ impl DocPresence for DocRegistry {
         up: vox::Rx<Vec<u8>>,
         down: vox::Tx<Vec<u8>>,
     ) -> Result<(), SyncError> {
-        self.admit_caller(doc_id, DocAccess::Read)?;
-        let writes = self.may_write(doc_id);
-        // Same attach-under-lock / pump-after-release split as `sync`.
-        let session = {
-            let mut docs = self.shared.docs.lock().await;
-            let entry = self.entry(&mut docs, doc_id).await?;
-            let session = entry.presence.attach(doc_id, down)?;
-            drop(docs);
-            session
-        };
-        if writes {
-            session.pump(up).await;
-        } else {
-            session.read_only().pump(up).await;
-        }
-        Ok(())
+        self.presence_as(doc_id, up, down, false).await
     }
 
     async fn now(&self) -> f64 {

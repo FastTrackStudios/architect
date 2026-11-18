@@ -509,3 +509,150 @@ async fn a_readers_presence_reads_and_publishes_nothing() {
     );
     assert!(!peers[2].states().contains_key("bob/state"));
 }
+
+/// A lane that serves `registry` to callers it knows may only read (a
+/// vault share link's guests): its sessions are read-only whatever the
+/// registry's write rules say about the caller.
+#[derive(Clone)]
+struct ReadOnlyLane(DocRegistry);
+
+impl crdt::sync::DocSync for ReadOnlyLane {
+    async fn sync(
+        &self,
+        doc_id: Uuid,
+        from: Vec<u8>,
+        up: vox::Rx<Vec<u8>>,
+        down: vox::Tx<crdt::sync::SyncDown>,
+    ) -> Result<(), SyncError> {
+        self.0.sync_read_only(doc_id, from, up, down).await
+    }
+}
+
+impl crdt::sync::DocPresence for ReadOnlyLane {
+    async fn presence(
+        &self,
+        doc_id: Uuid,
+        up: vox::Rx<Vec<u8>>,
+        down: vox::Tx<Vec<u8>>,
+    ) -> Result<(), SyncError> {
+        self.0.presence_read_only(doc_id, up, down).await
+    }
+
+    async fn now(&self) -> f64 {
+        crdt::presence::clock_ms()
+    }
+}
+
+/// A client of `lane` on its own in-process connection, calling as
+/// `who` (a real gate resolving it).
+async fn lane_client_as<C: vox::FromVoxLane>(lane: &ReadOnlyLane, who: &Principal) -> C {
+    let router = LayerRouter::new()
+        .with(
+            doc_sync_service_descriptor(),
+            DocSyncDispatcher::new(lane.clone()),
+        )
+        .with(
+            doc_presence_service_descriptor(),
+            DocPresenceDispatcher::new(lane.clone()),
+        );
+    let gated = PermissionsGate::new(Arc::new(AllowAll), Arc::new(StaticPrincipal(who.clone())))
+        .unlisted(UnlistedPolicy::Allow)
+        .wrap(router);
+    let (client_link, server_link) = vox::memory_link_pair(64);
+    tokio::spawn(async move {
+        if let Ok(connection) = vox::acceptor_on(server_link)
+            .on_lane(handler_acceptor(gated))
+            .establish_connection()
+            .await
+        {
+            let _hold = connection;
+            std::future::pending::<()>().await;
+        }
+    });
+    vox::initiator_on(client_link)
+        .establish::<C>()
+        .await
+        .expect("establish")
+}
+
+/// Through a read-only lane even a caller the registry lets write (ann)
+/// only follows: an update she sends up ends her session with
+/// `Forbidden`, and what she publishes in presence reaches nobody, while
+/// she sees the others and the shared clock answers her.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_read_only_lane_keeps_even_a_writer_from_writing() {
+    let registry = readers_registry("ann");
+    let lane = ReadOnlyLane(registry.clone());
+    let doc_id = Uuid::new_v4();
+    let at_host = registry.doc(doc_id).await.unwrap();
+    at_host
+        .loro()
+        .get_map("root")
+        .insert("title", "kept")
+        .unwrap();
+    at_host.loro().commit();
+
+    let ann: DocSyncClient = lane_client_as(&lane, &user("ann")).await;
+    let (up_tx, up_rx) = vox::channel::<Vec<u8>>();
+    let (down_tx, mut down_rx) = vox::channel::<crdt::sync::SyncDown>();
+    let mut call = std::pin::pin!(ann.sync(doc_id, Vec::new(), up_rx, down_tx));
+    tokio::select! {
+        res = &mut call => panic!("the session ended before attaching: {res:?}"),
+        frame = down_rx.recv() => {
+            frame.expect("down channel").expect("attached");
+        }
+    }
+    let send = up_tx.send(update("title", "defaced"));
+    let (pushed, ended) = tokio::join!(send, tokio::time::timeout(Duration::from_secs(5), call));
+    pushed.expect("the update went up");
+    let err = ended
+        .expect("the session ended")
+        .expect_err("a write through a read-only lane must be refused");
+    assert!(
+        matches!(&err, vox::VoxError::User(boxed) if matches!(**boxed, SyncError::Forbidden)),
+        "expected Forbidden, got: {err:?}"
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(map_value(at_host.loro(), "title").as_deref(), Some("kept"));
+
+    // Presence: bob leads on the registry's own lane; ann, through the
+    // read-only lane, sees him and publishes nothing.
+    let bob_client: DocPresenceClient = client_as(&registry, &user("ann")).await;
+    let (bob, mut bob_driver) = PresencePeer::new(doc_id, 30_000);
+    tokio::spawn(async move {
+        let _ = bob_driver.run(&bob_client).await;
+    });
+    let ann_client: DocPresenceClient = lane_client_as(&lane, &user("ann")).await;
+    let (ann, mut ann_driver) = PresencePeer::new(doc_id, 30_000);
+    tokio::spawn(async move {
+        let _ = ann_driver.run(&ann_client).await;
+    });
+    bob.set("lead/play", "playing at 10");
+    eventually("ann sees the leader's transport", async || {
+        ann.states().contains_key("lead/play")
+    })
+    .await;
+    let clock = ann.clock().clone();
+    eventually("the shared clock answers through the lane", async || {
+        clock.offset_ms().is_some()
+    })
+    .await;
+    ann.set("lead/play", "stopped by ann");
+    ann.set("ann/state", "here");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    bob.set("bob/state", "here");
+    eventually("ann sees the leader's next state", async || {
+        ann.states().contains_key("bob/state")
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        !bob.states().contains_key("ann/state"),
+        "a read-only lane's presence reached the leader"
+    );
+    assert_eq!(
+        bob.states().get("lead/play"),
+        Some(&loro::LoroValue::from("playing at 10")),
+        "a read-only lane took the transport"
+    );
+}
