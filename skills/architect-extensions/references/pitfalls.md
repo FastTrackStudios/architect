@@ -145,12 +145,12 @@ From `docs/content/architecture/embedded-views.md` ("Web views"):
 - **Tooling**: the component tooling is young (WASI 0.3, async components, needs Wasmtime 46+); old WIT versions are kept forever, so design WIT changes as additions.
 - **Source:** `docs/content/architecture/extensions.md` ("On each platform", "Risks"); `docs/content/guide/showcase.md`.
 
-### 18. `document::Style` in a process view
+### 18. `document::Style` in a process view (fixed)
 
-- **Symptom:** a process copy's view is unstyled while the linked copy is fine.
-- **Cause:** a process view's `VirtualDom` has no document head for `document::Style` to reach.
-- **Fix:** a plain `style { {CSS} }` element in the view's tree when `guest::in_process()` (Keyflow's palettes sidebar does this); `document::Style` linked in.
-- **Source:** #840.
+- **Was:** a process copy's view unstyled while the linked copy was fine: its `VirtualDom` had no document for `document::Style` to reach.
+- **Now:** every view a process serves is drawn under `guest`'s root, which gives it a document whose `document::Style` is a `style` element its host applies, the app's theme store (`architect_theme::try_use_theme`, `use_resolved`) holding the host's theme, and in a paint view's `ViewCtx` the actions it may run (`guest::app_actions`, the host call `actions`). A `style` element inline still works. Test: `apps/sandbox/sketch/tests/paint_parity.rs` `a_process_view_has_the_theme_its_styles_and_its_actions`.
+- **Still:** a linked extension's `Extension::files` are not sent by its process copy: put files its toolbars read in its package.
+- **Source:** #840, #844.
 
 ## Before calling an extension done
 

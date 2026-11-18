@@ -1451,8 +1451,10 @@ mod remote_paint_ui {
                     PaneId::new(pane),
                     KindId::paint(),
                     (ViewHost::Blitz, Placement::Pane),
+                    // The app's actions it may run, through its host: what
+                    // a linked view's list is, as far as it may reach.
                     (
-                        architect::action::ActionList::new(),
+                        crate::guest::app_actions(),
                         architect::action::ActionCaller::app(),
                     ),
                     clock,

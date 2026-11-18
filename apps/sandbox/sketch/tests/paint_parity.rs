@@ -264,6 +264,44 @@ fn MemoView() -> Element {
     rsx! { div { {kept.map(|k| k.value).unwrap_or_default()} } }
 }
 
+/// What a process view gets that a linked one gets from the app (#840):
+/// the theme store's theme, `document::Style` in its document, and the
+/// actions it may run in its `ViewCtx`.
+#[allow(non_snake_case)]
+fn ThemedView() -> Element {
+    let ink = architect_theme::use_resolved()
+        .get("ink")
+        .map(str::to_owned);
+    let mount = use_hook(|| PaintMount::new(Recorder::new));
+    // The paint view's ctx, as a process gives it: its actions.
+    let probe = use_hook(|| {
+        PaintMount::new(|ctx: &ViewCtx| {
+            let actions = ctx.actions.clone();
+            std::thread::spawn(move || {
+                for _ in 0..200 {
+                    if actions.info("TEST_PROBE_PING").is_some() {
+                        log("actions: TEST_PROBE_PING");
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                log("actions: none");
+            });
+            Recorder::new(ctx)
+        })
+    });
+    if let Some(ink) = ink {
+        log(&format!("theme ink={ink}"));
+    }
+    let _ = mount;
+    rsx! {
+        document::Style { "#themed-probe {{ color: rgb(1, 2, 3); }}" }
+        div { id: "themed-probe", style: "width: 100%; height: 100%;",
+            PaintPane { mount: probe }
+        }
+    }
+}
+
 fn probe(make: fn(&ViewCtx) -> Recorder) -> Element {
     let mount = use_hook(|| {
         let mount = PaintMount::new(make);
@@ -307,13 +345,27 @@ title = "Regions"
 [[views]]
 id = "memo"
 title = "Memo"
+
+[[views]]
+id = "themed"
+title = "Themed"
+
+[[actions]]
+id = "TEST_PROBE_PING"
+name = "Ping"
+description = "Answers pong."
+effect = "read_only"
 "#
     }
 
     fn build(&self, ext: &mut Builder) {
         ext.view("probe", ProbeView)
             .view("regions", RegionsView)
-            .view("memo", MemoView);
+            .view("memo", MemoView)
+            .view("themed", ThemedView)
+            .action("TEST_PROBE_PING", |_| async {
+                Ok(serde_json::json!("pong"))
+            });
     }
 }
 
@@ -405,6 +457,7 @@ fn App(props: AppProps) -> Element {
                 },
                 (None, "regions") => rsx! { RegionsView {} },
                 (None, "memo") => rsx! { MemoView {} },
+                (None, "themed") => rsx! { ThemedView {} },
                 (None, _) => rsx! { ProbeView {} },
             },
         ))
@@ -517,8 +570,10 @@ fn start_view(process: bool, dir: &Path, view: &'static str) -> Run {
         _host: host,
         processes: kept,
     };
-    if view == "memo" {
-        run.pump_until("the view", |l| l.contains("start view_state="));
+    if view == "memo" || view == "themed" {
+        run.pump_until("the view", |l| {
+            l.contains("start view_state=") || l.contains("ctx pane=")
+        });
     } else {
         run.pump_until("the view at its size", |l| l.contains("size "));
     }
@@ -910,4 +965,44 @@ fn a_press_on_a_region_carries_its_modifiers_linked_and_as_a_process() {
             l.contains(&press) && l.contains(&release)
         });
     }
+}
+
+/// A process view gets what a linked view gets from the app (#840): the
+/// app's theme through the theme store (`architect_theme::use_resolved`),
+/// its `document::Style` applied in its document, and in its paint
+/// view's `ViewCtx` the actions it may run (its own here).
+#[test]
+fn a_process_view_has_the_theme_its_styles_and_its_actions() {
+    let _one = SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let dir = tempfile::tempdir().unwrap();
+    let mut run = start_view(true, dir.path(), "themed");
+    run.pump_until("the theme's ink", |l| l.contains("theme ink=#"));
+    run.pump_until("its actions", |l| l.contains("actions: "));
+    assert!(
+        run.log().contains("actions: TEST_PROBE_PING"),
+        "{}",
+        run.log()
+    );
+    // Its style, in the view's own document.
+    let styled = {
+        let d = run.doc.inner.borrow();
+        let at = *architect_extensions::remote::mounted_views(&d)
+            .first()
+            .unwrap();
+        let sub: &dyn std::any::Any = d.subdoc(at).unwrap();
+        let remote = sub
+            .downcast_ref::<architect_extensions::remote::RemoteDocument>()
+            .unwrap();
+        let doc = blitz_dom::Document::inner(remote);
+        doc.query_selector_all("style")
+            .unwrap()
+            .iter()
+            .filter_map(|n| doc.get_node(*n))
+            .map(blitz_dom::Node::text_content)
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert!(styled.contains("rgb(1, 2, 3)"), "no style: {styled:?}");
 }

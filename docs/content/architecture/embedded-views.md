@@ -278,9 +278,11 @@ scroll, selection, a mode, as one string the pane keeps,
 restarts or its pane moves or pops out; `ViewState::set` keeps a new
 one (in a process, the host call `set_view_state`, taken only by a pane
 showing that extension's view). Test: `apps/sandbox/sketch/tests/paint_parity.rs` (one view
-both ways, the same log). Not the same yet: a process's `ViewCtx` has an
-empty `ActionList`, and `document::Style` in a process view reaches no
-head (put a `style` element inline).
+both ways, the same log). In a process the `ViewCtx`'s `ActionList` is
+the app's actions the extension may run, each run through its host
+(`guest::app_actions`, the host call `actions`), and the view is drawn
+under a root that gives it the app's theme store and a document whose
+`document::Style` its host applies.
 
 ## Composite kinds
 

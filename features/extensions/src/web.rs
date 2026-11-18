@@ -547,6 +547,9 @@ impl WebHost {
                 Ok(Json::Null)
             }
             // A browser's views are its own pages, kept by the page.
+            HostRequest::Actions => Err(HostError::Unsupported {
+                what: "actions: the browser host lists none yet".to_owned(),
+            }),
             HostRequest::SetViewState { .. } => Err(HostError::Unsupported {
                 what: "set_view_state: the browser host shows no process views".to_owned(),
             }),
