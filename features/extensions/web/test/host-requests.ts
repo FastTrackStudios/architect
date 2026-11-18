@@ -17,6 +17,7 @@ export const requests: HostRequest[] = /* BEGIN */ [
   { "op": "edit_document", "path": "notes/b.md", "edits": [{ "insert": { "at": 0, "text": "x" } }, { "append": { "text": "y" } }], "name": "Edit" },
   { "op": "rename_document", "path": "notes/b.md", "to": "notes/c.md" },
   { "op": "move_document", "path": "notes/c.md", "folder": "archive" },
+  { "op": "live_document", "path": "Charts/a.kf" },
   { "op": "delete_document", "path": "archive/c.md" },
   { "op": "set_view_state", "pane": "chart-1", "state": "zoom=2" },
   { "op": "undo_document", "path": "notes/a.md" },
