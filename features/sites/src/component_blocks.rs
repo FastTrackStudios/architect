@@ -262,7 +262,9 @@ impl Tree {
     /// than [`MAX_DEPTH`] ([`Tree::insert`]), so no walk up is longer.
     fn apply(&mut self, frame: Frame, deadline: Instant) -> Result<(), String> {
         let edits = match frame {
-            Frame::Edits { edits } => edits,
+            // A component here is never opened with `scene_view`, so no
+            // batches come as bytes; their edits are its drawing.
+            Frame::Edits { edits } | Frame::Batches { edits, .. } => edits,
             Frame::Failed(why) => return Err(why),
         };
         self.edits = self.edits.saturating_add(edits.len());

@@ -177,3 +177,45 @@ fn a_batch_that_is_not_one_and_a_layer_of_no_fragment_fail() {
     fresh.apply(&moved).unwrap();
     assert!(fresh.layers().is_empty());
 }
+
+/// A large resource in a batch given whole is drawn from the batch's own
+/// bytes (#835): the font's bytes are where the batch's are, not a copy.
+#[test]
+fn a_large_font_in_a_batch_given_whole_is_not_copied() {
+    use architect_scene::ops::{Receiver, SHARE_AT};
+    let font = FontData::new(Blob::from(vec![7_u8; SHARE_AT + 10]), 0);
+    let mut scene = Scene::new();
+    scene.draw_glyphs(
+        &font,
+        12.0,
+        false,
+        &[],
+        peniko::kurbo::Vec2::ZERO,
+        &Style::Fill(Fill::NonZero),
+        Color::BLACK,
+        1.0,
+        Affine::IDENTITY,
+        None,
+        std::iter::once(Glyph {
+            id: 3,
+            x: 0.0,
+            y: 0.0,
+        }),
+    );
+    let mut sender = architect_scene::ops::Sender::new();
+    let batch = sender
+        .frame(&[(
+            1,
+            architect_scene::layers::Layer::new(std::sync::Arc::new(scene.commands)),
+        )])
+        .unwrap();
+    let within = batch.as_ptr_range();
+    let id = architect_scene::resource::Resource::Font(font.data.clone()).id();
+    let mut receiver = Receiver::new();
+    receiver.apply_owned(batch).unwrap();
+    let kept = receiver.resources().font(id).unwrap();
+    assert!(
+        within.contains(&kept.data().as_ptr()),
+        "the font was copied out of its batch"
+    );
+}
