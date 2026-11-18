@@ -28,7 +28,7 @@ steps (
         do @run{id WORKSPACE_CLOSE_TAB}
         done {
             on (@changed"workspace")
-            check ({id WORKSPACE_LAYOUT, has {windows ({docked ({tabs (files search)} {tabs (outline backlinks)})})}})
+            check ({id WORKSPACE_LAYOUT, has {windows ({docked ({tabs (files)} {tabs (outline backlinks)})})}})
         }
         hide true
     }
@@ -70,6 +70,14 @@ steps (
         target @css"[data-group-tabs~=\"note-welcome\"] [aria-label=\"New tab\"]"
         do @click{}
         hold 0.8
+    }
+    {
+        // The Open menu lists every view (more since the sandbox links
+        // Sketch, #863): bring the rest of it into view first.
+        id reveal
+        target @text"Settings"
+        do @scroll{dy -800, seconds 0.6}
+        hide true
     }
     {
         id pick

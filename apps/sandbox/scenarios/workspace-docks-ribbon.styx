@@ -26,7 +26,7 @@ steps (
         do @run{id WORKSPACE_CLOSE_TAB}
         done {
             on (@changed"workspace")
-            check ({id WORKSPACE_LAYOUT, has {windows ({docked ({tabs (files search)} {tabs (outline backlinks)})})}})
+            check ({id WORKSPACE_LAYOUT, has {windows ({docked ({tabs (files)} {tabs (outline backlinks)})})}})
         }
         hide true
     }
@@ -54,11 +54,11 @@ steps (
         hold 1.0
     }
     {
-        id search
-        text "The left dock's views: Search."
-        target @tab"search"
+        id outline
+        text "A dock's views: the outline, in the right dock."
+        target @tab"outline"
         do @click{}
-        done {check ({id WORKSPACE_LAYOUT, has {windows ({docked ({current search} {current backlinks})})}})}
+        done {check ({id WORKSPACE_LAYOUT, has {windows ({docked ({current files} {current outline})})}})}
         hold 0.8
     }
     {

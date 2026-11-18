@@ -748,13 +748,39 @@ fn one_paint_view_gets_the_same_ctx_and_input_linked_and_as_a_process() {
 /// click on the view before it: the view takes the keyboard focus, as a
 /// press anywhere else in it does, and the key typed next is the view's.
 /// Its region hears the press; the view hears no pointer press.
+/// Hovers `at` until the host has the view's hit region there: the view
+/// hears `Enter`. A process view logs its size before its layers (and so
+/// its regions) reach the host, and a press sent before they do is a
+/// plain press the region never hears. Under load that gap is long (CI
+/// runs thousands of tests at once): the press must wait for it.
+fn hover_region(run: &mut Run, at: (f32, f32), mods: Modifiers) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut nudge = 0.0;
+    while !run.log().contains("region Enter(") {
+        assert!(
+            Instant::now() < deadline,
+            "the host never had the region; the log:\n{}",
+            run.log()
+        );
+        // A move it can tell from the last: the region is found on one.
+        run.send(UiEvent::PointerMove(pointer(
+            (at.0 + nudge, at.1),
+            MouseEventButtons::None,
+            mods,
+        )));
+        nudge = 1.0 - nudge;
+        run.pump_until("a moment", |_| true);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
 fn press_a_region_then_type(run: &mut Run) {
     let (ox, oy) = origin(&run.doc);
     let (x0, y0, _, _) = REGION_RECT;
     let at = (ox + x0 as f32 + 30.0, oy + y0 as f32 + 20.0);
     let free = MouseEventButtons::None;
     let held = MouseEventButtons::Primary;
-    run.send(UiEvent::PointerMove(pointer(at, free, Modifiers::empty())));
+    hover_region(run, at, Modifiers::empty());
     run.send(UiEvent::PointerDown(pointer(at, held, Modifiers::empty())));
     run.pump_until("the region's press", |l| l.contains("region Press("));
     run.send(UiEvent::PointerUp(pointer(at, free, Modifiers::empty())));
@@ -948,11 +974,7 @@ fn a_press_on_a_region_carries_its_modifiers_linked_and_as_a_process() {
         let (ox, oy) = origin(&run.doc);
         let (x0, y0, _, _) = REGION_RECT;
         let at = (ox + x0 as f32 + 30.0, oy + y0 as f32 + 20.0);
-        run.send(UiEvent::PointerMove(pointer(
-            at,
-            MouseEventButtons::None,
-            Modifiers::SHIFT,
-        )));
+        hover_region(&mut run, at, Modifiers::SHIFT);
         run.send(UiEvent::PointerDown(pointer(
             at,
             MouseEventButtons::Primary,

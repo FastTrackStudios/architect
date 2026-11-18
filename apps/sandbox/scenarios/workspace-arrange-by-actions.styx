@@ -49,7 +49,7 @@ steps (
         do @run{id WORKSPACE_MOVE, args {pane outline, to {beside {pane graph}}}}
         done {
             on (@changed"workspace")
-            check ({id WORKSPACE_LAYOUT, has {windows ({groups ({tabs (note-welcome note-shell arrange)} {tabs (note-workspace)} {tabs (graph outline)}), docked ({tabs (files search)} {tabs (backlinks)})})}})
+            check ({id WORKSPACE_LAYOUT, has {windows ({groups ({tabs (note-welcome note-shell arrange)} {tabs (note-workspace)} {tabs (graph outline)}), docked ({tabs (files)} {tabs (backlinks)})})}})
         }
         hold 1.0
     }
@@ -66,7 +66,7 @@ steps (
         do @run{id WORKSPACE_FLOAT, args {pane backlinks, rect {x 860, y 140, w 360, h 280}}}
         done {
             on (@changed"workspace")
-            check ({id WORKSPACE_LAYOUT, has {active note-welcome, windows ({docked ({tabs (files search)})})}})
+            check ({id WORKSPACE_LAYOUT, has {active note-welcome, windows ({docked ({tabs (files)})})}})
         }
         hold 1.0
     }
@@ -89,7 +89,7 @@ steps (
         do @run{id WORKSPACE_MOVE, args {pane backlinks, to {dock {side right}}}}
         done {
             on (@changed"workspace")
-            check ({id WORKSPACE_LAYOUT, has {windows ({docked ({tabs (files search)} {tabs (backlinks)})})}})
+            check ({id WORKSPACE_LAYOUT, has {windows ({docked ({tabs (files)} {tabs (backlinks)})})}})
         }
         hold 0.8
     }

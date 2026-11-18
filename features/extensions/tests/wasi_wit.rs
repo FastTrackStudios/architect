@@ -351,6 +351,10 @@ fn every_process_method_has_its_place_in_the_world() {
         ("theme", &[][..]),
         // What it adds at run time: not yet a component's (#167).
         ("updates", &[][..]),
+        // `view` with its scene batches as bytes (wire 8): a component's
+        // view still sends them in the attribute, through `render`; bytes
+        // over WIT are #835's last item.
+        ("scene_view", &[][..]),
     ]);
     let descriptors = [
         architect_extensions::proto::process_extension_service_descriptor(),
