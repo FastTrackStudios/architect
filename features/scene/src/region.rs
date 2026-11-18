@@ -181,6 +181,14 @@ pub struct Region {
     pub hover: Option<Color>,
     /// Drawn over its shape while it is pressed.
     pub press: Option<Color>,
+    /// A layer of the pane's drawn while the pointer is on it, in this
+    /// region's layer's space, over it: what it shows hovered, recorded
+    /// once (a notehead in the hover colour). The view sends that layer
+    /// with `visible: false`; the host shows it with no word to the view.
+    pub hover_layer: Option<Key>,
+    /// The layer drawn while it is pressed, the same way (else its
+    /// `hover_layer`).
+    pub press_layer: Option<Key>,
     /// What dragging it writes: at most one along each axis (a fader
     /// one, a box that moves anywhere two).
     pub drags: Vec<Drag>,
@@ -196,8 +204,32 @@ impl Region {
             cursor: Cursor::Default,
             hover: None,
             press: None,
+            hover_layer: None,
+            press_layer: None,
             drags: Vec::new(),
         }
+    }
+
+    /// While hovered, layer `key` (sent hidden) is drawn over it in its
+    /// layer's space: its content redrawn as hovered, not a box over it.
+    #[must_use]
+    pub const fn hover_layer(mut self, key: Key) -> Self {
+        self.hover_layer = Some(key);
+        self
+    }
+
+    /// While pressed, layer `key` (sent hidden) is drawn over it.
+    #[must_use]
+    pub const fn press_layer(mut self, key: Key) -> Self {
+        self.press_layer = Some(key);
+        self
+    }
+
+    /// Whether it says what to draw with layers: a batch that says so is
+    /// of [`crate::ops::VERSION`] 3.
+    #[must_use]
+    pub const fn swaps(&self) -> bool {
+        self.hover_layer.is_some() || self.press_layer.is_some()
     }
 
     #[must_use]
@@ -378,8 +410,17 @@ fn content_point(transform: Affine, at: Point) -> Option<Point> {
     (p.x.is_finite() && p.y.is_finite()).then_some(p)
 }
 
-/// Draws `lit`'s highlight over its region, its layer at `at`.
-pub(crate) fn draw_lit(scene: &mut impl PaintScene, region: &Region, at: Affine, pressed: bool) {
+/// Draws `lit`'s highlight over its region, its layer at `at`: its
+/// colour over its shape, then the layer it shows (`swap`, the commands
+/// of [`Region::hover_layer`] or [`Region::press_layer`], when there is
+/// one), in the same space.
+pub(crate) fn draw_lit(
+    scene: &mut impl PaintScene,
+    region: &Region,
+    at: Affine,
+    pressed: bool,
+    swap: Option<&[anyrender::recording::RenderCommand]>,
+) {
     let color = if pressed {
         region.press.or(region.hover)
     } else {
@@ -387,6 +428,22 @@ pub(crate) fn draw_lit(scene: &mut impl PaintScene, region: &Region, at: Affine,
     };
     if let Some(color) = color {
         region.shape.fill(scene, at, color);
+    }
+    if let Some(commands) = swap {
+        crate::layers::replay(scene, commands, at);
+    }
+}
+
+/// The layer `region` shows while lit (pressed or not), if it names one.
+#[must_use]
+pub const fn shown_layer(region: &Region, pressed: bool) -> Option<Key> {
+    if pressed {
+        match region.press_layer {
+            Some(k) => Some(k),
+            None => region.hover_layer,
+        }
+    } else {
+        region.hover_layer
     }
 }
 
@@ -772,6 +829,10 @@ const CIRCLE: u8 = 2;
 const HOVER: u8 = 1;
 const PRESS: u8 = 2;
 const DRAG: u8 = 4;
+/// A layer drawn while hovered: batch version 3.
+const HOVER_LAYER: u8 = 8;
+/// A layer drawn while pressed: batch version 3.
+const PRESS_LAYER: u8 = 16;
 const STEP: u8 = 1;
 const COAST: u8 = 2;
 
@@ -828,6 +889,8 @@ pub(crate) fn write(w: &mut Writer, regions: &[Region]) {
             (region.hover.is_some(), HOVER),
             (region.press.is_some(), PRESS),
             (!region.drags.is_empty(), DRAG),
+            (region.hover_layer.is_some(), HOVER_LAYER),
+            (region.press_layer.is_some(), PRESS_LAYER),
         ]
         .into_iter()
         .filter(|(on, _)| *on)
@@ -835,6 +898,12 @@ pub(crate) fn write(w: &mut Writer, regions: &[Region]) {
         w.u8(flags);
         for c in [region.hover, region.press].into_iter().flatten() {
             color(w, c);
+        }
+        for key in [region.hover_layer, region.press_layer]
+            .into_iter()
+            .flatten()
+        {
+            w.u64(key);
         }
         if !region.drags.is_empty() {
             w.u8(u8::try_from(region.drags.len()).unwrap_or(u8::MAX));
@@ -880,7 +949,7 @@ pub(crate) fn read(r: &mut Reader<'_>) -> Result<Vec<Region>, Error> {
             .copied()
             .ok_or(Error::Unknown("cursor", c))?;
         let flags = r.u8()?;
-        if flags & !(HOVER | PRESS | DRAG) != 0 {
+        if flags & !(HOVER | PRESS | DRAG | HOVER_LAYER | PRESS_LAYER) != 0 {
             return Err(Error::Unknown("region", flags));
         }
         let hover = if flags & HOVER == 0 {
@@ -892,6 +961,16 @@ pub(crate) fn read(r: &mut Reader<'_>) -> Result<Vec<Region>, Error> {
             None
         } else {
             Some(read_color(r)?)
+        };
+        let hover_layer = if flags & HOVER_LAYER == 0 {
+            None
+        } else {
+            Some(r.u64()?)
+        };
+        let press_layer = if flags & PRESS_LAYER == 0 {
+            None
+        } else {
+            Some(r.u64()?)
         };
         let count = if flags & DRAG == 0 { 0 } else { r.u8()? };
         if count > 2 {
@@ -937,6 +1016,8 @@ pub(crate) fn read(r: &mut Reader<'_>) -> Result<Vec<Region>, Error> {
             cursor,
             hover,
             press,
+            hover_layer,
+            press_layer,
             drags,
         });
     }

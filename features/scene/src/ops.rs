@@ -39,12 +39,14 @@ pub const MAGIC: [u8; 4] = *b"ASO\x01";
 
 /// The latest version of a batch this host reads and writes.
 ///
-/// 2 added animations, values, hit regions and drags. A batch is written at the
+/// 2 added animations, values, hit regions and drags; 3 a region's
+/// layers shown while it is hovered or pressed
+/// ([`crate::region::Region::hover_layer`]). A batch is written at the
 /// lowest version that holds what it says, so a host that reads only
 /// the first refuses one it can't read whole, by its version
 /// ([`Error::NotAFragment`] there, [`Error::Version`] here), before it
 /// applies any of it.
-pub const VERSION: u8 = 2;
+pub const VERSION: u8 = 3;
 
 /// The most bytes one batch may be.
 pub const MAX_BATCH_BYTES: usize = 64 * 1024 * 1024;
@@ -142,7 +144,9 @@ impl Sender {
         let mut w = Writer::default();
         w.bytes(&MAGIC);
         let start = w.out.len();
+        // The lowest version that holds what it says.
         let mut later = false;
+        let mut swaps = false;
         for (key, layer) in layers {
             let known = self
                 .sent
@@ -171,7 +175,9 @@ impl Sender {
                 later = true;
                 w.u8(REGIONS);
                 w.u64(*key);
-                region::write(&mut w, layer.regions.as_deref().unwrap_or_default());
+                let regions = layer.regions.as_deref().unwrap_or_default();
+                swaps |= regions.iter().any(region::Region::swaps);
+                region::write(&mut w, regions);
             }
             if animated_as.is_some_and(|was| *was != layer.animations) {
                 later = true;
@@ -206,6 +212,7 @@ impl Sender {
                         later = true;
                         w.u8(REGIONS);
                         w.u64(*key);
+                        swaps |= regions.iter().any(region::Region::swaps);
                         region::write(&mut w, regions);
                     }
                     if let Some(animations) = &layer.animations {
@@ -255,8 +262,9 @@ impl Sender {
                 w.f64(*value);
             }
         }
-        if later && let Some(version) = w.out.get_mut(MAGIC.len().saturating_sub(1)) {
-            *version = VERSION;
+        let version = if swaps { Some(3) } else { later.then_some(2) };
+        if let (Some(v), Some(at)) = (version, w.out.get_mut(MAGIC.len().saturating_sub(1))) {
+            *at = v;
         }
         (w.out.len() > start).then_some(w.out)
     }
