@@ -97,8 +97,6 @@ pub use drop::{Bar, Drop, bar_drop, contains, drop_at, drop_in, float_rect, snap
 pub use field_focus::{FieldFocus, field_focused};
 pub use tab_kind::{TabFace, TabKind, TabKindItem, TabKinds, TabWidth};
 #[cfg(feature = "native")]
-pub mod frames;
-#[cfg(feature = "native")]
 pub mod native;
 #[cfg(feature = "native")]
 pub mod shot;
