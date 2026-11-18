@@ -34,6 +34,7 @@ use architect::action::ActionList;
 use architect_extensions::consent::{Grants, Scope};
 use architect_extensions::host::{Host, SharedSections};
 use architect_extensions::manifest::Capabilities;
+use architect_extensions::process_view::{grant_program, needs_grant};
 use architect_extensions::{Origin, Package};
 use architect_process_view::extension::{self, PREFIX};
 use architect_process_view::host::{Session, Status, find};
@@ -48,6 +49,11 @@ const PROGRAM: &str = "bin/orbits";
 /// The package: the manifest and the demo program, copied in (a program
 /// runs from its package only: a link out of it is refused).
 fn package(dir: &Path) {
+    package_with(dir, "", "");
+}
+
+/// [`package`], its view's `args` line `args` and `tail` after the view.
+fn package_with(dir: &Path, args: &str, tail: &str) {
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     let bin = dir.join(PROGRAM);
     std::fs::copy(env!("CARGO_BIN_EXE_process-view-demo"), &bin).unwrap();
@@ -66,6 +72,8 @@ id = "{VIEW}"
 title = "Orbits"
 kind = "process"
 program = "{PROGRAM}"
+{args}
+{tail}
 "#
     );
     std::fs::write(dir.join("extension.toml"), manifest).unwrap();
@@ -173,17 +181,18 @@ fn an_installed_then_development_copy_shows_its_process_view() {
     grants.revoke(ID, None);
     let ended = extension::reap(&host);
     assert_eq!(ended, [key()]);
+    let Status::Stopped(why) = session.snapshot().status else {
+        panic!("stopped")
+    };
+    assert!(why.contains("not granted"), "{why}");
+    // Its pane's Restart starts nothing: the grant is gone.
+    session.restart();
     assert!(matches!(session.snapshot().status, Status::Stopped(_)));
-    grants.grant(
-        ID,
-        "1.0.0",
-        Capabilities {
-            programs: vec![PROGRAM.to_owned()],
-            ..Capabilities::default()
-        },
-        Scope::Device,
-        "test",
-    );
+    assert!(find(&key()).is_none(), "not started again");
+    // What the pane offers: Allow, a person's yes for this program alone.
+    assert_eq!(needs_grant(&host, ID, VIEW).as_deref(), Some(PROGRAM));
+    grant_program(&host, ID, PROGRAM, "person").unwrap();
+    assert_eq!(needs_grant(&host, ID, VIEW), None);
 
     // Unloaded: stopped, its session gone.
     let session = extension::open(&host, ID, VIEW, PANE).unwrap();
@@ -279,4 +288,132 @@ fn a_program_that_dies_is_started_again_and_says_why() {
     }
     assert!(matches!(frames(&session, 1), Shown::Frames));
     architect_process_view::host::end(&extension::key(ID, VIEW, pane));
+}
+
+/// An argument naming a setting gets its value, and a change of the
+/// setting starts the program again with the new one (`refresh`).
+#[test]
+fn a_setting_its_arguments_name_reaches_the_program_and_restarts_it() {
+    use architect_extensions::hostapi::MemoryValues;
+    use architect_extensions::hostapi::SettingValues as _;
+    let _alone = alone();
+    let tmp = tempfile::tempdir().unwrap();
+    let dev = tmp.path().join("dev");
+    package_with(
+        &dev,
+        r#"args = ["--clock={{setting:lab.orbits.clock}}", "{{setting:lab.orbits.show}}"]"#,
+        r#"[[sections]]
+id = "orbits"
+title = "Orbits"
+
+[[sections.settings]]
+key = "lab.orbits.clock"
+title = "Clock"
+control = "text"
+default = "internal"
+
+[[sections.settings]]
+key = "lab.orbits.show"
+title = "Show"
+control = "text"
+default = ""
+"#,
+    );
+    let host = host(&Grants::in_memory());
+    let values = Arc::new(MemoryValues::default());
+    host.set_setting_values(values.clone());
+    host.load(&Package::read(&dev).unwrap(), Origin::Dev)
+        .unwrap();
+    let pane = "pane-settings";
+    let key = extension::key(ID, VIEW, pane);
+    let session = extension::open(&host, ID, VIEW, pane).unwrap();
+    // The default, and an empty setting alone left out.
+    assert_eq!(session.program().args, ["--clock=internal"]);
+    if let Shown::NoGpu(why) = frames(&session, 1) {
+        eprintln!("the program could not draw here (no GPU?): {why}: skipped");
+        architect_process_view::host::end(&key);
+        return;
+    }
+    let before = session.snapshot();
+    assert!(extension::refresh(&host).is_empty(), "nothing changed");
+    values
+        .set("lab.orbits.clock", serde_json::json!("midi:IAC"))
+        .unwrap();
+    values
+        .set("lab.orbits.show", serde_json::json!("recital.ig-show"))
+        .unwrap();
+    assert_eq!(extension::refresh(&host), std::slice::from_ref(&key));
+    assert_eq!(
+        session.program().args,
+        ["--clock=midi:IAC", "recital.ig-show"]
+    );
+    let after = session.snapshot();
+    assert!(after.generation > before.generation, "started again");
+    assert_ne!(after.pid, before.pid);
+    assert!(matches!(frames(&session, 1), Shown::Frames));
+    architect_process_view::host::end(&key);
+}
+
+/// A pane gone from its workspace (closed) stops its program at the next
+/// check; one still in it (moving to another group or a pop-out window, or
+/// a tab behind another) keeps it running, the same program, however long
+/// it is away; one with no workspace to ask stops after the backstop. A
+/// close and a reopen before the check keep the program too.
+#[test]
+fn a_program_stops_when_its_pane_leaves_the_workspace_not_when_it_moves() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    let _alone = alone();
+    let tmp = tempfile::tempdir().unwrap();
+    let dev = tmp.path().join("dev");
+    package(&dev);
+    let host = host(&Grants::in_memory());
+    host.load(&Package::read(&dev).unwrap(), Origin::Dev)
+        .unwrap();
+    let pane = "pane-moving";
+    let key = extension::key(ID, VIEW, pane);
+    let present = Rc::new(Cell::new(true));
+    let there = present.clone();
+    extension::register_pane(&key, move || there.get());
+    let session = extension::open(&host, ID, VIEW, pane).unwrap();
+    if let Shown::NoGpu(why) = frames(&session, 1) {
+        eprintln!("the program could not draw here (no GPU?): {why}: skipped");
+        architect_process_view::host::end(&key);
+        return;
+    }
+    let pid = session.snapshot().pid;
+
+    // A move to a pop-out: unmounted here, mounted there, the pane in the
+    // workspace all along; away longer than the backstop.
+    architect_process_view::host::park(&key);
+    std::thread::sleep(extension::BACKSTOP + Duration::from_millis(300));
+    assert!(extension::reap(&host).is_empty(), "moving: kept");
+    architect_process_view::host::unpark(&key);
+    assert_eq!(session.snapshot().pid, pid, "the same program");
+    assert!(matches!(frames(&session, 1), Shown::Frames));
+
+    // A close and a reopen before the check: the same program.
+    architect_process_view::host::park(&key);
+    present.set(false);
+    present.set(true);
+    architect_process_view::host::unpark(&key);
+    assert!(extension::reap(&host).is_empty());
+    assert_eq!(session.snapshot().pid, pid);
+
+    // Closed: gone at the next check.
+    architect_process_view::host::park(&key);
+    present.set(false);
+    assert_eq!(extension::reap(&host), std::slice::from_ref(&key));
+    assert!(find(&key).is_none());
+    assert!(matches!(session.snapshot().status, Status::Stopped(_)));
+
+    // Nothing to ask (no workspace): the backstop.
+    let unknown = "pane-nowhere";
+    let k2 = extension::key(ID, VIEW, unknown);
+    let s2 = extension::open(&host, ID, VIEW, unknown).unwrap();
+    architect_process_view::host::park(&k2);
+    assert!(extension::reap(&host).is_empty(), "within the backstop");
+    std::thread::sleep(extension::BACKSTOP + Duration::from_millis(300));
+    assert_eq!(extension::reap(&host), [k2]);
+    assert!(matches!(s2.snapshot().status, Status::Stopped(_)));
 }

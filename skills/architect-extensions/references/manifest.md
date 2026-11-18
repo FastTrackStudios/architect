@@ -219,7 +219,7 @@ is `<extension id>/<view id>` (`ViewDecl::workspace_kind`).
 | `page` | string | none | TSX/JS, `.luau` elements or `.a2ui.json` page |
 | `src` | string | none | the HTML file a `web` view opens; required for `web`, refused otherwise |
 | `program` | string | none | the program in the package a `process` view runs; required for `process`, refused otherwise; must be in `capabilities.programs` |
-| `args` | string list | `[]` | the `program`'s arguments; only a `process` view has them |
+| `args` | string list | `[]` | the `program`'s arguments; only a `process` view has them; `{{setting:<key>}}` puts in one of its own settings (a change restarts the program), never a secret |
 | `home` | `main` \| `left` \| `right` \| `bottom` | `main` | where it lives |
 | `placement` | `tab` \| `split` \| `overlay` \| `popup` \| `zoomed` \| `float` | `tab` | how it opens |
 | `width`, `height` | float (points) | none | a popup's, overlay's or float's size |

@@ -32,6 +32,13 @@
 //! - **The package.** The program is a file in the package: never a path
 //!   out of it (`Manifest::check`), nor a link inside it that points out
 //!   ([`package_file`]).
+//! - **Settings.** An argument may name one of its settings,
+//!   `{{setting:<key>}}`, as a fetch's header names a secret: its value
+//!   (the one set, else the default) is put in when the program starts, and
+//!   a change starts it again (`architect-process-view`'s
+//!   `extension::refresh`). An argument that is a setting alone and comes
+//!   out empty is left out, so `--show={{setting:x.show}}` is the form for
+//!   a value that may be empty.
 //! - **Its version.** [`Launch::stamp`] is the file's size and time and the
 //!   copy loaded: a development copy rebuilt (`EXT_DEV` reloads it) or
 //!   another copy loaded starts the program again.
@@ -122,15 +129,83 @@ pub fn launch(host: &Host, extension: &str, view: &str) -> Result<Launch, String
         .ok_or_else(|| format!("{extension} has no package folder to run {program} from"))?;
     let file = package_file(&dir, program)?;
     let stamp = stamp(&file, loaded.origin);
+    let args = decl
+        .args
+        .iter()
+        .filter_map(|arg| {
+            crate::manifest::with_settings(arg, |key| {
+                arg_text(host.setting_value(extension, key).as_ref())
+            })
+        })
+        .collect();
     Ok(Launch {
         extension: extension.to_owned(),
         view: view.to_owned(),
         program: file,
-        args: decl.args.clone(),
+        args,
         dir,
         origin: loaded.origin,
         stamp,
     })
+}
+
+/// The program a process view lacks only a person's yes to run.
+///
+/// Extension `extension`'s view `view` asks to run it and a person has not
+/// granted it (an installed copy whose grant was taken back, or an update
+/// that asks for it): what its pane offers to allow.
+#[must_use]
+pub fn needs_grant(host: &Host, extension: &str, view: &str) -> Option<String> {
+    let loaded = host.get(extension)?;
+    let program = loaded
+        .manifest
+        .views
+        .iter()
+        .find(|v| v.id == view && v.kind == architect_workspace::PROCESS)?
+        .program
+        .clone()?;
+    let asks = loaded.manifest.capabilities.may_run_program(&program);
+    let may = host
+        .capabilities(extension)
+        .is_some_and(|c| c.may_run_program(&program));
+    (asks && !may && host.grants().is_some() && not_here(&host.platform()).is_none())
+        .then_some(program)
+}
+
+/// A person's yes, given in the app (the pane's Allow): extension
+/// `extension` may run `program` on this device, added to what it was
+/// granted here. Only a program its manifest asks for.
+///
+/// # Errors
+///
+/// It is not loaded, does not ask for `program`, or the app keeps no
+/// grants.
+pub fn grant_program(host: &Host, extension: &str, program: &str, by: &str) -> Result<(), String> {
+    let loaded = host
+        .get(extension)
+        .ok_or_else(|| format!("{extension} is not loaded"))?;
+    if !loaded.manifest.capabilities.may_run_program(program) {
+        return Err(format!("{extension} does not ask to run {program}"));
+    }
+    let grants = host.grants().ok_or("this app keeps no grants")?;
+    let mut caps = grants
+        .of(extension)
+        .into_iter()
+        .find(|g| g.scope == crate::consent::Scope::Device)
+        .map(|g| g.capabilities)
+        .unwrap_or_default();
+    if !caps.programs.iter().any(|p| p == program) {
+        caps.programs.push(program.to_owned());
+    }
+    grants.grant(
+        extension,
+        &loaded.manifest.version.to_string(),
+        caps,
+        crate::consent::Scope::Device,
+        by,
+    );
+    host.grants_changed(extension);
+    Ok(())
 }
 
 /// `program` (a path the manifest names) as a file inside package `dir`,
@@ -168,6 +243,16 @@ pub fn package_file(dir: &Path, program: &str) -> Result<PathBuf, String> {
         }
     }
     Ok(found)
+}
+
+/// A setting's value as an argument: text as it is, a switch `true` or
+/// `false`, a number as written, nothing as empty, anything else as JSON.
+fn arg_text(value: Option<&serde_json::Value>) -> String {
+    match value {
+        None | Some(serde_json::Value::Null) => String::new(),
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(other) => other.to_string(),
+    }
 }
 
 /// `file`'s size and modification time, and `origin`.

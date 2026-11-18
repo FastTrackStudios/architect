@@ -622,13 +622,15 @@ fn dispatch(vdom: &VirtualDom, event: ViewEvent) {
             Rc::new(PlatformEventData::new(Box::new(rich::composition(&text))))
         }
     };
-    // A scene's size, from its host, is its element's `input`.
+    // A scene's size, and what its regions heard, from its host, are its
+    // element's `input`.
     #[cfg(feature = "scenes")]
-    let name = if event.name == crate::scene::RESIZE_EVENT {
-        "input"
-    } else {
-        event.name.as_str()
-    };
+    let name =
+        if event.name == crate::scene::RESIZE_EVENT || event.name == crate::scene::REGION_EVENT {
+            "input"
+        } else {
+            event.name.as_str()
+        };
     #[cfg(not(feature = "scenes"))]
     let name = event.name.as_str();
     vdom.runtime().handle_event(

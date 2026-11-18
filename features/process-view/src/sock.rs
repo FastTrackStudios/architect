@@ -31,8 +31,9 @@ pub const MAX_FDS: usize = 8;
 pub struct Socket(OwnedFd);
 
 impl Socket {
-    /// A connected pair: the host's end (closed in any program it
-    /// starts) and the guest's (inherited by the program).
+    /// A connected pair: the host's end and the guest's, both closed in
+    /// any program this process starts. [`hand_to`] gives the guest's to
+    /// one program alone.
     pub fn pair() -> io::Result<(Self, OwnedFd)> {
         let (host, guest) = socketpair(
             AddressFamily::UNIX,
@@ -40,8 +41,6 @@ impl Socket {
             SocketFlags::CLOEXEC,
             None,
         )?;
-        // The guest's end is inherited across exec: clear its CLOEXEC.
-        rustix::io::fcntl_setfd(&guest, rustix::io::FdFlags::empty())?;
         Ok((Self(host), guest))
     }
 
@@ -115,6 +114,28 @@ impl Socket {
     }
 }
 
+/// Gives `guest` (a [`Socket::pair`]'s guest end) to the program
+/// `command` starts, in [`FD_ENV`].
+///
+/// The end stays close-on-exec in this process, so no other program it
+/// starts meanwhile (another view's, a process extension's, on another
+/// thread) inherits it and holds the socket open after this program dies;
+/// only the child, between fork and exec, clears the flag on its copy.
+pub fn hand_to(command: &mut std::process::Command, guest: &OwnedFd) {
+    use std::os::fd::AsRawFd as _;
+    use std::os::unix::process::CommandExt as _;
+    let raw = guest.as_raw_fd();
+    command.env(FD_ENV, raw.to_string());
+    // SAFETY: runs in the child after fork: one fcntl on a descriptor the
+    // child has (inherited from this process), async-signal-safe.
+    unsafe {
+        command.pre_exec(move || {
+            let fd = BorrowedFd::borrow_raw(raw);
+            rustix::io::fcntl_setfd(fd, rustix::io::FdFlags::empty()).map_err(io::Error::from)
+        });
+    }
+}
+
 impl AsFd for Socket {
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.0.as_fd()
@@ -149,5 +170,33 @@ mod tests {
         drop(guest);
         assert!(host.wait(Some(Duration::from_millis(100))).unwrap());
         assert!(host.recv().unwrap().is_none());
+    }
+
+    /// The guest's end reaches the program it is handed to and no other:
+    /// a sibling started meanwhile must not hold it (it would keep the
+    /// socket open after the program dies, hiding its death).
+    #[test]
+    fn only_the_program_handed_the_end_inherits_it() {
+        use std::os::fd::AsRawFd as _;
+        let (_host, guest) = Socket::pair().unwrap();
+        let raw = guest.as_raw_fd();
+        let has = |cmd: &mut std::process::Command| {
+            let out = cmd
+                .arg("-c")
+                .arg(format!(
+                    "test -e /proc/self/fd/{raw} && echo yes || echo no"
+                ))
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).trim().to_owned()
+        };
+        assert_eq!(
+            has(&mut std::process::Command::new("sh")),
+            "no",
+            "a sibling"
+        );
+        let mut handed = std::process::Command::new("sh");
+        hand_to(&mut handed, &guest);
+        assert_eq!(has(&mut handed), "yes", "the program handed it");
     }
 }

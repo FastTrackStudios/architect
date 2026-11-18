@@ -153,6 +153,7 @@ fn OsWindow(ui: ExtensionUi, open: OpenWindow) -> Element {
             .context::<architect_theme::ThemeHandle>()
             .context::<architect_theme::RootCss>()
             .context::<crate::interface::ViewPages>()
+            .context::<crate::interface::ProcessViews>()
             .context::<architect_workspace::Meters>()
             .context::<architect_settings::SettingsHandle>()
             .context::<architect_settings::SectionViews>();

@@ -45,15 +45,18 @@ use std::time::Duration;
 pub use anyrender::{PaintScene, Scene};
 pub use architect_scene::Layer;
 pub use architect_scene::anim::{self, Clocks, Readings};
-use architect_scene::anim::{Access, Name, Space, Values};
+use architect_scene::anim::{Name, Space, Values};
 pub use architect_scene::layers::Key as LayerKey;
+pub use architect_scene::region::{self, Cursor, RegionEvent};
+pub use architect_scene::wake;
 pub use peniko;
 use peniko::kurbo::{Affine, Point, Rect};
 use peniko::{Color, Fill};
 
 #[cfg(feature = "paint-ui")]
 pub use widget::{
-    PaintMount, PaintPane, PaintWake, PaintWidget, WHEEL_LINE, shell_tokens, view_input,
+    PaintMount, PaintPane, PaintWake, PaintWidget, WHEEL_LINE, pane_tokens, shell_tokens,
+    view_input,
 };
 
 use crate::ctx::{Geometry, ThemeTokens, ViewCtx, ViewInput};
@@ -92,6 +95,17 @@ pub trait PaintView: 'static {
     fn values(&mut self, ctx: &ViewCtx) -> Vec<(Name, f64)> {
         let _ = ctx;
         Vec::new()
+    }
+
+    /// What a pointer did to one of its layers' regions
+    /// ([`region::RegionEvent`]): enter, leave, press, release, or a
+    /// drag's value (at most once a frame). Whether what it draws
+    /// changed (it is asked for its layers again). Its host handles the
+    /// hover, the cursor, the highlight and the drag itself; a press on a
+    /// region is the region's, not a [`ViewInput`].
+    fn region(&mut self, ctx: &ViewCtx, event: &RegionEvent) -> bool {
+        let _ = (ctx, event);
+        false
     }
 
     /// What is under `at` (logical pixels): the id of what it drew there.
@@ -274,6 +288,13 @@ pub struct Painter {
     /// What a view of layers last returned, drawn again at each frame's
     /// clocks without it.
     held: Option<Held>,
+    /// Why its view failed: it is drawn as nothing and asked nothing
+    /// again, as a view in a process that sent what its host refused.
+    failed: Option<architect_scene::Error>,
+    /// A cursor its regions asked for since the host last looked.
+    cursor: Option<Cursor>,
+    /// The engine's values its layers read, when granted them.
+    engine: Option<Arc<architect_scene::engine::EngineTable>>,
 }
 
 /// A view's layers and values as its painter keeps them.
@@ -283,34 +304,55 @@ struct Held {
     values: Values,
     /// The clocks it was last drawn at.
     drawn: Readings,
+    /// Its values' revision when it was last drawn.
+    drawn_values: u64,
+    /// What it highlighted when last drawn.
+    drawn_lit: Option<region::Lit>,
+    /// The pointer over its regions.
+    interaction: region::Interaction,
 }
 
 impl Held {
-    /// `layers` kept, each animation checked as a host checks one sent
-    /// to it: a layer whose animations fail, or that would take the pane
-    /// past its cap, is kept still.
-    fn keep(&mut self, layers: Vec<(LayerKey, Layer)>, values: Vec<(Name, f64)>) {
-        let mut budget = anim::MAX_ANIMATIONS;
-        self.layers = layers
-            .into_iter()
-            .map(|(key, mut layer)| {
-                let count = layer.animation_count();
-                let fits = layer
-                    .animations
-                    .as_deref()
-                    .is_none_or(|a| anim::check(a, Access::default()).is_ok());
-                match budget.checked_sub(count) {
-                    Some(left) if fits => budget = left,
-                    _ => layer.animations = None,
-                }
-                (key, layer)
-            })
-            .collect();
-        for (name, value) in values {
-            // Another space's name, or past the cap: not the view's to
-            // write, as a host refuses it from a process.
-            let _ = self.values.write(Space::View, &name, value);
+    /// `layers` and `values` kept, checked as a host checks what a view
+    /// in a process sends it ([`architect_scene::ops::Receiver`]): the
+    /// same limits and the same errors, so a view fails the same way
+    /// linked in or not.
+    fn keep(
+        &mut self,
+        layers: Vec<(LayerKey, Layer)>,
+        values: Vec<(Name, f64)>,
+    ) -> Result<(), architect_scene::Error> {
+        use architect_scene::Error;
+        if layers.len() > architect_scene::ops::MAX_LAYERS {
+            return Err(Error::TooManyLayers(architect_scene::ops::MAX_LAYERS));
         }
+        let mut animations = 0_usize;
+        for (_, layer) in &layers {
+            if let Some(a) = layer.animations.as_deref() {
+                anim::check(a)?;
+                animations = animations.saturating_add(a.len());
+            }
+        }
+        if animations > anim::MAX_ANIMATIONS {
+            return Err(Error::TooManyAnimations(anim::MAX_ANIMATIONS));
+        }
+        let mut regions = 0_usize;
+        for (key, layer) in &layers {
+            if let Some(r) = layer.regions.as_deref() {
+                region::check(r)?;
+                regions = regions.saturating_add(r.len());
+                let old = self.layers.get(*key).and_then(|l| l.regions.as_deref());
+                region::seed(old, r, &mut self.values)?;
+            }
+        }
+        if regions > region::MAX_REGIONS {
+            return Err(Error::TooManyRegions(region::MAX_REGIONS));
+        }
+        for (name, value) in values {
+            self.values.write(Space::View, &name, value)?;
+        }
+        self.layers = layers.into_iter().collect();
+        Ok(())
     }
 }
 
@@ -341,7 +383,81 @@ impl Painter {
             dirty: true,
             clocks: Clocks::app().with_wall(move || frames.now().as_secs_f64()),
             held: None,
+            failed: None,
+            cursor: None,
+            engine: None,
         }
+    }
+
+    /// Its layers read the engine's values from `table` (its extension
+    /// was granted `engine`): drawn at the level the engine last wrote,
+    /// every frame while it writes.
+    #[must_use]
+    pub fn with_engine(mut self, table: Arc<architect_scene::engine::EngineTable>) -> Self {
+        if let Some(held) = self.held.as_mut() {
+            held.values.set_engine(Some(Arc::clone(&table)));
+        }
+        self.engine = Some(table);
+        self
+    }
+
+    /// The engine's table its layers read, if granted one.
+    #[must_use]
+    pub const fn engine(&self) -> Option<&Arc<architect_scene::engine::EngineTable>> {
+        self.engine.as_ref()
+    }
+
+    /// A pointer event, handled by its layers' regions first: whether it
+    /// was theirs (a press on a region, a drag), and so not the view's.
+    /// Hover and drags are drawn without asking the view; what happened
+    /// reaches it at the next frame ([`PaintView::region`]).
+    pub fn pointer(&mut self, input: &ViewInput) -> bool {
+        let Some(held) = self.held.as_mut().filter(|_| self.failed.is_none()) else {
+            return false;
+        };
+        let now = self.clocks.read();
+        let (layers, values, i) = (&held.layers, &mut held.values, &mut held.interaction);
+        let at = |x: f32, y: f32| Point::new(f64::from(x), f64::from(y));
+        let outcome = match *input {
+            ViewInput::PointerMove { x, y, .. } => i.moved(layers, &now, values, at(x, y)),
+            ViewInput::PointerDown { x, y, .. } => i.pressed(layers, &now, values, at(x, y)),
+            ViewInput::PointerUp { x, y, .. } => i.released(layers, &now, values, at(x, y)),
+            ViewInput::Touch { x, y, phase, .. } => match phase {
+                "start" => i.pressed(layers, &now, values, at(x, y)),
+                "move" => i.moved(layers, &now, values, at(x, y)),
+                "end" => i.released(layers, &now, values, at(x, y)),
+                _ => i.left(),
+            },
+            ViewInput::Focus(false) => i.left(),
+            _ => return false,
+        };
+        if let Some(cursor) = outcome.cursor {
+            self.cursor = Some(cursor);
+        }
+        outcome.consumed
+    }
+
+    /// The cursor its regions asked for since last asked, if it changed
+    /// ([`Cursor::Default`]: the pane's own).
+    pub const fn take_cursor(&mut self) -> Option<Cursor> {
+        self.cursor.take()
+    }
+
+    /// Why its view failed, if it did: what it returned broke a rule a
+    /// host enforces on a view in a process.
+    #[must_use]
+    pub const fn failed(&self) -> Option<&architect_scene::Error> {
+        self.failed.as_ref()
+    }
+
+    /// When what it holds next changes on its own: every frame, after a
+    /// while (a step), or never.
+    #[must_use]
+    pub fn next(&self) -> anim::Next {
+        self.held
+            .as_ref()
+            .filter(|_| self.failed.is_none())
+            .map_or(anim::Next::Never, |h| h.layers.next(&self.clocks.read()))
     }
 
     /// Its animations run on `clocks` (the app's, with the pane's frame
@@ -402,7 +518,16 @@ impl Painter {
     /// is waiting, it is moving, or a clock its layers read moved.
     #[must_use]
     pub fn wants_frame(&self) -> bool {
-        self.dirty
+        if self.failed.is_some() {
+            return false;
+        }
+        let pointed = self.held.as_ref().is_some_and(|h| {
+            h.interaction.pending()
+                || h.interaction.lit() != h.drawn_lit
+                || h.values.revision() != h.drawn_values
+        });
+        pointed
+            || self.dirty
             || !self.ctx.input.is_empty()
             || self.view.animating(&self.ctx)
             || self
@@ -415,11 +540,14 @@ impl Painter {
     /// its layers move on a running clock.
     #[must_use]
     pub fn animating(&self) -> bool {
+        if self.failed.is_some() {
+            return false;
+        }
         self.view.animating(&self.ctx)
-            || self
-                .held
-                .as_ref()
-                .is_some_and(|h| h.layers.moving(&self.clocks.read()))
+            || self.held.as_ref().is_some_and(|h| {
+                h.layers.moving(&self.clocks.read())
+                    || (h.values.engine().is_some() && h.values.revision() != h.drawn_values)
+            })
     }
 
     /// Whether the next frame asks the view, or draws what it holds.
@@ -449,6 +577,17 @@ impl Painter {
         let scale = f64::from(geometry.scale);
         let scale = if scale > 0.0 { scale } else { 1.0 };
         let mut scene = Scene::new();
+        if self.failed.is_some() {
+            self.dirty = false;
+            return scene;
+        }
+        // What its regions heard reaches the view first: what it answers
+        // may change what it draws.
+        if let Some(held) = self.held.as_mut() {
+            for event in held.interaction.take() {
+                self.dirty |= self.view.region(&self.ctx, &event);
+            }
+        }
         let asked = if self.asks(resized) {
             Some(self.view.layers(&self.ctx))
         } else {
@@ -457,8 +596,18 @@ impl Painter {
         let held = match asked {
             Some(Some(layers)) => {
                 let values = self.view.values(&self.ctx);
-                let held = self.held.get_or_insert_with(Held::default);
-                held.keep(layers, values);
+                let engine = self.engine.clone();
+                let held = self.held.get_or_insert_with(|| Held {
+                    values: engine
+                        .map_or_else(Values::default, |t| Values::default().with_engine(t)),
+                    ..Held::default()
+                });
+                if let Err(why) = held.keep(layers, values) {
+                    self.failed = Some(why);
+                    self.held = None;
+                    self.dirty = false;
+                    return scene;
+                }
                 Some(held)
             }
             // A view that paints: no layers to hold.
@@ -472,9 +621,12 @@ impl Painter {
             // Composed from where each layer's content is kept, at the
             // clocks now.
             let now = self.clocks.read();
+            let lit = held.interaction.lit();
             held.layers
-                .compose_at(&mut scene, Affine::scale(scale), &now, &held.values);
+                .compose_lit(&mut scene, Affine::scale(scale), &now, &held.values, lit);
             held.drawn = now;
+            held.drawn_values = held.values.revision();
+            held.drawn_lit = lit;
         } else {
             self.view.paint(&self.ctx, &mut scene);
             if (scale - 1.0).abs() > f64::EPSILON {

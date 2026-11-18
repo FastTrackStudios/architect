@@ -708,6 +708,8 @@ pub fn VaultPage() -> Element {
         architect_workspace::Bridge::new()
             .context::<architect_extensions::interface::ViewPages>()
             .context::<architect_extensions::interface::WebViews>()
+            // A process view moved to a pop-out keeps its program (#838).
+            .context::<architect_extensions::interface::ProcessViews>()
             .context::<architect_workspace::Meters>()
     });
     // The vault the navigator shows (the ribbon's "New note" adds to it).

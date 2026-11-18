@@ -13,6 +13,11 @@ authors = ["FastTrackStudio"]
 [entry]
 path = "architect-sandbox-sketch"
 
+# The timeline's meter is drawn from the engine's values, written
+# lock-free (`architect_scene::engine`). Declined, the meter stands.
+[capabilities]
+ui = ["engine"]
+
 # Drag to draw; Shift-drag or the middle button pans; the wheel zooms.
 [[views]]
 id = "sketch"

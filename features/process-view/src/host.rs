@@ -23,7 +23,7 @@
 //! rectangle, and it is handed input only while the pane has it.
 
 use std::collections::{HashMap, VecDeque};
-use std::os::fd::{AsFd as _, AsRawFd as _, OwnedFd};
+use std::os::fd::{AsFd as _, OwnedFd};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
@@ -41,7 +41,7 @@ use peniko::kurbo::{Affine, Rect};
 use peniko::{Color, Fill, ImageBrush, ImageSampler};
 
 use crate::gpu;
-use crate::sock::{FD_ENV, Socket};
+use crate::sock::Socket;
 use crate::wire::{self, ToGuest, ToHost, Transport};
 
 /// A view program: what to run.
@@ -201,6 +201,9 @@ struct State {
     attempts: u32,
     /// Stopped by the app ([`Session::stop`]): not started again.
     ended: bool,
+    /// Ended for good ([`retire`]), and why: its Restart answers that
+    /// instead of starting it (a grant taken back, its extension gone).
+    retired: Option<String>,
 }
 
 /// What a session measured.
@@ -297,6 +300,19 @@ pub fn find(key: &str) -> Option<Arc<Session>> {
     lock(sessions()).get(key).cloned()
 }
 
+/// Every session's key.
+#[must_use]
+pub fn keys() -> Vec<String> {
+    lock(sessions()).keys().cloned().collect()
+}
+
+/// How long no pane has shown `key`'s session ([`park`]); `None` while
+/// one does, or when there is no such session.
+#[must_use]
+pub fn away(key: &str) -> Option<Duration> {
+    find(key).and_then(|s| lock(&s.parked).map(|at| at.elapsed()))
+}
+
 /// Says no pane shows `key`'s session now (its pane closed, or is moving
 /// to another tab group or window): [`reap`] stops it once it has been so
 /// for longer than it allows.
@@ -315,9 +331,19 @@ pub fn unpark(key: &str) {
 
 /// Stops `key`'s program and forgets its session.
 pub fn end(key: &str) {
+    retire(key, "stopped by the app");
+}
+
+/// Stops `key`'s program for good and forgets its session: a pane still
+/// holding it says `why`, and its Restart starts nothing (the pane that
+/// opens next asks again).
+pub fn retire(key: &str, why: &str) {
     let gone = lock(sessions()).remove(key);
     if let Some(s) = gone {
         s.stop();
+        lock(&s.state).status = Status::Stopped(why.to_owned());
+        lock(&s.state).retired = Some(why.to_owned());
+        s.wake();
     }
 }
 
@@ -372,6 +398,7 @@ impl Session {
                 started: None,
                 attempts: 0,
                 ended: false,
+                retired: None,
             }),
             window: Mutex::new(None),
             stats: Stats::default(),
@@ -406,6 +433,12 @@ impl Session {
     fn start_again(self: &Arc<Self>) {
         let program = self.program();
         let mut state = lock(&self.state);
+        if let Some(why) = state.retired.clone() {
+            state.status = Status::Stopped(why);
+            drop(state);
+            self.wake();
+            return;
+        }
         state.ended = false;
         if let Some(mut child) = state.child.take() {
             let _ = child.kill();
@@ -648,8 +681,8 @@ fn spawn(program: &Program) -> std::io::Result<(Child, Arc<Socket>)> {
     command
         .args(&program.args)
         .envs(program.env.iter().map(|(k, v)| (k, v)))
-        .env(FD_ENV, guest.as_raw_fd().to_string())
         .stdin(Stdio::null());
+    crate::sock::hand_to(&mut command, &guest);
     if let Some(dir) = &program.dir {
         command.current_dir(dir);
     }
@@ -1191,6 +1224,9 @@ pub fn ProcessViewPane(
     use_drop(move || park(&session_key));
     let window = try_use_context::<Arc<dyn ShellProvider>>();
     session.attach_window(window.clone());
+    // The app's theme, as a linked paint view gets it: read here, a change
+    // renders the pane again and goes to the program (only a change is sent).
+    session.theme(architect_workspace::paint::pane_tokens());
     let widget = use_hook({
         let session = session.clone();
         move || CustomWidgetAttr::new(ProcessViewWidget::new(session))
@@ -1261,7 +1297,7 @@ pub fn ProcessViewPane(
                     }
                 }
             }
-            div { style: "padding: 4px 8px; font-size: 11px; color: #a1a1aa; font-family: monospace;",
+            div { style: "padding: 4px 8px; font-size: 11px; color: var(--muted-foreground, #a1a1aa); font-family: monospace;",
                 "{line}"
             }
         }

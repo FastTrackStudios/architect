@@ -46,7 +46,9 @@ pub const WRITES: [&str; 2] = [DOCUMENTS, EDITOR];
 
 /// What of the app's interface an extension may use
 /// ([`Capabilities::ui`]).
-pub const UI: [&str; 7] = [NOTIFY, CLIPBOARD, PICKERS, PROMPTS, MENUS, BADGES, OVERLAY];
+pub const UI: [&str; 8] = [
+    NOTIFY, CLIPBOARD, PICKERS, PROMPTS, MENUS, BADGES, OVERLAY, ENGINE,
+];
 /// Notifications (toasts).
 pub const NOTIFY: &str = "notify";
 /// The clipboard: read it and write it.
@@ -66,6 +68,12 @@ pub const BADGES: &str = "badges";
 /// Without it they are, so a view can't paint
 /// over the toolbar, a dialog or a prompt, by mistake or to fake one.
 pub const OVERLAY: &str = "overlay";
+/// The engine's live values in its views.
+///
+/// Meters and levels an engine writes lock-free (`architect_scene::engine`), drawn by the host at
+/// the display's rate. Without it an animation bound to an `engine.`
+/// value fails the view.
+pub const ENGINE: &str = "engine";
 
 /// What the host may do with an extension's languages past highlighting
 /// them ([`Capabilities::languages`]).
@@ -238,6 +246,7 @@ fn ui_words(u: &str) -> String {
         MENUS => "Show menus of its own".to_owned(),
         BADGES => "Mark files and tabs with icons and badges".to_owned(),
         OVERLAY => "Draw over the whole app, outside its own panes".to_owned(),
+        ENGINE => "Show the audio engine's live levels and meters in its views".to_owned(),
         other => format!("Use {other}"),
     }
 }
