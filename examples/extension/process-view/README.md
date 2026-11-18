@@ -22,6 +22,9 @@ just process-view-example
 architect dev --extension examples/extension/process-view/package
 ```
 
-As an installed copy the program runs only once a person grants it (the Extensions page, or
-`EXT_GRANT`). The test that loads it installed, then in development, and receives its frames is
+Alone in an isolated instance, the window just the view: `architect dev --extension
+examples/extension/process-view/package --only demo.process-view --hide all --run DEMO_PROCESS_VIEW_OPEN`.
+A development copy is not asked: it runs with what it asks. As an installed copy the program runs only
+once a person grants it: at install, or in the pane, which asks with **Allow** when the grant is missing
+(taken back, or an update that asks for it). The test that loads it installed, then in development, and receives its frames is
 `features/process-view/tests/extension_kind.rs`.

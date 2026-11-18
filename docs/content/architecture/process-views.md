@@ -117,6 +117,27 @@ capability today: installing it is the consent (the install's preview
 names the program, `manage.rs` `runner_words`). A process view asks even
 there; the gate is stronger, not weaker.
 
+Where the person is asked:
+
+- **Installing** (the store, `EXT_INSTALL`): the program is one of the
+  lines of the install's consent ("Run bin/x, a program in its package,
+  on this computer to draw its views"); nothing is installed without a
+  yes.
+- **In the pane**, when that yes is all that is missing (a grant taken
+  back, an update that asks for a program): the pane asks "Run bin/x, a
+  program in its package, on this computer to draw this view?" with
+  **Allow**, which widens this device's grant by that program alone
+  (`process_view::needs_grant`, `grant_program`). The pane checks again
+  every 500 ms, so a grant given or taken back elsewhere shows at once.
+- **A development copy** (`architect dev --extension …`, `EXT_DEV`) is
+  not asked: it runs with what it asks, as for every capability, because
+  the person put it there. Its manifest must still ask for the program
+  (`Manifest::check`), so the installed copy it becomes asks.
+
+A program stopped because its grant was taken back or its extension
+unloaded is retired (`host::retire`): its pane says why, and its Restart
+button starts nothing.
+
 **Settings.** An argument may name one of the extension's own settings,
 `{{setting:<key>}}`, the placeholder a fetch's header uses for a secret
 (`{{secret:<name>}}`), checked by `Manifest::check` against its
@@ -192,6 +213,26 @@ stopped when its grant is taken back and when it unloads, loaded again as
 a development copy, started again when its program changes; and a
 program killed, started again, saying why. The example package is
 `examples/extension/process-view` (`just process-view-example`).
+
+## In the app
+
+Seen on Linux in an isolated instance (`architect dev`, a headless Loft
+session, #838): the pane in a tab, input (pointer, keys, typed text) and
+focus reaching the program, a resize, a move to another group, a move to
+a pop-out OS window and back with the same program running throughout
+(the pop-out window's device takes the shared-memory fallback), a grant
+taken back and given again with Allow. Ignition (the FastTrackStudios/Ignition
+repository's lighting extension, id `ignition`), a Bevy renderer on wgpu 29 that
+speaks the wire itself over shared memory, ran the same way as a
+development copy: its 3D room in its `room` pane, its arguments its
+settings (`--camera={{setting:ignition.camera}}`, a pick restarting it). The program gets the app's theme
+(`architect_workspace::paint::pane_tokens`), as a linked paint view does.
+
+`APP_SHOT` does not show a process view's frames: it paints the page
+again on the CPU (`features/workspace/src/shot.rs`), and the frames are
+GPU textures of the window's own device; a pop-out window is not shot at
+all. Capture a process view with the compositor (`loft-shot` in a Loft
+session) until the shot reads frames back.
 
 ## Not built yet
 
