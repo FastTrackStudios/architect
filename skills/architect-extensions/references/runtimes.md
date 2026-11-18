@@ -302,6 +302,8 @@ Build it with `cargo build --target wasm32-wasip2` inside `devenv --profile wasi
 - Show more than `MAX_VIEWS` (256) views at once.
 - Be called per sample or per frame. Each call costs tens of µs.
 
+**Panes shown together (#891).** Views whose frames must land in the same window frame (an arrangement and its mixer, each a process on one engine) set `data-architect-group` and `data-architect-epoch` (`features/extensions/src/barrier.rs` `GROUP_ATTR`, `EPOCH_ATTR`) on an element: the host holds a member's frame until every member has drawn that epoch, at most `barrier::DEADLINE` (50 ms). An engine's table holds up to `architect_scene::engine::MAX_SLOTS` (8,192) values.
+
 **Its frames are paced to the display (#840).** A batch, and every change its document makes, asks the window for a frame through `features/workspace/src/pacing.rs` `Pacer` (`remote::HostShell::pacer`): right after a frame that waited for its swapchain image, the requests until the next refresh share one frame started just before the next image comes free, instead of each starting a frame that waits most of a refresh with the window's thread blocked. `ARCHITECT_FRAME_PACING=0` turns it off.
 
 **What moves every frame is the host's.** A paint view (`linked::Builder::paint`) that returns layers (`PaintView::layers`) sends them once (`architect-scene`, `features/scene/src/ops.rs`), and the host draws them every frame without it:

@@ -2011,6 +2011,10 @@ async fn follow(
             *fit.live.borrow_mut() = Some(to_view);
         }
         let mut failed = None;
+        // The group its frames are shown with, once it names one.
+        let barrier = crate::barrier::Barrier::here();
+        let pane = session.pane;
+        let mut group: Option<String> = None;
         while let Some(frame) =
             next_frame(&mut session.frames, &asked, &mut was_asked, &mut timing).await
         {
@@ -2025,6 +2029,27 @@ async fn follow(
             }
             // Its scenes decoded off the UI thread first.
             let (frame, decoded) = decode_scenes(frame).await;
+            // A view of a group (Studio's arrangement and mixer) shows an
+            // edit in the same frame as the rest of its group: its frame
+            // waits until each has drawn that edit, or for the deadline
+            // (`crate::barrier`, #891).
+            if let Frame::Edits { edits } | Frame::Batches { edits, .. } = &frame {
+                let (named, epoch) = crate::barrier::of_frame(edits);
+                if let Some(named) = named
+                    && group.as_deref() != Some(named.as_str())
+                {
+                    if let Some(was) = &group {
+                        barrier.leave(was, pane);
+                    }
+                    barrier.join(&named, pane);
+                    group = Some(named);
+                }
+                if let (Some(group), Some(epoch)) = (&group, epoch) {
+                    barrier
+                        .arrive(group, pane, epoch, crate::barrier::DEADLINE)
+                        .await;
+                }
+            }
             let applied = with_doc(&node, |doc, at| {
                 let (x, y) = pane_at(doc, at);
                 shell.moved(x, y);
@@ -2082,6 +2107,9 @@ async fn follow(
         }
         forwarding.cancel();
         placing.cancel();
+        if let Some(group) = group.take() {
+            barrier.leave(&group, pane);
+        }
         if !slots.peek().is_empty() {
             slots.set(Vec::new());
         }

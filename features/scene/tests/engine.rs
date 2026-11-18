@@ -236,3 +236,31 @@ fn a_resting_host_is_woken_when_the_engine_writes() {
     }
     assert!(began.elapsed() < Duration::from_millis(100));
 }
+
+/// A big template's values fit (#891): 300 tracks, each with five meter
+/// values and mute, solo, arm, phase, volume and pan, every one written
+/// and read back. At 1,024 slots, 146 tracks was the most.
+#[test]
+fn a_table_holds_a_big_templates_values() {
+    const PER_TRACK: [&str; 11] = [
+        "peak.l", "peak.r", "rms.l", "rms.r", "gr", "mute", "solo", "arm", "phase", "volume", "pan",
+    ];
+    let names: Vec<Name> = (0..300)
+        .flat_map(|t| {
+            PER_TRACK
+                .iter()
+                .map(move |v| name(&format!("engine.track.{t}.{v}")))
+        })
+        .collect();
+    assert!(names.len() > 1024 && names.len() <= MAX_SLOTS);
+    let (table, writer) = EngineTable::new(names.clone()).unwrap();
+    for (i, n) in names.iter().enumerate() {
+        writer.write(table.slot(n).unwrap(), f64::from(u32::try_from(i).unwrap()));
+    }
+    for (i, n) in names.iter().enumerate() {
+        assert_eq!(table.read(n), Some(f64::from(u32::try_from(i).unwrap())));
+    }
+    // And a full table, MAX_SLOTS names.
+    let full = (0..MAX_SLOTS).map(|i| name(&format!("engine.v{i}")));
+    assert!(EngineTable::new(full).is_ok());
+}

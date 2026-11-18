@@ -348,7 +348,8 @@ Four things are the host's own:
 - **The engine's values** (`features/scene/src/engine.rs`). An engine
   writes `engine.` values into a fixed table of atomic slots
   (`EngineTable`, `EngineWriter::write`: two atomic stores, no lock, no
-  allocation), and a pane granted `capabilities.ui = ["engine"]` reads
+  allocation; at most `engine::MAX_SLOTS`, 8,192 values, so a 300-track
+  template's meters, mute, solo, arm, phase, volume and pan fit), and a pane granted `capabilities.ui = ["engine"]` reads
   them at compose time. Ungranted, a binding to one reads nothing and the
   layer stands as sent.
 
@@ -498,6 +499,37 @@ What it shows, and what it can't:
 - **Not shown above 120 Hz.** This display's top rate is 120 Hz. 240 Hz,
   and 5120 × 1440, are the owner's ultrawide's: `WIDTH=5120 HEIGHT=1440
   just frames` there, release profile by default.
+
+## Frames shown together
+
+Panes of different runtime views (Studio's arrangement and its mixer, each
+a process on one engine) send their own frames, so an edit made in one
+reaches the others' frames at different moments. State that is a value is
+already shown together: every pane reads the engine's table when it
+composes. A change of layout (a strip opening wide, a row's tint) is each
+view's own frame. For those, views join a group (`features/extensions/src/barrier.rs`):
+
+```rust
+rsx! {
+    div {
+        "data-architect-group": "studio",          // barrier::GROUP_ATTR
+        "data-architect-epoch": "{revision}",      // barrier::EPOCH_ATTR: grows with each edit
+        // the view
+    }
+}
+```
+
+The host holds a member's frame of epoch `e` until every mounted member of
+its group has sent `e` or later, then applies them in one turn of the
+window's loop, so they are drawn in the same frame. A member that has not
+answered after `barrier::DEADLINE` (50 ms) is not waited for, so a slow or
+stuck pane costs its group a delay of at most that, never a frozen frame.
+A frame with no epoch, or of a view in no group, is applied at once; a
+view that unmounts leaves its group. The rule is the host's and the
+attributes are DOM edits, so it is the same for a process, a WASI
+component and a page. Test: `features/extensions/tests/remote_barrier.rs`
+(two process views, one answering each edit 30 ms late: never shown apart;
+without the barrier, apart for those 30 ms at every edit).
 
 ## Tests to read
 

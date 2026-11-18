@@ -118,7 +118,8 @@ fn a_file_that_is_not_a_whole_table_is_refused() {
     assert!(matches!(refused(&good[..good.len() - 1]), Error::Truncated));
     assert!(matches!(refused(&good[..16]), Error::Truncated));
     let mut many = good.clone();
-    many[8..16].copy_from_slice(&5000_u64.to_le_bytes());
+    let past = u64::try_from(architect_scene::engine::MAX_SLOTS + 1).unwrap();
+    many[8..16].copy_from_slice(&past.to_le_bytes());
     assert!(matches!(refused(&many), Error::TooManyValues(_)));
     // A view's name in it.
     let mut view = good;
@@ -128,4 +129,22 @@ fn a_file_that_is_not_a_whole_table_is_refused() {
     // A view's name can't be made one either.
     assert!(shared::create(&path, [name("view.x")]).is_err());
     assert!(shared::path_of("../etc").is_err());
+}
+
+/// A full table (`MAX_SLOTS`, #891) is made, opened from its file and
+/// read where it was written.
+#[test]
+fn a_full_table_crosses_a_shared_file() {
+    use architect_scene::engine::MAX_SLOTS;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("full.values");
+    let names: Vec<Name> = (0..MAX_SLOTS)
+        .map(|i| name(&format!("engine.v{i}")))
+        .collect();
+    let (table, writer) = shared::create(&path, names.clone()).unwrap();
+    let last = names.last().unwrap();
+    writer.write(table.slot(last).unwrap(), 0.5);
+    let opened = shared::open(&path).unwrap();
+    assert_eq!(opened.read(last), Some(0.5));
+    assert_eq!(opened.read(&names[0]), None);
 }
