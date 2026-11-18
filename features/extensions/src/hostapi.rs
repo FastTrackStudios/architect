@@ -856,7 +856,8 @@ impl ExtensionApi {
     /// `live_document`: the document of a kind the vault file `path` is,
     /// when its kind is one the extension declares (`[[doc_kinds]]`),
     /// remembered so its sessions may reach it (`crate::live`).
-    // Without `doc-sync` it refuses, and reads nothing of itself.
+    // Without `doc-sync` (or in a browser) it only refuses, and `self` is
+    // unused there.
     #[cfg_attr(
         not(all(feature = "doc-sync", not(target_family = "wasm"))),
         allow(clippy::unused_self)
