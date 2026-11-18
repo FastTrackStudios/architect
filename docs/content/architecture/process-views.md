@@ -292,6 +292,51 @@ GPU textures of the window's own device; a pop-out window is not shot at
 all. Capture a process view with the compositor (`loft-shot` in a Loft
 session) until the shot reads frames back.
 
+### On macOS
+
+Seen on macOS (an M4, a 144 Hz display) in isolated instances
+(`architect dev`), #838: Ignition's room (its development copy) and the
+Orbits example (installed from a signed archive through a registry, and
+as a development copy), over `IOSurface`s:
+
+- a resize, a move to another group, a move to a pop-out OS window and
+  back, all on the same program; the pop-out window's device takes the
+  same surfaces (no shared-memory fallback, unlike Linux);
+- pointer, a drag, Shift-drag (modifiers), the wheel, keys, typed text,
+  focus in and out, the theme (light and dark);
+- settings in `args` (a pick restarts the program with the new value);
+- consent: an installed copy is asked at install ("Run
+  bin/process-view-demo, a program in its package, …"); a grant taken back
+  stops the program within half a second and the pane asks again; Allow
+  runs it again; a development copy is not asked;
+- a program killed (`kill -9`) is started again; a pane closed, or left
+  out of the phone layout at 390 px, stops its program.
+
+Measured (debug builds; a fresh instance, 15 s to settle, then the
+pane's numbers and 10 s of `ps` CPU, % of one core):
+
+| View, transport | its frame p50 | host paint p50 | app CPU | program CPU |
+|---|---|---|---|---|
+| Orbits 1280×720, `IOSurface` | 4.13 ms | 0.047 ms | 38 % | 28 % |
+| Orbits 1280×720, shared memory | 4.04 ms | 0.839 ms | 64 % | 41 % |
+| Ignition's room 1280×720, `IOSurface` | 32.8 ms | 0.023 ms | 20 % | 50 % |
+| Ignition's room 1280×720, shared memory | 32.4 ms | 0.485 ms | 23 % | 51 % |
+
+Input to the frame that shows it, and to the paint that draws it, for
+Orbits: 4.6 ms and 7.0 ms p50. The late repaints seen on Linux
+(input→paint 140–850 ms) do not happen here. Ignition's room is bound
+by its scene's GPU cost (about 26 ms at its default quality on an M4,
+the same in its own window), not by the transport.
+
+Found running it: a window resize panicked every non-bare instance on
+macOS (Stylo's viewport-unit invalidation unwrapped an element never
+styled); blitz at `fix/accessibility-unstyled` fixes it. An installed
+package's program at `bin/x` was extracted without its executable bit
+(`architect-extension-archive`, fixed). Replacing a running package's
+program with `cp` over the old file gets the new one killed at launch
+on macOS (the kernel's cached code signature): remove the old file
+first, as cargo does.
+
 ## Not built yet
 
 - **Windows**: a DXGI shared NT handle (`D3D12` `CreateSharedHandle`,
