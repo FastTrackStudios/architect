@@ -327,6 +327,22 @@ Four things are the host's own:
   them at compose time. Ungranted, a binding to one reads nothing and the
   layer stands as sent.
 
+- **An engine in a process of its own** (`features/scene/src/engine/shared.rs`).
+  A DAW or a lighting renderer is a process extension, so it can't
+  write the host's table. It makes one in shared memory instead
+  (`engine::shared::create`, a file under `$XDG_RUNTIME_DIR/architect-engines/<id>.values`,
+  written whole under a temporary name and renamed in, never truncated),
+  with the same two-store writes. It may list `host.` names too: a drag on
+  a pane reading the table writes the value it makes into it as it makes
+  it (`EngineTable::write_host`, from `Values::write`), and the engine
+  reads it lock-free (`EngineWriter::read`), so a fader moves the
+  engine's gain while it is held. Which table a pane reads: a pane
+  granted `engine` reads the tables of the providers of the services
+  its extension `[uses]` or `[requires]` (`engine::read_from`), looked
+  for again every `PLACE_EVERY`, so an engine that starts later or
+  restarts is found. The host checks the header, the names and the
+  length before it maps (`engine::shared::open`).
+
 Values are named by whose they are: `view.` (the view writes them, a
 `VALUE` operation of a name and a number), `host.` (a drag, later a
 control surface), `engine.` (the engine). Each writer writes its own

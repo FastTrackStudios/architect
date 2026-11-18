@@ -1241,6 +1241,20 @@ pub fn ExtensionView(
         let engine = host
             .capabilities(&extension)
             .is_some_and(|c| c.may_use(crate::capabilities::ENGINE));
+        // An engine in a process of its own is the provider of a service
+        // the view uses: its views read that engine's shared table
+        // (`architect_scene::engine::shared`).
+        if engine {
+            let wanted = loaded.manifest.uses.iter().chain(&loaded.manifest.requires);
+            let engines = wanted
+                .filter_map(|(service, req)| {
+                    let req = semver::VersionReq::parse(req).ok()?;
+                    host.provider(service, &req).map(|(id, _)| id)
+                })
+                .filter(|id| *id != extension)
+                .collect();
+            architect_scene::engine::read_from(&extension, engines);
+        }
         // A remote document is sized by its box: a slot's is a bar's height.
         let remote = if fill {
             "flex: 1; min-height: 0; display: flex; flex-direction: column;"

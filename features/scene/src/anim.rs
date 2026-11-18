@@ -566,6 +566,13 @@ impl Values {
         if !self.held.contains_key(name) && self.held.len() >= MAX_VALUES {
             return Err(Error::TooManyValues(MAX_VALUES));
         }
+        // A host value an engine reads (a fader it follows while held):
+        // handed to its table as it is made.
+        if writer == Space::Host
+            && let Some(engine) = &self.engine
+        {
+            engine.write_host(name, value);
+        }
         self.held.insert(name.clone(), value);
         self.revision = self.revision.wrapping_add(1);
         Ok(true)

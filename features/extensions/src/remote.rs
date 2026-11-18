@@ -267,7 +267,7 @@ impl RemoteDocument {
         }
     }
 
-    /// The painted element whose box holds `(x, y)` (its document's CSS
+        /// The painted element whose box holds `(x, y)` (its document's CSS
     /// pixels), and the point in it.
     fn painted_at(&self, x: f32, y: f32) -> Option<(NodeId, peniko::kurbo::Point)> {
         self.painted.keys().copied().find_map(|node| {
@@ -1687,6 +1687,19 @@ struct Timing {
 
 /// Mounts `view` and follows it: the frames into the document, until it
 /// stops; then why, until it can be mounted again.
+/// Whether two engine tables are the same one (or both none).
+fn same_table(
+    a: Option<&Arc<architect_scene::engine::EngineTable>>,
+    b: Option<&Arc<architect_scene::engine::EngineTable>>,
+) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+
 #[allow(clippy::too_many_arguments)]
 async fn follow(
     node: NodeHandle,
@@ -1807,13 +1820,22 @@ async fn follow(
         // Where the pane is, now and then: an input method's caret moves
         // with the pane, not only when a frame comes.
         let placing = {
-            let (node, shell) = (node.clone(), shell.clone());
+            let (node, shell, extension) = (node.clone(), shell.clone(), extension.clone());
             spawn(async move {
                 loop {
                     futures_timer::Delay::new(PLACE_EVERY).await;
+                    // The engine's table, looked for again: an engine in a
+                    // process of its own may start after the pane, or
+                    // restart with a new table.
+                    let table = engine
+                        .then(|| architect_scene::engine::published(&extension))
+                        .flatten();
                     let (pane, held) = with_doc(&node, |doc, at| {
                         let pane = pane_at(doc, at);
                         let held = remote(doc, at).map(|r| {
+                            if engine && !same_table(r.engine.as_ref(), table.as_ref()) {
+                                r.set_engine(table);
+                            }
                             r.place_scenes(pane);
                             r.embedded()
                         });
