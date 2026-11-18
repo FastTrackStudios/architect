@@ -11,7 +11,8 @@ use crate::ui::try_use_commands;
 
 /// Hears the window's keys for the [`Commands`](crate::Commands) above:
 /// a chord with ⌘ or ⌃, or Esc, F1–F12, runs its command. Plain keys stay
-/// the page's (typing, a held-letter tool).
+/// the page's (typing, a held-letter tool), but for one the keymap binds
+/// everywhere (Space for play), which runs when no field is typed in.
 #[component]
 pub fn WindowKeys() -> Element {
     let commands = try_use_commands();
@@ -40,6 +41,12 @@ pub fn WindowKeys() -> Element {
             // Arrows and ↵ in the palette are its field's; plain letters
             // are the page's.
             if !chorded && key != "Esc" {
+                // A plain key bound everywhere (Space for play) runs
+                // wherever the window's focus is, a pane with no keys of
+                // its own included; never while a field is typed in.
+                if !m.alt_key() && !m.shift_key() && commands.plain_key_everywhere(&key) {
+                    let _ = commands.run_plain_once(&key);
+                }
                 return;
             }
             let shifted_char = matches!(&event.logical_key, Key::Character(c) if !c.chars().all(char::is_alphabetic));

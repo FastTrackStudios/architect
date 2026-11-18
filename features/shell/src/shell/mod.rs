@@ -1731,6 +1731,14 @@ pub fn AppShell(
         )
     };
 
+    // Whether a view of someone else's fills the title slot, and the row
+    // it gets: the title row's height, past the window's buttons.
+    let title_filled = try_use_context::<Signal<Chrome>>()
+        .is_some_and(|c| c.read().filler(Slot::Title).is_some());
+    // Clear of the window's buttons and the sidebar button on the left, and
+    // of the app's own buttons on the right, as the title row's content is.
+    let title_h = shell.title_row();
+    let (title_left, title_right) = (shell.content_left(), shell.title_clearance().1);
     rsx! {
         div {
             // A stacking context (`z-index: 0`): the shell's layers stay
@@ -1747,8 +1755,22 @@ pub fn AppShell(
             // A desk's title bar runs across the whole window, over the ribbon,
             // the sidebar and the page; the middle row starts under it.
             if frame == Frame::Sidebar && desk && !page_title {
-                SlotView { slot: Slot::Title,
-                    DeskTitleRow { title: bar_title, tabs_left }
+                if title_filled {
+                    // A view fills the title slot: in the title row's
+                    // place, clear of the window's buttons.
+                    div {
+                        style: "flex: 0 0 auto; height: {title_h}px; box-sizing: border-box; display: flex; \
+                                align-items: stretch; padding-left: {title_left}px; padding-right: {title_right}px; background: {t.desk};",
+                        div { style: "flex: 1 1 0; min-width: 0; position: relative;",
+                            SlotView { slot: Slot::Title,
+                                DeskTitleRow { title: bar_title, tabs_left }
+                            }
+                        }
+                    }
+                } else {
+                    SlotView { slot: Slot::Title,
+                        DeskTitleRow { title: bar_title, tabs_left }
+                    }
                 }
             }
             // The middle row: a desk's ribbon, then the sides and the page.

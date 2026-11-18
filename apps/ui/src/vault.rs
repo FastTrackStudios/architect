@@ -920,7 +920,12 @@ pub fn VaultPage() -> Element {
     // On a desk the workspace's tabs are the title row (Obsidian's): no page
     // bar, the top tab bars as tall, clear of the window's buttons.
     let shell = use_shell();
-    let title_row = shell.desk().then(|| {
+    // A layout that fills the window's title slot with a view of its own
+    // (Studio's set of songs across the bar) keeps the title row: the tab
+    // bars along the top are then ordinary ones, not the window's.
+    let title_filled = try_use_context::<Signal<architect_shell::Chrome>>()
+        .is_some_and(|c| c.read().filler(architect_shell::Slot::Title).is_some());
+    let title_row = (shell.desk() && !title_filled).then(|| {
         let (left, right) = shell.title_clearance();
         TitleRow {
             height: narrow(shell.title_row()),
@@ -987,7 +992,7 @@ pub fn VaultPage() -> Element {
     rsx! {
         if phone {
             PageBar { title: pane_title, lead: note_lead, toolbar: panes }
-        } else if title_row.is_none() {
+        } else if title_row.is_none() && !title_filled {
             PageBar { title: "Vault" }
         }
         crate::extensions::VaultNeedsBanner { status: Some(needs_status) }
