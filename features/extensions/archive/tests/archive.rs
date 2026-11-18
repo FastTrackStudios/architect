@@ -276,6 +276,40 @@ fn a_platform_neutral_one_runs_anywhere() {
     assert!(out.path().join("main.luau").exists());
 }
 
+/// A package that ships its program at `bin/x` with no per-platform
+/// builds (a `kind = "process"` view's program, as the process-view
+/// example's): it installs executable, and what is not under `bin/` does
+/// not.
+#[test]
+fn a_neutral_packages_program_installs_executable() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("extension.toml"),
+        "id = \"acme.view\"\nname = \"View\"\nversion = \"0.1.0\"\nkind = \"data\"\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("bin")).unwrap();
+    std::fs::write(dir.path().join("bin/draw"), "#!/bin/sh\n").unwrap();
+    std::fs::write(dir.path().join("notes.md"), "notes").unwrap();
+    let key = SecretKey::generate().unwrap();
+    let archive = sign_archive(&pack(dir.path()).unwrap().1, &key).unwrap();
+    let v = open(&archive, &trusting(&key)).unwrap();
+    let out = tempfile::tempdir().unwrap();
+    v.extract(out.path()).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = |p: &str| {
+            std::fs::metadata(out.path().join(p))
+                .unwrap()
+                .permissions()
+                .mode()
+        };
+        assert_eq!(mode("bin/draw") & 0o111, 0o111, "the program is executable");
+        assert_eq!(mode("notes.md") & 0o111, 0, "a note is not");
+    }
+}
+
 #[test]
 fn a_process_build_without_its_program_is_not_packed() {
     let dir = package();

@@ -10,7 +10,7 @@ id = "demo.process-view"
 name = "Process view"
 version = "0.1.0"
 kind = "data"
-description = "Orbits drawn by a program of its own on its own GPU device, its frames shown in a pane (Linux)."
+description = "Orbits drawn by a program of its own on its own GPU device, its frames shown in a pane (Linux and macOS)."
 
 [capabilities]
 actions = ["EXT_VIEW_OPEN"]
