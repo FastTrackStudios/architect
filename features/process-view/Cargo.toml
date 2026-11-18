@@ -72,3 +72,4 @@ pollster = "0.4"
 # development (#838).
 tempfile = "3"
 semver = "1"
+serde_json = { workspace = true }

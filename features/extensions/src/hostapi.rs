@@ -697,6 +697,17 @@ impl Host {
         }
     }
 
+    /// Extension `id`'s setting `key` as its host-service `setting` call
+    /// answers it: the value set, else its manifest's default. `None` when
+    /// `id` is not loaded or `key` is not one of its settings.
+    #[must_use]
+    pub fn setting_value(&self, id: &str, key: &str) -> Option<Value> {
+        let loaded = self.get(id)?;
+        let default = default_of(&loaded.manifest, key)?;
+        let set = lock(&self.services().values).clone().get(key);
+        Some(set.unwrap_or(default))
+    }
+
     /// What loaded extension `id` may reach now.
     #[must_use]
     pub fn capabilities(&self, id: &str) -> Option<Capabilities> {

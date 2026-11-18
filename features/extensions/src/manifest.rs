@@ -382,7 +382,11 @@ pub struct ViewDecl {
     /// (`capabilities.programs`).
     #[serde(default)]
     pub program: Option<String>,
-    /// The `program`'s arguments.
+    /// The `program`'s arguments. One may name a setting of its own,
+    /// `{{setting:<key>}}` (as a fetch's header names a secret,
+    /// `{{secret:<name>}}`): the setting's value is put in when the program
+    /// starts, and a change of it starts the program again. An argument
+    /// that is that alone and comes out empty is left out.
     #[serde(default)]
     pub args: Vec<String>,
     /// Where it lives: the main area or a dock (`left`, `right`,
@@ -1515,6 +1519,31 @@ impl Manifest {
         match (&view.program, view.kind == architect_workspace::PROCESS) {
             (Some(program), true) => {
                 inside(program)?;
+                for arg in &view.args {
+                    if arg.contains(crate::hostcall::SECRET_OPEN) {
+                        return Err(ManifestError::Interop {
+                            field: format!("views.{}.args", view.id),
+                            why:
+                                "a secret never goes to a program: only a fetch's header names one"
+                                    .to_owned(),
+                        });
+                    }
+                    for key in setting_refs(arg) {
+                        let declared = self
+                            .sections
+                            .iter()
+                            .flat_map(|s| &s.settings)
+                            .any(|s| s.key == key);
+                        if !declared {
+                            return Err(ManifestError::Interop {
+                                field: format!("views.{}.args", view.id),
+                                why: format!(
+                                    "{{{{setting:{key}}}}} is not one of its settings ([[sections.settings]])"
+                                ),
+                            });
+                        }
+                    }
+                }
                 if !self.capabilities.programs.contains(program) {
                     return Err(bad(format!(
                         "it runs {program}: ask for it with capabilities.programs = [\"{program}\"]"
@@ -1885,6 +1914,46 @@ fn inside(path: &str) -> Result<(), ManifestError> {
     } else {
         Err(ManifestError::BadPath(path.to_owned()))
     }
+}
+
+/// What opens a setting's key in a process view's argument.
+pub const SETTING_OPEN: &str = "{{setting:";
+
+/// The settings an argument names (`{{setting:<key>}}`), in order.
+#[must_use]
+pub fn setting_refs(arg: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut rest = arg;
+    while let Some((_, after)) = rest.split_once(SETTING_OPEN) {
+        let Some((key, next)) = after.split_once("}}") else {
+            break;
+        };
+        out.push(key.trim());
+        rest = next;
+    }
+    out
+}
+
+/// `arg` with each setting it names replaced by `value(key)`; `None` when
+/// it is one setting alone whose value is empty (left out of the
+/// arguments).
+#[must_use]
+pub fn with_settings(arg: &str, mut value: impl FnMut(&str) -> String) -> Option<String> {
+    let mut out = String::new();
+    let mut rest = arg;
+    let mut named = 0usize;
+    while let Some((before, after)) = rest.split_once(SETTING_OPEN) {
+        let Some((key, next)) = after.split_once("}}") else {
+            break;
+        };
+        out.push_str(before);
+        out.push_str(&value(key.trim()));
+        named = named.saturating_add(1);
+        rest = next;
+    }
+    out.push_str(rest);
+    let alone = named == 1 && arg.starts_with(SETTING_OPEN) && arg.ends_with("}}");
+    (!(alone && out.is_empty())).then_some(out)
 }
 
 /// A declared setting as the settings page takes it.
@@ -2619,5 +2688,56 @@ mod process_view_tests {
         );
         let guest = crate::share_needs::guest_capabilities(&asks, &[]);
         assert!(guest.programs.is_empty());
+    }
+
+    const SECTION: &str = "[[sections]]\nid = \"room\"\ntitle = \"Room\"\n\
+                           [[sections.settings]]\nkey = \"lab.room.show\"\ntitle = \"Show\"\ncontrol = \"text\"\ndefault = \"\"\n";
+
+    /// An argument may name a setting of its own, declared; never a secret.
+    #[test]
+    fn an_argument_names_its_own_settings_and_never_a_secret() {
+        let text = |args: &str| {
+            format!(
+                "{HEAD}\n[capabilities]\nprograms = [\"bin/room\"]\n\n{SECTION}\n[[views]]\nid = \"room\"\ntitle = \"Room\"\n\
+                 kind = \"process\"\nprogram = \"bin/room\"\nargs = {args}\n"
+            )
+        };
+        let m = Manifest::parse(&text("[\"--show={{setting:lab.room.show}}\"]")).expect("it reads");
+        assert_eq!(m.views[0].args, ["--show={{setting:lab.room.show}}"]);
+        let e = Manifest::parse(&text("[\"{{setting:lab.room.nope}}\"]"))
+            .expect_err("not declared")
+            .to_string();
+        assert!(e.contains("not one of its settings"), "{e}");
+        let e = Manifest::parse(&text("[\"--key={{secret:api}}\"]"))
+            .expect_err("a secret")
+            .to_string();
+        assert!(e.contains("never goes to a program"), "{e}");
+    }
+
+    #[test]
+    fn settings_are_put_in_and_an_empty_one_alone_is_left_out() {
+        use super::{setting_refs, with_settings};
+        assert_eq!(
+            setting_refs("--a={{setting:x.a}},{{setting: x.b }}"),
+            ["x.a", "x.b"]
+        );
+        let v = |k: &str| {
+            if k == "x.a" {
+                "7".to_owned()
+            } else {
+                String::new()
+            }
+        };
+        assert_eq!(
+            with_settings("--a={{setting:x.a}}", v).as_deref(),
+            Some("--a=7")
+        );
+        assert_eq!(
+            with_settings("--b={{setting:x.b}}", v).as_deref(),
+            Some("--b=")
+        );
+        assert_eq!(with_settings("{{setting:x.b}}", v), None);
+        assert_eq!(with_settings("{{setting:x.a}}", v).as_deref(), Some("7"));
+        assert_eq!(with_settings("--plain", v).as_deref(), Some("--plain"));
     }
 }

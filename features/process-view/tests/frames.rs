@@ -23,7 +23,7 @@
     feature = "demo"
 ))]
 
-use std::os::fd::{AsFd as _, AsRawFd as _, OwnedFd};
+use std::os::fd::{AsFd as _, OwnedFd};
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
@@ -31,6 +31,65 @@ use architect_process_view::gpu;
 use architect_process_view::sock::{FD_ENV, Socket};
 use architect_process_view::wire::{self, ToGuest, ToHost, Transport};
 use architect_workspace::{ThemeTokens, ViewInput};
+
+/// The GPU tests take turns: two Vulkan devices made and torn down at once
+/// in one process (one of them with imported dma-bufs) stalled the NVIDIA
+/// driver here, a driver thread spinning a core for as long as the run.
+fn gpu_alone() -> std::sync::MutexGuard<'static, ()> {
+    static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    ONE.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+thread_local! {
+    static STEP: std::cell::RefCell<Option<std::sync::Arc<std::sync::Mutex<&'static str>>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// What this test is doing now, for its watchdog.
+fn step(what: &'static str) {
+    STEP.with(|s| {
+        if let Some(at) = &*s.borrow() {
+            *at.lock().unwrap() = what;
+        }
+    });
+}
+
+/// Watches the test on this thread: if it has not finished within
+/// `within`, the run ends (abort) saying the step it was stuck at, rather
+/// than a stalled call (a GPU driver's) holding a core and the run for
+/// ever. Dropped when the test returns.
+struct Watchdog(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl Watchdog {
+    fn new(test: &'static str, within: Duration) -> Self {
+        let at = std::sync::Arc::new(std::sync::Mutex::new("starting"));
+        STEP.with(|s| *s.borrow_mut() = Some(at.clone()));
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let seen = done.clone();
+        std::thread::spawn(move || {
+            let until = Instant::now() + within;
+            while Instant::now() < until {
+                if seen.load(std::sync::atomic::Ordering::Acquire) {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            eprintln!(
+                "{test}: not finished within {within:?}; stuck at: {}",
+                at.lock().unwrap()
+            );
+            std::process::abort();
+        });
+        Self(done)
+    }
+}
+
+impl Drop for Watchdog {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Release);
+    }
+}
 
 const W: u32 = 320;
 const H: u32 = 200;
@@ -63,7 +122,7 @@ fn device() -> Option<(wgpu::Device, wgpu::Queue, wgpu::Adapter)> {
 fn start(transport: Option<&str>) -> (Child, Socket) {
     let (host, guest) = Socket::pair().unwrap();
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_process-view-demo"));
-    cmd.env(FD_ENV, guest.as_raw_fd().to_string());
+    architect_process_view::sock::hand_to(&mut cmd, &guest);
     if let Some(t) = transport {
         cmd.env("ARCHITECT_PROCESS_VIEW_TRANSPORT", t);
     }
@@ -110,8 +169,11 @@ fn read_back(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture
             depth_or_array_layers: 1,
         },
     );
+    step("read back: submitting the copy");
     queue.submit([encoder.finish()]);
+    step("read back: mapping the buffer");
     buffer.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+    step("read back: waiting for the GPU (poll)");
     device
         .poll(wgpu::PollType::Wait {
             submission_index: None,
@@ -157,6 +219,10 @@ fn hello(socket: &Socket, adapter: &wgpu::Adapter, dmabuf: bool) {
 
 #[test]
 fn frames_arrive_as_dma_bufs_the_host_device_reads_in_place() {
+    let _alone = gpu_alone();
+    // Declared first: dropped last, after the device and its textures.
+    let _watch = Watchdog::new("dma-buf frames", Duration::from_secs(60));
+    step("making a device");
     let Some((device, queue, adapter)) = device() else {
         eprintln!("no Vulkan adapter: skipped");
         return;
@@ -213,10 +279,23 @@ fn frames_arrive_as_dma_bufs_the_host_device_reads_in_place() {
         socket.send(&release.encode().unwrap(), &[]).unwrap();
     }
     socket.send(&ToGuest::Tick.encode().unwrap(), &[]).unwrap();
+    // The program answers each tick with a frame: without a deadline a
+    // frame that never shows the press would ping-pong for ever.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut seen = Vec::new();
     let shown = loop {
+        assert!(
+            Instant::now() < deadline,
+            "no frame showing the press (input 1) within 30 s; the frames' inputs: {seen:?}"
+        );
         let (frame, _) = recv(&socket);
         if let ToHost::Frame { input: 1, slot, .. } = frame {
             break slot;
+        }
+        if let ToHost::Frame { input, .. } = frame
+            && seen.len() < 64
+        {
+            seen.push(input);
         }
         if let ToHost::Frame { buffers, slot, .. } = frame {
             let release = ToGuest::Release { buffers, slot };
@@ -229,22 +308,44 @@ fn frames_arrive_as_dma_bufs_the_host_device_reads_in_place() {
         adapter.get_info().name,
         sent.elapsed()
     );
+    step("reading the frame back");
     assert_drawn(&read_back(&device, &queue, &textures[usize::from(shown)]));
+    step("killing the program");
     child.kill().unwrap();
     child.wait().unwrap();
+    step("reading the killed program's socket to its end");
     // The program's end is closed: the host reads the end, not a hang.
-    assert!(socket.wait(Some(Duration::from_secs(5))).unwrap());
-    while socket.recv().unwrap().is_some() {}
+    // Its last frames, then the end: each wait bounded.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        assert!(
+            socket.wait(Some(Duration::from_secs(5))).unwrap(),
+            "the killed program's socket neither closed nor spoke within 5 s"
+        );
+        if socket.recv().unwrap().is_none() {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the killed program's socket still sending after 10 s"
+        );
+    }
+    step("dropping the imported textures and the device (the GPU driver)");
 }
 
 #[test]
 fn frames_arrive_in_shared_memory_where_dma_bufs_cannot() {
+    let _alone = gpu_alone();
+    let _watch = Watchdog::new("shared-memory frames", Duration::from_secs(60));
+    step("making a device");
     let Some((device, _queue, adapter)) = device() else {
         eprintln!("no Vulkan adapter: skipped");
         return;
     };
+    step("starting the program (shared memory)");
     let (mut child, socket) = start(Some("shm"));
     hello(&socket, &adapter, gpu::can_share(&device));
+    step("waiting for its buffers");
     let (buffers, fds) = recv(&socket);
     let ToHost::Buffers {
         transport,
