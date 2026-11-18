@@ -406,3 +406,155 @@ fn a_linked_reader_follows_and_others_are_refused() {
     assert_eq!(node_text(&collab, &rt, id), "Node: made here");
     drop(replica);
 }
+
+/// A `DocPresence` client of `service` on an in-memory connection, with
+/// no gate (the registry's authorizer sees no caller).
+async fn presence_client<D>(service: D) -> crdt::sync::DocPresenceClient
+where
+    D: crdt::sync::DocPresence + Clone + Send + Sync + 'static,
+{
+    let router = architect::layer::LayerRouter::new().with(
+        crdt::sync::doc_presence_service_descriptor(),
+        crdt::sync::DocPresenceDispatcher::new(service),
+    );
+    let (client_link, server_link) = vox::memory_link_pair(16);
+    tokio::spawn(async move {
+        if let Ok(connection) = vox::acceptor_on(server_link)
+            .on_lane(architect::layer::handler_acceptor(router))
+            .establish_connection()
+            .await
+        {
+            let _hold = connection;
+            std::future::pending::<()>().await;
+        }
+    });
+    vox::initiator_on(client_link)
+        .establish::<crdt::sync::DocPresenceClient>()
+        .await
+        .unwrap()
+}
+
+/// A presence peer on `doc_id` over `client`, its driver running.
+fn presence_peer(
+    doc_id: uuid::Uuid,
+    client: crdt::sync::DocPresenceClient,
+) -> crdt::sync::PresencePeer {
+    let (peer, mut driver) = crdt::sync::PresencePeer::new(doc_id, 30_000);
+    tokio::spawn(async move {
+        let _ = driver.run(&client).await;
+    });
+    peer
+}
+
+async fn until_async(what: &str, mut ok: impl FnMut() -> bool) {
+    let end = Instant::now() + Duration::from_secs(10);
+    while !ok() {
+        assert!(Instant::now() < end, "timed out: {what}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// Another node, as a [`architect_extensions::live::PresenceLink`] sees it:
+/// this node is `here`, and `there` is a registry of its own.
+struct TwoNodes {
+    there: crdt::registry::DocRegistry,
+}
+
+impl architect_extensions::live::PresenceLink for TwoNodes {
+    fn me(&self) -> String {
+        "here".to_owned()
+    }
+
+    fn dial(
+        &self,
+        host: String,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<crdt::sync::DocPresenceClient, String>> + Send>,
+    > {
+        let there = self.there.clone();
+        Box::pin(async move {
+            assert_eq!(host, "there", "dialled the node the document names");
+            Ok(presence_client(there).await)
+        })
+    }
+}
+
+/// An extension's presence is relayed by the host to where the document
+/// says its presence is hosted (session#192): this node's registry when
+/// nothing says, and when the document names another node, that node's
+/// presence, whose leader the extension then hears and whose clock it
+/// estimates. `live_document` answers the node's endpoint id once the app
+/// has a node to reach others through.
+#[test]
+fn an_extensions_presence_follows_the_node_the_document_names() {
+    let tmp = tempfile::tempdir().unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let (collab, id) = node(tmp.path(), &rt);
+    let host = Host::new(ActionList::new(), SharedSections::default())
+        .with_kind_documents(kind_documents(&collab));
+    let ext = Extensions::new(host.clone(), Installs::new(tmp.path().join("installs")))
+        .with_linked(&Follower)
+        .unwrap();
+    let _ = ext.sync();
+    let handle = FOLLOWER.get().unwrap().clone();
+    let api = host.api(LINKED);
+    rt.block_on(async {
+        let lane = handle.document("Songs/a.session").await.unwrap();
+        assert_eq!(lane.node(), None, "no node to reach others through yet");
+
+        // Hosted here: a leader on this node's registry is heard.
+        let own = crdt::peer::SelfPresenceLane::open(collab.registry().clone(), api.principal())
+            .await
+            .unwrap();
+        let leader = presence_peer(id, own.client().clone());
+        let follower = presence_peer(
+            id,
+            presence_client(architect_extensions::live::ExtensionDocPresence::new(
+                api.clone(),
+            ))
+            .await,
+        );
+        leader.set("lead/play", "here");
+        until_async("the extension hears this node's leader", || {
+            follower.states().get("lead/play") == Some(&crdt::loro::LoroValue::from("here"))
+        })
+        .await;
+        let clock = follower.clock().clone();
+        until_async("this node's clock answers", || clock.offset_ms().is_some()).await;
+
+        // Hosted on another node, which the document names.
+        let there =
+            crdt::registry::DocRegistry::new(|_| Box::pin(async { Ok(CrdtDoc::ephemeral()) }))
+                .with_authorizer(|_, _| true);
+        host.set_presence_link(std::sync::Arc::new(TwoNodes {
+            there: there.clone(),
+        }));
+        let lane = handle.document("Songs/a.session").await.unwrap();
+        assert_eq!(
+            lane.node(),
+            Some("here"),
+            "the node's endpoint id, answered"
+        );
+        let doc = collab.registry().doc(id).await.unwrap();
+        crdt::presence::set_presence_host(doc.loro(), Some("there")).unwrap();
+        let remote = presence_peer(id, presence_client(there).await);
+        remote.set("lead/play", "there");
+        let through = presence_peer(
+            id,
+            presence_client(architect_extensions::live::ExtensionDocPresence::new(
+                api.clone(),
+            ))
+            .await,
+        );
+        until_async("the extension hears the other node's leader", || {
+            through.states().get("lead/play") == Some(&crdt::loro::LoroValue::from("there"))
+        })
+        .await;
+        let clock = through.clock().clone();
+        until_async("the other node's clock answers through the relay", || {
+            clock.offset_ms().is_some()
+        })
+        .await;
+        drop(own);
+    });
+}
