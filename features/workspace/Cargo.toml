@@ -183,6 +183,10 @@ required-features = ["native"]
 name = "phone_flip"
 required-features = ["native"]
 
+[[test]]
+name = "late_view"
+required-features = ["native"]
+
 [lints]
 workspace = true
 

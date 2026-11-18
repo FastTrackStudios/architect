@@ -537,7 +537,10 @@ pub struct TitleRow {
 #[derive(Clone, Copy)]
 pub struct Host {
     pub workspace: Signal<Workspace>,
-    views: CopyValue<Views>,
+    /// The app's views: a signal, so a pane whose view was not there yet
+    /// (a layout restored before its extension loaded) draws it once the
+    /// app has it (architect#877).
+    views: Signal<Views>,
     commands: CopyValue<Vec<Command>>,
     /// The commands an empty main area offers, by id ([`WorkspaceView`]'s
     /// `empty`).
@@ -1602,7 +1605,7 @@ pub fn WorkspaceView(
     let decks_now = deck::try_use_decks();
     let mut host = use_context_provider(|| Host {
         workspace,
-        views: CopyValue::new(views.clone()),
+        views: Signal::new(views.clone()),
         commands: CopyValue::new(commands.clone()),
         empty: CopyValue::new(empty.clone()),
         on_command: CopyValue::new(on_command),
@@ -1660,7 +1663,9 @@ pub fn WorkspaceView(
     use_popup_provider(host);
     use_side_menu_provider(host);
     // Props change under a live host: keep it current.
-    host.views.set(views);
+    if *host.views.peek() != views {
+        host.views.set(views);
+    }
     host.commands.set(commands);
     host.on_command.set(on_command);
     if *host.theme.peek() != theme {
