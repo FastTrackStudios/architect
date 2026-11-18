@@ -2638,6 +2638,54 @@ pub fn mounted_views(doc: &BaseDocument) -> Vec<NodeId> {
 }
 
 #[cfg(test)]
+mod image_tests {
+    use std::sync::{Arc, Mutex};
+
+    use blitz_traits::net::{Bytes, NetHandler, NetProvider, Request, Url};
+
+    use super::DataOnly;
+
+    /// What a fetch gave: its bytes, or why not.
+    type Got = Arc<Mutex<Option<Result<Vec<u8>, String>>>>;
+
+    struct Keep(Got);
+
+    impl NetHandler for Keep {
+        fn bytes(self: Box<Self>, _url: String, bytes: Bytes) {
+            *self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Ok(bytes.to_vec()));
+        }
+        fn error(self: Box<Self>, _url: String, why: String) {
+            *self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Err(why));
+        }
+    }
+
+    fn fetch(url: &str) -> Option<Result<Vec<u8>, String>> {
+        let got = Got::default();
+        let url = Url::parse(url).unwrap_or_else(|e| panic!("{url}: {e}"));
+        DataOnly.fetch(0, Request::get(url), Box::new(Keep(Arc::clone(&got))));
+        got.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()
+    }
+
+    /// A view's `<img src="data:…">` (Keyflow's palette glyphs) gets its
+    /// bytes; a path on disk or a site's image is refused.
+    #[test]
+    fn a_views_document_fetches_data_uris_and_nothing_else() {
+        // `<svg/>`, base64.
+        assert_eq!(
+            fetch("data:image/svg+xml;base64,PHN2Zy8+"),
+            Some(Ok(b"<svg/>".to_vec()))
+        );
+        assert_eq!(
+            fetch("data:image/svg+xml,%3Csvg%2F%3E"),
+            Some(Ok(b"<svg/>".to_vec()))
+        );
+        for url in ["file:///etc/passwd", "https://example.com/beacon.png"] {
+            assert!(matches!(fetch(url), Some(Err(_))), "{url} was fetched");
+        }
+    }
+}
+
+#[cfg(test)]
 mod pacing_tests {
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::{Duration, Instant};
