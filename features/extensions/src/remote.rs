@@ -1633,6 +1633,9 @@ async fn follow(
             let from = asked.borrow_mut().pop_front();
             let applying = Instant::now();
             let _ = answer.unbounded_send(());
+            // An event is always answered (wire 5), with no edits when the
+            // view did not change: that answer is timed, not drawn.
+            let changes = !matches!(&frame, Frame::Edits { edits } if edits.is_empty());
             // Its scenes decoded off the UI thread first.
             let (frame, decoded) = decode_scenes(frame).await;
             let applied = with_doc(&node, |doc, at| {
@@ -1651,8 +1654,13 @@ async fn follow(
                 // look, `PLACE_EVERY`).
                 let held = remote(doc, at).map(|r| r.embedded());
                 // A frame no input asked for (a save, live data, a worker's
-                // news) still shows: the window is asked to draw again.
-                doc.shell_provider.request_redraw();
+                // news) still shows: the window is asked to draw again. An
+                // empty one changes nothing on screen; a frame for it would
+                // take the next present's place, and the frame that does
+                // change it waits a refresh behind (#840).
+                if changes {
+                    doc.shell_provider.request_redraw();
+                }
                 (applied, held)
             })
             .await;
