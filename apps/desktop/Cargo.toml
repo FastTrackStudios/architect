@@ -66,7 +66,9 @@ architect-workspace = { workspace = true, features = ["native", "hot-reload"], o
 # `net`, extensions' fetches (#310): the app turns the client on, not its UI crates.
 # `node`: the node serves installed extensions' node actions on its org
 # lane (#583); the window adds `process` and `remote` (`gui`).
-architect-extensions = { workspace = true, features = ["host", "net", "node"] }
+# `crdt`: an extension's `[[doc_kinds]]` as the node's document kinds
+# (`DocKindDecl::to_doc_kind`, `node::kinds`).
+architect-extensions = { workspace = true, features = ["host", "net", "node", "crdt"] }
 dioxus = { workspace = true, optional = true }
 dioxus-native = { workspace = true, features = ["vello", "hot-reload"], optional = true }
 facet-json = { version = "0.50.0-rc.5" }

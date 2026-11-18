@@ -151,6 +151,57 @@ pub fn parse(bytes: &[u8]) -> Result<Parsed, FileError> {
     Ok(Parsed { records, good_len })
 }
 
+/// The `meta` values a file starts with (`kind`, `schema`, `id`).
+///
+/// Read from `from` frame by frame and no further than the first record
+/// that is not one: what a catalogue lists a file by, without reading the
+/// steps and blobs behind them. A file always writes these first, and
+/// rewrites them first when it is folded.
+///
+/// # Errors
+///
+/// `from` is not a document file (no header), one of a newer format, or
+/// could not be read.
+pub fn leading_meta(from: &mut impl std::io::Read) -> Result<Vec<(String, String)>, FileError> {
+    let mut head = [0_u8; HEADER_LEN];
+    from.read_exact(&mut head)
+        .map_err(|_| FileError::NotADocument("shorter than a header".into()))?;
+    parse(&head)?;
+    let mut out = Vec::new();
+    loop {
+        let mut len = [0_u8; 4];
+        if from.read_exact(&mut len).is_err() {
+            break;
+        }
+        let len = usize::try_from(u32::from_le_bytes(len)).map_err(|_| too_big())?;
+        let mut tag = [0_u8; 1];
+        if len == 0 || from.read_exact(&mut tag).is_err() || tag != [META] {
+            break;
+        }
+        // A meta record is two short strings: anything larger is not one.
+        if len > 1 << 20 {
+            break;
+        }
+        let mut payload = vec![0_u8; len];
+        let Some((first, rest)) = payload.split_first_mut() else {
+            break;
+        };
+        *first = META;
+        let mut crc = [0_u8; 4];
+        if from.read_exact(rest).is_err() || from.read_exact(&mut crc).is_err() {
+            break;
+        }
+        if crc32fast::hash(&payload) != u32::from_le_bytes(crc) {
+            break;
+        }
+        match decode(&payload) {
+            Some(Record::Meta { key, value }) => out.push((key, value)),
+            _ => break,
+        }
+    }
+    Ok(out)
+}
+
 /// The record at the start of `bytes` and the bytes its frame took, if
 /// it is whole and sound.
 fn next_frame(bytes: &[u8]) -> Option<(Record, usize)> {
