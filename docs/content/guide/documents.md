@@ -245,6 +245,30 @@ let marks = roster.pointers(clock_ms(), |place| arrange_pixels(place));
 Draw them with the workspace's `PresenceLayer` as the view's last child
 (the [UI chapter](@/guide/ui.md)). Never call `sweep()` in a render.
 
+### A playhead, in the host's clock
+
+A playhead in presence (`PlayState`) says where it was and *when*, so a
+peer extrapolates it every frame instead of streaming it. "When" has to be
+one clock for both peers, and two processes never share one: each
+`clock_ms` starts at its own first call. So the presence host serves its
+clock (`DocPresence::now`), each `PresenceDriver` pings it ten times a
+second into its peer's `SharedClock` (`features/crdt/crdt/src/clock.rs`,
+NTP's estimate over the fastest quarter of the last 32 exchanges), and a
+playhead is stamped in it:
+
+```rust
+// The leader: false until the driver has an estimate.
+here.play_now(playing, position_seconds, rate);
+// A follower, each frame:
+if let (Some(play), Some(now)) = (play_state, peer.clock().now_ms()) {
+    let at = play.position_at(now);
+}
+```
+
+The error is at most half the fastest round trip (`SharedClock::round_trip_ms`):
+under a millisecond on a LAN. A host older than this serves no clock; the
+driver's pings then stop and presence carries on, with no estimate.
+
 <!-- media: presence-pointers-overlay — two people in one arrangement: the other's named pointer and selection wash drawn over the pane -->
 
 ### Collaborative text
