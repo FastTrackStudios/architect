@@ -32,6 +32,13 @@
 //! - **The package.** The program is a file in the package: never a path
 //!   out of it (`Manifest::check`), nor a link inside it that points out
 //!   ([`package_file`]).
+//! - **Settings.** An argument may name one of its settings,
+//!   `{{setting:<key>}}`, as a fetch's header names a secret: its value
+//!   (the one set, else the default) is put in when the program starts, and
+//!   a change starts it again (`architect-process-view`'s
+//!   `extension::refresh`). An argument that is a setting alone and comes
+//!   out empty is left out, so `--show={{setting:x.show}}` is the form for
+//!   a value that may be empty.
 //! - **Its version.** [`Launch::stamp`] is the file's size and time and the
 //!   copy loaded: a development copy rebuilt (`EXT_DEV` reloads it) or
 //!   another copy loaded starts the program again.
@@ -122,11 +129,20 @@ pub fn launch(host: &Host, extension: &str, view: &str) -> Result<Launch, String
         .ok_or_else(|| format!("{extension} has no package folder to run {program} from"))?;
     let file = package_file(&dir, program)?;
     let stamp = stamp(&file, loaded.origin);
+    let args = decl
+        .args
+        .iter()
+        .filter_map(|arg| {
+            crate::manifest::with_settings(arg, |key| {
+                arg_text(host.setting_value(extension, key).as_ref())
+            })
+        })
+        .collect();
     Ok(Launch {
         extension: extension.to_owned(),
         view: view.to_owned(),
         program: file,
-        args: decl.args.clone(),
+        args,
         dir,
         origin: loaded.origin,
         stamp,
@@ -168,6 +184,16 @@ pub fn package_file(dir: &Path, program: &str) -> Result<PathBuf, String> {
         }
     }
     Ok(found)
+}
+
+/// A setting's value as an argument: text as it is, a switch `true` or
+/// `false`, a number as written, nothing as empty, anything else as JSON.
+fn arg_text(value: Option<&serde_json::Value>) -> String {
+    match value {
+        None | Some(serde_json::Value::Null) => String::new(),
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(other) => other.to_string(),
+    }
 }
 
 /// `file`'s size and modification time, and `origin`.

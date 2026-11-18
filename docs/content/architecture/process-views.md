@@ -117,6 +117,34 @@ capability today: installing it is the consent (the install's preview
 names the program, `manage.rs` `runner_words`). A process view asks even
 there; the gate is stronger, not weaker.
 
+**Settings.** An argument may name one of the extension's own settings,
+`{{setting:<key>}}`, the placeholder a fetch's header uses for a secret
+(`{{secret:<name>}}`), checked by `Manifest::check` against its
+`[[sections.settings]]`. The value (the one set, else the default; text
+as it is, a switch `true` or `false`) is put in when the program starts
+(`Host::setting_value`), and a change starts the program again
+(`extension::refresh`). An argument that is a setting alone and comes
+out empty is left out, so a value that may be empty goes as
+`--show={{setting:lighting.show}}`. A secret never goes to a program.
+
+<!-- doc-check: off -->
+```toml
+[[views]]
+id = "room"
+kind = "process"
+program = "bin/ignition"
+args = ["--process-view", "--clock={{setting:ignition.clock}}", "--show={{setting:ignition.show}}"]
+```
+<!-- doc-check: on -->
+
+Why arguments, not the program asking the host: a process extension
+reads its settings through the host service over its own connection,
+but a process view's program has only the frame socket, and the
+programs that serve one (Ignition's Bevy renderer speaks the wire
+itself, on another wgpu) would each need a host client. A setting in an
+argument needs nothing of the program but its command line, and the
+restart is what such programs already do for a new show.
+
 **Starting it.** `ExtensionView` (`features/extensions/src/interface.rs`)
 asks `ProcessViews`, which the app provides with
 `architect_process_view::extension::use_process_views`. Each pane first
@@ -138,9 +166,16 @@ with `ProcessViewPane`.
 - A pane moved to another tab group, a split or a pop-out window keeps
   its program: the session is the process's, found again by the pane's
   key, and its widget greets the program again in the new window.
-- A pane closed stops it after `extension::PARKED` (10 s, long enough
-  for a move); its extension unloading, or its grant taken back, stops
-  it at the next check (`extension::reap`, every second).
+- A pane closed stops it at the next check (`extension::reap`, every
+  250 ms): each pane registers whether it is still in its workspace
+  (`extension::register_pane`), and a move to another group, a split or
+  a pop-out window keeps the pane in the one workspace model, so the
+  program runs on however long the move takes; a tab behind another
+  keeps it too, idle (a program draws only when a shown frame ticks it).
+  A pane drawn where there is no workspace to ask stops
+  `extension::BACKSTOP` (2 s) after it went. A close and a reopen before
+  the check keep the same program. Its extension unloading, or its grant
+  taken back, stops it at the same check (`extension::fate`).
 - A program that dies is started again as a process extension's is
   (`host::Restart`: three times in a row, 250 ms doubling to 10 s,
   counted again after 30 s running), the pane saying why it died; then

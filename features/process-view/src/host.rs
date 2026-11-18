@@ -297,6 +297,19 @@ pub fn find(key: &str) -> Option<Arc<Session>> {
     lock(sessions()).get(key).cloned()
 }
 
+/// Every session's key.
+#[must_use]
+pub fn keys() -> Vec<String> {
+    lock(sessions()).keys().cloned().collect()
+}
+
+/// How long no pane has shown `key`'s session ([`park`]); `None` while
+/// one does, or when there is no such session.
+#[must_use]
+pub fn away(key: &str) -> Option<Duration> {
+    find(key).and_then(|s| lock(&s.parked).map(|at| at.elapsed()))
+}
+
 /// Says no pane shows `key`'s session now (its pane closed, or is moving
 /// to another tab group or window): [`reap`] stops it once it has been so
 /// for longer than it allows.

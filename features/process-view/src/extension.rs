@@ -13,21 +13,26 @@
 //! - starts the program when it opens ([`open`]), one session per pane
 //!   (`<extension>/<view>#<pane>`), so a pane moved to another tab group
 //!   or a pop-out window keeps its program;
-//! - starts it again when its stamp changes (a development copy rebuilt,
-//!   which `EXT_DEV` reloads; another copy loaded), and when it dies, as a
-//!   process extension's program is ([`Restart::default`]), saying why;
-//! - stops it when its pane has been gone for [`PARKED`] (closed, not
-//!   moved), at once when its extension unloads or its grant is taken
-//!   back ([`reap`]).
+//! - starts it again when what it runs changes ([`refresh`]): its stamp
+//!   (a development copy rebuilt, which `EXT_DEV` reloads; another copy
+//!   loaded), or an argument that names a setting
+//!   (`{{setting:<key>}}`) when the setting changes; and when it dies, as
+//!   a process extension's program is ([`Restart::default`]), saying why;
+//! - stops it when its pane is gone from the workspace (closed: a move to
+//!   another group, a split or a pop-out window keeps the pane, so the
+//!   program runs on), at once when its extension unloads or its grant is
+//!   taken back ([`reap`]). A pane drawn where there is no workspace to ask
+//!   stops [`BACKSTOP`] after it went.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use architect_extensions::host::Host;
 use architect_extensions::interface::{ProcessAsk, ProcessViews};
 use architect_extensions::process_view::{Launch, launch};
-use std::rc::Rc;
-use std::sync::Arc;
-
 use architect_workspace::use_pane;
 use dioxus::prelude::*;
 
@@ -40,12 +45,51 @@ pub const TRANSPORT_ENV: &str = "ARCHITECT_PROCESS_VIEW_TRANSPORT";
 /// The prefix of extensions' sessions' keys.
 pub const PREFIX: &str = "ext:";
 
-/// How long a session whose pane went away is kept for it to come back
-/// (a tab switch, a move to another group or window).
-pub const PARKED: Duration = Duration::from_secs(10);
+/// How long a session whose pane went away is kept when nothing says
+/// whether the pane is still in a workspace (a view drawn outside one):
+/// the backstop. A pane the workspace knows is kept while it is there.
+pub const BACKSTOP: Duration = Duration::from_secs(2);
 
-/// How often sessions are checked against the host.
-pub const REAP: Duration = Duration::from_secs(1);
+/// How often sessions are checked against the host and the workspace.
+pub const REAP: Duration = Duration::from_millis(250);
+
+/// Whether a session's pane is still in its workspace, by session key:
+/// registered by the pane as it mounts (the window's thread; a pop-out's
+/// panes are on the same one).
+type Present = Rc<dyn Fn() -> bool>;
+
+thread_local! {
+    static PANES: RefCell<HashMap<String, Present>> = RefCell::new(HashMap::new());
+}
+
+/// Says how to tell whether `key`'s pane is still in its workspace (a pane
+/// does it as it mounts; a test with no workspace gives its own).
+pub fn register_pane(key: &str, present: impl Fn() -> bool + 'static) {
+    PANES.with(|p| p.borrow_mut().insert(key.to_owned(), Rc::new(present)));
+}
+
+/// What becomes of a session, from what is known of its pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fate {
+    Keep,
+    End,
+}
+
+/// A session's fate: shown (`away` none) is kept; away from its pane, it
+/// ends when the workspace says the pane is gone (`present`
+/// `Some(false)`), is kept while the pane is there (a move in flight, a
+/// tab behind another: it draws nothing until shown, as it is ticked only
+/// when a frame is shown), and with no workspace to ask ends after
+/// [`BACKSTOP`].
+#[must_use]
+pub fn fate(away: Option<Duration>, present: Option<bool>) -> Fate {
+    match (away, present) {
+        (None, _) | (Some(_), Some(true)) => Fate::Keep,
+        (Some(_), Some(false)) => Fate::End,
+        (Some(away), None) if away > BACKSTOP => Fate::End,
+        (Some(_), None) => Fate::Keep,
+    }
+}
 
 /// The session key of extension `extension`'s view `view` in pane `pane`.
 #[must_use]
@@ -91,16 +135,53 @@ pub fn open(host: &Host, extension: &str, view: &str, pane: &str) -> Result<Arc<
     ))
 }
 
-/// Stops each extension's session no pane has shown for [`PARKED`], each
-/// whose extension is no longer loaded, and each it may no longer run (a
-/// grant taken back). Returns the keys ended.
+/// The extensions' sessions' keys.
+fn keys() -> Vec<String> {
+    host::keys()
+        .into_iter()
+        .filter(|k| k.starts_with(PREFIX))
+        .collect()
+}
+
+/// Stops each extension's session whose pane is gone ([`fate`]), whose
+/// extension is no longer loaded, or that may no longer run its program (a
+/// grant taken back). The lab's own sessions are not touched. Returns the
+/// keys ended.
 #[allow(clippy::must_use_candidate)]
 pub fn reap(host: &Host) -> Vec<String> {
-    host::reap(PARKED, |key| match of_key(key) {
-        Some((extension, view)) => launch(host, extension, view).is_ok(),
-        // Not an extension's (the lab's own): kept.
-        None => true,
-    })
+    let mut ended = Vec::new();
+    for key in keys() {
+        let present = PANES.with(|p| p.borrow().get(&key).cloned()).map(|f| f());
+        let runs = of_key(&key).is_some_and(|(e, v)| launch(host, e, v).is_ok());
+        if !runs || fate(host::away(&key), present) == Fate::End {
+            host::end(&key);
+            PANES.with(|p| p.borrow_mut().remove(&key));
+            ended.push(key);
+        }
+    }
+    ended
+}
+
+/// Starts again each extension's session whose program, arguments or stamp
+/// changed since it started (a setting its arguments name; a development
+/// copy rebuilt, even with no pane redrawn). Returns the keys started again.
+#[allow(clippy::must_use_candidate)]
+pub fn refresh(host: &Host) -> Vec<String> {
+    let mut again = Vec::new();
+    for key in keys() {
+        let Some((extension, view)) = of_key(&key) else {
+            continue;
+        };
+        let (Ok(now), Some(session)) = (launch(host, extension, view), host::find(&key)) else {
+            continue;
+        };
+        let program = program(&now);
+        if session.program() != program {
+            let _ = host::session(&key, &program);
+            again.push(key);
+        }
+    }
+    again
 }
 
 /// Provides `ProcessViews` for the app's window over `host`'s
@@ -115,6 +196,7 @@ pub fn use_process_views(host: Host) -> ProcessViews {
             loop {
                 futures_timer::Delay::new(REAP).await;
                 let _ = reap(&host);
+                let _ = refresh(&host);
             }
         }
     });
@@ -152,9 +234,13 @@ fn ExtensionProcessPane(ask: ProcessAsk, host: HostRef) -> Element {
             }
         };
     }
+    let session_key = key(&ask.extension, &ask.view, &pane.id.0);
+    // The reaper asks the workspace whether this pane is still there: a
+    // move keeps it (the program runs on), a close does not.
+    let (workspace, id) = (pane.workspace(), pane.id.clone());
+    register_pane(&session_key, move || workspace.peek().pane(&id).is_some());
     match launch(&host.0, &ask.extension, &ask.view) {
         Ok(launch) => {
-            let session_key = key(&ask.extension, &ask.view, &pane.id.0);
             let program = program(&launch);
             rsx! {
                 div { style: "flex: 1; display: flex; flex-direction: column; min-height: 0;",
