@@ -73,6 +73,7 @@ mod layout;
 pub mod meter;
 mod model;
 mod ops;
+pub mod pacing;
 #[cfg(feature = "paint")]
 pub mod paint;
 #[cfg(feature = "presence")]
