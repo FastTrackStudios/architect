@@ -533,6 +533,7 @@ fn render(
             dioxus::prelude::Signal::new(crate::contrib::EmbedInput::default())
         });
         vdom.provide_root_context(crate::linked::EmbedContext(embed));
+        vdom.provide_root_context(InProcess);
         let mut writer = WireWriter::default();
         vdom.rebuild(&mut writer);
         if sink.send(writer.take()).await.is_err() {
@@ -564,6 +565,19 @@ fn render(
             }
         }
     });
+}
+
+/// Provided at the root of every view a process serves: what
+/// [`in_process`] finds.
+#[derive(Clone, Copy)]
+struct InProcess;
+
+/// Whether the component calling it is drawn by a process for its host
+/// (a view [`Guest`] serves), not linked into an app: one view's code
+/// picks the element that works where it runs (`linked::PaintPane`).
+#[must_use]
+pub fn in_process() -> bool {
+    dioxus::prelude::try_consume_context::<InProcess>().is_some()
 }
 
 /// The host's input for an inline embed, when `event` is one

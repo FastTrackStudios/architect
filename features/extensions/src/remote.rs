@@ -949,6 +949,7 @@ impl Document for RemoteDocument {
     }
 
     fn handle_ui_event(&mut self, event: UiEvent) {
+        let event = localised_wheel(event);
         // A pointer that comes back, or leaves, with no button held lost
         // its release where the view couldn't see it: what it held is
         // let go.
@@ -970,6 +971,27 @@ impl Document for RemoteDocument {
         if releases {
             self.held = None;
         }
+    }
+}
+
+/// A wheel's points in the view's document: Blitz moves a pointer
+/// event's client and page points into a sub-document's space but not a
+/// wheel's, whose `element` point (the host's, in the view's box) is
+/// where it is in the view.
+fn localised_wheel(event: UiEvent) -> UiEvent {
+    match event {
+        UiEvent::Wheel(mut w) => {
+            let (dx, dy) = (
+                w.coords.client_x - w.element.x,
+                w.coords.client_y - w.element.y,
+            );
+            w.coords.client_x -= dx;
+            w.coords.client_y -= dy;
+            w.coords.page_x -= dx;
+            w.coords.page_y -= dy;
+            UiEvent::Wheel(w)
+        }
+        other => other,
     }
 }
 
@@ -1800,12 +1822,17 @@ async fn next_frame(
 /// Its scenes (`crate::scene`) are clipped to their boxes unless
 /// `overlay`: the extension was granted `overlay` (`capabilities.ui`) and
 /// may draw over the whole app.
+///
+/// `input`, when given, reaches the view as its `linked::use_embed` does
+/// an embed's, now and on every change: a pane's is its state
+/// (`linked::PANE_CLAIM`, read with `linked::use_pane_state`).
 #[component]
 pub fn RemoteView(
     processes: Processes,
     extension: String,
     view: String,
     #[props(default)] overlay: bool,
+    #[props(default)] input: Option<Signal<crate::contrib::EmbedInput>>,
 ) -> Element {
     // Keyed by what it shows (a one-item list: a key on a lone node does
     // not remount it): a pane that goes on to another process view (one
@@ -1814,9 +1841,34 @@ pub fn RemoteView(
     let key = format!("{extension}/{view}");
     rsx! {
         for key in [key] {
-            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: None, max_height: None, overlay }
+            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input, max_height: None, overlay }
         }
     }
+}
+
+/// [`RemoteView`] in a workspace pane: told the pane's id and state
+/// (`linked::PANE_CLAIM`), now and whenever the state changes, so a view
+/// opened on a file (an opener's) knows which.
+#[component]
+pub fn RemotePaneView(
+    processes: Processes,
+    extension: String,
+    view: String,
+    #[props(default)] overlay: bool,
+) -> Element {
+    let pane = architect_workspace::try_use_pane();
+    let now = crate::linked::pane_input(
+        pane.as_ref().map(|p| p.id.0.as_str()).unwrap_or_default(),
+        &pane
+            .as_ref()
+            .map(architect_workspace::PaneHandle::state)
+            .unwrap_or_default(),
+    );
+    let mut input = use_signal(|| now.clone());
+    if *input.peek() != now {
+        input.set(now);
+    }
+    rsx! { RemoteView { processes, extension, view, overlay, input: Some(input) } }
 }
 
 /// A process extension's view `view` inline in a host's document, as an

@@ -1245,7 +1245,7 @@ pub fn ExtensionView(
         };
         return rsx! {
             div { style: "{remote}",
-                crate::remote::RemoteView { processes, extension, view, overlay }
+                crate::remote::RemotePaneView { processes, extension, view, overlay }
             }
         };
     }
