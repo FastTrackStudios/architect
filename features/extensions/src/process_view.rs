@@ -149,6 +149,65 @@ pub fn launch(host: &Host, extension: &str, view: &str) -> Result<Launch, String
     })
 }
 
+/// The program a process view lacks only a person's yes to run.
+///
+/// Extension `extension`'s view `view` asks to run it and a person has not
+/// granted it (an installed copy whose grant was taken back, or an update
+/// that asks for it): what its pane offers to allow.
+#[must_use]
+pub fn needs_grant(host: &Host, extension: &str, view: &str) -> Option<String> {
+    let loaded = host.get(extension)?;
+    let program = loaded
+        .manifest
+        .views
+        .iter()
+        .find(|v| v.id == view && v.kind == architect_workspace::PROCESS)?
+        .program
+        .clone()?;
+    let asks = loaded.manifest.capabilities.may_run_program(&program);
+    let may = host
+        .capabilities(extension)
+        .is_some_and(|c| c.may_run_program(&program));
+    (asks && !may && host.grants().is_some() && not_here(&host.platform()).is_none())
+        .then_some(program)
+}
+
+/// A person's yes, given in the app (the pane's Allow): extension
+/// `extension` may run `program` on this device, added to what it was
+/// granted here. Only a program its manifest asks for.
+///
+/// # Errors
+///
+/// It is not loaded, does not ask for `program`, or the app keeps no
+/// grants.
+pub fn grant_program(host: &Host, extension: &str, program: &str, by: &str) -> Result<(), String> {
+    let loaded = host
+        .get(extension)
+        .ok_or_else(|| format!("{extension} is not loaded"))?;
+    if !loaded.manifest.capabilities.may_run_program(program) {
+        return Err(format!("{extension} does not ask to run {program}"));
+    }
+    let grants = host.grants().ok_or("this app keeps no grants")?;
+    let mut caps = grants
+        .of(extension)
+        .into_iter()
+        .find(|g| g.scope == crate::consent::Scope::Device)
+        .map(|g| g.capabilities)
+        .unwrap_or_default();
+    if !caps.programs.iter().any(|p| p == program) {
+        caps.programs.push(program.to_owned());
+    }
+    grants.grant(
+        extension,
+        &loaded.manifest.version.to_string(),
+        caps,
+        crate::consent::Scope::Device,
+        by,
+    );
+    host.grants_changed(extension);
+    Ok(())
+}
+
 /// `program` (a path the manifest names) as a file inside package `dir`,
 /// resolved: a link inside the package that points out of it is outside
 /// too, as for a web view's files.

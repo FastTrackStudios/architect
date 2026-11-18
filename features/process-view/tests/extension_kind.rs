@@ -34,6 +34,7 @@ use architect::action::ActionList;
 use architect_extensions::consent::{Grants, Scope};
 use architect_extensions::host::{Host, SharedSections};
 use architect_extensions::manifest::Capabilities;
+use architect_extensions::process_view::{grant_program, needs_grant};
 use architect_extensions::{Origin, Package};
 use architect_process_view::extension::{self, PREFIX};
 use architect_process_view::host::{Session, Status, find};
@@ -180,17 +181,18 @@ fn an_installed_then_development_copy_shows_its_process_view() {
     grants.revoke(ID, None);
     let ended = extension::reap(&host);
     assert_eq!(ended, [key()]);
+    let Status::Stopped(why) = session.snapshot().status else {
+        panic!("stopped")
+    };
+    assert!(why.contains("not granted"), "{why}");
+    // Its pane's Restart starts nothing: the grant is gone.
+    session.restart();
     assert!(matches!(session.snapshot().status, Status::Stopped(_)));
-    grants.grant(
-        ID,
-        "1.0.0",
-        Capabilities {
-            programs: vec![PROGRAM.to_owned()],
-            ..Capabilities::default()
-        },
-        Scope::Device,
-        "test",
-    );
+    assert!(find(&key()).is_none(), "not started again");
+    // What the pane offers: Allow, a person's yes for this program alone.
+    assert_eq!(needs_grant(&host, ID, VIEW).as_deref(), Some(PROGRAM));
+    grant_program(&host, ID, PROGRAM, "person").unwrap();
+    assert_eq!(needs_grant(&host, ID, VIEW), None);
 
     // Unloaded: stopped, its session gone.
     let session = extension::open(&host, ID, VIEW, PANE).unwrap();
@@ -340,7 +342,7 @@ default = ""
     values
         .set("lab.orbits.show", serde_json::json!("recital.ig-show"))
         .unwrap();
-    assert_eq!(extension::refresh(&host), [key.clone()]);
+    assert_eq!(extension::refresh(&host), std::slice::from_ref(&key));
     assert_eq!(
         session.program().args,
         ["--clock=midi:IAC", "recital.ig-show"]
@@ -401,7 +403,7 @@ fn a_program_stops_when_its_pane_leaves_the_workspace_not_when_it_moves() {
     // Closed: gone at the next check.
     architect_process_view::host::park(&key);
     present.set(false);
-    assert_eq!(extension::reap(&host), [key.clone()]);
+    assert_eq!(extension::reap(&host), std::slice::from_ref(&key));
     assert!(find(&key).is_none());
     assert!(matches!(session.snapshot().status, Status::Stopped(_)));
 
