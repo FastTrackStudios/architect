@@ -61,6 +61,80 @@ pub fn layers_value(n: u64, batch: &[u8]) -> String {
     )
 }
 
+/// A [`LAYERS_ATTR`] value that names batch `n` of its view's frame
+/// alone: the batch's bytes cross beside the edits (`wire::BYTES_WIRE`,
+/// [`outbox`]).
+#[must_use]
+pub fn layers_marker(n: u64) -> String {
+    format!("{n:x}")
+}
+
+/// Whether a [`LAYERS_ATTR`] value names its batch by number
+/// ([`layers_marker`]) rather than carrying it: its number.
+#[must_use]
+pub fn layers_named(value: &str) -> Option<u64> {
+    if value.contains('\n') {
+        return None;
+    }
+    u64::from_str_radix(value, 16).ok()
+}
+
+/// The layers batches a view's thread sends as bytes beside its edits
+/// (`wire::BYTES_WIRE`): on only in a view its host opened that way.
+///
+/// The scene component puts each batch here ([`put`](outbox::put)) and
+/// sets its element's [`LAYERS_ATTR`] to the number it is given; the
+/// view's writer takes them with the frame's edits
+/// ([`take`](outbox::take)). The bytes are moved, never encoded or
+/// copied on the way.
+pub mod outbox {
+    use std::cell::RefCell;
+
+    thread_local! {
+        static OUT: RefCell<Option<(u64, Vec<(u64, Vec<u8>)>)>> = const { RefCell::new(None) };
+    }
+
+    /// This thread's view sends its batches as bytes.
+    pub fn enable() {
+        OUT.with(|o| *o.borrow_mut() = Some((0, Vec::new())));
+    }
+
+    /// Whether this thread's view sends its batches as bytes.
+    #[must_use]
+    pub fn enabled() -> bool {
+        OUT.with(|o| o.borrow().is_some())
+    }
+
+    /// `batch` to send with the next frame: the value its element's
+    /// attribute takes, or the batch back when this thread sends none
+    /// as bytes.
+    ///
+    /// # Errors
+    ///
+    /// Bytes are not on for this thread: the batch, to send as before.
+    pub fn put(batch: Vec<u8>) -> Result<String, Vec<u8>> {
+        OUT.with(|o| match o.borrow_mut().as_mut() {
+            Some((n, out)) => {
+                *n = n.wrapping_add(1);
+                out.push((*n, batch));
+                Ok(super::layers_marker(*n))
+            }
+            None => Err(batch),
+        })
+    }
+
+    /// The batches put since the last take, in order.
+    #[must_use]
+    pub fn take() -> Vec<(u64, Vec<u8>)> {
+        OUT.with(|o| {
+            o.borrow_mut()
+                .as_mut()
+                .map(|(_, out)| std::mem::take(out))
+                .unwrap_or_default()
+        })
+    }
+}
+
 /// The batch a [`LAYERS_ATTR`] value carries.
 ///
 /// # Errors
@@ -1174,7 +1248,12 @@ mod guest {
                 let values = props.values.as_ref().map_or(&[][..], |v| v.0.as_slice());
                 if let Some(batch) = t.sender.frame_with(&shown.0, values) {
                     t.batches = t.batches.wrapping_add(1);
-                    t.value = super::layers_value(t.batches, &batch);
+                    // As bytes beside the edits where its host takes them
+                    // (`wire::BYTES_WIRE`), else in the attribute.
+                    t.value = match super::outbox::put(batch) {
+                        Ok(marker) => marker,
+                        Err(batch) => super::layers_value(t.batches, &batch),
+                    };
                 }
                 t.shown = Some(now);
             }

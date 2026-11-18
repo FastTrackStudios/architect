@@ -45,7 +45,7 @@ impl Pane {
                 Ok(frame) => {
                     self.view.apply(frame.clone()).unwrap();
                     match frame {
-                        Frame::Edits { edits } => return edits,
+                        Frame::Edits { edits } | Frame::Batches { edits, .. } => return edits,
                         Frame::Failed(why) => panic!("the page failed: {why}"),
                     }
                 }

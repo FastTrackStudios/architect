@@ -471,6 +471,18 @@ impl ProcessExtensionStreamSource for Served {
     }
 
     fn view_attach(&self, open: Open, sink: EventSink<Frame>) {
+        self.attach(open, sink, false);
+    }
+
+    fn scene_view_attach(&self, open: Open, sink: EventSink<Frame>) {
+        self.attach(open, sink, true);
+    }
+}
+
+impl Served {
+    /// Mounts `open`'s view on a thread of its own; `bytes`: its scene
+    /// batches cross as bytes beside its edits (`crate::wire::BYTES_WIRE`).
+    fn attach(&self, open: Open, sink: EventSink<Frame>, bytes: bool) {
         let root = self.guest.views.get(&open.view).copied();
         let (to, events) = mpsc::unbounded_channel();
         self.panes
@@ -484,6 +496,9 @@ impl ProcessExtensionStreamSource for Served {
                 let span =
                     tracing::info_span!("ext.view", ext.view = %open.view, ext.pane = open.pane);
                 let _entered = span.enter();
+                if bytes {
+                    crate::scene::outbox::enable();
+                }
                 match root {
                     Some(root) => render(root, events, &sink),
                     None => refuse(&sink, format!("no view {}", open.view)),
@@ -840,10 +855,21 @@ impl WireWriter {
         self.edits.is_empty()
     }
 
-    /// What was written since the last take, as one frame.
+    /// What was written since the last take, as one frame: with the
+    /// layers batches its edits name, as bytes, in a view that sends
+    /// them so (`crate::wire::BYTES_WIRE`).
     pub fn take(&mut self) -> Frame {
-        Frame::Edits {
-            edits: std::mem::take(&mut self.edits),
+        let edits = std::mem::take(&mut self.edits);
+        let batches = crate::scene::outbox::take();
+        if batches.is_empty() {
+            return Frame::Edits { edits };
+        }
+        Frame::Batches {
+            edits,
+            batches: batches
+                .into_iter()
+                .map(|(n, bytes)| crate::wire::Batch { n, bytes })
+                .collect(),
         }
     }
 }
@@ -980,7 +1006,7 @@ mod click_tests {
         vdom.rebuild(&mut writer);
         let id = match writer.take() {
             // The node a handler was put on: the `PushId` before `Listen`.
-            Frame::Edits { edits } => edits
+            Frame::Edits { edits } | Frame::Batches { edits, .. } => edits
                 .windows(2)
                 .find_map(|w| match w {
                     [Edit::PushId { id }, Edit::Listen { .. }] => Some(*id),

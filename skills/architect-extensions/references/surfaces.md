@@ -445,7 +445,7 @@ Tests:
 
 ## Remote input: pointer, wheel, keys, IME, focus
 
-A process or WASI extension's view is a remote view: a Blitz sub-document in the pane (`features/extensions/src/remote.rs` `RemoteView`, `RemoteDocument`). It has no manifest key of its own. Every `[[views]]` entry of a process or WASI extension gets this input, from wire 7 (`features/extensions/src/wire.rs` `INPUT_WIRE`). A TSX or Luau page gets the same events (`features/pages/src/api.rs` `PageEvent`), and so does a browser pane (`features/extensions/src/web.rs` `Pane`).
+A process or WASI extension's view is a remote view: a Blitz sub-document in the pane (`features/extensions/src/remote.rs` `RemoteView`, `RemoteDocument`). It has no manifest key of its own. Every `[[views]]` entry of a process or WASI extension gets this input, from wire 7 (`features/extensions/src/wire.rs` `INPUT_WIRE`). From wire 8 (`BYTES_WIRE`) a process's scene batches cross as bytes beside its edits (`Frame::Batches`, `ProcessExtension::scene_view`; `docs/content/features/remote-views.md`, "On the wire"). A TSX or Luau page gets the same events (`features/pages/src/api.rs` `PageEvent`), and so does a browser pane (`features/extensions/src/web.rs` `Pane`).
 
 | Handler | Carries |
 |---|---|
