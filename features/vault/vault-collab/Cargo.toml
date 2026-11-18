@@ -24,6 +24,9 @@ crdt = { workspace = true, features = ["vox"] }
 # no architect features of its own).
 vox = { workspace = true }
 architect-telemetry = { workspace = true }
+# `Persistence` for a document of a kind that follows its file
+# (`documents::DocumentStore`).
+async-trait = { workspace = true }
 tokio = { workspace = true, features = ["sync", "rt", "macros", "time"] }
 tracing = { workspace = true }
 sha2 = "0.10"
