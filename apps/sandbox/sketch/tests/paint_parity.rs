@@ -621,7 +621,9 @@ fn comparable(log: &str) -> Vec<String> {
 
 #[test]
 fn one_paint_view_gets_the_same_ctx_and_input_linked_and_as_a_process() {
-    let _one = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _one = SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let dir = tempfile::tempdir().unwrap();
     let mut linked = start(false, dir.path());
     script(&mut linked);
@@ -657,7 +659,11 @@ fn press_a_region_then_type(run: &mut Run) {
     run.pump_until("the region's press", |l| l.contains("region Press("));
     run.send(UiEvent::PointerUp(pointer(at, free, Modifiers::empty())));
     run.pump_until("the region's release", |l| l.contains("region Release("));
-    run.send(UiEvent::KeyDown(key("k", KeyState::Pressed, Modifiers::empty())));
+    run.send(UiEvent::KeyDown(key(
+        "k",
+        KeyState::Pressed,
+        Modifiers::empty(),
+    )));
     run.pump_until("the key, after a press on a region", |l| {
         l.contains("\"k\", down: true")
     });
@@ -665,14 +671,19 @@ fn press_a_region_then_type(run: &mut Run) {
 
 #[test]
 fn a_press_on_a_region_focuses_the_view_linked_and_as_a_process() {
-    let _one = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _one = SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let dir = tempfile::tempdir().unwrap();
     for process in [false, true] {
         let mut run = start_view(process, dir.path(), "regions");
         press_a_region_then_type(&mut run);
         let log = run.log();
         let how = if process { "process" } else { "linked" };
-        assert!(log.contains("input Focus(true)"), "{how}: never focused:\n{log}");
+        assert!(
+            log.contains("input Focus(true)"),
+            "{how}: never focused:\n{log}"
+        );
         assert!(
             !log.contains("input down"),
             "{how}: the region's press reached the view as a pointer press:\n{log}"
@@ -687,7 +698,9 @@ fn a_press_on_a_region_focuses_the_view_linked_and_as_a_process() {
 #[test]
 fn a_key_bound_in_a_views_context_runs_its_action_and_skips_the_view() {
     use std::sync::atomic::Ordering;
-    let _one = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _one = SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let dir = tempfile::tempdir().unwrap();
     for process in [false, true] {
         let how = if process { "process" } else { "linked" };
@@ -706,10 +719,22 @@ fn a_key_bound_in_a_views_context_runs_its_action_and_skips_the_view() {
         )));
         run.pump_until("the focus", |l| l.contains("input Focus(true)"));
         let before = NOTED.load(Ordering::SeqCst);
-        run.send(UiEvent::KeyDown(key("n", KeyState::Pressed, Modifiers::empty())));
-        run.send(UiEvent::KeyDown(key("m", KeyState::Pressed, Modifiers::empty())));
+        run.send(UiEvent::KeyDown(key(
+            "n",
+            KeyState::Pressed,
+            Modifiers::empty(),
+        )));
+        run.send(UiEvent::KeyDown(key(
+            "m",
+            KeyState::Pressed,
+            Modifiers::empty(),
+        )));
         run.pump_until("the unbound key", |l| l.contains("key: \"m\", down: true"));
-        assert_eq!(NOTED.load(Ordering::SeqCst), before + 1, "{how}: N didn't run");
+        assert_eq!(
+            NOTED.load(Ordering::SeqCst),
+            before + 1,
+            "{how}: N didn't run"
+        );
         let log = run.log();
         assert!(
             !log.contains("key: \"n\""),

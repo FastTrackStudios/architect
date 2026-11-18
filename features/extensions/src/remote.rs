@@ -369,7 +369,6 @@ impl RemoteDocument {
         (consumed, cursor)
     }
 
-
     /// Whether a text field of its own has the focus, told to
     /// `architect_workspace::field_focused`.
     fn sync_field(&mut self) {
