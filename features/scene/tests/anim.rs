@@ -15,8 +15,8 @@ use anyrender::recording::RenderCommand;
 use anyrender::{PaintScene as _, Scene};
 use architect_scene::Error;
 use architect_scene::anim::{
-    Access, Animation, Clock, Input, Linear, MAX_ANIMATIONS, Map, Name, Property, Reading,
-    Readings, Space, Steps, Values, place,
+    Animation, Clock, Input, Linear, MAX_ANIMATIONS, Map, Name, Property, Reading, Readings, Space,
+    Steps, Values, place,
 };
 use architect_scene::layers::{Layer, Layers};
 use architect_scene::ops::{Receiver, Sender};
@@ -55,7 +55,10 @@ const fn wall(t: f64) -> Readings {
 const fn at(wall: f64, time: f64, running: bool) -> Readings {
     Readings {
         wall: Some(wall),
-        playhead: Some(Reading { time, running }),
+        playhead: Some(Reading {
+            time,
+            rate: if running { 1.0 } else { 0.0 },
+        }),
     }
 }
 
@@ -199,7 +202,7 @@ fn a_host_draws_every_frame_only_while_a_clock_one_reads_runs() {
     let paused = at(5.0, 1.0, false);
     assert!(!layers.moving(&paused));
     assert!(!layers.stale(&paused, &at(9.0, 1.0, false)));
-    // ...but a seek is drawn.
+    // ...but a seek that moves it is drawn.
     assert!(layers.stale(&paused, &at(9.0, 2.0, false)));
     // A layer bound to a value alone never is: its value's change is.
     let mut bound = Layers::new();
@@ -287,6 +290,8 @@ fn a_value_crosses_as_its_name_and_number_when_it_changes() {
 /// it.
 fn with_animate(animate: &[u8]) -> Vec<u8> {
     let mut batch = Sender::new().frame(&[(1, Layer::new(square()))]).unwrap();
+    // An `ANIMATE` is of the second version.
+    batch[3] = 2;
     batch.push(8);
     batch.extend_from_slice(&1_u64.to_le_bytes());
     batch.extend_from_slice(animate);
@@ -363,8 +368,8 @@ fn a_malformed_animation_fails_the_view() {
 }
 
 #[test]
-fn a_value_a_pane_may_not_read_or_write_fails_the_view() {
-    // Bound to the engine's value, ungranted.
+fn a_value_a_pane_may_not_write_fails_the_view_and_one_it_may_not_read_reads_nothing() {
+    // Bound to the engine's value, ungranted: taken, and drawn as sent.
     let engine = Name::new("engine.track.1.peak").unwrap();
     let mut sender = Sender::new();
     let bound = Layer::new(square()).animated(vec![Animation::linear(
@@ -373,13 +378,9 @@ fn a_value_a_pane_may_not_read_or_write_fails_the_view() {
         Linear::new(1.0, 0.0),
     )]);
     let batch = sender.frame(&[(1, bound)]).unwrap();
-    assert!(matches!(
-        Receiver::new().apply(&batch),
-        Err(Error::Denied("read", _))
-    ));
-    // Granted, it reads it.
-    let mut granted = Receiver::new().with_access(Access { engine: true });
-    granted.apply(&batch).unwrap();
+    let mut ungranted = Receiver::new();
+    ungranted.apply(&batch).unwrap();
+    assert_eq!(composed(&ungranted, &Readings::NONE), [0.0]);
     // A view writing another space's value.
     let host = Name::new("host.fader.1").unwrap();
     let batch = Sender::new()
@@ -494,4 +495,161 @@ fn a_batch_without_animations_is_the_bytes_it_was() {
     let mut r = Receiver::new();
     r.apply(&batch).unwrap();
     assert_eq!(composed(&r, &wall(5.0)), [3.0]);
+}
+
+#[test]
+fn a_step_on_a_running_clock_sleeps_until_it_is_due() {
+    use architect_scene::anim::Next;
+    let lyric = Animation::new(
+        Property::Visible,
+        Input::clock(Clock::Playhead),
+        Map::Steps(Steps {
+            before: 0.0,
+            steps: vec![(12.0, 1.0), (15.5, 0.0)],
+        }),
+    );
+    let on = |time, rate| Readings {
+        wall: Some(0.0),
+        playhead: Some(Reading { time, rate }),
+    };
+    assert_eq!(lyric.next(&on(10.0, 1.0)), Next::In(2.0));
+    // At half speed, twice as long; between its steps, the next one.
+    assert_eq!(lyric.next(&on(10.0, 0.5)), Next::In(4.0));
+    assert_eq!(lyric.next(&on(13.0, 1.0)), Next::In(2.5));
+    // Past the last, paused, or no playhead: never on its own.
+    assert_eq!(lyric.next(&on(16.0, 1.0)), Next::Never);
+    assert_eq!(lyric.next(&on(10.0, 0.0)), Next::Never);
+    assert_eq!(lyric.next(&wall(3.0)), Next::Never);
+    // Playing backwards: when it drops below the step it is on.
+    assert_eq!(lyric.next(&on(13.0, -1.0)), Next::In(1.0));
+    // A line moves every frame; held at its clamp it doesn't, and short
+    // of the clamp it moves into, it does once it gets there.
+    let line = |l: Linear| Animation::linear(Property::X, Input::clock(Clock::Wall), l);
+    assert_eq!(line(Linear::new(10.0, 0.0)).next(&wall(1.0)), Next::Every);
+    assert_eq!(
+        line(Linear::new(10.0, 0.0).clamp(0.0, 5.0)).next(&wall(1.0)),
+        Next::Never
+    );
+    assert_eq!(
+        line(Linear::new(10.0, -30.0).clamp(0.0, 50.0)).next(&wall(1.0)),
+        Next::In(2.0)
+    );
+    assert_eq!(line(Linear::new(0.0, 4.0)).next(&wall(1.0)), Next::Never);
+    // A pane: the soonest of its layers.
+    let mut layers = Layers::new();
+    layers.set(1, Layer::new(square()).animated(vec![lyric]));
+    assert_eq!(layers.next(&on(14.0, 1.0)), Next::In(1.5));
+    assert!(!layers.moving(&on(14.0, 1.0)));
+    layers.set(2, Layer::new(square()).animated(vec![playhead()]));
+    assert!(layers.moving(&on(14.0, 1.0)));
+}
+
+#[test]
+fn a_seek_is_drawn_only_when_it_changes_what_is_drawn() {
+    let mut layers = Layers::new();
+    layers.set(
+        1,
+        Layer::new(square()).animated(vec![Animation::new(
+            Property::Visible,
+            Input::clock(Clock::Playhead),
+            Map::Steps(Steps {
+                before: 0.0,
+                steps: vec![(12.0, 1.0), (15.5, 0.0)],
+            }),
+        )]),
+    );
+    let paused = |t| at(0.0, t, false);
+    assert!(
+        !layers.stale(&paused(13.0), &paused(14.0)),
+        "within one step"
+    );
+    assert!(layers.stale(&paused(13.0), &paused(16.0)), "past it");
+    assert!(
+        layers.stale(&paused(13.0), &wall(1.0)),
+        "nothing on the playhead"
+    );
+}
+
+#[test]
+fn a_batch_is_written_at_the_lowest_version_that_holds_it() {
+    use architect_scene::ops::{MAGIC, VERSION};
+    let still = Sender::new().frame(&[(1, Layer::new(square()))]).unwrap();
+    assert_eq!(&still[..4], &MAGIC);
+    let moving = Sender::new()
+        .frame(&[(1, Layer::new(square()).animated(vec![playhead()]))])
+        .unwrap();
+    assert_eq!(&moving[..4], b"ASO\x02");
+    assert_eq!(VERSION, 2);
+    // A host that reads the first version only matches `MAGIC` exactly:
+    // this batch is refused whole, as not one it reads.
+    assert_ne!(&moving[..4], &MAGIC);
+    // One from a later host than this: refused by its version.
+    let mut later = moving.clone();
+    later[3] = 3;
+    assert_eq!(Receiver::new().apply(&later), Err(Error::Version(3, 2)));
+    // A first-version batch can't hold a later operation.
+    let mut mislabelled = moving;
+    mislabelled[3] = 1;
+    assert!(matches!(
+        Receiver::new().apply(&mislabelled),
+        Err(Error::Unknown(_, 8))
+    ));
+}
+
+#[test]
+fn a_clock_moved_wakes_every_host_that_asked_while_it_lives() {
+    use architect_scene::wake;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let woken = Arc::new(AtomicUsize::new(0));
+    let count = Arc::clone(&woken);
+    let waker: wake::Waker = Arc::new(move || {
+        count.fetch_add(1, Ordering::Relaxed);
+    });
+    wake::on_clocks_moved(&waker);
+    wake::clocks_moved();
+    assert!(woken.load(Ordering::Relaxed) >= 1);
+    // Gone: never called again.
+    let before = woken.load(Ordering::Relaxed);
+    drop(waker);
+    wake::clocks_moved();
+    assert_eq!(woken.load(Ordering::Relaxed), before);
+}
+
+#[test]
+fn an_alarm_wakes_its_host_at_the_next_step_and_not_every_frame() {
+    use architect_scene::anim::Next;
+    use architect_scene::wake::Alarm;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::{Duration, Instant};
+    let woken = Arc::new(AtomicUsize::new(0));
+    let count = Arc::clone(&woken);
+    let alarm = Alarm::new(Arc::new(move || {
+        count.fetch_add(1, Ordering::Relaxed);
+    }));
+    assert!(alarm.drawn(Next::Every), "every frame");
+    assert!(!alarm.drawn(Next::Never));
+    let began = Instant::now();
+    assert!(!alarm.drawn(Next::In(0.03)), "it rests until then");
+    // Asked again for the same step: one wake, not two.
+    assert!(!alarm.drawn(Next::In(0.029)));
+    while woken.load(Ordering::Relaxed) == 0 {
+        assert!(began.elapsed() < Duration::from_secs(5), "never woken");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    // The timer itself, with a waker no clock move reaches: not before.
+    let timed = Arc::new(AtomicUsize::new(0));
+    let count = Arc::clone(&timed);
+    let waker: architect_scene::wake::Waker = Arc::new(move || {
+        count.fetch_add(1, Ordering::Relaxed);
+    });
+    let began = Instant::now();
+    assert!(architect_scene::wake::after(
+        Duration::from_millis(30),
+        &waker
+    ));
+    while timed.load(Ordering::Relaxed) == 0 {
+        assert!(began.elapsed() < Duration::from_secs(5), "never woken");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(began.elapsed() >= Duration::from_millis(30));
 }

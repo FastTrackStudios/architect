@@ -1058,11 +1058,15 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
                     deck.current()
                         .map(|source| architect_workspace::paint::anim::Reading {
                             time: source.time(now),
-                            running: source.transport.playing,
+                            rate: source.rate(now),
                         })
                 })
             });
             architect_playhead::on_change("app.event", move |state| {
+                // A seek, a play or a pause: every window with layers on
+                // the playhead draws them at the new reading, a pop-out
+                // whose own frames are resting too.
+                architect_workspace::paint::wake::clocks_moved();
                 let _ = architect_playhead::raise_changed(&host, state);
                 // Its source's playing, as its extension's own runtime
                 // state: a favourite's primary shows Pause by it (#607).

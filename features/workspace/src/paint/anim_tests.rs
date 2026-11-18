@@ -3,7 +3,11 @@
 //! was moved), and a view linked in composes to what the same view does
 //! from across the wire.
 
-#![allow(clippy::arithmetic_side_effects, clippy::unnecessary_wraps)]
+#![allow(
+    clippy::arithmetic_side_effects,
+    clippy::unnecessary_wraps,
+    clippy::panic
+)]
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -39,17 +43,11 @@ impl Hands {
 }
 
 const fn playing(time: f64) -> Option<Reading> {
-    Some(Reading {
-        time,
-        running: true,
-    })
+    Some(Reading::moving(time, 1.0))
 }
 
 const fn paused(time: f64) -> Option<Reading> {
-    Some(Reading {
-        time,
-        running: false,
-    })
+    Some(Reading::still(time))
 }
 
 /// A playhead's line, a lyric line shown from 1 s to 2 s, a meter bound
@@ -262,14 +260,308 @@ fn a_painters_values_are_its_views_own() {
         }
     }
     let mine = Name::new("view.a").unwrap();
+    let mut painter = Painter::new(ctx(), Writes(vec![(mine.clone(), 1.0)]));
+    let _ = painter.frame(AT);
+    assert_eq!(painter.values().unwrap().get(&mine), Some(1.0));
+    // Another space's value fails the view, as from a process
+    // (`a_view_fails_the_same_way_linked_in_or_across_the_wire`).
     let hosts = Name::new("host.fader").unwrap();
+    let mut painter = Painter::new(ctx(), Writes(vec![(hosts, 2.0)]));
+    let _ = painter.frame(AT);
+    assert!(matches!(
+        painter.failed(),
+        Some(architect_scene::Error::Denied("write", _))
+    ));
+}
+
+/// A view that returns `layers` and `values`, counting the times asked.
+struct Returns {
+    layers: Vec<(LayerKey, Layer)>,
+    values: Vec<(Name, f64)>,
+    asked: Arc<AtomicUsize>,
+}
+
+impl PaintView for Returns {
+    fn input(&mut self, _: &ViewCtx, _: &ViewInput) -> bool {
+        false
+    }
+
+    fn paint(&mut self, _: &ViewCtx, _: &mut Scene) {}
+
+    fn layers(&mut self, _: &ViewCtx) -> Option<Vec<(LayerKey, Layer)>> {
+        self.asked.fetch_add(1, Ordering::Relaxed);
+        Some(self.layers.clone())
+    }
+
+    fn values(&mut self, _: &ViewCtx) -> Vec<(Name, f64)> {
+        self.values.clone()
+    }
+}
+
+#[test]
+fn a_view_fails_the_same_way_linked_in_or_across_the_wire() {
+    let content = Song::new(Arc::default()).content;
+    let wrapped = |every: f64| {
+        Layer::new(Arc::clone(&content)).animated(vec![Animation::linear(
+            Property::X,
+            Input::clock(Clock::Wall),
+            Linear::new(1.0, 0.0).wrap(every),
+        )])
+    };
+    let cases: Vec<(Vec<(LayerKey, Layer)>, Vec<(Name, f64)>)> = vec![
+        // A wrap of nothing.
+        (vec![(1, wrapped(0.0))], vec![]),
+        // A wrap below nothing.
+        (vec![(1, wrapped(-1.0))], vec![]),
+        // Writing the host's value.
+        (vec![], vec![(Name::new("host.fader").unwrap(), 1.0)]),
+    ];
+    for (layers, values) in cases {
+        let across = Receiver::new()
+            .apply(&Sender::new().frame_with(&layers, &values).unwrap())
+            .unwrap_err();
+        let asked = Arc::new(AtomicUsize::new(0));
+        let mut linked = Painter::new(
+            ctx(),
+            Returns {
+                layers,
+                values,
+                asked: Arc::clone(&asked),
+            },
+        );
+        let drawn = linked.frame(AT);
+        assert_eq!(linked.failed(), Some(&across));
+        assert!(drawn.commands.is_empty(), "a failed view draws nothing");
+        // ...and is asked nothing again, and wants no frame.
+        linked.invalidate();
+        assert!(!linked.wants_frame());
+        let _ = linked.frame(AT);
+        assert_eq!(asked.load(Ordering::Relaxed), 1);
+    }
+    // A well-formed one doesn't fail.
+    let mut fine = Painter::new(
+        ctx(),
+        Returns {
+            layers: vec![(1, wrapped(10.0))],
+            values: vec![],
+            asked: Arc::default(),
+        },
+    );
+    let _ = fine.frame(AT);
+    assert_eq!(fine.failed(), None);
+}
+
+#[test]
+fn a_stepped_layer_rests_until_its_step_and_a_line_moves_every_frame() {
+    use architect_scene::anim::Next;
+    let hands = Hands::default();
+    let content = Song::new(Arc::default()).content;
+    let lyric = Layer::new(Arc::clone(&content)).animated(vec![Animation::new(
+        Property::Visible,
+        Input::clock(Clock::Playhead),
+        Map::Steps(Steps {
+            before: 0.0,
+            steps: vec![(1.0, 1.0), (2.0, 0.0)],
+        }),
+    )]);
     let mut painter = Painter::new(
         ctx(),
-        Writes(vec![(mine.clone(), 1.0), (hosts.clone(), 2.0)]),
+        Returns {
+            layers: vec![(1, lyric)],
+            values: vec![],
+            asked: Arc::default(),
+        },
+    )
+    .with_clocks(hands.clocks());
+    hands.set(0.0, playing(0.5));
+    let _ = painter.frame(AT);
+    // Playing, but nothing drawn changes for half a second: no frames.
+    assert_eq!(painter.next(), Next::In(0.5));
+    assert!(!painter.animating());
+    hands.set(0.1, playing(0.75));
+    assert!(!painter.wants_frame());
+    // Its step came: a frame.
+    hands.set(0.6, playing(1.1));
+    assert!(painter.wants_frame());
+}
+
+/// A fader as a linked view: a track with a drag, a knob bound to it, and
+/// what it heard.
+struct Fader {
+    content: Arc<Vec<RenderCommand>>,
+    heard: Arc<Mutex<Vec<RegionEvent>>>,
+    asked: Arc<AtomicUsize>,
+}
+
+fn fader_name() -> Name {
+    Name::new("host.fader").unwrap()
+}
+
+fn fader_layers(content: &Arc<Vec<RenderCommand>>) -> Vec<(LayerKey, Layer)> {
+    use architect_scene::region::{Axis, Drag, Region, Shape};
+    vec![
+        (
+            1,
+            Layer::new(Arc::clone(content)).regions(vec![
+                Region::new(9, Shape::Rect(Rect::new(0.0, 0.0, 20.0, 100.0)))
+                    .cursor(Cursor::NsResize)
+                    .hover(Color::from_rgba8(255, 255, 255, 30))
+                    .drag(Drag {
+                        value: fader_name(),
+                        axis: Axis::Y,
+                        scale: -0.01,
+                        min: 0.0,
+                        max: 1.0,
+                        step: None,
+                        initial: 0.5,
+                    }),
+            ]),
+        ),
+        (
+            2,
+            Layer::new(Arc::clone(content))
+                .z(1)
+                .animated(vec![Animation::linear(
+                    Property::Y,
+                    Input::Value(fader_name()),
+                    Linear::new(-100.0, 100.0),
+                )]),
+        ),
+    ]
+}
+
+impl PaintView for Fader {
+    fn input(&mut self, _: &ViewCtx, _: &ViewInput) -> bool {
+        panic!("a press on a region is the region's");
+    }
+
+    fn paint(&mut self, _: &ViewCtx, _: &mut Scene) {}
+
+    fn layers(&mut self, _: &ViewCtx) -> Option<Vec<(LayerKey, Layer)>> {
+        self.asked.fetch_add(1, Ordering::Relaxed);
+        Some(fader_layers(&self.content))
+    }
+
+    fn region(&mut self, _: &ViewCtx, event: &RegionEvent) -> bool {
+        self.heard.lock().unwrap().push(*event);
+        false
+    }
+}
+
+#[test]
+fn a_linked_fader_follows_the_pointer_without_its_view_and_draws_as_one_across_the_wire() {
+    use architect_scene::region::{Axis, Interaction};
+    let content = Song::new(Arc::default()).content;
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let asked = Arc::new(AtomicUsize::new(0));
+    let mut painter = Painter::new(
+        ctx(),
+        Fader {
+            content: Arc::clone(&content),
+            heard: Arc::clone(&heard),
+            asked: Arc::clone(&asked),
+        },
+    )
+    .with_clocks(Hands::default().clocks());
+    // The same view across the wire: a receiver, and the host's pointer.
+    let mut receiver = Receiver::new();
+    receiver
+        .apply(&Sender::new().frame(&fader_layers(&content)).unwrap())
+        .unwrap();
+    let mut remote = Interaction::new();
+    let clocks = Hands::default().clocks();
+    let _ = painter.frame(AT);
+    let point = |y: f32| ViewInput::PointerMove {
+        x: 10.0,
+        y,
+        mods: vec![],
+    };
+    let mut both = |input: &ViewInput, y: f32| {
+        let consumed = painter.pointer(input);
+        let (layers, values) = receiver.parts_mut();
+        let at = peniko::kurbo::Point::new(10.0, f64::from(y));
+        let now = clocks.read();
+        let o = match input {
+            ViewInput::PointerDown { .. } => remote.pressed(layers, &now, values, at),
+            ViewInput::PointerUp { .. } => remote.released(layers, &now, values, at),
+            _ => remote.moved(layers, &now, values, at),
+        };
+        assert_eq!(consumed, o.consumed);
+        let here = painter.frame(AT).commands;
+        let mut there = Scene::new();
+        receiver.layers().compose_lit(
+            &mut there,
+            Affine::scale(2.0),
+            &clocks.read(),
+            receiver.values(),
+            remote.lit(),
+        );
+        assert_eq!(here, there.commands, "at y {y}");
+        here
+    };
+    let _ = both(&point(50.0), 50.0);
+    let down = ViewInput::PointerDown {
+        x: 10.0,
+        y: 50.0,
+        button: crate::ctx::Button::Primary,
+        mods: vec![],
+    };
+    let _ = both(&down, 50.0);
+    let mut last = Vec::new();
+    for step in 1..=30_u8 {
+        let y = 50.0 - f32::from(step);
+        let drawn = both(&point(y), y);
+        assert_ne!(drawn, last, "step {step} drew the last frame again");
+        last = drawn;
+    }
+    let up = ViewInput::PointerUp {
+        x: 10.0,
+        y: 20.0,
+        button: crate::ctx::Button::Primary,
+        mods: vec![],
+    };
+    let _ = both(&up, 20.0);
+    assert!((painter.values().unwrap().get(&fader_name()).unwrap() - 0.8).abs() < 1e-9);
+    assert_eq!(asked.load(Ordering::Relaxed), 1, "the view was asked again");
+    // It heard each frame's value once, and the release.
+    let heard = heard.lock().unwrap();
+    assert_eq!(heard[0], RegionEvent::Enter(9));
+    assert_eq!(heard[1], RegionEvent::Press(9));
+    let values = heard
+        .iter()
+        .filter(|e| matches!(e, RegionEvent::Value(9, Axis::Y, _)))
+        .count();
+    assert_eq!(values, 30);
+    assert_eq!(heard.last(), Some(&RegionEvent::Release(9)));
+}
+
+#[test]
+fn a_linked_regions_cursor_is_the_hosts_to_show() {
+    let content = Song::new(Arc::default()).content;
+    let mut painter = Painter::new(
+        ctx(),
+        Fader {
+            content,
+            heard: Arc::default(),
+            asked: Arc::default(),
+        },
     );
     let _ = painter.frame(AT);
-    let values = painter.values().unwrap();
-    assert_eq!(values.get(&mine), Some(1.0));
-    // As a host refuses it from a process: not the view's to write.
-    assert_eq!(values.get(&hosts), None);
+    let at = |x: f32| ViewInput::PointerMove {
+        x,
+        y: 50.0,
+        mods: vec![],
+    };
+    assert!(
+        !painter.pointer(&at(10.0)),
+        "a hover is still the view's to see"
+    );
+    assert_eq!(painter.take_cursor(), Some(Cursor::NsResize));
+    assert!(painter.wants_frame(), "its highlight is drawn");
+    let _ = painter.frame(AT);
+    assert!(!painter.wants_frame());
+    let _ = painter.pointer(&at(15.0));
+    assert_eq!(painter.take_cursor(), None, "unchanged");
+    let _ = painter.pointer(&at(300.0));
+    assert_eq!(painter.take_cursor(), Some(Cursor::Default));
 }

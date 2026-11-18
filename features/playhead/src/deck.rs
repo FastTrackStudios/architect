@@ -203,6 +203,20 @@ impl Source {
         self.transport.at(now, self.duration())
     }
 
+    /// How fast it moves at `now`: its rate while it plays, 0 while it
+    /// is paused or stands at the end of its item (playing, but held
+    /// there until the deck moves on).
+    #[must_use]
+    pub fn rate(&self, now: f64) -> f64 {
+        let duration = self.duration();
+        let at_end = duration > 0.0 && self.time(now) >= duration;
+        if self.transport.playing && !at_end {
+            self.transport.rate
+        } else {
+            0.0
+        }
+    }
+
     fn halt(&mut self, now: f64) {
         let t = self.time(now);
         self.transport = Transport::still(t, now);
@@ -757,6 +771,19 @@ mod tests {
         d.apply(&ext("studio"), spec(&other), None, 3_000.0)
             .unwrap();
         assert_eq!(d.source("studio").unwrap().index, 0);
+    }
+
+    #[test]
+    fn a_source_moves_while_it_plays_and_not_at_the_end_of_its_item() {
+        let mut d = Deck::new();
+        d.apply(&ext("studio"), spec(&two()), None, 0.0).unwrap();
+        let rate = |d: &Deck, now| d.source("studio").unwrap().rate(now);
+        assert_eq!(rate(&d, 0.0), 0.0, "paused");
+        d.apply(&ext("studio"), Control::Play, None, 0.0).unwrap();
+        assert_eq!(rate(&d, 50_000.0), 1.0);
+        // Still playing, but held at the end of its 100 s item.
+        assert_eq!(rate(&d, 100_000.0), 0.0);
+        assert_eq!(rate(&d, 250_000.0), 0.0);
     }
 
     #[test]

@@ -164,6 +164,13 @@ pub struct RemoteDocument {
     /// What its layers' animations read (`architect_scene::anim`): the
     /// app's clocks unless told.
     clocks: architect_scene::Clocks,
+    /// Wakes its window at its layers' next step and when a clock jumps
+    /// (`architect_scene::wake`), once it has a window.
+    alarm: Option<Arc<architect_scene::wake::Alarm>>,
+    /// The painted element the pointer is over or holds a region of.
+    pointed: Option<NodeId>,
+    /// The engine's values its scenes read, when it was granted them.
+    engine: Option<Arc<architect_scene::engine::EngineTable>>,
 }
 
 impl std::fmt::Debug for RemoteDocument {
@@ -232,6 +239,150 @@ impl RemoteDocument {
             painted: HashMap::new(),
             scene_bytes: 0,
             clocks: architect_scene::Clocks::app(),
+            alarm: None,
+            pointed: None,
+            engine: None,
+        }
+    }
+
+    /// Its scenes read the engine's values from `table` (its extension
+    /// was granted `engine`): an animation bound to one is drawn at the
+    /// level the engine last wrote, and its window wakes when the engine
+    /// writes after a rest.
+    pub fn set_engine(&mut self, table: Option<Arc<architect_scene::engine::EngineTable>>) {
+        for painted in self.painted.values() {
+            let mut p = painted.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some(layers) = p.layers.as_mut() {
+                layers.grant(table.clone());
+            }
+            p.dirty = true;
+        }
+        self.engine = table;
+        self.watch_engine();
+    }
+
+    fn watch_engine(&self) {
+        if let (Some(table), Some(alarm)) = (&self.engine, &self.alarm) {
+            architect_scene::engine::watch(table, alarm.waker());
+        }
+    }
+
+    /// The painted element whose box holds `(x, y)` (its document's CSS
+    /// pixels), and the point in it.
+    fn painted_at(&self, x: f32, y: f32) -> Option<(NodeId, peniko::kurbo::Point)> {
+        self.painted.keys().copied().find_map(|node| {
+            let n = self.doc.get_node(node)?;
+            let at = n.absolute_position(0.0, 0.0);
+            let size = n.final_layout().size;
+            let (dx, dy) = (x - at.x, y - at.y);
+            ((0.0..size.width).contains(&dx) && (0.0..size.height).contains(&dy)).then(|| {
+                (
+                    node,
+                    peniko::kurbo::Point::new(f64::from(dx), f64::from(dy)),
+                )
+            })
+        })
+    }
+
+    /// A pointer event for its scenes' hit regions, before the view
+    /// hears it: whether it was theirs (a press on a region, a drag), and
+    /// so not forwarded. Hover, the cursor and a drag are drawn here,
+    /// with no word to the view but what its regions heard.
+    fn regions_event(&mut self, event: &UiEvent) -> (bool, bool) {
+        use crate::scene::PointerKind;
+        let (p, kind) = match event {
+            UiEvent::PointerMove(p) => (p, PointerKind::Move),
+            UiEvent::PointerDown(p) => (p, PointerKind::Down),
+            UiEvent::PointerUp(p) => (p, PointerKind::Up),
+            UiEvent::PointerLeave(p) | UiEvent::PointerCancel(p) => (p, PointerKind::Gone),
+            _ => return (false, false),
+        };
+        if self.painted.values().all(|p| {
+            p.lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .layers
+                .as_ref()
+                .is_none_or(|l| l.layers().region_count() == 0)
+        }) {
+            return (false, false);
+        }
+        let (x, y) = (p.coords.client_x, p.coords.client_y);
+        let holding = self.pointed.filter(|node| {
+            self.painted.get(node).is_some_and(|p| {
+                p.lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .interaction
+                    .holding()
+            })
+        });
+        let under = self.painted_at(x, y);
+        // Held: the element that holds it hears it wherever it goes.
+        let target = match (holding, under) {
+            (Some(node), _) => self.doc.get_node(node).map(|n| {
+                let at = n.absolute_position(0.0, 0.0);
+                (
+                    node,
+                    peniko::kurbo::Point::new(f64::from(x - at.x), f64::from(y - at.y)),
+                )
+            }),
+            (None, under) => under,
+        };
+        let mut outcomes = Vec::new();
+        // Off the element it was over: that one's hover ends.
+        if let Some(was) = self
+            .pointed
+            .filter(|was| target.is_none_or(|(now, _)| now != *was))
+            && let Some(painted) = self.painted.get(&was)
+        {
+            let mut p = painted.lock().unwrap_or_else(PoisonError::into_inner);
+            outcomes.push(p.pointer(PointerKind::Gone, peniko::kurbo::Point::ZERO));
+        }
+        self.pointed = target.map(|(node, _)| node);
+        if let Some((node, at)) = target
+            && let Some(painted) = self.painted.get(&node)
+        {
+            let outcome = painted
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .pointer(kind, at);
+            outcomes.push(outcome);
+            if kind == PointerKind::Gone {
+                self.pointed = None;
+            }
+        }
+        let shell = Arc::clone(&self.doc.shell_provider);
+        let (mut consumed, mut cursor) = (false, false);
+        for o in outcomes {
+            consumed |= o.consumed;
+            cursor |= o.cursor.is_some();
+            if o.redraw {
+                shell.request_redraw();
+            }
+        }
+        if consumed && let Some(layer) = &self.overlay {
+            layer.touch();
+        }
+        (consumed, cursor)
+    }
+
+    /// Shows the cursor the region under the pointer asks for: after the
+    /// view's own document set its element's, which it does when its
+    /// hover changes.
+    fn region_cursor(&self, changed: bool) {
+        let cursor = self
+            .pointed
+            .and_then(|node| self.painted.get(&node))
+            .map(|p| {
+                p.lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .interaction
+                    .cursor()
+            })
+            .unwrap_or_default();
+        if changed || cursor != architect_scene::region::Cursor::Default {
+            self.doc
+                .shell_provider
+                .set_cursor(cursor.css().parse::<cursor_icon::CursorIcon>().ok());
         }
     }
 
@@ -289,6 +440,19 @@ impl RemoteDocument {
                 data: EventData::Composition(String::new()),
             });
         }
+    }
+
+    /// The value `name` holds in its scenes' layers (`architect_scene`
+    /// values: the view's, the host's, a drag's), if one holds it.
+    #[must_use]
+    pub fn scene_value(&self, name: &architect_scene::anim::Name) -> Option<f64> {
+        self.painted.values().find_map(|p| {
+            p.lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .layers
+                .as_ref()
+                .and_then(|l| l.values().get(name))
+        })
     }
 
     /// How many bytes of scene content and transforms the view has sent.
@@ -430,6 +594,7 @@ impl RemoteDocument {
             .scene_bytes
             .saturating_add(u64::try_from(value.len()).unwrap_or(u64::MAX));
         let batch = crate::scene::layers_batch(value)?;
+        let engine = self.engine.clone();
         if !self.painted.contains_key(&node) {
             // The widget, as a scene's.
             self.paint_attr(node, crate::scene::TRANSFORM_ATTR, None)?;
@@ -440,7 +605,11 @@ impl RemoteDocument {
         let mut p = painted.lock().unwrap_or_else(PoisonError::into_inner);
         let applied = p
             .layers
-            .get_or_insert_with(architect_scene::ops::Receiver::new)
+            .get_or_insert_with(|| {
+                let mut receiver = architect_scene::ops::Receiver::new();
+                receiver.grant(engine.clone());
+                receiver
+            })
             .apply(&batch)
             .map_err(|e| format!("its layers: {e}"));
         p.dirty = true;
@@ -504,6 +673,10 @@ impl RemoteDocument {
             layers: None,
             clocks: self.clocks.clone(),
             drawn: architect_scene::Readings::NONE,
+            alarm: self.alarm.clone(),
+            interaction: architect_scene::region::Interaction::new(),
+            drawn_lit: None,
+            drawn_values: 0,
             transform: transform.unwrap_or(Affine::IDENTITY),
             element,
             dirty: true,
@@ -529,6 +702,15 @@ impl RemoteDocument {
     /// Gives the view the host window's input method, clipboard and
     /// redraws ([`HostShell`]): a field in it can be composed into.
     pub fn set_host_shell(&mut self, shell: HostShell) {
+        let window = Arc::clone(&shell.window);
+        let alarm = Arc::new(architect_scene::wake::Alarm::new(Arc::new(move || {
+            window.request_redraw();
+        })));
+        for painted in self.painted.values() {
+            painted.lock().unwrap_or_else(PoisonError::into_inner).alarm = Some(Arc::clone(&alarm));
+        }
+        self.alarm = Some(alarm);
+        self.watch_engine();
         self.doc.set_shell_provider(Arc::new(shell));
     }
 
@@ -949,6 +1131,13 @@ impl Document for RemoteDocument {
     }
 
     fn handle_ui_event(&mut self, event: UiEvent) {
+        // Its scenes' hit regions first: a press or a drag on one is the
+        // host's, and the view hears what its regions heard instead.
+        let (consumed, cursor) = self.regions_event(&event);
+        if consumed {
+            self.region_cursor(cursor);
+            return;
+        }
         // A pointer that comes back, or leaves, with no button held lost
         // its release where the view couldn't see it: what it held is
         // let go.
@@ -966,9 +1155,16 @@ impl Document for RemoteDocument {
             held: &mut self.held,
             composing: &mut self.composing,
         };
+        let pointer = matches!(
+            event,
+            UiEvent::PointerMove(_) | UiEvent::PointerUp(_) | UiEvent::PointerLeave(_)
+        );
         EventDriver::new(&mut self.doc, forward).handle_ui_event(event);
         if releases {
             self.held = None;
+        }
+        if pointer {
+            self.region_cursor(cursor);
         }
     }
 }
@@ -1178,6 +1374,10 @@ impl HostShell {
 impl ShellProvider for HostShell {
     fn request_redraw(&self) {
         self.window.request_redraw();
+    }
+
+    fn set_cursor(&self, icon: Option<cursor_icon::CursorIcon>) {
+        self.window.set_cursor(icon);
     }
 
     fn set_ime_enabled(&self, is_enabled: bool) {
@@ -1475,6 +1675,7 @@ async fn follow(
     mut timing: Timing,
     fit: Option<Fit>,
     overlay: Option<crate::scene::OverlayLayer>,
+    engine: bool,
     mut slots: Signal<Vec<crate::embedded::Slot>>,
 ) {
     loop {
@@ -1561,6 +1762,11 @@ async fn follow(
         let shell = with_doc(&node, |doc, at| {
             let mut remote = RemoteDocument::new(events);
             remote.set_overlay(overlay.clone());
+            // Granted the engine's values: its scenes read the table its
+            // engine published (`architect_scene::engine`).
+            if engine {
+                remote.set_engine(architect_scene::engine::published(&extension));
+            }
             if let Some(css) = theme {
                 remote.set_theme_css(&css.peek());
             }
@@ -1799,13 +2005,15 @@ async fn next_frame(
 ///
 /// Its scenes (`crate::scene`) are clipped to their boxes unless
 /// `overlay`: the extension was granted `overlay` (`capabilities.ui`) and
-/// may draw over the whole app.
+/// may draw over the whole app. `engine`: it was granted `engine`, and
+/// its scenes read the values its engine writes lock-free.
 #[component]
 pub fn RemoteView(
     processes: Processes,
     extension: String,
     view: String,
     #[props(default)] overlay: bool,
+    #[props(default)] engine: bool,
 ) -> Element {
     // Keyed by what it shows (a one-item list: a key on a lone node does
     // not remount it): a pane that goes on to another process view (one
@@ -1814,7 +2022,7 @@ pub fn RemoteView(
     let key = format!("{extension}/{view}");
     rsx! {
         for key in [key] {
-            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: None, max_height: None, overlay }
+            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: None, max_height: None, overlay, engine }
         }
     }
 }
@@ -1834,7 +2042,7 @@ pub fn RemoteEmbed(
     let key = format!("{extension}/{view}");
     rsx! {
         for key in [key] {
-            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: Some(input), max_height: Some(max_height), overlay: false }
+            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: Some(input), max_height: Some(max_height), overlay: false, engine: false }
         }
     }
 }
@@ -1865,7 +2073,7 @@ pub fn RemoteOverlay(
     let key = format!("{extension}/{view}");
     rsx! {
         for key in [key] {
-            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: Some(signal), max_height: None, overlay: false }
+            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: Some(signal), max_height: None, overlay: false, engine: false }
         }
     }
 }
@@ -1893,7 +2101,7 @@ fn HeldView(processes: Processes, slot: crate::embedded::Slot) -> Element {
     let key = format!("{extension}/{view}");
     rsx! {
         for key in [key] {
-            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: Some(signal), max_height: None, overlay: false }
+            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: Some(signal), max_height: None, overlay: false, engine: false }
         }
     }
 }
@@ -1951,6 +2159,7 @@ fn Mount(
     input: Option<Signal<crate::contrib::EmbedInput>>,
     max_height: Option<u32>,
     overlay: bool,
+    engine: bool,
 ) -> Element {
     let shown = use_signal(|| Shown::Waiting("Starting…".to_owned()));
     let busy = use_signal(|| false);
@@ -2045,6 +2254,7 @@ fn Mount(
                     },
                     fit.clone(),
                     layer.clone(),
+                    engine,
                     slots,
                 ));
                 if fit.as_ref().is_some_and(|f| f.sized) {

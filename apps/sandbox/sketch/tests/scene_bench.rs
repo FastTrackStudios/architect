@@ -63,36 +63,39 @@ fn report(scene: &str, what: &str, mut samples: Vec<Duration>) {
 
 /// A glyph-shaped outline at (`x`, `y`): a closed path of 24 curves.
 fn glyph(x: f64, y: f64, seed: u32) -> BezPath {
-    let mut p = BezPath::new();
+    let mut path = BezPath::new();
     let wobble = |i: u32| f64::from((seed.wrapping_mul(31).wrapping_add(i * 17)) % 97) / 97.0;
-    p.move_to((x, y));
+    path.move_to((x, y));
     for i in 0..24_u32 {
-        let a = f64::from(i) / 24.0 * std::f64::consts::TAU;
-        let r = 4.0 + wobble(i) * 3.0;
-        let (sx, sy) = (x + a.cos() * r, y + a.sin() * r);
-        p.curve_to(
+        let angle = f64::from(i) / 24.0 * std::f64::consts::TAU;
+        let radius = f64::mul_add(wobble(i), 3.0, 4.0);
+        let (sx, sy) = (
+            angle.cos().mul_add(radius, x),
+            angle.sin().mul_add(radius, y),
+        );
+        path.curve_to(
             (sx + wobble(i + 1), sy - wobble(i + 2)),
             (sx - wobble(i + 3), sy + wobble(i + 4)),
             (sx + 0.37, sy + 0.61),
         );
     }
-    p.close_path();
-    p
+    path.close_path();
+    path
 }
 
 /// A chart's staff lines and barlines, for `systems` systems.
 fn staves(scene: &mut Scene, systems: u32, ink: Color) {
     for s in 0..systems {
-        let top = f64::from(s) * 90.0 + 40.0;
+        let top = f64::mul_add(f64::from(s), 90.0, 40.0);
         for line in 0..5_u32 {
-            let y = top + f64::from(line) * 6.0;
+            let y = f64::mul_add(f64::from(line), 6.0, top);
             let mut staff = BezPath::new();
             staff.move_to((36.0, y));
             staff.line_to((1164.0, y));
             scene.stroke(&Stroke::new(0.6), Affine::IDENTITY, ink, None, &staff);
         }
         for bar in 0..5_u32 {
-            let x = 36.0 + f64::from(bar) * 282.0;
+            let x = f64::mul_add(f64::from(bar), 282.0, 36.0);
             let mut line = BezPath::new();
             line.move_to((x, top));
             line.line_to((x, top + 24.0));
@@ -129,8 +132,8 @@ fn chart_glyph_runs(glyphs: u32, font: &FontData) -> Vec<RenderCommand> {
                     let (s, i) = (g / per_system, g % per_system);
                     Glyph {
                         id: g % 500 + 1,
-                        x: 44.0 + i as f32 * 10.2,
-                        y: s as f32 * 90.0 + 40.0 + ((g * 7) % 30) as f32,
+                        x: (i as f32).mul_add(10.2, 44.0),
+                        y: (s as f32).mul_add(90.0, 40.0) + ((g * 7) % 30) as f32,
                     }
                 })
                 .collect(),
@@ -160,8 +163,8 @@ fn measure_fragment(name: &str, commands: &[RenderCommand], first: bool) {
             }),
         );
     }
-    let mut encoder = architect_scene::Encoder::new();
-    let _ = encoder.encode(commands);
+    let mut warm = architect_scene::Encoder::new();
+    let _ = warm.encode(commands);
     report(
         name,
         if first {
@@ -169,7 +172,7 @@ fn measure_fragment(name: &str, commands: &[RenderCommand], first: bool) {
         } else {
             "fragment encode"
         },
-        time(200, || drop(encoder.encode(commands))),
+        time(200, || drop(warm.encode(commands))),
     );
     let mut resources = architect_scene::Resources::new();
     for (_, resource) in encoded.resources {
@@ -196,8 +199,8 @@ fn chart_scene(glyphs: u32) -> Vec<RenderCommand> {
     staves(&mut scene, glyphs.div_ceil(per_system), ink);
     for g in 0..glyphs {
         let (s, i) = (g / per_system, g % per_system);
-        let x = 44.0 + f64::from(i) * 10.2;
-        let y = f64::from(s) * 90.0 + 40.0 + f64::from((g * 7) % 30);
+        let x = f64::mul_add(f64::from(i), 10.2, 44.0);
+        let y = f64::mul_add(f64::from(s), 90.0, 40.0) + f64::from((g * 7) % 30);
         scene.fill(Fill::NonZero, Affine::IDENTITY, ink, None, &glyph(x, y, g));
     }
     scene.commands

@@ -36,6 +36,8 @@ anyrender_vello_cpu = { workspace = true }
 png = { workspace = true }
 # tests/scene_bench.rs: the fragment format beside today's scenes.
 architect-scene = { workspace = true }
+# tests/sketch.rs: the cursor a hit region sets on the window.
+cursor-icon = { workspace = true }
 
 [lints]
 workspace = true

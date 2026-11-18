@@ -14,6 +14,9 @@
 //!   draws; it never carries them.
 //! - [`layers`] are what a pane's host keeps of it: content by key, and
 //!   where each piece is drawn, composed every frame without the view.
+//! - [`region`] is what a pointer does over a layer, handled by its
+//!   host: hover, cursor and press by a region's id, and a drag that
+//!   writes a value a layer is bound to.
 //! - [`anim`] is how a layer moves without the view: a property as a
 //!   function of a clock (wall time, the app's playhead) or of a named
 //!   value (a meter, a fader), evaluated by the host each frame.
@@ -33,10 +36,13 @@
 
 pub mod anim;
 mod bytes;
+pub mod engine;
 pub mod fragment;
 pub mod layers;
 pub mod ops;
+pub mod region;
 pub mod resource;
+pub mod wake;
 
 pub use anim::{Animation, Clock, Clocks, Input, Linear, Map, Property, Readings, Values};
 pub use anyrender::recording::RenderCommand;
@@ -143,4 +149,10 @@ pub enum Error {
     TooManyValues(usize),
     #[error("a value it may not {0}: {1}")]
     Denied(&'static str, String),
+    #[error("a batch of version {0}: this host reads up to version {1}")]
+    Version(u8, u8),
+    #[error("a hit region that can't be used: {0}")]
+    BadRegion(&'static str),
+    #[error("more than {0} hit regions")]
+    TooManyRegions(usize),
 }

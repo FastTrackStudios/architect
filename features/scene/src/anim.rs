@@ -22,9 +22,9 @@
 //!
 //! An animation is data, never code, and is checked as a fragment is
 //! ([`check`]): every number finite and in range, the steps in order, at
-//! most [`MAX_ANIMATIONS`] in a pane, and every value it reads one the
-//! pane may read ([`Access`]). What fails the check fails the view that
-//! sent it, never the app.
+//! most [`MAX_ANIMATIONS`] in a pane. What fails the check fails the
+//! view that sent it, never the app. A value bound to the engine's reads
+//! as nothing in a pane not granted them.
 //!
 //! Nothing here depends on which window draws: a pane's layers, values
 //! and the app's clocks are the same wherever the pane is shown.
@@ -261,14 +261,35 @@ impl Animation {
     }
 }
 
-/// One clock's reading: where it is, and whether it moves on its own.
+/// One clock's reading: where it is, and how fast it moves on its own.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Reading {
     /// Seconds.
     pub time: f64,
-    /// Whether it moves without being told to: wall time always does, a
-    /// playhead while it plays.
-    pub running: bool,
+    /// Its seconds a second of wall time: 1 for wall time, a playhead's
+    /// rate while it plays, 0 while it stands (paused, or at the end of
+    /// what it plays).
+    pub rate: f64,
+}
+
+impl Reading {
+    /// A clock standing at `time`.
+    #[must_use]
+    pub const fn still(time: f64) -> Self {
+        Self { time, rate: 0.0 }
+    }
+
+    /// A clock at `time`, moving at `rate`.
+    #[must_use]
+    pub const fn moving(time: f64, rate: f64) -> Self {
+        Self { time, rate }
+    }
+
+    /// Whether it moves on its own.
+    #[must_use]
+    pub fn running(&self) -> bool {
+        self.rate != 0.0
+    }
 }
 
 /// Every clock, read once for a frame.
@@ -291,10 +312,7 @@ impl Readings {
     pub const fn clock(&self, clock: Clock) -> Option<Reading> {
         match clock {
             Clock::Wall => match self.wall {
-                Some(time) => Some(Reading {
-                    time,
-                    running: true,
-                }),
+                Some(time) => Some(Reading::moving(time, 1.0)),
                 None => None,
             },
             Clock::Playhead => self.playhead,
@@ -379,7 +397,7 @@ impl Clocks {
     pub fn read(&self) -> Readings {
         Readings {
             wall: Some((self.wall)()).filter(|t| t.is_finite()),
-            playhead: (self.playhead)().filter(|r| r.time.is_finite()),
+            playhead: (self.playhead)().filter(|r| r.time.is_finite() && r.rate.is_finite()),
         }
     }
 }
@@ -399,8 +417,8 @@ pub enum Space {
     View,
     /// The host: a pointer dragging a fader, a control surface.
     Host,
-    /// The engine, lock-free. Read only by a pane granted it
-    /// ([`Access::engine`]).
+    /// The engine, lock-free ([`crate::engine`]). Read only by a pane
+    /// granted it: elsewhere it reads as nothing.
     Engine,
 }
 
@@ -464,34 +482,15 @@ impl std::fmt::Display for Name {
     }
 }
 
-/// What a pane may read: its own view's values and its host's always;
-/// the engine's when the host grants it (a capability, later).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Access {
-    pub engine: bool,
-}
-
-impl Access {
-    #[must_use]
-    pub const fn may_read(self, space: Space) -> bool {
-        match space {
-            Space::View | Space::Host => true,
-            Space::Engine => self.engine,
-        }
-    }
-
-    /// Whether `writer` may write `name`: each its own space only.
-    #[must_use]
-    pub fn may_write(self, writer: Space, name: &Name) -> bool {
-        name.space() == writer
-    }
-}
-
 /// A pane's named values: what a layer's property can be bound to.
+///
+/// The view's and the host's are held here; the engine's are read from
+/// its table ([`crate::engine`]) when the pane has one.
 #[derive(Debug, Clone, Default)]
 pub struct Values {
     held: BTreeMap<Name, f64>,
     revision: u64,
+    engine: Option<Arc<crate::engine::EngineTable>>,
 }
 
 impl Values {
@@ -500,11 +499,31 @@ impl Values {
         Self::default()
     }
 
-    /// How many times one changed: what a host compares to know whether
-    /// to draw again.
+    /// Reading the engine's values from `table`.
     #[must_use]
-    pub const fn revision(&self) -> u64 {
+    pub fn with_engine(mut self, table: Arc<crate::engine::EngineTable>) -> Self {
+        self.set_engine(Some(table));
+        self
+    }
+
+    /// Reading the engine's values from `table`, or none.
+    pub fn set_engine(&mut self, table: Option<Arc<crate::engine::EngineTable>>) {
+        self.engine = table;
+        self.revision = self.revision.wrapping_add(1);
+    }
+
+    /// The engine's table it reads, if any.
+    #[must_use]
+    pub const fn engine(&self) -> Option<&Arc<crate::engine::EngineTable>> {
+        self.engine.as_ref()
+    }
+
+    /// How many times one changed, the engine's writes too: what a host
+    /// compares to know whether to draw again.
+    #[must_use]
+    pub fn revision(&self) -> u64 {
         self.revision
+            .wrapping_add(self.engine.as_ref().map_or(0, |e| e.generation()))
     }
 
     #[must_use]
@@ -519,6 +538,11 @@ impl Values {
 
     #[must_use]
     pub fn get(&self, name: &Name) -> Option<f64> {
+        if name.space() == Space::Engine
+            && let Some(engine) = &self.engine
+        {
+            return engine.read(name);
+        }
         self.held.get(name).copied()
     }
 
@@ -529,7 +553,8 @@ impl Values {
     /// `writer` may not write `name`, `value` is out of range, or the
     /// pane holds [`MAX_VALUES`] already.
     pub fn write(&mut self, writer: Space, name: &Name, value: f64) -> Result<bool, Error> {
-        if !Access::default().may_write(writer, name) {
+        // Each writes its own space only.
+        if name.space() != writer {
             return Err(Error::Denied("write", name.to_string()));
         }
         if !in_range(value) {
@@ -560,12 +585,17 @@ fn in_range(v: f64) -> bool {
 ///
 /// At most one per property, every number finite and in range, a wrap
 /// above zero, a clamp's ends in order, steps in order and at most
-/// [`MAX_STEPS`], and every value read one `access` lets the pane read.
+/// [`MAX_STEPS`].
+///
+/// A value it reads may be any space's: the engine's reads as nothing in
+/// a pane not granted them (its host attaches no table,
+/// [`Values::with_engine`]), so an extension whose capability was
+/// declined still draws, its meters standing.
 ///
 /// # Errors
 ///
 /// The first thing wrong.
-pub fn check(animations: &[Animation], access: Access) -> Result<(), Error> {
+pub fn check(animations: &[Animation]) -> Result<(), Error> {
     let mut seen = [false; PROPERTIES.len()];
     for a in animations {
         let at = PROPERTIES
@@ -577,11 +607,6 @@ pub fn check(animations: &[Animation], access: Access) -> Result<(), Error> {
             return Err(Error::BadAnimation("a property animated twice"));
         }
         *slot = true;
-        if let Input::Value(name) = &a.input
-            && !access.may_read(name.space())
-        {
-            return Err(Error::Denied("read", name.to_string()));
-        }
         match &a.map {
             Map::Linear(l) => {
                 let numbers = [Some(l.scale), Some(l.offset), l.wrap, l.min, l.max];
@@ -671,22 +696,123 @@ const fn narrow(v: f64) -> f32 {
     v as f32
 }
 
-/// Whether any of `animations` reads a clock that moves on its own: the
+/// When what an animation draws next changes on its own.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Next {
+    /// Every frame: a line on a running clock.
+    Every,
+    /// In this many seconds of wall time: the next step on a running
+    /// clock, or a clamp the line reaches.
+    In(f64),
+    /// Not until something else changes: a still clock, a value, a line
+    /// held at its clamp.
+    Never,
+}
+
+impl Next {
+    /// The sooner of the two.
+    #[must_use]
+    pub const fn and(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Every, _) | (_, Self::Every) => Self::Every,
+            (Self::In(a), Self::In(b)) => Self::In(a.min(b)),
+            (Self::In(a), Self::Never) | (Self::Never, Self::In(a)) => Self::In(a),
+            (Self::Never, Self::Never) => Self::Never,
+        }
+    }
+}
+
+impl Linear {
+    // The input to output slope times the clock's rate.
+    fn next(&self, x: f64, rate: f64) -> Next {
+        let slope = self.scale * rate;
+        if slope == 0.0 {
+            return Next::Never;
+        }
+        if self.wrap.is_some() {
+            return Next::Every;
+        }
+        let y = self.scale.mul_add(x, self.offset);
+        // Held at a clamp it moves further into: still. Short of a clamp
+        // it moves away from... it moves now.
+        match (self.min, self.max) {
+            (_, Some(max)) if y >= max && slope > 0.0 => Next::Never,
+            (Some(min), _) if y <= min && slope < 0.0 => Next::Never,
+            (_, Some(max)) if y > max => Next::In((max - y) / slope),
+            (Some(min), _) if y < min => Next::In((min - y) / slope),
+            _ => Next::Every,
+        }
+    }
+}
+
+impl Steps {
+    fn next(&self, x: f64, rate: f64) -> Next {
+        let crossing = if rate > 0.0 {
+            // The first step past where it is.
+            self.steps
+                .iter()
+                .find(|(from, _)| *from > x)
+                .map(|(from, _)| (from - x) / rate)
+        } else {
+            // Going back: when it drops below the step it is on.
+            self.steps
+                .iter()
+                .rev()
+                .find(|(from, _)| *from <= x)
+                .map(|(from, _)| (x - from) / -rate)
+        };
+        crossing.map_or(Next::Never, Next::In)
+    }
+}
+
+impl Animation {
+    /// When what it draws next changes on its own, at `readings`.
+    #[must_use]
+    pub fn next(&self, readings: &Readings) -> Next {
+        let Some(r) = self.input.reading(readings) else {
+            return Next::Never;
+        };
+        if !r.running() {
+            return Next::Never;
+        }
+        match &self.map {
+            Map::Linear(l) => l.next(r.time, r.rate),
+            Map::Steps(s) => s.next(r.time, r.rate),
+        }
+    }
+
+    /// What it sets its property to at these clocks, if it reads one.
+    fn output(&self, readings: &Readings) -> Option<f64> {
+        match &self.input {
+            Input::Clock { .. } => self.input.reading(readings).map(|r| self.map.apply(r.time)),
+            Input::Value(_) => None,
+        }
+    }
+}
+
+/// When what `animations` draw next changes on its own.
+#[must_use]
+pub fn next(animations: &[Animation], readings: &Readings) -> Next {
+    animations
+        .iter()
+        .fold(Next::Never, |n, a| n.and(a.next(readings)))
+}
+
+/// Whether any of `animations` reads a clock that moves every frame: the
 /// host draws every frame while one does.
 #[must_use]
 pub fn moving(animations: &[Animation], readings: &Readings) -> bool {
-    animations
-        .iter()
-        .any(|a| a.input.reading(readings).is_some_and(|r| r.running))
+    next(animations, readings) == Next::Every
 }
 
-/// Whether any of `animations` reads a clock that reads differently in
-/// `now` than in `drawn`: a seek while paused.
+/// Whether any of `animations` on a clock draws something else at `now`
+/// than at `drawn`: a frame of playback, a step reached, a seek past a
+/// step. A seek that changes nothing drawn is not.
 #[must_use]
 pub fn differs(animations: &[Animation], drawn: &Readings, now: &Readings) -> bool {
     animations
         .iter()
-        .any(|a| a.input.reading(drawn) != a.input.reading(now))
+        .any(|a| a.output(drawn).map(f64::to_bits) != a.output(now).map(f64::to_bits))
 }
 
 // The bytes of an `ops::ANIMATE` and an `ops::VALUE`.
@@ -782,7 +908,7 @@ fn read_clock(r: &mut Reader<'_>) -> Result<Option<Clock>, Error> {
 }
 
 /// Animations from bytes, checked ([`check`]).
-pub(crate) fn read(r: &mut Reader<'_>, access: Access) -> Result<Vec<Animation>, Error> {
+pub(crate) fn read(r: &mut Reader<'_>) -> Result<Vec<Animation>, Error> {
     let n = usize::from(r.u8()?);
     if n > PROPERTIES.len() {
         return Err(Error::BadAnimation("more animations than properties"));
@@ -848,6 +974,6 @@ pub(crate) fn read(r: &mut Reader<'_>, access: Access) -> Result<Vec<Animation>,
             map,
         });
     }
-    check(&out, access)?;
+    check(&out)?;
     Ok(out)
 }
