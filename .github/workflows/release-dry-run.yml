@@ -10,6 +10,9 @@ name: release-dry-run
 
 on:
   pull_request:
+    # Not on a draft PR ("draft" above is the throwaway release): marking
+    # the PR ready starts it.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - scripts/release-publish.sh
       - scripts/release-sums.sh
@@ -27,7 +30,7 @@ concurrency:
 jobs:
   dry-run:
     name: Release mechanics on a throwaway draft
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

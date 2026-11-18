@@ -48,6 +48,7 @@ pub mod blobs;
 // space, selections, carets, playheads) and the text binding that puts
 // others' edits and carets in an editor. Plain data over Loro: they ride
 // the presence channel and the doc, and compile everywhere.
+pub mod clock;
 pub mod presence;
 pub mod text;
 pub use presence::{Here, PeerState, Place, PresenceSink, Roster};

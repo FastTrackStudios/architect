@@ -21,6 +21,9 @@ the app declares its kinds and edits. In this chapter you will:
 
 All of it is the `crdt` crate (`features/crdt/crdt`) unless said otherwise.
 Each step names the test that proves it; read the test beside the step.
+A crate that depends on `crdt` from outside the fleet's feature union (a
+library with no UI) patches architect's workspace-hack out; the recipe is
+in `skills/architect/references/xtask-tooling.md` ("Outside the union").
 
 Rows a server owns and validates (a task's status, a member list) are not
 documents: they are entities and services with optimistic updates (the
@@ -96,7 +99,12 @@ let back = file.restore(&file.versions(MAIN).await?[3], "from v3").await?;
   `features/crdt/crdt/tests/file.rs` kills a writer mid-edit to prove it.
 - **Kind.** Opening refuses another kind or a newer schema.
 - **Sync.** `file.persistence(MAIN)` is the branch as a `Persistence`, so a
-  `CrdtDoc` and its sync keep their replica in the file.
+  `CrdtDoc` and its sync keep their replica in the file. Make its
+  `SyncedDoc` durable (`SyncedDoc::new(id, doc).durable()`): imports fire
+  no local-update subscription, so without it the file keeps only this
+  device's edits and what arrived from others is gone after a restart
+  (`a_synced_file_replica_keeps_what_it_received_only_when_durable` in
+  `features/crdt/crdt/tests/file.rs`). The org driver does this for you.
 
 Not yet: undo that survives reopening, an IndexedDB `Storage`, one writer
 per file across processes.
@@ -236,6 +244,30 @@ let marks = roster.pointers(clock_ms(), |place| arrange_pixels(place));
 
 Draw them with the workspace's `PresenceLayer` as the view's last child
 (the [UI chapter](@/guide/ui.md)). Never call `sweep()` in a render.
+
+### A playhead, in the host's clock
+
+A playhead in presence (`PlayState`) says where it was and *when*, so a
+peer extrapolates it every frame instead of streaming it. "When" has to be
+one clock for both peers, and two processes never share one: each
+`clock_ms` starts at its own first call. So the presence host serves its
+clock (`DocPresence::now`), each `PresenceDriver` pings it ten times a
+second into its peer's `SharedClock` (`features/crdt/crdt/src/clock.rs`,
+NTP's estimate over the fastest quarter of the last 32 exchanges), and a
+playhead is stamped in it:
+
+```rust
+// The leader: false until the driver has an estimate.
+here.play_now(playing, position_seconds, rate);
+// A follower, each frame:
+if let (Some(play), Some(now)) = (play_state, peer.clock().now_ms()) {
+    let at = play.position_at(now);
+}
+```
+
+The error is at most half the fastest round trip (`SharedClock::round_trip_ms`):
+under a millisecond on a LAN. A host older than this serves no clock; the
+driver's pings then stop and presence carries on, with no estimate.
 
 <!-- media: presence-pointers-overlay — two people in one arrangement: the other's named pointer and selection wash drawn over the pane -->
 
