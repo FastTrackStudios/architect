@@ -188,7 +188,11 @@ static DISPLAY_MHZ: AtomicU64 = AtomicU64::new(0);
 /// The main window's display refreshes `hz` times a second.
 pub fn set_display_hz(hz: f64) {
     if hz.is_finite() && hz > 1.0 {
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::as_conversions)]
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::as_conversions
+        )]
         DISPLAY_MHZ.store((hz * 1000.0) as u64, Ordering::Relaxed);
     }
 }
@@ -265,13 +269,13 @@ pub fn start() -> bool {
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .replace(Recording {
-        began: Instant::now(),
-        frames: Vec::with_capacity(4096),
-        inputs: Vec::new(),
-        refresh: Vec::new(),
-        sizes: Vec::new(),
-        dropped_records: 0,
-    })
+            began: Instant::now(),
+            frames: Vec::with_capacity(4096),
+            inputs: Vec::new(),
+            refresh: Vec::new(),
+            sizes: Vec::new(),
+            dropped_records: 0,
+        })
         .is_some();
     BATCH_ARRIVED.store(0, Ordering::Relaxed);
     BATCH_APPLIED.store(0, Ordering::Relaxed);
@@ -315,7 +319,12 @@ fn stamp(cell: &AtomicU64) {
     let Some(us) = with(|r| since(r.began, now)) else {
         return;
     };
-    let _ = cell.compare_exchange(0, us.saturating_add(1), Ordering::Relaxed, Ordering::Relaxed);
+    let _ = cell.compare_exchange(
+        0,
+        us.saturating_add(1),
+        Ordering::Relaxed,
+        Ordering::Relaxed,
+    );
 }
 
 /// A runtime view's batch (a frame from its process) arrived.
@@ -549,7 +558,8 @@ impl Recorded {
             intervals.push(gap);
             if refresh_us > 0 {
                 let refreshes = (gap as f64 / f64::from(refresh_us)).round() as u64;
-                dropped = dropped.saturating_add(u32::try_from(refreshes.saturating_sub(1)).unwrap_or(u32::MAX));
+                dropped = dropped
+                    .saturating_add(u32::try_from(refreshes.saturating_sub(1)).unwrap_or(u32::MAX));
             }
         }
         let first = mine.first().map_or(0, |f| f.ended_us);
@@ -695,7 +705,11 @@ impl Driving {
             self.sent += 1;
             match &self.drive {
                 Drive::Still => {}
-                Drive::Wheel { at: (x, y), dy, turn } => {
+                Drive::Wheel {
+                    at: (x, y),
+                    dy,
+                    turn,
+                } => {
                     // The pointer goes there once; a wheel or a trackpad
                     // scrolls with no move between its events.
                     if !self.pressed {
@@ -889,12 +903,18 @@ mod action {
         if !(seconds.is_finite() && seconds > 0.0 && seconds <= 60.0) {
             return Err(format!("seconds: {seconds} is not between 0 and 60"));
         }
-        let path = args
-            .path
-            .clone()
-            .map_or_else(|| std::env::temp_dir().join("app-frames.json"), PathBuf::from);
-        if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("json")) {
-            return Err(format!("{}: the recording's path ends in .json", path.display()));
+        let path = args.path.clone().map_or_else(
+            || std::env::temp_dir().join("app-frames.json"),
+            PathBuf::from,
+        );
+        if !path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("json"))
+        {
+            return Err(format!(
+                "{}: the recording's path ends in .json",
+                path.display()
+            ));
         }
         let path = std::path::absolute(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         if super::recording_now() {
@@ -1015,7 +1035,10 @@ mod tests {
             1.0,
         );
         let first = d.due(0.0);
-        assert_eq!(first, vec![Driven::Move(10.0, 10.0), Driven::Press(10.0, 10.0)]);
+        assert_eq!(
+            first,
+            vec![Driven::Move(10.0, 10.0), Driven::Press(10.0, 10.0)]
+        );
         let mid = d.due(0.5);
         assert!(matches!(mid.last(), Some(Driven::Move(x, _)) if (*x - 110.0).abs() < 2.5));
         let end = d.due(1.0);

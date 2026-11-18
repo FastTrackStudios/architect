@@ -884,9 +884,15 @@ impl ApplicationHandler for App {
     fn window_event(&mut self, event_loop: &dyn ActiveEventLoop, window: OsId, event: WindowEvent) {
         if !crate::frames::recording_now() {
             // The meter (`APP_FRAMES`): every frame of the main window.
-            if matches!(event, WindowEvent::RedrawRequested) && !self.popouts.contains_key(&window) {
+            if matches!(event, WindowEvent::RedrawRequested) && !self.popouts.contains_key(&window)
+            {
                 if crate::frames::display_hz().is_none()
-                    && let Some(hz) = self.desk.main.borrow().as_ref().and_then(|w| refresh_hz(w.as_ref()))
+                    && let Some(hz) = self
+                        .desk
+                        .main
+                        .borrow()
+                        .as_ref()
+                        .and_then(|w| refresh_hz(w.as_ref()))
                 {
                     crate::frames::set_display_hz(hz);
                 }
@@ -908,7 +914,9 @@ impl ApplicationHandler for App {
         let key = window_key(window);
         if !crate::frames::knows_refresh(key) {
             let os = if self.popouts.contains_key(&window) {
-                self.popouts.get(&window).map(|o| Arc::clone(&o.view.window))
+                self.popouts
+                    .get(&window)
+                    .map(|o| Arc::clone(&o.view.window))
             } else {
                 self.desk.main.borrow().clone()
             };
@@ -975,9 +983,13 @@ impl App {
             .borrow()
             .as_ref()
             .map_or(1.0, |w| w.scale_factor());
-        let at = |x: f64, y: f64| dioxus_native::winit::dpi::PhysicalPosition::new(x * scale, y * scale);
+        let at =
+            |x: f64, y: f64| dioxus_native::winit::dpi::PhysicalPosition::new(x * scale, y * scale);
         for input in driven {
-            use dioxus_native::winit::event::{ButtonSource, MouseButton, MouseScrollDelta, PointerSource, ScrollSource, TouchPhase};
+            use dioxus_native::winit::event::{
+                ButtonSource, MouseButton, MouseScrollDelta, PointerSource, ScrollSource,
+                TouchPhase,
+            };
             let event = match input {
                 crate::frames::Driven::Move(x, y) => WindowEvent::PointerMoved {
                     device_id: None,
@@ -1013,7 +1025,12 @@ impl App {
         }
     }
 
-    fn window_event_now(&mut self, event_loop: &dyn ActiveEventLoop, window: OsId, event: WindowEvent) {
+    fn window_event_now(
+        &mut self,
+        event_loop: &dyn ActiveEventLoop,
+        window: OsId,
+        event: WindowEvent,
+    ) {
         if let WindowEvent::PointerButton {
             state: ElementState::Released,
             primary: true,

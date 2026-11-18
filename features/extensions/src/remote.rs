@@ -2490,4 +2490,3 @@ pub fn mounted_views(doc: &BaseDocument) -> Vec<NodeId> {
         })
         .collect()
 }
-
