@@ -62,6 +62,7 @@ pub mod control;
 mod ctx;
 pub mod deck;
 pub mod frames;
+pub mod pacing;
 mod drop;
 pub mod guide;
 #[cfg(feature = "home")]

@@ -619,8 +619,8 @@ release-sums-test:
     bash scripts/release-sums-test.sh
 
 # The window's frame-time report (#839): the sandbox's Sketch timelines
-# (2,000 and 20,000 clips) and arrangement, linked in and as a process,
-# playing, wheeling, panning and dragging, on this
+# (2,000 and 20,000 clips) and arrangement, linked in and as a process
+# (paced and not), playing, wheeling, panning and dragging, on this
 # display at its own refresh rate. Isolated instances, scratch folders.
 # WIDTH=5120 HEIGHT=1440 sizes the window; PROFILE=dev, SECONDS_EACH,
 # VIEWS, SCENARIOS, OUT as scripts/frames.sh says.

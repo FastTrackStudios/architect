@@ -1357,6 +1357,10 @@ impl Forward<'_> {
 #[derive(Clone)]
 pub struct HostShell {
     window: Arc<dyn ShellProvider>,
+    /// The view's frames, asked of the window at most once a refresh
+    /// (#840): a batch applied to its document asks for one, and so does
+    /// the document itself after each change it makes.
+    pacer: architect_workspace::pacing::Pacer,
     /// Where the pane is in the window, CSS pixels, and the view's last
     /// caret area while its input method is on (in its own pixels).
     state: Arc<Mutex<ShellState>>,
@@ -1372,7 +1376,11 @@ impl HostShell {
     /// The window's `shell`, for a pane at `x`, `y`.
     #[must_use]
     pub fn new(window: Arc<dyn ShellProvider>, x: f32, y: f32) -> Self {
+        let redraw = Arc::clone(&window);
         Self {
+            pacer: architect_workspace::pacing::Pacer::new(Arc::new(move || {
+                redraw.request_redraw();
+            })),
             window,
             state: Arc::new(Mutex::new(ShellState {
                 at: (x, y),
@@ -1395,9 +1403,17 @@ impl HostShell {
     }
 }
 
+impl HostShell {
+    /// What asks the window for the view's frames, paced to the display.
+    #[must_use]
+    pub const fn pacer(&self) -> &architect_workspace::pacing::Pacer {
+        &self.pacer
+    }
+}
+
 impl ShellProvider for HostShell {
     fn request_redraw(&self) {
-        self.window.request_redraw();
+        self.pacer.request();
     }
 
     fn set_cursor(&self, icon: Option<cursor_icon::CursorIcon>) {
@@ -1817,6 +1833,9 @@ async fn follow(
             shell
         })
         .await;
+        // Its frames asked of the window at most once a refresh, when the
+        // image they render into comes free (#840).
+        let pacer = shell.pacer().clone();
         // Where the pane is, now and then: an input method's caret moves
         // with the pane, not only when a frame comes.
         let placing = {
@@ -1893,7 +1912,7 @@ async fn follow(
                 // change it waits a refresh behind (#840).
                 if changes {
                     architect_workspace::frames::batch_applied();
-                    doc.shell_provider.request_redraw();
+                    pacer.request();
                 }
                 (applied, held)
             })
@@ -2492,3 +2511,41 @@ pub fn mounted_views(doc: &BaseDocument) -> Vec<NodeId> {
         .collect()
 }
 
+#[cfg(test)]
+mod pacing_tests {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::time::{Duration, Instant};
+
+    use super::{Arc, HostShell, ShellProvider};
+
+    struct Counting(Arc<AtomicU32>);
+
+    impl ShellProvider for Counting {
+        fn request_redraw(&self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    /// #840: a view's document asks its window for a frame after every
+    /// change (Blitz's mutator does, and so does each batch applied). Asked
+    /// right after a frame, they wait for the display's next refresh and
+    /// share one frame, instead of each starting one that then waits for a
+    /// free swapchain image with the window's thread blocked.
+    #[test]
+    fn a_views_redraws_right_after_a_frame_share_one_at_the_next_refresh() {
+        if !architect_workspace::pacing::enabled() {
+            return;
+        }
+        let asked = Arc::new(AtomicU32::new(0));
+        let shell = HostShell::new(Arc::new(Counting(Arc::clone(&asked))), 0.0, 0.0);
+        architect_workspace::pacing::set_refresh(Duration::from_micros(8_333));
+        // A frame that waited for its image: it ended at a refresh.
+        architect_workspace::pacing::frame_ended(Instant::now(), Duration::from_millis(7));
+        for _ in 0..10 {
+            shell.request_redraw();
+        }
+        assert_eq!(asked.load(Ordering::SeqCst), 0, "a frame asked for before its refresh");
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(asked.load(Ordering::SeqCst), 1, "ten changes, one frame");
+    }
+}

@@ -11,7 +11,8 @@
 # window forward, records `APP_FRAMES` for SECONDS with the input driven
 # by the window itself, and closes the instance. Linked: `architect-sandbox`
 # (Sketch compiled in). Process: `architect-desktop dev --extension` with
-# Sketch's own program.
+# Sketch's own program, its batches paced to the display, and again with
+# `ARCHITECT_FRAME_PACING=0` (each batch a frame at once, as before #840).
 #
 # Every report is a JSON file in OUT (default target/frames/<date>), its
 # frames and its summary; a table of them is printed at the end and
@@ -86,11 +87,11 @@ drive() {
     esac
 }
 
-run() { # name app view scenario
-    local name=$1 app=$2 view=$3 scenario=$4
+run() { # name app view scenario [pacing]
+    local name=$1 app=$2 view=$3 scenario=$4 pacing=${5:-1}
     local label="$view-$scenario-$name" args=(dev --name "frames-$name" --only lab.sketch)
     [ "$app" = architect-desktop ] && args+=(--extension "$ext")
-    "$bin/$app" "${args[@]}" >/dev/null
+    ARCHITECT_FRAME_PACING=$pacing "$bin/$app" "${args[@]}" >/dev/null
     local info socket pid
     info=$("$bin/$app" dev list | python3 -c "import json,sys; i=[i for i in json.load(sys.stdin) if i['name']=='frames-$name'][0]; print(i['socket'], i['pid'])")
     socket=${info% *}; pid=${info#* }
@@ -111,7 +112,8 @@ for view in $views; do
         # The arrangement is a scene with no playhead or regions.
         if [ "$view" = arrangement ] && { [ "$scenario" = play ] || [ "$scenario" = drag ]; }; then continue; fi
         run linked architect-sandbox "$view" "$scenario"
-        run process architect-desktop "$view" "$scenario"
+        run process architect-desktop "$view" "$scenario" 1
+        run unpaced architect-desktop "$view" "$scenario" 0
     done
 done
 

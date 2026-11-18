@@ -133,6 +133,7 @@ pub fn launch_with_fonts(
         popouts: HashMap::new(),
         devices: Vec::new(),
         main: None,
+        refresh_known: false,
         own,
         own_queue,
         fonts,
@@ -623,6 +624,8 @@ struct App {
     /// The main window, once it had an event: where `APP_FRAMES`'s
     /// driver sends its input.
     main: Option<OsId>,
+    /// Whether [`crate::pacing`] has the display's refresh.
+    refresh_known: bool,
 }
 
 /// Wakes the loop for `APP_FRAMES`'s driver.
@@ -882,7 +885,27 @@ impl ApplicationHandler for App {
     }
 
     fn window_event(&mut self, event_loop: &dyn ActiveEventLoop, window: OsId, event: WindowEvent) {
+        // The display's refresh, for pacing runtime views' frames
+        // (`crate::pacing`): learned at the first frame, again when a
+        // window may have moved to another display.
+        if matches!(
+            event,
+            WindowEvent::Moved(_) | WindowEvent::ScaleFactorChanged { .. }
+        ) || !self.refresh_known
+        {
+            self.learn_refresh(window);
+        }
         if !crate::frames::recording_now() {
+            if matches!(event, WindowEvent::RedrawRequested) {
+                self.window_event_now(event_loop, window, event);
+                crate::pacing::frame_ended(
+                    std::time::Instant::now(),
+                    std::time::Duration::from_micros(
+                        blitz_traits::LAST_PRESENT_MICROS.load(std::sync::atomic::Ordering::Relaxed),
+                    ),
+                );
+                return;
+            }
             return self.window_event_now(event_loop, window, event);
         }
         // A frame record (`crate::frames`): the frame's times, read from
@@ -915,6 +938,7 @@ impl ApplicationHandler for App {
         let micros = |a: &std::sync::atomic::AtomicU64| {
             std::time::Duration::from_micros(a.load(std::sync::atomic::Ordering::Relaxed))
         };
+        crate::pacing::frame_ended(ended, micros(&blitz_traits::LAST_PRESENT_MICROS));
         // Not drawn (hidden, or waiting for a resource): no frame.
         if blitz_traits::LAST_FRAME_MICROS.load(std::sync::atomic::Ordering::Relaxed) == before
             && ended.duration_since(began) < std::time::Duration::from_micros(200)
@@ -941,6 +965,20 @@ impl ApplicationHandler for App {
 }
 
 impl App {
+    /// The refresh of the display window `window` is on, for
+    /// [`crate::pacing`].
+    fn learn_refresh(&mut self, window: OsId) {
+        let os = if self.popouts.contains_key(&window) {
+            self.popouts.get(&window).map(|o| Arc::clone(&o.view.window))
+        } else {
+            self.desk.main.borrow().clone()
+        };
+        if let Some(hz) = os.and_then(|w| refresh_hz(w.as_ref())).filter(|hz| *hz > 1.0) {
+            crate::pacing::set_refresh(std::time::Duration::from_secs_f64(1.0 / hz));
+            self.refresh_known = true;
+        }
+    }
+
     /// `APP_FRAMES`'s input due now, to the main window, as the platform
     /// would send it.
     fn drive(&mut self, event_loop: &dyn ActiveEventLoop) {

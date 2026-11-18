@@ -308,7 +308,7 @@ Build it with `cargo build --target wasm32-wasip2` inside `devenv --profile wasi
 - Named values a layer is bound to (`PaintView::values`, `view.` names); the engine's lock-free `engine.` values with `capabilities.ui = ["engine"]` (`features/scene/src/engine.rs`).
 - A malformed animation, region or value fails the view, linked in or not. The example: `apps/sandbox/sketch` `Timeline` (and `LargeTimeline`, 20,000 clips, view `timeline-20k`).
 
-**Measure a view's frames** in the window it is in (#839): measure a view with `APP_FRAMES` (`features/workspace/src/frames.rs`: per frame its draw, render, refresh, the input and batches it shows; `drive` feeds wheel or drag input) or `just frames` (`scripts/frames.sh`: Sketch linked against process). Numbers and what they show: `docs/content/features/remote-views.md`, "Frames".
+**Its frames are the window's, paced to the display (#840).** A batch, and every change its document makes, asks the window for a frame through `features/workspace/src/pacing.rs` `Pacer` (`remote::HostShell::pacer`): right after a frame that waited for its swapchain image, the requests until the next refresh share one frame started just before it, instead of each starting a frame that waits most of a refresh with the window's thread blocked. `ARCHITECT_FRAME_PACING=0` turns it off. Measure a view with `APP_FRAMES` (`features/workspace/src/frames.rs`: per frame its draw, render, refresh, the input and batches it shows; `drive` feeds wheel or drag input) or `just frames` (`scripts/frames.sh`: Sketch linked against process). Numbers and what they show: `docs/content/features/remote-views.md`, "Frames".
 
 **Example** (`examples/extension/counter`):
 

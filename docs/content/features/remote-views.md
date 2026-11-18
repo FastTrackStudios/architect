@@ -374,20 +374,37 @@ Measured (`cargo test -p architect-sandbox-sketch --test sketch --
 | 188 engine writes at audio-callback rate, 3,436 frames drawn | 0 bytes |
 | an engine write (p50 / p99 / max) | 167 ns / 500 ns / 3.2 µs, no allocation |
 
-## Frames: measuring a view in its window
+## Frames: what the window does with a batch
+
+A runtime view's batch arrives when its process answered, at a moment
+that has nothing to do with the display. Asked for a frame then, the
+window builds it in a fraction of a millisecond and the renderer waits,
+most of a refresh, for a swapchain image: the next one is free only when
+the frame before it is on screen. The frame shows what it was given a
+refresh before it had to, and the window's thread is blocked meanwhile
+(#840). So the view's frames go through a `Pacer`
+(`features/workspace/src/pacing.rs`; `remote::HostShell::pacer`): after
+a frame that waited for its image, the requests until the next refresh,
+each batch's and each change its document makes, share one frame started
+just before its image comes free. After a frame that did not wait (an
+idle window, a frame slower than a refresh) it is asked for at once, so
+no wait is added where none was saved. `ARCHITECT_FRAME_PACING=0` turns
+it off.
 
 **Measuring.** `APP_FRAMES {seconds, label, path, drive, rate}`
 (`features/workspace/src/frames.rs`) has the window record its own
 frames: per frame (`FrameRecord`) when it began and ended, its draw
 (Blitz building the scene's commands) and its render (rasterise,
 composite, present, waiting for an image included), the display's
-refresh, the first input and the first batch it shows. The summary (`Report`): presented fps, refreshes dropped, the
+refresh, the first input and the first batch it shows, and whether a
+runtime view asked for it at once or paced. The summary (`Report`): presented fps, refreshes dropped, the
 interval, work, draw and render, input to frame and batch to frame, at
 p50, p95, p99 and the most. `drive` feeds the window wheel or drag input
 through its own event handler, so a run needs no OS input. `just frames`
 (`scripts/frames.sh`) runs the sandbox's Sketch (`timeline`, 2,000 clips;
 `timeline-20k`; `arrangement`) linked in (`architect-sandbox`) and as a
-process (`architect-desktop dev --extension`), playing,
+process (`architect-desktop dev --extension`, paced and with
+`ARCHITECT_FRAME_PACING=0`), playing,
 wheeling, panning and dragging, each in an instance of its own, and
 prints a table. On the owner's ultrawide: `WIDTH=5120 HEIGHT=1440 just frames`.
 
@@ -401,8 +418,10 @@ percent between runs), 5 s each, fps and p50 / p99 in ms:
 |---|---:|---:|---:|---:|---:|
 | `timeline`, playing, linked | 82.1 | 8.54 / 29.4 | 0.70 / 0.94 | 7.62 / 28.5 | — |
 | `timeline`, playing, process | 76.7 | 8.50 / 33.6 | 0.64 / 0.92 | 7.67 / 32.8 | — |
+| `timeline`, playing, process, paced | 74.8 | 8.62 / 33.4 | 0.60 / 0.73 | 7.81 / 32.6 | — |
 | `timeline`, wheel, linked | 72.6 | 8.47 / 37.7 | 0.73 / 1.06 | 7.42 / 36.6 | 8.40 / 37.6 |
 | `timeline`, wheel, process | 74.2 | 8.59 / 37.5 | 0.63 / 0.87 | 7.63 / 33.1 | 8.58 / 37.5 |
+| `timeline`, wheel, process, paced | 78.7 | 8.69 / 33.5 | 0.63 / 0.89 | 7.68 / 28.8 | 8.70 / 29.7 |
 | `timeline`, drag (host-run box), linked | 83.8 | 9.08 / 39.5 | 0.95 / 13.5 | 7.20 / 35.9 | 8.85 / 44.4 |
 | `timeline`, drag, process | 87.6 | 8.90 / 34.3 | 0.80 / 9.26 | 7.26 / 31.5 | 8.84 / 34.3 |
 | `timeline-20k`, playing, linked | 25.0 | 33.1 / 122 | 15.6 / 83.9 | 10.2 / 70.6 | — |
@@ -411,6 +430,7 @@ percent between runs), 5 s each, fps and p50 / p99 in ms:
 | `timeline-20k`, drag, process | 66.5 | 8.60 / 49.8 | 4.80 / 5.54 | 3.38 / 44.5 | 8.58 / 49.8 |
 | `arrangement`, wheel, linked | 40.6 | 26.1 / 40.9 | 0.27 / 0.45 | 1.15 / 28.2 | 21.2 / 37.9 |
 | `arrangement`, wheel, process | 91.4 | 8.50 / 32.6 | 0.83 / 2.34 | 7.12 / 31.2 | 8.46 / 32.4 |
+| `arrangement`, wheel, process, paced | 73.2 | 10.0 / 42.9 | 0.86 / 10.2 | 7.19 / 35.7 | 9.91 / 42.9 |
 
 What it shows, and what it can't:
 
@@ -425,7 +445,14 @@ What it shows, and what it can't:
   not: Blitz's document reports itself animating and asks for each next
   frame itself (`APP_FRAMES`' `again_animating`, 84 of 82 frames a
   second), so every frame, linked or not, waits for its image as a
-  vsync-locked loop does.
+  vsync-locked loop does. Paced and unpaced are within this machine's
+  noise (the same run gave 30 and 70 fps a minute apart). What pacing
+  removes is the frames a runtime view asks for on its own: a batch,
+  and the document's request after each change it makes, right after a
+  frame (`remote::pacing_tests`: ten requests, one frame, at the next
+  refresh). Where that matters is a window that is otherwise still
+  (Keyflow's chart scrolled by notches); its numbers on Linux are the
+  next run of `just frames`.
 - **What holds a view under 120 fps here is the window's GPU work, not
   the runtime.** With vsync off and the GPU waited for each frame
   (`FTS_PRESENT=immediate FTS_GPU_BARRIER=1`) a frame of the arrangement
