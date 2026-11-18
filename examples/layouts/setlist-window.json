@@ -19,8 +19,10 @@
                 "node": {
                   "group": {
                     "tabs": [
-                      { "pane": "setlist-room", "view": "ignition/room", "title": "Lighting: room" }
-                    ]
+                      { "pane": "setlist-room", "view": "ignition/room", "title": "Lighting: room" },
+                      { "pane": "setlist-cues", "view": "ignition/cues", "title": "Lighting: cues" }
+                    ],
+                    "current": "setlist-room"
                   }
                 }
               },
@@ -57,29 +59,9 @@
               {
                 "share": 0.30,
                 "node": {
-                  "split": {
-                    "axis": "row",
-                    "children": [
-                      {
-                        "share": 0.36,
-                        "node": {
-                          "group": {
-                            "tabs": [
-                              { "pane": "setlist-chart-text", "view": "vault.note", "state": "Charts/02 Drive To LA.kf", "title": "02 Drive To LA.kf" }
-                            ]
-                          }
-                        }
-                      },
-                      {
-                        "share": 0.64,
-                        "node": {
-                          "group": {
-                            "tabs": [
-                              { "pane": "setlist-chart", "view": "keyflow/chart", "state": "Charts/02 Drive To LA.kf", "title": "Chart" }
-                            ]
-                          }
-                        }
-                      }
+                  "group": {
+                    "tabs": [
+                      { "pane": "setlist-chart", "view": "keyflow/chart", "state": "Charts/02 Drive To LA.kf", "title": "Chart" }
                     ]
                   }
                 }
