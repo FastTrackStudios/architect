@@ -839,6 +839,7 @@ dependencies = [
  "architect-pages",
  "architect-playhead",
  "architect-presence",
+ "architect-process-view",
  "architect-projects",
  "architect-sandbox-board",
  "architect-scripting",
@@ -1610,6 +1611,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-process-view"
+version = "0.1.0"
+dependencies = [
+ "anyrender",
+ "architect-extensions",
+ "architect-workspace",
+ "architect-workspace-hack",
+ "ash",
+ "blitz-dom",
+ "blitz-traits",
+ "dioxus",
+ "dioxus-native-dom",
+ "futures-timer",
+ "mach2",
+ "objc2 0.6.5",
+ "objc2-core-foundation",
+ "objc2-io-surface",
+ "objc2-metal 0.3.2",
+ "peniko 0.6.1",
+ "rustix",
+ "thiserror 2.0.20",
+ "wgpu 30.0.1",
+ "wgpu_context",
+]
+
+[[package]]
 name = "architect-projects"
 version = "0.1.0"
 dependencies = [
@@ -1649,6 +1676,7 @@ dependencies = [
  "anyrender",
  "architect-workspace-hack",
  "blake3",
+ "memmap2",
  "peniko 0.6.1",
  "thiserror 2.0.20",
  "web-time",
