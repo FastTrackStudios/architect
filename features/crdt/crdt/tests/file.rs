@@ -629,6 +629,33 @@ async fn a_synced_file_replica_keeps_what_it_received_only_when_durable() {
     }
 }
 
+/// A `CrdtDoc` over a file branch persists each commit on a writer task
+/// of its own. `compact` (a save) must not depend on that task having
+/// run: on one thread it never runs between the commit and the save, and
+/// a save that only folded what the file already held lost the commit,
+/// so the file opened again read nothing (Keyflow's chart file, one run
+/// in three on many threads; keyflow#95).
+#[tokio::test(flavor = "current_thread")]
+async fn a_save_holds_every_commit_whether_or_not_the_writer_ran() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("Song.note");
+    {
+        let file = DocFile::create(DiskStorage::open(&path).unwrap(), &note())
+            .await
+            .unwrap();
+        let id = file.id().await.unwrap();
+        let doc = CrdtDoc::open(id, file.persistence(MAIN)).await.unwrap();
+        type_at(doc.loro(), 0, "hello");
+        doc.loro().commit();
+        doc.compact(id).await.unwrap();
+    }
+    let again = DocFile::open(DiskStorage::open(&path).unwrap(), &note())
+        .await
+        .unwrap();
+    let main = again.open_branch(MAIN).await.unwrap();
+    assert_eq!(text(main.loro()), "hello");
+}
+
 /// A catalogue lists a vault's document files by what their first
 /// records say, without opening them: the id, the kind and the schema,
 /// before and after a save folds the file, and for a file adopted from
