@@ -579,10 +579,11 @@ impl<S: PresenceSink> Here<S> {
 /// The root map of a document holding where its presence is hosted.
 const PRESENCE_ROOT: &str = "presence";
 
-/// Where `doc`'s presence is hosted: the endpoint id of the node that
-/// serves its presence and the clock its peers share (a session's
-/// transport is hosted on its leader's node, session#192). A peer's node
-/// relays to it; `None`: wherever the peer's own node is.
+/// Where `doc`'s presence is hosted: a node's endpoint id.
+///
+/// That node serves its presence and the clock its peers share (a
+/// session's transport is hosted on its leader's node, session#192). A
+/// peer's node relays to it; `None`: wherever the peer's own node is.
 #[must_use]
 pub fn presence_host(doc: &loro::LoroDoc) -> Option<String> {
     match doc.get_map(PRESENCE_ROOT).get("host")? {

@@ -164,9 +164,10 @@ pub struct Running {
     _self_lane: Arc<SelfLane>,
 }
 
-/// How a node's extensions reach the presence of a document another node
-/// hosts (session#192): dialled over this node's iroh endpoint by the
-/// host's endpoint id alone, as any of the org's devices dials another.
+/// How a node's extensions reach the presence another node hosts.
+///
+/// Dialled over this node's iroh endpoint by the host's endpoint id alone,
+/// as any of the org's devices dials another (session#192).
 #[derive(Clone)]
 pub struct NodePresenceLink(iroh::Endpoint);
 

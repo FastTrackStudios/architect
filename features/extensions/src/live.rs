@@ -210,10 +210,11 @@ mod host_side {
         }
     }
 
-    /// How this app's node reaches the presence of a document another node
-    /// hosts (session#192): the node's own endpoint id, and a presence
-    /// client of another node, dialled over the org's iroh lane by its
-    /// endpoint id alone.
+    /// How this app's node reaches the presence another node hosts.
+    ///
+    /// The node's own endpoint id, and a presence client of another node,
+    /// dialled over the org's iroh lane by its endpoint id alone
+    /// (session#192).
     pub trait PresenceLink: Send + Sync {
         /// This node's endpoint id.
         fn me(&self) -> String;
@@ -229,8 +230,9 @@ mod host_side {
         >;
     }
 
-    /// The host's relay of an extension's presence sessions (session#192):
-    /// to the node's own registry when the document's presence is hosted
+    /// The host's relay of an extension's presence sessions (session#192).
+    ///
+    /// To the node's own registry when the document's presence is hosted
     /// here (or nowhere said), else to the node that hosts it
     /// (`crdt::presence::presence_host`), over the org's iroh lane.
     ///
@@ -302,14 +304,13 @@ mod host_side {
                 })
             });
             let local;
-            let client = match &remote {
-                Some(client) => client,
-                None => {
-                    local = crdt::peer::SelfPresenceLane::open(session.registry, session.principal)
-                        .await
-                        .map_err(SyncError::Internal)?;
-                    local.client()
-                }
+            let client = if let Some(client) = &remote {
+                client
+            } else {
+                local = crdt::peer::SelfPresenceLane::open(session.registry, session.principal)
+                    .await
+                    .map_err(SyncError::Internal)?;
+                local.client()
             };
             let (node_up, node_up_rx) = vox::channel::<Vec<u8>>();
             let (node_down_tx, mut node_down) = vox::channel::<Vec<u8>>();

@@ -418,8 +418,9 @@ const SELF_PRESENCE_PERMITS: ServicePermits = ServicePermits {
     ],
 };
 
-/// This node's own registry's presence as a client of itself, as `who`
-/// ([`SelfLane`]'s sibling): what a relay to the node's presence (an
+/// This node's own registry's presence as a client of itself, as `who`.
+///
+/// [`SelfLane`]'s sibling: what a relay to the node's presence (an
 /// extension's, `architect_extensions::live`) calls through, so the
 /// registry's authorizer sees the principal it acts for.
 pub struct SelfPresenceLane {

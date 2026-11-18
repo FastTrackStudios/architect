@@ -498,9 +498,10 @@ fn presence_slot() -> &'static Mutex<Option<crdt::sync::DocPresenceClient>> {
     PRESENCE.get_or_init(|| Mutex::new(None))
 }
 
-/// The `DocPresence` lane to the host, on this process's connection: a
-/// live document's presence and the clock its peers share, relayed by the
-/// host to wherever the document's presence is hosted (session#192).
+/// The `DocPresence` lane to the host, on this process's connection.
+///
+/// A live document's presence and the clock its peers share, relayed by
+/// the host to wherever the document's presence is hosted (session#192).
 ///
 /// # Errors
 ///
@@ -557,8 +558,9 @@ pub async fn document(path: &str) -> Result<crate::live::DocLane, crate::hostcal
     crate::live::DocLane::from_answer(answer, doc_sync()?)
 }
 
-/// Live document `doc_id`'s presence (one [`document`] answered): a peer
-/// joined through the host, which relays it to wherever the document's
+/// Live document `doc_id`'s presence (one [`document`] answered).
+///
+/// A peer joined through the host, which relays it to wherever the document's
 /// presence is hosted (this app's node, or the node its leader named,
 /// through the org: session#192), with that host's clock estimated in
 /// [`crdt::sync::PresencePeer::clock`]. Its driver runs on a task of its
