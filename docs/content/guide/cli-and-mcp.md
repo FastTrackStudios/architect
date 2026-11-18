@@ -231,6 +231,19 @@ window, every architect app can give through its list (#268):
 - **`APP_SHOT`** and `actions shot [file.png] [--pane id]`: the window
   drawn by the app itself, its Blitz document painted again on the CPU at
   the window's pixel size (`features/workspace/src/shot.rs`).
+- **`APP_FRAMES {reset?, seconds?, label?, path?, drive?, rate?}`**: the
+  main window's last frames (each one's work on the window's thread and
+  the time to the next, p50, p99 and max, and the rate; `reset` to
+  measure from now). With `seconds` the window first records its own
+  frames (when each began and ended, draw and render
+  times, the display's refresh, the input and runtime batches each shows)
+  and writes them with a summary to a JSON file: presented fps, dropped
+  refreshes, frame-time and input-to-frame percentiles. `drive` feeds it
+  input meanwhile (`{"Wheel": {"at": [x, y], "dy": 1, "turn": 20}}`,
+  `{"Drag": {"from": [x, y], "reach": [dx, dy], "period": 1.0}}`, window
+  points) through its own event handler. `just frames` runs the sandbox's
+  Sketch timelines with it, linked and as a process
+  ([Remote views](@/features/remote-views.md), "Frames").
 - **`EXT_CHECK {folder}`**: an extension loaded once on its own and each
   view rendered once, `ok` or the exact problem;
   `architect-desktop extensions check <folder>` does it with no window

@@ -56,6 +56,7 @@ impl Extension for Sketch {
             .view("arrangement", ArrangementView)
             .paint::<Graph>("graph")
             .paint::<Timeline>("timeline")
+            .paint::<LargeTimeline>("timeline-20k")
             .action("LAB_SKETCH_NUDGE", |_| async {
                 let n = NUDGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 Ok(serde_json::json!({ "nudged": n.saturating_add(1) }))
@@ -475,16 +476,24 @@ pub struct Timeline {
 
 impl Default for Timeline {
     fn default() -> Self {
+        Self::sized(50, 40)
+    }
+}
+
+impl Timeline {
+    /// `tracks` lanes of `clips`, the rest as the default's.
+    #[must_use]
+    pub fn sized(tracks: u32, clips: u32) -> Self {
         let mut line = Scene::new();
         line.stroke(
             &Stroke::new(1.5),
             Affine::IDENTITY,
             NODE,
             None,
-            &Line::new((0.0, 0.0), (0.0, 50.0 * 24.0)),
+            &Line::new((0.0, 0.0), (0.0, f64::from(tracks) * 24.0)),
         );
         Self {
-            clips: std::sync::Arc::new(arrangement_scene(50, 40)),
+            clips: std::sync::Arc::new(arrangement_scene(tracks, clips)),
             playhead: std::sync::Arc::new(line.commands),
             track: filled(
                 &Rect::new(0.0, 0.0, 24.0, TRACK_HEIGHT),
@@ -651,6 +660,39 @@ impl PaintView for Timeline {
                 hovered
             }),
         ])
+    }
+}
+
+/// The [`Timeline`] at 20,000 clips (200 tracks of 100), the
+/// arrangement #839 measures: one fragment of clips, a playhead over it.
+#[derive(Debug)]
+pub struct LargeTimeline(pub Timeline);
+
+impl Default for LargeTimeline {
+    fn default() -> Self {
+        Self(Timeline::sized(200, 100))
+    }
+}
+
+impl PaintView for LargeTimeline {
+    fn input(&mut self, ctx: &ViewCtx, event: &ViewInput) -> bool {
+        self.0.input(ctx, event)
+    }
+
+    fn paint(&mut self, ctx: &ViewCtx, scene: &mut Scene) {
+        self.0.paint(ctx, scene);
+    }
+
+    fn region(&mut self, ctx: &ViewCtx, event: &RegionEvent) -> bool {
+        self.0.region(ctx, event)
+    }
+
+    fn values(&mut self, ctx: &ViewCtx) -> Vec<(Name, f64)> {
+        self.0.values(ctx)
+    }
+
+    fn layers(&mut self, ctx: &ViewCtx) -> Option<Vec<(LayerKey, Layer)>> {
+        self.0.layers(ctx)
     }
 }
 
