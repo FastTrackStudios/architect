@@ -29,10 +29,10 @@ The engine's position and the chart's shown time, read one after the other
 
 | moment | engine | chart |
 |---|---|---|
-| played from 0 | 6.04 s | 6.08 s |
-| seek 66 s (Interlude) | 69.01 s | 69.14 s |
-| seek 93 s (Pre-Chorus 2) | 96.06 s | 96.14 s |
-| light theme | 100.70 s | 100.77 s |
+| played from 0 | 6.02 s | 6.05 s |
+| seek 66 s (Interlude) | 69.02 s | 69.06 s |
+| seek 93 s (Pre-Chorus 2) | 96.01 s | 96.04 s |
+| light theme | 100.00 s | 100.02 s |
 
 Read on screen at 93 s (an earlier run of the same build), the arrangement's playhead is at the start of project bar 63, and the chart's playhead is at the first bar of PRE-CH 2. That is the same bar: the song's bar 1 is project bar 5. The room changes look with each seek (amber intro wash at 5 s, magenta at 120 s), following the same session.
 
@@ -49,11 +49,11 @@ All captured with `loft-shot` / `wf-recorder` from a headless GPU Loft session (
 
 ## Builds
 
-Every repo at its `main`, except two things with no `main` build yet:
+Every repo at its `main`, except Architect's unmerged bits:
 - **Architect:** `runtime-compositor-setlist` `f768a769`. It is `main` `6f1fadbb` (past v0.14.0's `9bbad508`) plus my unmerged `dev --layout <file>.json`, `--hide now-playing` and the `now_playing` slot (the layout file uses both), the opt-in process-view stats line, the schema cache and the launcher and layout preset (all coming as PRs). The provider choice (#872), a provider using its own service (#873) and images in a runtime view (#874) are on `main`.
 - **Keyflow:** `main` `001c54be` (#102–#111, its `[uses] "fts.session"` included); the package is its folder with `icons/`, no manifest patching.
 - **Ignition:** `main` `628e70ad` (#24).
-- **Studio:** studio#519's branch `feat/arrangement-mixer-runtime-extensions` `d9fbb6ca`; the extensions are not on Studio `main` yet.
+- **Studio:** `main` `8fe8a836` (studio#519 merged): the arrangement, the mixer (its meters the engine's values, `ui = ["engine"]`) and the `daw` engine.
 - **Run:** `just setlist-window --play 0` (`scripts/setlist-window.sh`, `examples/layouts/setlist-window.json`).
 
 ## The chart column against Keyflow's own window
@@ -73,22 +73,26 @@ Compared with Keyflow's capture `pr-media/chart-selection-and-input-modes:captur
 
 ## Frame time
 
-`APP_FRAMES` (#863) over the recorded 32 s, all five panes playing, the
-recorder running beside it, on a heavily shared THEBATTLESHIP (load 53 at the
-start, 66 at the end: CI runners and other threads' builds):
+`APP_FRAMES` (#863), all five panes playing, fullscreen 5120×1440, THEBATTLESHIP at load ~17 (still shared):
 
-| | |
-|---|---|
-| window, presented | **21.2 fps** |
-| gap between frames | p50 39.1 ms, p99 132.5 ms |
-| the recording | 580 frames in 31.9 s (the recorder, starved too) |
+| | window | gap p50 / p99 / max | each redraw's work p50 / p99 |
+|---|---|---|---|
+| playing, no recorder (15 s) | **42.1 fps** | 18.5 / 44.5 / 66.0 ms | 18.0 / 42.2 ms |
+| during the recording (32 s) | 40.9 fps | 22.3 / 49.7 ms | |
 
-The previous take of the same window (Keyflow #104's branch) measured 30.9 fps at load 38–44, and 56.4 fps at load ~43 with no recorder (`stage-c-two-clocks/`). These numbers show the shared machine, not the app. The Loft output is 60 Hz. 240 fps on the owner's ultrawide is not shown: it needs a high-refresh display, an idle machine and the window's work a frame under ~4 ms.
+- The recording holds 928 frames in 31.9 s; that is the recorder's own capture, also shared.
+- The Loft output is 60 Hz, so nothing above 60 fps can show here, and a redraw's work includes waiting on that present.
+- Earlier runs at heavier load: 21–31 fps (load 44–66), and 56.4 fps with Studio's earlier drawing at load ~43 (`stage-c-two-clocks/`).
+- 240 fps on the owner's ultrawide is not shown: it needs a high-refresh display, an idle machine and the window's work a frame under ~4 ms.
 
 The clocks during the recording, engine then chart:
 
 | step | engine | chart |
 |---|---|---|
-| played from 0 | 1.11 s | 1.19 s |
-| seek 66 s | 67.06 s | 67.15 s |
-| seek 93 s | 94.10 s | 94.19 s |
+| played from 0 | 1.03 s | 1.07 s |
+| seek 66 s | 67.03 s | 67.07 s |
+| seek 93 s | 94.03 s | 94.06 s |
+
+## The mixer's width
+
+The mixer's strips fill about the left half of its pane. That is Studio's own mixer: `studio:apps/session/ui/src/mixer_panel.rs` draws fixed 86 px strips (`studio:apps/session/ui/src/mcp.rs` `STRIP_W`) at zoom 1.0 on a desktop (`studio:apps/session/ui/src/touch.rs` `mixer_zoom`). Only Studio's record view sets `fill`, which zooms strips to the width. `studio-desktop` mounts the same panel, and Studio's parity test finds 0 pixels different between the two, so it leaves the same space at this width. This is read from the code; `studio-desktop` was not run at 2,304 px.
