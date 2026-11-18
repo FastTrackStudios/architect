@@ -128,6 +128,7 @@ pub fn launch_with_fonts(
         own,
         own_queue,
         fonts,
+        refresh_known: false,
     };
     // An event loop that cannot run has no window to say so in; the
     // process ends either way.
@@ -612,6 +613,8 @@ struct App {
     own_queue: Receiver<BlitzShellEvent>,
     /// The app's faces, for each pop-out's document.
     fonts: &'static [&'static [u8]],
+    /// Whether [`crate::pacing`] has the display's refresh.
+    refresh_known: bool,
 }
 
 impl App {
@@ -842,6 +845,67 @@ impl ApplicationHandler for App {
     }
 
     fn window_event(&mut self, event_loop: &dyn ActiveEventLoop, window: OsId, event: WindowEvent) {
+        // The display's refresh, for pacing runtime views' frames
+        // (`crate::pacing`): learned at the first frame, again when a
+        // window may have moved to another display.
+        if matches!(
+            event,
+            WindowEvent::Moved(_) | WindowEvent::ScaleFactorChanged { .. }
+        ) || !self.refresh_known
+        {
+            self.learn_refresh(window);
+        }
+        if matches!(event, WindowEvent::RedrawRequested) {
+            self.window_event_now(event_loop, window, event);
+            // When it ended and how long its render took: when the next
+            // swapchain image comes free (`crate::pacing`).
+            crate::pacing::frame_ended(
+                std::time::Instant::now(),
+                std::time::Duration::from_micros(
+                    blitz_traits::LAST_PRESENT_MICROS.load(std::sync::atomic::Ordering::Relaxed),
+                ),
+            );
+            return;
+        }
+        self.window_event_now(event_loop, window, event);
+    }
+
+    fn proxy_wake_up(&mut self, event_loop: &dyn ActiveEventLoop) {
+        self.own_events();
+        self.asks(event_loop);
+        self.inner.proxy_wake_up(event_loop);
+        // The main window's turn may have asked for more.
+        self.asks(event_loop);
+    }
+}
+
+impl App {
+    /// The refresh of the display window `window` is on, for
+    /// [`crate::pacing`].
+    fn learn_refresh(&mut self, window: OsId) {
+        let os = if self.popouts.contains_key(&window) {
+            self.popouts
+                .get(&window)
+                .map(|o| Arc::clone(&o.view.window))
+        } else {
+            self.desk.main.borrow().clone()
+        };
+        let hz = os.and_then(|w| {
+            let mode = w.current_monitor()?.current_video_mode()?;
+            Some(f64::from(mode.refresh_rate_millihertz()?.get()) / 1000.0)
+        });
+        if let Some(hz) = hz.filter(|hz| *hz > 1.0) {
+            crate::pacing::set_refresh(std::time::Duration::from_secs_f64(1.0 / hz));
+            self.refresh_known = true;
+        }
+    }
+
+    fn window_event_now(
+        &mut self,
+        event_loop: &dyn ActiveEventLoop,
+        window: OsId,
+        event: WindowEvent,
+    ) {
         if let WindowEvent::PointerButton {
             state: ElementState::Released,
             primary: true,
@@ -860,14 +924,6 @@ impl ApplicationHandler for App {
         } else {
             self.inner.window_event(event_loop, window, event);
         }
-    }
-
-    fn proxy_wake_up(&mut self, event_loop: &dyn ActiveEventLoop) {
-        self.own_events();
-        self.asks(event_loop);
-        self.inner.proxy_wake_up(event_loop);
-        // The main window's turn may have asked for more.
-        self.asks(event_loop);
     }
 }
 

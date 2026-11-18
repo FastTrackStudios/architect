@@ -302,6 +302,8 @@ Build it with `cargo build --target wasm32-wasip2` inside `devenv --profile wasi
 - Show more than `MAX_VIEWS` (256) views at once.
 - Be called per sample or per frame. Each call costs tens of µs.
 
+**Its frames are paced to the display (#840).** A batch, and every change its document makes, asks the window for a frame through `features/workspace/src/pacing.rs` `Pacer` (`remote::HostShell::pacer`): right after a frame that waited for its swapchain image, the requests until the next refresh share one frame started just before the next image comes free, instead of each starting a frame that waits most of a refresh with the window's thread blocked. `ARCHITECT_FRAME_PACING=0` turns it off.
+
 **What moves every frame is the host's.** A paint view (`linked::Builder::paint`) that returns layers (`PaintView::layers`) sends them once (`architect-scene`, `features/scene/src/ops.rs`), and the host draws them every frame without it:
 - Motion on a clock: a layer's `X`, `Y`, `ScaleX`, `ScaleY`, `Opacity` or `Visible` from `Clock::Wall` or `Clock::Playhead` (`features/scene/src/anim.rs` `Animation`, `Linear`, `Steps`). A playhead line, a scrolling arrangement, a lyric line. Don't return `animating` true for these: the view would be asked every frame.
 - Hit regions and drags (`features/scene/src/region.rs` `Region`, `Drag`): hover, cursor, highlight and a fader or drag box following the pointer, all on the host; the view hears `RegionEvent`s by id (`PaintView::region`), a drag's value at most once a frame. A press on a region still gives the view the keyboard focus (`Focus(true)`), linked in or in a process.
