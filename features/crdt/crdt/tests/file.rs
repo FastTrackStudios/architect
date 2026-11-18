@@ -563,3 +563,68 @@ async fn memory_storage_is_a_storage() {
     let dir = tempfile::tempdir().unwrap();
     round_trip(&DiskStorage::open(dir.path().join("f")).unwrap()).await;
 }
+
+/// A file replica that syncs keeps what it received across a restart when
+/// its `SyncedDoc` is `durable`; by default it keeps only its own edits
+/// (a browser tab's choice: it re-learns the rest by version vector).
+/// Backing a `CrdtDoc` with `DocFile::persistence` is not enough on its
+/// own: imports fire no local-update subscription, so nothing else writes
+/// them.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_synced_file_replica_keeps_what_it_received_only_when_durable() {
+    use crdt::sync::{
+        DocSyncClient, DocSyncDispatcher, DocSyncHost, SyncedDoc, doc_sync_service_descriptor,
+    };
+    for durable in [true, false] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("b.note");
+        let id = Uuid::new_v4();
+        // The hub, holding an edit made elsewhere.
+        let hub = CrdtDoc::ephemeral();
+        type_at(hub.loro(), 0, "from elsewhere");
+        hub.loro().commit();
+        let router = architect::LayerRouter::new().with(
+            doc_sync_service_descriptor(),
+            DocSyncDispatcher::new(DocSyncHost::new(id, hub.clone())),
+        );
+        let local = architect::LocalServer::serve(router, architect::Scope::new());
+
+        // B: this device's file for the document, synced from the hub.
+        {
+            let file = DocFile::adopt(DiskStorage::open(&path).unwrap(), &note(), id)
+                .await
+                .unwrap();
+            let doc = CrdtDoc::open(id, file.persistence(MAIN)).await.unwrap();
+            let synced = SyncedDoc::new(id, doc.clone());
+            let mut synced = if durable { synced.durable() } else { synced };
+            let client: DocSyncClient = local.establish().await.unwrap();
+            let run = tokio::spawn(async move {
+                let _ = synced.run(&client).await;
+            });
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+            while text(doc.loro()) != "from elsewhere" {
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "B never received it"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            // The process ends: no save, no close.
+            run.abort();
+        }
+
+        let again = DocFile::open(DiskStorage::open(&path).unwrap(), &note())
+            .await
+            .unwrap();
+        let reopened = again.open_branch(MAIN).await.unwrap();
+        if durable {
+            assert_eq!(text(reopened.loro()), "from elsewhere", "durable keeps it");
+        } else {
+            assert_eq!(
+                text(reopened.loro()),
+                "",
+                "the default keeps own edits only"
+            );
+        }
+    }
+}

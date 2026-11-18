@@ -99,7 +99,12 @@ let back = file.restore(&file.versions(MAIN).await?[3], "from v3").await?;
   `features/crdt/crdt/tests/file.rs` kills a writer mid-edit to prove it.
 - **Kind.** Opening refuses another kind or a newer schema.
 - **Sync.** `file.persistence(MAIN)` is the branch as a `Persistence`, so a
-  `CrdtDoc` and its sync keep their replica in the file.
+  `CrdtDoc` and its sync keep their replica in the file. Make its
+  `SyncedDoc` durable (`SyncedDoc::new(id, doc).durable()`): imports fire
+  no local-update subscription, so without it the file keeps only this
+  device's edits and what arrived from others is gone after a restart
+  (`a_synced_file_replica_keeps_what_it_received_only_when_durable` in
+  `features/crdt/crdt/tests/file.rs`). The org driver does this for you.
 
 Not yet: undo that survives reopening, an IndexedDB `Storage`, one writer
 per file across processes.
