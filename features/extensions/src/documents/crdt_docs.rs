@@ -368,6 +368,32 @@ impl Documents for CrdtDocuments {
         })
     }
 
+    // The document's own CRDT history: the person's steps and every
+    // extension's, in the order they were made.
+    fn undo(&self, path: &str, _by: &Principal) -> Result<Option<super::Undone>, DocError> {
+        let mut inner = self.lock();
+        let entry = inner
+            .docs
+            .get_mut(path)
+            .ok_or_else(|| DocError::NotFound(format!("document {path}")))?;
+        let step = entry.history.undo();
+        let text = Self::text_of(entry.doc.loro()).to_string();
+        drop(inner);
+        Ok(step.map(|step| super::Undone { step, text }))
+    }
+
+    fn redo(&self, path: &str, _by: &Principal) -> Result<Option<super::Undone>, DocError> {
+        let mut inner = self.lock();
+        let entry = inner
+            .docs
+            .get_mut(path)
+            .ok_or_else(|| DocError::NotFound(format!("document {path}")))?;
+        let step = entry.history.redo();
+        let text = Self::text_of(entry.doc.loro()).to_string();
+        drop(inner);
+        Ok(step.map(|step| super::Undone { step, text }))
+    }
+
     fn rename(&self, path: &str, to: &str, _by: &Principal) -> Result<DocInfo, DocError> {
         let mut inner = self.lock();
         if !inner.docs.contains_key(path) {

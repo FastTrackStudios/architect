@@ -3746,6 +3746,7 @@ over vox, `EXT_HOST_CALL`.
 | `rename_document {path, to}` | `rename_document(path, to)` / `rename` | its info | `writes` |
 | `move_document {path, folder}` | `move_document(path, folder)` / `move` | its info | `writes` |
 | `delete_document {path}` | `delete_document(path)` / `delete` | nothing | `writes` |
+| `undo_document {path}` / `redo_document {path}` | `undo_document(path)` / `redo_document(path)` | `{step, text}`, or `null` with none | `writes` |
 | `watch_documents {action \| script, function?}` | `watch_documents(hook)` / `watch(hook)` | the hooks' keys | `reads` |
 
 A path is relative and `/`-separated (`notes/Inbox.md`), never `..`; its

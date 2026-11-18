@@ -87,7 +87,10 @@ export type HostRequest =
   | { op: "edit_document"; path: string; edits: DocEdit[]; name?: string | null }
   | { op: "rename_document"; path: string; to: string }
   | { op: "move_document"; path: string; folder: string }
+  | { op: "live_document"; path: string }
   | { op: "delete_document"; path: string }
+  | { op: "undo_document"; path: string }
+  | { op: "redo_document"; path: string }
   | { op: "watch_documents"; action?: string; script?: string; function?: string }
   | { op: "editor_state" }
   | { op: "edit_editor"; changes?: Json[]; selection?: Json[]; name?: string; base?: number }

@@ -118,6 +118,14 @@ pub fn is_under(path: &str, under: Option<&str>) -> bool {
     }
 }
 
+/// What an undo or a redo did: the step taken back (or made again), by
+/// its name, and the document's text after.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Undone {
+    pub step: String,
+    pub text: String,
+}
+
 /// What an edit did: the text after, and whether it changed (an edit
 /// that changes nothing raises no `doc.saved`).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -247,6 +255,32 @@ mod host {
             let _ = query;
             Err(DocError::Unsupported(
                 "metadata: these documents have none".to_owned(),
+            ))
+        }
+
+        /// Takes back document `path`'s last undo step, as `by`: `None`
+        /// when it has none. Edits made since (the person's, a peer's)
+        /// stay. None kept by default.
+        ///
+        /// # Errors
+        ///
+        /// No document, or these documents keep no undo.
+        fn undo(&self, path: &str, by: &Principal) -> Result<Option<super::Undone>, DocError> {
+            let _ = (path, by);
+            Err(DocError::Unsupported(
+                "undo: these documents keep no undo".to_owned(),
+            ))
+        }
+
+        /// Makes the step undone last again: `None` when there is none.
+        ///
+        /// # Errors
+        ///
+        /// No document, or these documents keep no undo.
+        fn redo(&self, path: &str, by: &Principal) -> Result<Option<super::Undone>, DocError> {
+            let _ = (path, by);
+            Err(DocError::Unsupported(
+                "redo: these documents keep no undo".to_owned(),
             ))
         }
     }

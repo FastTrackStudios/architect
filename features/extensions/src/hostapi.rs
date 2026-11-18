@@ -1243,6 +1243,8 @@ impl ExtensionApi {
             | HostRequest::RenameDocument { .. }
             | HostRequest::MoveDocument { .. }
             | HostRequest::DeleteDocument { .. }
+            | HostRequest::UndoDocument { .. }
+            | HostRequest::RedoDocument { .. }
             | HostRequest::WatchDocuments { .. } => self.document(&host, manifest, request).await,
             HostRequest::EditorState
             | HostRequest::EditEditor { .. }
@@ -1876,6 +1878,16 @@ impl ExtensionApi {
                     .map_err(fail)?;
                 (info(moved), Some(DocEvent::Renamed { from: path, to }))
             }
+            HostRequest::UndoDocument { path } => {
+                let path = path_ok(&path)?;
+                let undone = docs.undo(me, path.clone()).await.map_err(fail)?;
+                undone_answer(undone, path)
+            }
+            HostRequest::RedoDocument { path } => {
+                let path = path_ok(&path)?;
+                let redone = docs.redo(me, path.clone()).await.map_err(fail)?;
+                undone_answer(redone, path)
+            }
             HostRequest::DeleteDocument { path } => {
                 let path = path_ok(&path)?;
                 docs.delete(me, path.clone()).await.map_err(fail)?;
@@ -2156,4 +2168,19 @@ async fn keep_toast(host: &Host, from: &str, toast: &Value) {
         .list_of(&action)
         .run_json_async_with(&caller, &action, toast.to_string().as_bytes())
         .await;
+}
+
+/// An undo's or a redo's answer: `{step, text}` and a save, or `null`
+/// and nothing when there was no step.
+fn undone_answer(
+    done: Option<architect_documents::Undone>,
+    path: String,
+) -> (Value, Option<crate::events::DocEvent>) {
+    match done {
+        Some(u) => (
+            serde_json::json!({ "step": u.step, "text": u.text }),
+            Some(crate::events::DocEvent::Saved { path }),
+        ),
+        None => (Value::Null, None),
+    }
 }

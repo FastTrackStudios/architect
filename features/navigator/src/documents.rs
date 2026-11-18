@@ -42,7 +42,7 @@ use std::time::Duration;
 
 use architect::action::{ActionList, Principal};
 use architect_extensions::documents::{
-    DocEdit, DocError, DocInfo, Documents, Edited, apply_edits, is_under,
+    DocEdit, DocError, DocInfo, Documents, Edited, Undone, apply_edits, is_under,
 };
 use architect_extensions::events::DocEvent;
 
@@ -176,6 +176,8 @@ pub struct VaultDocuments {
     writing: Arc<Mutex<()>>,
     /// Each note's parsed metadata, by its modified time.
     meta: Arc<vault::actions::MetadataCache>,
+    /// The undo of what was changed through it (a file keeps none).
+    journal: Arc<architect_documents::Journal>,
 }
 
 impl std::fmt::Debug for VaultDocuments {
@@ -195,7 +197,66 @@ impl VaultDocuments {
             source,
             writing: Arc::new(Mutex::new(())),
             meta: Arc::new(vault::actions::MetadataCache::default()),
+            journal: Arc::new(architect_documents::Journal::new()),
         }
+    }
+
+    /// Takes a journal step back (`undo`) or makes it again, merged into
+    /// what the note is now: edits made since, the person's or a peer's,
+    /// stay (the three-way merge an open note uses).
+    fn step(&self, path: &str, undo: bool) -> Result<Option<Undone>, DocError> {
+        note_path(path)?;
+        let taken = if undo {
+            self.journal.take_undo(path)
+        } else {
+            self.journal.take_redo(path)
+        };
+        let Some(step) = taken else { return Ok(None) };
+        let (base, ours) = if undo {
+            (step.after.clone(), step.before.clone())
+        } else {
+            (step.before.clone(), step.after.clone())
+        };
+        let Some(mut now) = self.vault_text(path) else {
+            self.journal.put_back(path, step, undo);
+            return Err(not_found(path));
+        };
+        for _ in 0..TRIES {
+            let text = if now == base {
+                ours.clone()
+            } else {
+                vault_doc::merge3(&base, &ours, &now)
+            };
+            let saved = quietly(|| self.source.save_if(path, &now, &text));
+            match saved {
+                Ok(true) => {
+                    let done = Undone {
+                        step: step.name.clone(),
+                        text,
+                    };
+                    if undo {
+                        self.journal.undone(path, step);
+                    } else {
+                        self.journal.redone(path, step);
+                    }
+                    return Ok(Some(done));
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    self.journal.put_back(path, step, undo);
+                    return Err(DocError::Failed(e));
+                }
+            }
+            let Some(t) = self.vault_text(path) else {
+                self.journal.put_back(path, step, undo);
+                return Err(not_found(path));
+            };
+            now = t;
+        }
+        self.journal.put_back(path, step, undo);
+        Err(DocError::Failed(format!(
+            "{path} kept changing while it was undone: nothing written"
+        )))
     }
 
     /// The source it changes.
@@ -343,8 +404,9 @@ impl Documents for VaultDocuments {
         path: &str,
         edits: &[DocEdit],
         // A file on disk keeps no undo of its own: the open note takes
-        // the change as one edit of its typing.
-        _step: &str,
+        // the change as one edit of its typing, and the journal keeps it
+        // as one step for `undo`.
+        step: &str,
         by: &Principal,
     ) -> Result<Edited, DocError> {
         note_path(path)?;
@@ -365,6 +427,7 @@ impl Documents for VaultDocuments {
                 });
             }
             if quietly(|| self.source.save_if(path, &now, &text)).map_err(DocError::Failed)? {
+                self.journal.record(path, step, &now, &text);
                 return Ok(Edited {
                     text,
                     changed: true,
@@ -388,6 +451,7 @@ impl Documents for VaultDocuments {
             return Err(DocError::Exists(there));
         }
         quietly(|| self.source.rename(path, to)).map_err(DocError::Failed)?;
+        self.journal.renamed(path, to);
         Ok(DocInfo::of(to))
     }
 
@@ -419,6 +483,17 @@ impl Documents for VaultDocuments {
         if self.vault_text(path).is_none() {
             return Err(not_found(path));
         }
-        quietly(|| self.source.write(&[FileOp::Trash(path.to_owned())])).map_err(DocError::Failed)
+        quietly(|| self.source.write(&[FileOp::Trash(path.to_owned())]))
+            .map_err(DocError::Failed)?;
+        self.journal.forget(path);
+        Ok(())
+    }
+
+    fn undo(&self, path: &str, _by: &Principal) -> Result<Option<Undone>, DocError> {
+        self.step(path, true)
+    }
+
+    fn redo(&self, path: &str, _by: &Principal) -> Result<Option<Undone>, DocError> {
+        self.step(path, false)
     }
 }

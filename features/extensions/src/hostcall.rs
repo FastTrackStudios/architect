@@ -23,6 +23,7 @@
 //! | `edit_document {path, edits, name?}` | edits as one CRDT transaction, one undo step (`DocEdit`s): its text after | `writes = ["documents"]` |
 //! | `rename_document {path, to}` / `move_document {path, folder}` | a new path (or folder) for it, its history kept: its `DocInfo` | `writes = ["documents"]` |
 //! | `delete_document {path}` | deletes it | `writes = ["documents"]` |
+//! | `undo_document {path}` / `redo_document {path}` | takes back the document's last undo step (its own history: a CRDT document's every step, a vault note's edits made through the documents) or makes it again; edits made since stay: `{step, text}`, `null` when there is none | `writes = ["documents"]` |
 //! | `watch_documents {action \| script, function?}` | its action (script) on every `doc.created/saved/renamed/deleted`: the hooks' keys | `reads = ["documents"]` |
 //! | `editor_state` | the editor being typed in: `{editor, context, text, selection, primary, cursor, node, version}` (`crate::editor::EditorView`; `node` is the block at the cursor: a list item, a table cell and its table's cells, …) | `reads = ["editor"]` or `writes = ["editor"]` |
 //! | `edit_editor {changes, selection?, name?, base?}` | its changes (byte offsets into the text it read) and selection as one transaction, one undo step named `name`, made as the extension (`architect_editor::ext::EditCommand`): the editor after | `writes = ["editor"]` |
@@ -159,6 +160,15 @@ pub enum HostRequest {
         folder: String,
     },
     DeleteDocument {
+        path: String,
+    },
+    /// Takes back document `path`'s last undo step: `{step, text}`, or
+    /// `null` with none.
+    UndoDocument {
+        path: String,
+    },
+    /// Makes the step of document `path` undone last again.
+    RedoDocument {
         path: String,
     },
     /// Its action (a Luau script) on every document event —
@@ -768,6 +778,8 @@ impl HostRequest {
             Self::RenameDocument { .. } => "rename_document",
             Self::MoveDocument { .. } => "move_document",
             Self::DeleteDocument { .. } => "delete_document",
+            Self::UndoDocument { .. } => "undo_document",
+            Self::RedoDocument { .. } => "redo_document",
             Self::WatchDocuments { .. } => "watch_documents",
             Self::EditorState => "editor_state",
             Self::EditEditor { .. } => "edit_editor",
@@ -987,7 +999,9 @@ pub fn check(
         | HostRequest::EditDocument { .. }
         | HostRequest::RenameDocument { .. }
         | HostRequest::MoveDocument { .. }
-        | HostRequest::DeleteDocument { .. } => (
+        | HostRequest::DeleteDocument { .. }
+        | HostRequest::UndoDocument { .. }
+        | HostRequest::RedoDocument { .. } => (
             "writes",
             if may.may_write(DOCUMENTS) {
                 Ok(())
