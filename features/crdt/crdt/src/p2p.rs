@@ -61,7 +61,10 @@ pub use crate::link::Access;
 use crate::link::{DocLink, LINK_BEARER_PREFIX};
 use crate::peer::{DocCatalog, DocPeerDispatcher, DocPeerHost, doc_peer_service_descriptor};
 use crate::registry::DocRegistry;
-use crate::sync::{DocSync, DocSyncDispatcher, SyncDown, SyncError, doc_sync_service_descriptor};
+use crate::sync::{
+    DocPresence, DocPresenceDispatcher, DocSync, DocSyncDispatcher, SyncDown, SyncError,
+    doc_presence_service_descriptor, doc_sync_service_descriptor,
+};
 
 // ── Shares ─────────────────────────────────────────────────────────────
 
@@ -425,6 +428,62 @@ impl DocSync for NodeSync {
     }
 }
 
+/// `DocPresence` over the node's registry: the presence of a document the
+/// node hosts, and its clock (`now`), to the node's peers (session#192: a
+/// transport hosted on the leader's node, followed by the org's other
+/// devices through it, no address given). Admitted as [`NodeSync`] is: a
+/// read link's guest sees everyone and publishes nothing, and a guest's or
+/// a device's session ends when it is revoked.
+#[derive(Clone)]
+struct NodePresence {
+    registry: DocRegistry,
+    shares: Shares,
+    devices: Admission,
+}
+
+impl DocPresence for NodePresence {
+    async fn presence(
+        &self,
+        doc_id: Uuid,
+        up: vox::Rx<Vec<u8>>,
+        down: vox::Tx<Vec<u8>>,
+    ) -> Result<(), SyncError> {
+        match architect::permissions_gate::caller() {
+            Some(Principal::Guest { link_id, .. }) => {
+                let read_only = !self.shares.writes(&link_id, doc_id);
+                let session = self.registry.presence_as(doc_id, up, down, read_only);
+                tokio::select! {
+                    res = session => res,
+                    () = self.shares.until_revoked(&link_id) => Err(SyncError::UnknownDoc),
+                }
+            }
+            Some(Principal::Host { endpoint }) => {
+                let session = self.registry.presence(doc_id, up, down);
+                tokio::select! {
+                    res = session => res,
+                    () = self.devices.ends(&endpoint) => Err(SyncError::UnknownDoc),
+                }
+            }
+            _ => self.registry.presence(doc_id, up, down).await,
+        }
+    }
+
+    async fn now(&self) -> f64 {
+        crate::presence::clock_ms()
+    }
+}
+
+/// `DocPresence` for [`node_router`]'s gate: reading a document's presence
+/// and the node's clock; which document is the registry's authorizer's
+/// call, and what a reader may publish the registry's write rule.
+const PRESENCE_PERMITS: ServicePermits = ServicePermits {
+    service: "DocPresence",
+    methods: &[
+        MethodPermit::new("presence", "read", "docs/**"),
+        MethodPermit::new("now", "read", "docs/**"),
+    ],
+};
+
 /// `DocSync` for [`node_router`]'s gate; which document is the
 /// registry's authorizer's call.
 const SYNC_PERMITS: ServicePermits = ServicePermits {
@@ -497,6 +556,14 @@ pub fn node_router_with<C: DocCatalog + Clone>(
         .with(
             doc_sync_service_descriptor(),
             DocSyncDispatcher::new(NodeSync {
+                registry: registry.clone(),
+                shares: access.shares.clone(),
+                devices: access.devices.clone(),
+            }),
+        )
+        .with(
+            doc_presence_service_descriptor(),
+            DocPresenceDispatcher::new(NodePresence {
                 registry,
                 shares: access.shares.clone(),
                 devices: access.devices.clone(),
@@ -520,6 +587,7 @@ pub fn node_router_with<C: DocCatalog + Clone>(
     };
     let gate = PermissionsGate::new(Arc::new(access), Arc::new(identity))
         .permit(doc_sync_service_descriptor(), &SYNC_PERMITS)
+        .permit(doc_presence_service_descriptor(), &PRESENCE_PERMITS)
         .permit(doc_peer_service_descriptor(), &PEER_PERMITS)
         .permit(device_pairing_service_descriptor(), &PAIR_PERMITS);
     more.permits

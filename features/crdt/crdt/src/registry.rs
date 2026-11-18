@@ -608,7 +608,7 @@ impl DocRegistry {
 
     /// [`DocPresence::presence`], read-only whatever the caller may write
     /// when `read_only`.
-    async fn presence_as(
+    pub(crate) async fn presence_as(
         &self,
         doc_id: Uuid,
         up: vox::Rx<Vec<u8>>,

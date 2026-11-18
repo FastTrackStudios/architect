@@ -576,3 +576,83 @@ async fn a_peer_is_listed_only_the_documents_it_may_open() {
         "the private document's name stays on the desk"
     );
 }
+
+/// A presence peer on `doc_id`, hosted by the node at `to`, dialled over
+/// iroh from `from`: no address but the node's endpoint.
+async fn presence_on(
+    from: &iroh::Endpoint,
+    to: impl Into<iroh::EndpointAddr>,
+    doc_id: Uuid,
+) -> Result<crdt::sync::PresencePeer, String> {
+    let link = iroh_link::connect(from, to)
+        .await
+        .map_err(|e| e.to_string())?;
+    let client = vox::initiator_on(link)
+        .establish::<crdt::sync::DocPresenceClient>()
+        .await
+        .map_err(|e| e.to_string())?;
+    let (peer, mut driver) = crdt::sync::PresencePeer::new(doc_id, 30_000);
+    tokio::spawn(async move {
+        let _ = driver.run(&client).await;
+    });
+    Ok(peer)
+}
+
+/// The transport through the org (session#192): the laptop's node hosts
+/// the song's presence and clock on its iroh lane; the desk leads through
+/// it and the phone follows through it, each knowing only the laptop's
+/// endpoint. The phone hears the desk's transport and estimates the
+/// laptop's clock; a device of no one's account is refused.
+#[tokio::test(flavor = "multi_thread")]
+async fn devices_lead_and_follow_a_documents_presence_through_its_node() {
+    let laptop = serve(loopback().await);
+    let desk = serve(loopback().await);
+    let phone = serve(loopback().await);
+    let ids = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    let account = directory(&[(ids.0, &laptop), (ids.1, &desk), (ids.2, &phone)]);
+    laptop
+        .access
+        .devices
+        .set_account(account_peers(&account, ids.0));
+    let song = Uuid::new_v4();
+
+    let lead = presence_on(&desk.endpoint, laptop.addr(), song)
+        .await
+        .unwrap();
+    let follow = presence_on(&phone.endpoint, laptop.addr(), song)
+        .await
+        .unwrap();
+    lead.set("lead/play", "playing at 12");
+    let clock = follow.clock().clone();
+    for _ in 0..200 {
+        if follow.states().contains_key("lead/play") && clock.offset_ms().is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_eq!(
+        follow.states().get("lead/play"),
+        Some(&loro::LoroValue::from("playing at 12")),
+        "the phone hears the desk's transport through the laptop"
+    );
+    assert!(
+        clock.offset_ms().is_some(),
+        "the laptop's clock answers the phone"
+    );
+    let round_trip = clock.round_trip_ms().unwrap();
+    assert!(
+        round_trip < 50.0,
+        "round trip over loopback iroh: {round_trip} ms"
+    );
+
+    // A device of no one's account: no presence.
+    let stranger = loopback().await;
+    let refused = presence_on(&stranger, laptop.addr(), song).await;
+    if let Ok(peer) = refused {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(
+            !peer.states().contains_key("lead/play"),
+            "a stranger heard the transport"
+        );
+    }
+}
