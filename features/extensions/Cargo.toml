@@ -229,7 +229,7 @@ pickers = [
     "dep:block2",
     "dep:dispatch2",
 ]
-remote = ["process", "ui", "scenes", "architect-theme/dioxus", "dep:blitz-dom", "blitz-dom/custom-widget", "dep:blitz-traits", "dep:cursor-icon", "dep:dioxus-native-dom", "dep:futures-timer"]
+remote = ["process", "ui", "scenes", "architect-theme/dioxus", "dep:blitz-dom", "blitz-dom/custom-widget", "dep:blitz-traits", "dep:cursor-icon", "dep:data-url", "dep:dioxus-native-dom", "dep:futures-timer"]
 
 [dependencies]
 # `[[share_layers]]` patterns and paths compared in one Unicode form (NFC).
@@ -303,6 +303,9 @@ vox-stream = { version = "0.10.0-rc.7", optional = true }
 thiserror = { workspace = true, optional = true }
 blitz-dom = { workspace = true, optional = true }
 blitz-traits = { workspace = true, optional = true }
+# A remote view's `<img src="data:…">` decoded (`remote`; `crate::remote`'s
+# `DataOnly`): the only thing such a document fetches.
+data-url = { workspace = true, optional = true }
 # A hit region's cursor, set on the window (`remote`).
 cursor-icon = { workspace = true, optional = true }
 # A remote view's scenes (`scenes`): anyrender's commands as data.

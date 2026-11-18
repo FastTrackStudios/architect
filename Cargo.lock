@@ -1409,6 +1409,7 @@ dependencies = [
  "block2 0.6.2",
  "crdt",
  "cursor-icon",
+ "data-url",
  "dioxus",
  "dioxus-html",
  "dioxus-native-dom",

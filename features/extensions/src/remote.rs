@@ -197,11 +197,43 @@ fn qual(name: &str, namespace: Option<&str>) -> QualName {
     )
 }
 
+/// What a remote view's document fetches: a `data:` URI's own bytes, and
+/// nothing else. A view's `<img src="data:image/svg+xml;…">` (Keyflow's
+/// palette glyphs) draws, as it does linked into the app's document; no
+/// `file:` path, `https:` beacon or bundle asset is reachable from one.
+/// Without it the document had no provider and every image stayed blank.
+struct DataOnly;
+
+impl blitz_traits::net::NetProvider for DataOnly {
+    fn fetch(
+        &self,
+        _doc_id: usize,
+        request: blitz_traits::net::Request,
+        handler: Box<dyn blitz_traits::net::NetHandler>,
+    ) {
+        let url = request.url.to_string();
+        if request.url.scheme() != "data" {
+            handler.error(url, "a remote view fetches data: URIs only".to_owned());
+            return;
+        }
+        match data_url::DataUrl::process(&url)
+            .ok()
+            .and_then(|d| d.decode_to_vec().ok())
+        {
+            Some((bytes, _)) => handler.bytes(url, blitz_traits::net::Bytes::from(bytes)),
+            None => handler.error(url, "not a data: URI that decodes".to_owned()),
+        }
+    }
+}
+
 impl RemoteDocument {
     /// An empty view, sending its events to `events`.
     #[must_use]
     pub fn new(events: mpsc::UnboundedSender<ViewEvent>) -> Self {
-        let mut doc = BaseDocument::new(DocumentConfig::default());
+        let mut doc = BaseDocument::new(DocumentConfig {
+            net_provider: Some(Arc::new(DataOnly)),
+            ..DocumentConfig::default()
+        });
         doc.add_user_agent_stylesheet(UserAgentStylesheet::default_sheet());
         let mut m = doc.mutate();
         let html = m.create_element(qual("html", None), Vec::new());
@@ -2603,6 +2635,62 @@ pub fn mounted_views(doc: &BaseDocument) -> Vec<NodeId> {
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod image_tests {
+    use std::sync::{Arc, Mutex};
+
+    use blitz_traits::net::{Bytes, NetHandler, NetProvider, Request, Url};
+
+    use super::DataOnly;
+
+    /// What a fetch gave: its bytes, or why not.
+    type Got = Arc<Mutex<Option<Result<Vec<u8>, String>>>>;
+
+    struct Keep(Got);
+
+    impl NetHandler for Keep {
+        fn bytes(self: Box<Self>, _url: String, bytes: Bytes) {
+            *self
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Ok(bytes.to_vec()));
+        }
+        fn error(self: Box<Self>, _url: String, why: String) {
+            *self
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Err(why));
+        }
+    }
+
+    fn fetch(url: &str) -> Option<Result<Vec<u8>, String>> {
+        let got = Got::default();
+        let url = Url::parse(url).unwrap_or_else(|e| panic!("{url}: {e}"));
+        DataOnly.fetch(0, Request::get(url), Box::new(Keep(Arc::clone(&got))));
+        got.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+    }
+
+    /// A view's `<img src="data:…">` (Keyflow's palette glyphs) gets its
+    /// bytes; a path on disk or a site's image is refused.
+    #[test]
+    fn a_views_document_fetches_data_uris_and_nothing_else() {
+        // `<svg/>`, base64.
+        assert_eq!(
+            fetch("data:image/svg+xml;base64,PHN2Zy8+"),
+            Some(Ok(b"<svg/>".to_vec()))
+        );
+        assert_eq!(
+            fetch("data:image/svg+xml,%3Csvg%2F%3E"),
+            Some(Ok(b"<svg/>".to_vec()))
+        );
+        for url in ["file:///etc/passwd", "https://example.com/beacon.png"] {
+            assert!(matches!(fetch(url), Some(Err(_))), "{url} was fetched");
+        }
+    }
 }
 
 #[cfg(test)]
