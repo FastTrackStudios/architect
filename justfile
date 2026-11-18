@@ -27,6 +27,12 @@ webview-example KEY="":
     cargo xtask ext-pack examples/extension/webview-board/package --out target/webview-board.archext
     @if [ -n "{{KEY}}" ]; then cargo xtask ext-sign target/webview-board.archext --key "{{KEY}}"; else echo "unsigned: pass KEY=<secret key file> to sign it"; fi
 
+# The process view showcase (#838): build process-view-demo into examples/extension/process-view/package/bin/, a package whose only view has kind = "process" (Linux and macOS)
+process-view-example:
+    cargo build --release -p architect-process-view --bin process-view-demo --features guest,demo
+    mkdir -p examples/extension/process-view/package/bin
+    cp "${CARGO_TARGET_DIR:-target}/release/process-view-demo" examples/extension/process-view/package/bin/
+
 # The public website (apps/site: landing, download, changelog, extensions, docs), hot reload
 website:
     devenv up site

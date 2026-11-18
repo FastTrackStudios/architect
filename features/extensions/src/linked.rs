@@ -452,9 +452,78 @@ pub fn use_embed() -> Option<crate::contrib::EmbedInput> {
     use dioxus::prelude::{ReadableExt as _, try_use_context};
     let input = try_use_context::<EmbedContext>()?.0;
     let now = input.read().clone();
-    // A process view's context is there in a pane too, empty.
-    (!now.claim.is_empty()).then_some(now)
+    // A process view's context is there in a pane too: empty, or its
+    // pane's state (`use_pane_state`).
+    (!now.claim.is_empty() && now.claim != PANE_CLAIM).then_some(now)
 }
+
+/// The claim a process view's pane input is sent under: its
+/// [`EmbedInput`](crate::contrib::EmbedInput)'s `props` are `{"pane",
+/// "state"}`, the pane's id and its state ([`use_pane_state`]).
+pub const PANE_CLAIM: &str = "pane";
+
+/// A pane's input to a process view ([`PANE_CLAIM`]).
+#[must_use]
+pub fn pane_input(pane: &str, state: &str) -> crate::contrib::EmbedInput {
+    crate::contrib::EmbedInput {
+        claim: PANE_CLAIM.to_owned(),
+        source: String::new(),
+        props: serde_json::json!({ "pane": pane, "state": state }),
+    }
+}
+
+/// The pane this view is drawn in, as its id and its state (an opener's
+/// path), linked in or as a process: read in a view, it draws again when
+/// either changes. `None` outside a pane (a slot, an embed).
+///
+/// Linked in, it is `architect_workspace::use_pane`'s; in a process, what
+/// its host told it ([`PANE_CLAIM`]).
+#[cfg(feature = "pane")]
+#[must_use]
+pub fn use_pane_state() -> Option<(String, String)> {
+    use dioxus::prelude::{ReadableExt as _, try_use_context};
+    if let Some(pane) = architect_workspace::try_use_pane() {
+        return Some((pane.id.0.clone(), pane.state()));
+    }
+    let input = try_use_context::<EmbedContext>()?.0;
+    let now = input.read();
+    if now.claim != PANE_CLAIM {
+        return None;
+    }
+    let text = |key: &str| {
+        now.props
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    Some((text("pane"), text("state")))
+}
+
+#[cfg(feature = "paint-pane")]
+mod paint_pane {
+    use dioxus::prelude::*;
+
+    /// A view's [`PaintView`](architect_workspace::paint::PaintView) in its
+    /// own Dioxus view, the same code linked in or as a process: linked, it
+    /// is `architect_workspace::PaintPane`; in a process, the host composes
+    /// what it draws (`crate::scene::RemotePaint`), with the same `ViewCtx`
+    /// (the theme, `mount`'s extras and its `PaintWake`) and the same input.
+    ///
+    /// Mount it among the view's own elements, as `PaintPane` is: it fills
+    /// its parent.
+    #[component]
+    pub fn PaintPane(mount: architect_workspace::paint::PaintMount) -> Element {
+        #[cfg(feature = "guest")]
+        if crate::guest::in_process() {
+            return rsx! { crate::scene::RemotePaint { mount } };
+        }
+        rsx! { architect_workspace::paint::PaintPane { mount } }
+    }
+}
+
+#[cfg(feature = "paint-pane")]
+pub use paint_pane::{PaintPane, PaintPaneProps};
 
 #[cfg(feature = "guest")]
 impl crate::guest::Guest {

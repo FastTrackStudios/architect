@@ -35,14 +35,22 @@ gui = [
     "dep:dioxus",
     "dep:dioxus-native",
     "architect-mcp/bridge",
+    # Extensions' `kind = "process"` views (#838): a program in the
+    # package draws the pane on its own GPU device. On Linux and macOS;
+    # a Windows build has none and the pane says why. In the window's
+    # feature, not the release's list, so every build of the window has
+    # it: the release (`cargo xtask dist desktop`), a distribution crate
+    # (`dist/standard`'s `gui`), and `architect dev` from a checkout.
+    "architect-app/process-views",
 ]
 keyflow-lab = ["gui", "architect-app/keyflow-lab"]
 # Extensions' web views (#222) in a native child web view (wry).
 webview = ["gui", "architect-app/webview"]
 # WASI component extensions: Wasmtime and Cranelift in the binary.
 wasi = ["gui", "architect-app/wasi", "node-wasi"]
-# The lab's process views (Linux, off by default): architect-app's.
-process-views = ["gui", "architect-app/process-views"]
+# The lab's "Process views" screenset (⌘6) and its demo scene, off by
+# default. Extensions' process views are in `gui`, without it.
+process-views = ["gui", "architect-app/process-views-lab"]
 # The node draws the fences an installed WASI component's embed view
 # claims on share links and Sites (#488): Wasmtime in the node, without
 # the window. The release's node and its image have it.

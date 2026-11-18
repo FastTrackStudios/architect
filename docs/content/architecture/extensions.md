@@ -85,7 +85,7 @@ weight = 67
 > `Extension`). The window side is `features/extensions/src/interface.rs`
 > `use_extension_ui`. The sandbox's Board is one (`apps/sandbox/board`). See
 > "Contributions" and "One trait, three ways to run it" below. Not yet:
-> WASM, a process view told its pane's state, hooks on a phone.
+> WASM, hooks on a phone.
 >
 > The rest of this page is proposed (2026-10-31). Decided: one crate, `architect-extensions`, with four kinds — data,
 > WebAssembly components, Luau scripts, and processes over vox — and a
@@ -266,6 +266,18 @@ boundary is a function call or a local socket, well under a millisecond.
 **Frame documents** stay for what has no code: a face, a control
 surface, a data-only extension's panel — bound to parameters and actions,
 rendered by the app.
+
+**Process views** are for what draws on a GPU of its own: a Bevy room, a
+game engine, a renderer in another language (#838). A `[[views]] kind =
+"process"` names a `program` in the package. The app's process-view pane
+runs it, shows its frames (a shared dma-buf texture, or shared memory)
+and forwards the pane's input and size, whichever copy of the extension
+is loaded: built in, installed or in development. Any kind of extension
+may declare one. Running the program is a capability
+(`capabilities.programs`, below), and the view is Linux only for now;
+elsewhere the extension loads and its pane says why
+(`docs/content/architecture/process-views.md`,
+`features/extensions/src/process_view.rs`).
 
 ### Spike
 
@@ -3304,7 +3316,10 @@ app's interface it may use (`ui`: below), the folders past its own,
 the network hosts, the MIDI ports and OSC endpoints (`ports`: "MIDI,
 OSC and control surfaces", below), and what the host may do with its
 languages (`languages = ["servers"]`: run their servers, "Languages for
-the editor", below)
+the editor", below), and the programs in its package its `process` views
+run (`programs = ["bin/room"]`, one by one: "Run bin/room, a program in
+its package, on this computer"; checked each time a pane opens, never a
+share-link guest's; `docs/content/architecture/process-views.md`)
 (`features/extensions/src/manifest.rs` `Capabilities`;
 `features/extensions/src/capabilities.rs` turns them into the lines a
 person reads, `Capabilities::grows_from`, and into what may run,
@@ -4923,7 +4938,8 @@ device's buffers. Where this design stands against all of it:
 | Control surfaces (`csurf`: banks, touch, feedback) | **partial**: streams give feedback | a surface contribution: track banks, touch state, last-touched and focused FX, MIDI/OSC ports by capability — on frame documents |
 | Timers, background scripts (`defer`), `atexit`, startup scripts | **partial** | since #308: a WASI view's timers, `every`/`at` hooks, document events, the app's own events (`app:<name>`: Studio's project opened, saved, closed) and background extensions started on their first event; still missing: a run state shown as `checked`, a relaunch rule, an exit hook |
 | Marker actions (an action when the playhead crosses a marker) | **missing** | triggers on transport time |
-| Drawing (gfx, ReaImGui) | **covered**: egui behind a ReaImGui-shaped Luau API, and `gfx` | — |
+| Drawing (gfx, ReaImGui) | **better**: egui behind a ReaImGui-shaped Luau API, and `gfx`; a runtime extension's own GPU drawing as a retained layer tree the host keeps (`features/scene`: fragments by hash, motion on the wall clock or the playhead, hit regions and drags with inertia, the engine's lock-free values), so the extension is off the frame path, linked in or as a process (#837, #840) | bytes on the wire to the browser (#835); presentation above 60 fps measured (#839) |
+| A native renderer in a window of its own (an extension's own OpenGL/Vulkan window, video) | **better on Linux and macOS**: a `process` view runs the program from the package in its own crash domain and shows its GPU frames (a dma-buf, an `IOSurface`, or shared memory) in a pane, tab or pop-out window, input forwarded, in every build of the window (#838) | Windows (DXGI shared handles); the frame as a layer of the compositor's tree |
 | Drawing into REAPER's own windows (js_ReaScriptAPI) | **better**: overlay layers in a view's coordinates | — |
 | Menus and toolbars (`hookcustommenu`, `toolbar_icon_map`) | **partial** | contributions to named menus and to a target's context menu (also just before it shows), toolbar items with icons and toggle state |
 | New media formats, project importers (`pcmsrc`, `pcmsink`, `projectimport`) | **missing** | decoder, encoder and importer contributions, off the audio thread, with peaks |

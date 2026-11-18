@@ -37,9 +37,9 @@ bit-vec = { version = "0.8.0" }
 bitflags = { version = "2.13.2", default-features = false, features = ["serde", "std"] }
 blake2 = { version = "0.10.6" }
 blake3 = { version = "1.8.7" }
-blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101", features = ["autofocus"] }
-blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101", features = ["apple-font-embolden", "custom-widget"] }
-blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101", features = ["data-uri"] }
+blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb", features = ["autofocus"] }
+blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb", features = ["apple-font-embolden", "custom-widget"] }
+blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb", features = ["data-uri"] }
 bytemuck = { version = "1.25.2", default-features = false, features = ["aarch64_simd", "derive", "extern_crate_alloc", "min_const_generics", "wasm_simd"] }
 byteorder = { version = "1.5.0" }
 bytes = { version = "1.12.1", features = ["serde"] }
@@ -362,6 +362,8 @@ objc2-core-foundation = { version = "0.3.2", features = ["CFBase"] }
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["CGColor", "CGColorSpace", "CGContext", "CGDirectDisplay", "CGDisplayConfiguration", "CGDisplayFade", "CGError", "CGPath", "CGRemoteOperation", "CGWindowLevel", "libc", "objc2", "std"] }
 objc2-foundation-468e82937335b1c9 = { package = "objc2-foundation", version = "0.3.2", default-features = false, features = ["NSAffineTransform", "NSAppleEventDescriptor", "NSArray", "NSAttributedString", "NSAutoreleasePool", "NSBundle", "NSCoder", "NSData", "NSDate", "NSDictionary", "NSDistributedNotificationCenter", "NSEnumerator", "NSError", "NSException", "NSFileManager", "NSFileWrapper", "NSFormatter", "NSGeometry", "NSHTTPCookie", "NSItemProvider", "NSJSONSerialization", "NSKeyValueCoding", "NSKeyValueObserving", "NSLocale", "NSNotification", "NSNull", "NSObjCRuntime", "NSObject", "NSOperation", "NSOrthography", "NSPathUtilities", "NSProcessInfo", "NSProgress", "NSRange", "NSRunLoop", "NSScriptCommand", "NSScriptStandardSuiteCommands", "NSSet", "NSStream", "NSString", "NSTextCheckingResult", "NSThread", "NSURL", "NSURLAuthenticationChallenge", "NSURLCredential", "NSURLRequest", "NSURLResponse", "NSURLSession", "NSUUID", "NSUndoManager", "NSUserActivity", "NSValue", "NSZone", "block2", "objc2-core-foundation", "std"] }
 objc2-foundation-6f8ce4dd05d13bba = { package = "objc2-foundation", version = "0.2.2", features = ["NSArray", "NSAttributedString", "NSBundle", "NSCoder", "NSData", "NSDate", "NSDictionary", "NSEnumerator", "NSError", "NSGeometry", "NSNotification", "NSObjCRuntime", "NSObject", "NSPathUtilities", "NSRange", "NSString", "NSThread", "NSURL", "NSUndoManager", "NSValue"] }
+objc2-io-surface = { version = "0.3.2", default-features = false, features = ["IOSurfaceRef", "IOSurfaceTypes", "libc", "objc2", "objc2-core-foundation", "std"] }
+objc2-metal = { version = "0.3.2", default-features = false, features = ["MTLAccelerationStructureCommandEncoder", "MTLAccelerationStructureTypes", "MTLBlitCommandEncoder", "MTLBlitPass", "MTLBuffer", "MTLCaptureManager", "MTLCaptureScope", "MTLCommandBuffer", "MTLCommandEncoder", "MTLCommandQueue", "MTLComputeCommandEncoder", "MTLComputePass", "MTLComputePipeline", "MTLCounters", "MTLDepthStencil", "MTLDevice", "MTLDrawable", "MTLEvent", "MTLPipeline", "MTLPixelFormat", "MTLRenderCommandEncoder", "MTLRenderPass", "MTLRenderPipeline", "MTLResidencySet", "MTLSampler", "MTLStageInputOutputDescriptor", "MTLTexture", "MTLTypes", "MTLVertexDescriptor", "block2", "objc2-io-surface", "std"] }
 once_cell = { version = "1.21.4", default-features = false, features = ["critical-section"] }
 parking_lot = { version = "0.12.5", features = ["arc_lock", "send_guard"] }
 portable-atomic = { version = "1.15.0", features = ["serde"] }
@@ -369,7 +371,7 @@ quick-xml = { version = "0.41.0", features = ["overlapped-lists", "serialize"] }
 reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", default-features = false, features = ["blocking"] }
 rfd = { version = "0.17.2" }
 ring = { version = "0.17.14", features = ["std"] }
-rustix = { version = "1.1.5", features = ["io_uring", "mm", "pipe", "process", "time"] }
+rustix = { version = "1.1.5", features = ["io_uring", "mm", "pipe", "process", "shm", "time"] }
 rustls = { version = "0.23.46", default-features = false, features = ["aws-lc-rs", "aws_lc_rs"] }
 rustls-webpki = { version = "0.103.15", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 simdutf8 = { version = "0.1.5" }
@@ -427,6 +429,8 @@ objc2-core-foundation = { version = "0.3.2", features = ["CFBase"] }
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["CGColor", "CGColorSpace", "CGContext", "CGDirectDisplay", "CGDisplayConfiguration", "CGDisplayFade", "CGError", "CGPath", "CGRemoteOperation", "CGWindowLevel", "libc", "objc2", "std"] }
 objc2-foundation-468e82937335b1c9 = { package = "objc2-foundation", version = "0.3.2", default-features = false, features = ["NSAffineTransform", "NSAppleEventDescriptor", "NSArray", "NSAttributedString", "NSAutoreleasePool", "NSBundle", "NSCoder", "NSData", "NSDate", "NSDictionary", "NSDistributedNotificationCenter", "NSEnumerator", "NSError", "NSException", "NSFileManager", "NSFileWrapper", "NSFormatter", "NSGeometry", "NSHTTPCookie", "NSItemProvider", "NSJSONSerialization", "NSKeyValueCoding", "NSKeyValueObserving", "NSLocale", "NSNotification", "NSNull", "NSObjCRuntime", "NSObject", "NSOperation", "NSOrthography", "NSPathUtilities", "NSProcessInfo", "NSProgress", "NSRange", "NSRunLoop", "NSScriptCommand", "NSScriptStandardSuiteCommands", "NSSet", "NSStream", "NSString", "NSTextCheckingResult", "NSThread", "NSURL", "NSURLAuthenticationChallenge", "NSURLCredential", "NSURLRequest", "NSURLResponse", "NSURLSession", "NSUUID", "NSUndoManager", "NSUserActivity", "NSValue", "NSZone", "block2", "objc2-core-foundation", "std"] }
 objc2-foundation-6f8ce4dd05d13bba = { package = "objc2-foundation", version = "0.2.2", features = ["NSArray", "NSAttributedString", "NSBundle", "NSCoder", "NSData", "NSDate", "NSDictionary", "NSEnumerator", "NSError", "NSGeometry", "NSNotification", "NSObjCRuntime", "NSObject", "NSPathUtilities", "NSRange", "NSString", "NSThread", "NSURL", "NSUndoManager", "NSValue"] }
+objc2-io-surface = { version = "0.3.2", default-features = false, features = ["IOSurfaceRef", "IOSurfaceTypes", "libc", "objc2", "objc2-core-foundation", "std"] }
+objc2-metal = { version = "0.3.2", default-features = false, features = ["MTLAccelerationStructureCommandEncoder", "MTLAccelerationStructureTypes", "MTLBlitCommandEncoder", "MTLBlitPass", "MTLBuffer", "MTLCaptureManager", "MTLCaptureScope", "MTLCommandBuffer", "MTLCommandEncoder", "MTLCommandQueue", "MTLComputeCommandEncoder", "MTLComputePass", "MTLComputePipeline", "MTLCounters", "MTLDepthStencil", "MTLDevice", "MTLDrawable", "MTLEvent", "MTLPipeline", "MTLPixelFormat", "MTLRenderCommandEncoder", "MTLRenderPass", "MTLRenderPipeline", "MTLResidencySet", "MTLSampler", "MTLStageInputOutputDescriptor", "MTLTexture", "MTLTypes", "MTLVertexDescriptor", "block2", "objc2-io-surface", "std"] }
 once_cell = { version = "1.21.4", default-features = false, features = ["critical-section"] }
 parking_lot = { version = "0.12.5", features = ["arc_lock", "send_guard"] }
 portable-atomic = { version = "1.15.0", features = ["serde"] }
@@ -434,7 +438,7 @@ quick-xml = { version = "0.41.0", features = ["overlapped-lists", "serialize"] }
 reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", default-features = false, features = ["blocking"] }
 rfd = { version = "0.17.2" }
 ring = { version = "0.17.14", features = ["std"] }
-rustix = { version = "1.1.5", features = ["io_uring", "mm", "pipe", "process", "time"] }
+rustix = { version = "1.1.5", features = ["io_uring", "mm", "pipe", "process", "shm", "time"] }
 rustls = { version = "0.23.46", default-features = false, features = ["aws-lc-rs", "aws_lc_rs"] }
 rustls-webpki = { version = "0.103.15", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 simdutf8 = { version = "0.1.5" }
@@ -503,7 +507,7 @@ portable-atomic = { version = "1.15.0", features = ["serde"] }
 quick-xml = { version = "0.41.0", features = ["overlapped-lists", "serialize"] }
 reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", default-features = false, features = ["blocking"] }
 ring = { version = "0.17.14", features = ["std"] }
-rustix = { version = "1.1.5", features = ["io_uring", "mm", "pipe", "process", "time"] }
+rustix = { version = "1.1.5", features = ["io_uring", "mm", "pipe", "process", "shm", "time"] }
 rustls = { version = "0.23.46", default-features = false, features = ["aws-lc-rs", "aws_lc_rs"] }
 rustls-webpki = { version = "0.103.15", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 security-framework-sys = { version = "2.17.0", features = ["OSX_10_10", "OSX_10_11", "OSX_10_12", "OSX_10_9"] }

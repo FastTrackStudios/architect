@@ -46,7 +46,9 @@ pub const WRITES: [&str; 2] = [DOCUMENTS, EDITOR];
 
 /// What of the app's interface an extension may use
 /// ([`Capabilities::ui`]).
-pub const UI: [&str; 7] = [NOTIFY, CLIPBOARD, PICKERS, PROMPTS, MENUS, BADGES, OVERLAY];
+pub const UI: [&str; 8] = [
+    NOTIFY, CLIPBOARD, PICKERS, PROMPTS, MENUS, BADGES, OVERLAY, ENGINE,
+];
 /// Notifications (toasts).
 pub const NOTIFY: &str = "notify";
 /// The clipboard: read it and write it.
@@ -66,6 +68,12 @@ pub const BADGES: &str = "badges";
 /// Without it they are, so a view can't paint
 /// over the toolbar, a dialog or a prompt, by mistake or to fake one.
 pub const OVERLAY: &str = "overlay";
+/// The engine's live values in its views.
+///
+/// Meters and levels an engine writes lock-free (`architect_scene::engine`), drawn by the host at
+/// the display's rate. Without it an animation bound to an `engine.`
+/// value fails the view.
+pub const ENGINE: &str = "engine";
 
 /// What the host may do with an extension's languages past highlighting
 /// them ([`Capabilities::languages`]).
@@ -78,7 +86,7 @@ pub const SERVERS: &str = "servers";
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Ask {
     /// `actions`, `effect`, `hosts`, `folders`, `reads`, `writes`, `ui`,
-    /// `events`, `ports`, `languages` or `device`.
+    /// `events`, `ports`, `languages`, `device`, `over` or `programs`.
     pub kind: &'static str,
     /// What exactly (`TRANSPORT_`, `api.github.com`, `selection`).
     pub what: String,
@@ -238,6 +246,7 @@ fn ui_words(u: &str) -> String {
         MENUS => "Show menus of its own".to_owned(),
         BADGES => "Mark files and tabs with icons and badges".to_owned(),
         OVERLAY => "Draw over the whole app, outside its own panes".to_owned(),
+        ENGINE => "Show the audio engine's live levels and meters in its views".to_owned(),
         other => format!("Use {other}"),
     }
 }
@@ -277,6 +286,7 @@ impl Capabilities {
             && self.languages.is_empty()
             && self.device.is_empty()
             && self.over.is_empty()
+            && self.programs.is_empty()
     }
 
     /// Everything it asks for, one line a thing, in the order a prompt
@@ -380,6 +390,19 @@ impl Capabilities {
                 kind: "over",
                 what: v.clone(),
                 says: format!("Draw over {}", view_words(v)),
+            });
+        }
+        for p in self
+            .programs
+            .iter()
+            .filter(|p| !granted.programs.contains(p))
+        {
+            out.push(Ask {
+                kind: "programs",
+                what: p.clone(),
+                says: format!(
+                    "Run {p}, a program in its package, on this computer to draw its views"
+                ),
             });
         }
         for f in self
@@ -500,6 +523,14 @@ impl Capabilities {
                 .filter(|d| granted.device.contains(d))
                 .cloned()
                 .collect(),
+            // A program of its package only as declared and granted, one
+            // by one.
+            programs: self
+                .programs
+                .iter()
+                .filter(|p| granted.programs.contains(p))
+                .cloned()
+                .collect(),
             // Drawing over another's view only as declared and granted.
             over: self
                 .over
@@ -602,6 +633,13 @@ impl Capabilities {
     #[must_use]
     pub fn may_draw_over(&self, extension: &str, view: &str) -> bool {
         view.starts_with(&format!("{extension}/")) || self.over.iter().any(|v| v == view)
+    }
+
+    /// Whether it may run `program`, a path in its package, to draw a
+    /// `process` view (`capabilities.programs`).
+    #[must_use]
+    pub fn may_run_program(&self, program: &str) -> bool {
+        self.programs.iter().any(|p| p == program)
     }
 
     /// Whether it may use the device's `entry` (`capabilities.device`:

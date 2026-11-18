@@ -119,7 +119,9 @@ pub enum ViewInput {
         button: Button,
         mods: Vec<&'static str>,
     },
-    /// Scrolled by `dx, dy` logical pixels. `x, y` are the pointer's
+    /// Scrolled by `dx, dy` logical pixels, signed as the web's: a
+    /// positive `dy` scrolls down (the wheel turned toward the person),
+    /// whichever host it came from. `x, y` are the pointer's
     /// position in the view's logical pixels (the same space as
     /// [`PointerMove`](Self::PointerMove)); `mods` are the held modifier
     /// names as [`Key`](Self::Key) gives them (`"Mod"`, `"Shift"`, `"Alt"`).

@@ -1,10 +1,12 @@
 //! The wire between the app and a process view's program.
 //!
 //! The messages between the app (the host) and a view's program (the
-//! guest), one per datagram on a `SOCK_SEQPACKET` pair
-//! ([`crate::sock`]): little-endian, a tag byte first. File descriptors
-//! (the frames' dma-bufs, or the shared memory) travel beside a message
-//! as `SCM_RIGHTS`, never in it.
+//! guest), one per datagram on a Unix socket pair ([`crate::sock`]):
+//! little-endian, a tag byte first. File descriptors (the frames'
+//! dma-bufs, or the shared memory) travel beside a message as
+//! `SCM_RIGHTS`, never in it; on macOS the frames' `IOSurface`s travel
+//! on a Mach port beside the socket (`crate::surface`), just before the
+//! message that announces them.
 //!
 //! The host asks: [`ToGuest::Hello`] once (the pane's size, its adapter,
 //! what it can import), then [`ToGuest::Resize`], [`ToGuest::Input`],
@@ -27,8 +29,12 @@ pub const MAX_SLOTS: u8 = 8;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Transport {
     /// One dma-buf per slot, a texture both sides' GPU devices import
-    /// (Vulkan external memory, a DRM format modifier): no copy.
+    /// (Linux: Vulkan external memory, a DRM format modifier): no copy.
     Dmabuf,
+    /// One `IOSurface` per slot, sent on the app's Mach port
+    /// (`crate::surface`): a texture both sides' Metal devices make over
+    /// the same memory (macOS): no copy.
+    IoSurface,
     /// One shared-memory file for every slot: the guest reads its frame
     /// back from its GPU and the host uploads it to its own.
     Shm,
@@ -48,15 +54,16 @@ pub struct Adapter {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ToGuest {
     /// The pane, the first time: its size in physical pixels and the
-    /// display's scale, the host's adapter, whether it can import a
-    /// dma-buf, and the app's theme tokens.
+    /// display's scale, the host's adapter, whether it can import frames
+    /// the GPU shares (`zero_copy`: a dma-buf on Linux, an `IOSurface` on
+    /// macOS), and the app's theme tokens.
     Hello {
         version: u16,
         width: u32,
         height: u32,
         scale: f32,
         adapter: Adapter,
-        dmabuf: bool,
+        zero_copy: bool,
         theme: ThemeTokens,
     },
     /// A new size (physical pixels) or scale.
@@ -357,7 +364,7 @@ impl ToGuest {
                 height,
                 scale,
                 adapter,
-                dmabuf,
+                zero_copy,
                 theme,
             } => {
                 out.u8(1)
@@ -368,7 +375,7 @@ impl ToGuest {
                     .u32(adapter.vendor)
                     .u32(adapter.device)
                     .str(&adapter.name)
-                    .u8(u8::from(*dmabuf))
+                    .u8(u8::from(*zero_copy))
                     .theme(theme);
             }
             Self::Resize {
@@ -412,7 +419,7 @@ impl ToGuest {
                     device: i.u32()?,
                     name: i.string()?,
                 },
-                dmabuf: i.u8()? != 0,
+                zero_copy: i.u8()? != 0,
                 theme: i.theme()?,
             },
             2 => Self::Resize {
@@ -456,6 +463,7 @@ impl ToHost {
                     .u8(match transport {
                         Transport::Dmabuf => 0,
                         Transport::Shm => 1,
+                        Transport::IoSurface => 2,
                     })
                     .u32(width)
                     .u32(height)
@@ -491,6 +499,7 @@ impl ToHost {
                 let transport = match i.u8()? {
                     0 => Transport::Dmabuf,
                     1 => Transport::Shm,
+                    2 => Transport::IoSurface,
                     _ => return Err(WireError::Range),
                 };
                 let (width, height, slots) = (i.u32()?, i.u32()?, i.u8()?);
@@ -540,7 +549,7 @@ mod tests {
                 device: 0x2704,
                 name: "NVIDIA GeForce RTX 4080".into(),
             },
-            dmabuf: true,
+            zero_copy: true,
             theme: ThemeTokens::default().with("brand", "#ff7a1a"),
         });
         round_trip_guest(&ToGuest::Resize {
@@ -610,6 +619,16 @@ mod tests {
                 height: 480,
                 slots: 4,
                 stride: 2560,
+                offset: 0,
+                modifier: 0,
+            },
+            ToHost::Buffers {
+                id: 2,
+                transport: Transport::IoSurface,
+                width: 333,
+                height: 17,
+                slots: 4,
+                stride: 1344,
                 offset: 0,
                 modifier: 0,
             },

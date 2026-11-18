@@ -218,15 +218,18 @@ is `<extension id>/<view id>` (`ViewDecl::workspace_kind`).
 | `document` | string | none | a frame document in the package (a data view) |
 | `page` | string | none | TSX/JS, `.luau` elements or `.a2ui.json` page |
 | `src` | string | none | the HTML file a `web` view opens; required for `web`, refused otherwise |
+| `program` | string | none | the program in the package a `process` view runs; required for `process`, refused otherwise; must be in `capabilities.programs` |
+| `args` | string list | `[]` | the `program`'s arguments; only a `process` view has them; `{{setting:<key>}}` puts in one of its own settings (a change restarts the program), never a secret |
 | `home` | `main` \| `left` \| `right` \| `bottom` | `main` | where it lives |
 | `placement` | `tab` \| `split` \| `overlay` \| `popup` \| `zoomed` \| `float` | `tab` | how it opens |
 | `width`, `height` | float (points) | none | a popup's, overlay's or float's size |
 | `on_unload` | `placeholder` \| `close` | `placeholder` | its panes when it unloads |
 
 `kind` values the app registers (`features/workspace/src/kinds.rs`
-`DIOXUS`, `PAINT`, `WEB`): `dioxus` (a process's or linked Dioxus view,
+`DIOXUS`, `PAINT`, `WEB`, `PROCESS`): `dioxus` (a process's or linked Dioxus view,
 drawn remotely or in the app's document), `paint` (a scene recorded each
-frame), `web` (its own HTML/CSS/JS, #222). Apps may register more
+frame), `web` (its own HTML/CSS/JS, #222), `process` (a program in the
+package draws it on its own GPU device, #838). Apps may register more
 (`frame.surface`, `genui`; `docs/content/architecture/embedded-views.md`).
 A kind the app has no provider for refuses the load
 (`host::LoadError::ViewKind`).
@@ -239,6 +242,13 @@ A kind the app has no provider for refuses the load
   `apps/sandbox/sketch/extension.toml` (`sketch`, `arrangement`).
 - **Web views**: `kind = "web"` plus `src`.
   `examples/extension/webview-board/package/extension.toml`.
+- **Process views**: `kind = "process"` plus `program` (and `args`), any
+  extension kind, with `capabilities.programs` naming the program. The
+  app's process-view pane runs it from the package and shows its GPU
+  frames, whichever copy is loaded; Linux only, elsewhere the pane says
+  why (`features/extensions/src/process_view.rs`,
+  `docs/content/architecture/process-views.md`).
+  `examples/extension/process-view/package/extension.toml`.
 - **Page views**: `page = …`. `examples/showcase/recipe-scaler/extension.toml`.
 - **Held views** (one extension's view inside another's remote view,
   #764): there is no `embeddable` or `holds` key. The holding view renders
@@ -253,6 +263,13 @@ id = "board"
 title = "Board (web view)"
 kind = "web"
 src = "dist/index.html"
+
+[[views]]
+id = "room"
+title = "Room"
+kind = "process"
+program = "bin/ignition"          # in the package; in capabilities.programs
+args = ["--process-view"]
 ```
 <!-- doc-check: on -->
 
@@ -687,13 +704,14 @@ all lists default empty. Semantics are in the capabilities reference.
 | `folders` | string list | |
 | `reads` | string list | `org`, `selection`, `documents`, `editor`, `files` |
 | `writes` | string list | `documents`, `editor` |
-| `ui` | string list | `notify`, `clipboard`, `pickers`, `prompts`, `menus`, `badges`, `overlay` |
+| `ui` | string list | `notify`, `clipboard`, `pickers`, `prompts`, `menus`, `badges`, `overlay`, `engine` (its views' layers read the engine's live values, `features/scene/src/engine.rs`; declined, a binding to one reads nothing) |
 | `events` | string list | an app event name, `<prefix>.*` or `*` |
 | `ports` | string list | `midi:<name>`, `osc:<host>:<port>`, `osc:listen:<port>`, `osc:*` |
 | `languages` | string list | `servers` |
 | `webrtc` | string list | `peer-connections` only |
 | `device` | string list | `notifications`, `camera`, `photos`, `health:read:<type>`, `health:write:<type>` |
 | `over` | string list | view kinds it may draw an overlay on |
+| `programs` | string list | paths in the package (no `..`, nothing absolute) its `process` views run |
 
 An unknown value in a checked list is refused (`BadCapability`); an
 unknown key in `[capabilities]` is ignored like any other.

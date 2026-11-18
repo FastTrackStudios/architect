@@ -120,16 +120,16 @@ pub use host::{
     DecksConfig, HeaderParts, HeaderTools, Host, Opened, PaneHandle, Popout, PresenceLayer,
     PresenceMarksLayer, PresenceOverlay, TabBadges, TitleRow, View, ViewHeader, Views,
     WindowSystem, Windows, WorkspaceActions, WorkspaceStore, WorkspaceView, context_invocation,
-    try_use_decks, try_use_pane_of, use_deck_context, use_decks, use_host, use_pane, use_pane_of,
-    use_pane_status, use_presence_overlay,
+    try_use_decks, try_use_pane, try_use_pane_of, use_deck_context, use_decks, use_host, use_pane,
+    use_pane_of, use_pane_status, use_presence_overlay,
 };
 #[cfg(all(feature = "ui", feature = "presence"))]
 pub use host::{PaneRoom, use_pane_room, use_pane_space, use_pane_subject};
 #[cfg(feature = "ui")]
 pub use host::{TabKindsUi, TabRender, TabRenderCtx, try_use_tab_kinds, use_tab_kinds};
 pub use kinds::{
-    Capabilities, Capability, DIOXUS, Hosts, KindError, KindId, KindSpec, PAINT, Part, Placement,
-    Placements, ViewHost, ViewKinds, WEB,
+    Capabilities, Capability, DIOXUS, Hosts, KindError, KindId, KindSpec, PAINT, PROCESS, Part,
+    Placement, Placements, ViewHost, ViewKinds, WEB,
 };
 pub use layout::{Direction, Placed, Slide, area_rects, neighbour, scroll_to, slides};
 pub use meter::{FRAME_BUDGET, Meters, ViewHealth, ViewMeter, ViewReport, ViewSummary};

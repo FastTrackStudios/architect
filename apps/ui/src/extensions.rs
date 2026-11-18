@@ -1048,7 +1048,25 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
                 description: "A source on the playhead was set, played, paused, sought, moved to another item or removed. An extension hears its own source's state (PLAYHEAD_STATE), and of another's change only {active}: whether its own source is the active one.".to_owned(),
                 detail: None,
             });
+            // The playhead as the clock layers move on
+            // (`architect_scene::anim`, #837): read by the host each
+            // frame, so a view's playhead line follows play, pause, seek
+            // and rate with no word from its extension.
+            architect_workspace::paint::anim::install_playhead(|| {
+                let now = architect_playhead::now_ms();
+                architect_playhead::with(|deck| {
+                    deck.current()
+                        .map(|source| architect_workspace::paint::anim::Reading {
+                            time: source.time(now),
+                            rate: source.rate(now),
+                        })
+                })
+            });
             architect_playhead::on_change("app.event", move |state| {
+                // A seek, a play or a pause: every window with layers on
+                // the playhead draws them at the new reading, a pop-out
+                // whose own frames are resting too.
+                architect_workspace::paint::wake::clocks_moved();
                 let _ = architect_playhead::raise_changed(&host, state);
                 // Its source's playing, as its extension's own runtime
                 // state: a favourite's primary shows Pause by it (#607).
@@ -1238,6 +1256,13 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         )
     ))]
     let _ = architect_webview::desk::use_desk_web_views(extensions.host().clone());
+    // Extensions' `process` views (#838): a program in the package, its
+    // GPU frames in the pane. Without it their panes say why.
+    #[cfg(all(
+        feature = "process-views",
+        any(target_os = "linux", target_os = "macos")
+    ))]
+    let _ = architect_process_view::extension::use_process_views(extensions.host().clone());
     use_extension_ui(extensions.host().clone(), Arc::clone(&lab))
 }
 

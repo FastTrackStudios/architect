@@ -1,11 +1,11 @@
 //! The Vault's "Process views" screenset (⌘6, feature `process-views`,
-//! Linux): the same scene twice, side by side, to measure one against
-//! the other —
+//! Linux and macOS): the same scene twice, side by side, to measure one
+//! against the other —
 //!
 //! - **Process view**: `architect_process_view::demo::Orbits` served by
 //!   the `process-view-demo` program, in a process of its own, its
-//!   frames shared with the window's GPU (a dma-buf texture, or shared
-//!   memory where the window can't import one);
+//!   frames shared with the window's GPU (a dma-buf texture or an
+//!   `IOSurface`, or shared memory where the window can't import one);
 //! - **Linked**: the same `Orbits` drawn in-process by the paint kind.
 //!
 //! Kill the program (its pid is on the pane's line) and the pane says
@@ -103,7 +103,7 @@ fn ProcessLabPane() -> Element {
                 about: "Drawn by process-view-demo, a program of its own: its GPU frames shared with this window. Point, press, use the arrows and type; kill it and restart it here.",
             }
             div { style: "flex: 1; display: flex; min-height: 0; margin: 4px 12px 8px;",
-                ProcessViewPane { session_key: pane.id.0.clone(), program }
+                ProcessViewPane { session_key: pane.id.0, program }
             }
         }
     }
@@ -200,7 +200,7 @@ fn snapshot_json(s: &Snapshot) -> serde_json::Value {
         "why": why,
         "pid": s.pid,
         "starts": s.generation,
-        "transport": s.transport.map(|t| match t { Transport::Dmabuf => "dmabuf", Transport::Shm => "shm" }),
+        "transport": s.transport.map(|t| match t { Transport::Dmabuf => "dmabuf", Transport::IoSurface => "iosurface", Transport::Shm => "shm" }),
         "size": s.size,
         "framesShown": s.frames,
         "guestFrame": us(s.render),

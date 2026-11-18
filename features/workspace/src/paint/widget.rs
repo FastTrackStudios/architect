@@ -11,7 +11,7 @@
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyrender::RenderContext;
 use architect::action::{ActionCaller, ActionList};
@@ -31,13 +31,17 @@ use crate::kinds::{KindId, Placement, ViewHost};
 use peniko::Fill;
 use peniko::kurbo::{Affine, Rect};
 
-/// Logical pixels a wheel's line is.
-const LINE: f64 = 20.0;
+/// Logical pixels a wheel's line is: a view is given pixels, whichever
+/// its host was told (a process's host converts the same way).
+pub const WHEEL_LINE: f64 = 20.0;
+const LINE: f64 = WHEEL_LINE;
 
 /// A [`Painter`] as a Blitz custom widget.
 pub struct PaintWidget {
     painter: Painter,
     wake: PaintWake,
+    /// Wakes its window at its layers' next step and when a clock jumps.
+    alarm: architect_scene::wake::Alarm,
 }
 
 impl std::fmt::Debug for PaintWidget {
@@ -49,20 +53,32 @@ impl std::fmt::Debug for PaintWidget {
 impl PaintWidget {
     #[must_use]
     pub fn new(painter: Painter) -> Self {
+        Self::with_wake(painter, PaintWake::new())
+    }
+
+    fn with_wake(painter: Painter, wake: PaintWake) -> Self {
+        let redraw = wake.clone();
+        let alarm = architect_scene::wake::Alarm::new(Arc::new(move || redraw.redraw()));
+        if let Some(table) = painter.engine() {
+            architect_scene::engine::watch(table, alarm.waker());
+        }
         Self {
             painter,
-            wake: PaintWake::new(),
+            wake,
+            alarm,
         }
     }
 
-    const fn with_wake(painter: Painter, wake: PaintWake) -> Self {
-        Self { painter, wake }
-    }
-
     fn frame(&mut self, geometry: Geometry) -> Scene {
-        self.wake.0.dirty.swap(false, Ordering::AcqRel);
+        // A wake is news the view must draw: it is asked again.
+        if self.wake.0.dirty.swap(false, Ordering::AcqRel) {
+            self.painter.invalidate();
+        }
         self.sync_theme();
-        self.painter.frame(geometry)
+        let frame = self.painter.frame(geometry);
+        // Resting until its next step: the alarm wakes its window then.
+        let _ = self.alarm.drawn(self.painter.next());
+        frame
     }
 }
 
@@ -73,7 +89,13 @@ impl Widget for PaintWidget {
     fn handle_event(&mut self, event: &UiEvent) {
         self.sync_theme();
         if let Some(input) = view_input(event) {
-            self.painter.ctx().input.push(input);
+            // Its regions' first: a press or a drag on one is the host's.
+            if !self.painter.pointer(&input) {
+                self.painter.ctx().input.push(input);
+            }
+        }
+        if let Some(cursor) = self.painter.take_cursor() {
+            self.wake.set_cursor(cursor);
         }
         self.painter.pump();
     }
@@ -155,6 +177,29 @@ impl PaintWake {
     /// Mark the pane dirty and wake its window, including from a worker thread.
     pub fn wake(&self) {
         self.0.dirty.store(true, Ordering::Release);
+        self.redraw();
+    }
+
+    /// Shows `cursor` over the pane, as a hit region asks.
+    pub fn set_cursor(&self, cursor: super::Cursor) {
+        let window = self
+            .0
+            .window
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if let Some(window) = window {
+            let icon = cursor
+                .css()
+                .parse::<cursor_icon::CursorIcon>()
+                .unwrap_or_default();
+            window.set_cursor(Some(icon));
+        }
+    }
+
+    /// Wake its window to draw the pane's layers again, without asking its
+    /// view: a clock moved, or a layer's next step came.
+    pub fn redraw(&self) {
         let window = self
             .0
             .window
@@ -166,7 +211,16 @@ impl PaintWake {
         }
     }
 
-    fn attach(&self, window: Option<Arc<dyn ShellProvider>>) {
+    /// Whether a wake is waiting, which it clears: a host that draws the
+    /// view itself (a process's) asks before each frame.
+    #[must_use]
+    pub fn take(&self) -> bool {
+        self.0.dirty.swap(false, Ordering::AcqRel)
+    }
+
+    /// Where its wakes go: `window`'s redraw, now and from any thread. A
+    /// wake that came before it is passed on at once.
+    pub fn attach(&self, window: Option<Arc<dyn ShellProvider>>) {
         *self.0.window.lock().unwrap_or_else(PoisonError::into_inner) = window;
         if self.0.dirty.load(Ordering::Acquire) {
             self.wake();
@@ -218,12 +272,16 @@ pub fn view_input(event: &UiEvent) -> Option<ViewInput> {
             BlitzPointerId::Mouse | BlitzPointerId::Pen => return None,
         },
         UiEvent::Wheel(w) => {
+            // Signed as the web's (positive scrolls down), as a browser's
+            // pane and a process's host give it: Blitz carries winit's.
             let (dx, dy) = match w.delta {
-                BlitzWheelDelta::Lines(x, y) => (x * LINE, y * LINE),
-                BlitzWheelDelta::Pixels(x, y) => (x, y),
+                BlitzWheelDelta::Lines(x, y) => (-x * LINE, -y * LINE),
+                BlitzWheelDelta::Pixels(x, y) => (-x, -y),
             };
-            // The pointer's point, as the pointer events give it.
-            let (x, y) = (w.coords.client_x, w.coords.client_y);
+            // The pointer's point in the view. Blitz moves a pointer
+            // event's client point into a widget's space but not a
+            // wheel's: its `element` point is the one in the view's.
+            let (x, y) = (w.element.x, w.element.y);
             ViewInput::Wheel {
                 dx: narrow(dx),
                 dy: narrow(dy),
@@ -336,8 +394,10 @@ pub fn shell_tokens(theme: &ShellTheme) -> ThemeTokens {
 }
 
 /// The tokens a pane sees now: the app's theme store's whole resolved
-/// theme when there is one, else the shell's colours, else none.
-fn pane_tokens() -> ThemeTokens {
+/// theme when there is one, else the shell's colours, else none. Read in
+/// a render, the component renders again when the theme changes.
+#[must_use]
+pub fn pane_tokens() -> ThemeTokens {
     if let Some(store) = architect_theme::try_use_theme() {
         return ThemeTokens::from(&*store.resolved().read());
     }
@@ -410,6 +470,31 @@ impl PaintMount {
     pub fn wake_handle(&self) -> PaintWake {
         self.wake.clone()
     }
+
+    /// Its view, made for `ctx`: what a host that is not a [`PaintPane`]
+    /// (a process's) mounts, once per pane.
+    #[must_use]
+    pub fn make_view(&self, ctx: &ViewCtx) -> Box<dyn PaintView> {
+        (self.make)(ctx)
+    }
+
+    /// The host's typed data and handles it was given.
+    #[must_use]
+    pub fn host_extras(&self) -> Extras {
+        self.extras.clone()
+    }
+
+    /// Where its frame times go.
+    #[must_use]
+    pub fn frame_stats(&self) -> FrameStats {
+        self.stats.clone()
+    }
+
+    /// How long a frame may take.
+    #[must_use]
+    pub const fn frame_budget(&self) -> Duration {
+        self.budget
+    }
 }
 
 /// A pane of the paint kind: `mount`'s view, filling the pane, given the
@@ -427,8 +512,9 @@ pub fn PaintPane(mount: PaintMount) -> Element {
     mount.wake.attach(window.clone());
     mount.wake.set_theme(theme.clone());
     let (widget, input) = use_hook(|| {
-        let began = Instant::now();
-        let clock = FrameClock::new(mount.budget, move || began.elapsed());
+        // The app's one wall clock: a pane in any window, and the
+        // animations of its layers, read the same time.
+        let clock = FrameClock::new(mount.budget, architect_scene::anim::wall_elapsed);
         let actions = actions.map(|a| (*a).clone()).unwrap_or_default();
         let ctx = ViewCtx::new(
             pane.id.clone(),
@@ -473,6 +559,7 @@ mod tests {
     use dioxus::core::NoOpMutations;
     use std::cell::RefCell;
     use std::sync::atomic::AtomicUsize;
+    use std::time::Instant;
 
     #[derive(Default)]
     struct Window(AtomicUsize);
@@ -590,6 +677,113 @@ mod tests {
         );
         let _ = widget.frame(geometry);
         assert!(!widget.needs_redraw());
+    }
+
+    /// A view of one layer that moves as `animation` says.
+    struct Moves(architect_scene::anim::Animation);
+
+    impl PaintView for Moves {
+        fn input(&mut self, _: &ViewCtx, _: &ViewInput) -> bool {
+            false
+        }
+
+        fn paint(&mut self, _: &ViewCtx, _: &mut Scene) {}
+
+        fn layers(
+            &mut self,
+            _: &ViewCtx,
+        ) -> Option<Vec<(super::super::LayerKey, super::super::Layer)>> {
+            let mut dot = Scene::new();
+            dot.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                peniko::Color::BLACK,
+                None,
+                &Rect::new(0.0, 0.0, 1.0, 1.0),
+            );
+            Some(vec![(
+                1,
+                super::super::Layer::new(Arc::new(dot.commands)).animated(vec![self.0.clone()]),
+            )])
+        }
+    }
+
+    fn resting(
+        animation: architect_scene::anim::Animation,
+        playhead: Arc<Mutex<Option<architect_scene::anim::Reading>>>,
+    ) -> (PaintWidget, Arc<Window>) {
+        let ctx = ViewCtx::new(
+            PaneId::new("popout"),
+            KindId::paint(),
+            (ViewHost::Blitz, Placement::Pane),
+            (ActionList::new(), ActionCaller::app()),
+            FrameClock::new(Duration::from_millis(4), || Duration::ZERO),
+        );
+        let clocks = architect_scene::Clocks::new(|| 0.0, move || *playhead.lock().unwrap());
+        let wake = PaintWake::new();
+        let window = Arc::new(Window::default());
+        wake.attach(Some(window.clone()));
+        let painter = Painter::new(ctx, Moves(animation)).with_clocks(clocks);
+        let mut widget = PaintWidget::with_wake(painter, wake);
+        let _ = widget.frame(Geometry {
+            width: 10.0,
+            height: 10.0,
+            scale: 1.0,
+        });
+        (widget, window)
+    }
+
+    #[test]
+    fn a_seek_while_paused_wakes_a_pop_out_that_rests() {
+        use architect_scene::anim::{Animation, Clock, Input, Linear, Property, Reading};
+        let playhead = Arc::new(Mutex::new(Some(Reading::still(1.0))));
+        let (widget, window) = resting(
+            Animation::linear(
+                Property::X,
+                Input::clock(Clock::Playhead),
+                Linear::new(100.0, 0.0),
+            ),
+            Arc::clone(&playhead),
+        );
+        assert!(
+            !widget.requires_redraw() && !widget.needs_redraw(),
+            "paused: it rests"
+        );
+        let before = window.0.load(Ordering::Relaxed);
+        // The main window's bar seeks; the deck says its clock moved.
+        *playhead.lock().unwrap() = Some(Reading::still(2.0));
+        architect_scene::wake::clocks_moved();
+        assert!(
+            window.0.load(Ordering::Relaxed) > before,
+            "the pop-out wasn't woken"
+        );
+        assert!(widget.needs_redraw());
+    }
+
+    #[test]
+    fn a_step_wakes_its_window_when_it_comes_and_not_before() {
+        use architect_scene::anim::{Animation, Clock, Input, Map, Property, Steps};
+        let (widget, window) = resting(
+            Animation::new(
+                Property::Visible,
+                Input::clock(Clock::Wall),
+                Map::Steps(Steps {
+                    before: 0.0,
+                    steps: vec![(0.04, 1.0)],
+                }),
+            ),
+            Arc::default(),
+        );
+        // Wall time runs, but nothing drawn changes for 40 ms: no frames.
+        assert!(!widget.requires_redraw());
+        let began = Instant::now();
+        let before = window.0.load(Ordering::Relaxed);
+        while window.0.load(Ordering::Relaxed) == before {
+            assert!(began.elapsed() < Duration::from_secs(5), "never woken");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        // (When it is woken is the timer's, tested in architect-scene:
+        // another test's clock move may wake it sooner here.)
     }
 
     thread_local! {

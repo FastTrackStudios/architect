@@ -13,6 +13,12 @@
 //! ([`FrameStats`]). [`Marks`] is a display list a view can draw and
 //! hit-test from, so what is drawn and what a pointer finds are one list.
 //!
+//! A view that returns layers ([`PaintView::layers`]) may say how they
+//! move ([`anim`]): the painter keeps the layers it was given and draws
+//! them at each frame's clocks ([`Clocks`]) without asking the view, for
+//! as long as nothing the view draws changed. The same evaluation draws
+//! the same layers from a view in a process.
+//!
 //! This module is the model: no Dioxus, wasm-clean. The Blitz host —
 //! `PaintPane`, a pane mounting a `PaintWidget` — is feature `paint-ui`.
 
@@ -37,12 +43,21 @@ use std::time::Duration;
 // What a view records with, at the versions the host draws: a crate
 // that paints needs no anyrender or peniko of its own.
 pub use anyrender::{PaintScene, Scene};
+pub use architect_scene::Layer;
+pub use architect_scene::anim::{self, Clocks, Readings};
+use architect_scene::anim::{Name, Space, Values};
+pub use architect_scene::layers::Key as LayerKey;
+pub use architect_scene::region::{self, Cursor, RegionEvent};
+pub use architect_scene::wake;
 pub use peniko;
 use peniko::kurbo::{Affine, Point, Rect};
 use peniko::{Color, Fill};
 
 #[cfg(feature = "paint-ui")]
-pub use widget::{PaintMount, PaintPane, PaintWake, PaintWidget, shell_tokens, view_input};
+pub use widget::{
+    PaintMount, PaintPane, PaintWake, PaintWidget, WHEEL_LINE, pane_tokens, shell_tokens,
+    view_input,
+};
 
 use crate::ctx::{Geometry, ThemeTokens, ViewCtx, ViewInput};
 use crate::meter::percentile;
@@ -57,6 +72,42 @@ pub trait PaintView: 'static {
     /// `ctx.geometry` (the host scales it to the display's).
     fn paint(&mut self, ctx: &ViewCtx, scene: &mut Scene);
 
+    /// This frame as layers, for a view that keeps what it draws: `None`
+    /// (the default) and it is [`Self::paint`]'s one scene.
+    ///
+    /// Each layer is content in its own space and where it is drawn. Keep
+    /// a layer's `commands` the same `Arc` while its content is the same:
+    /// a pan or a zoom is then a new transform and nothing is recorded
+    /// again, here or in a host the view runs outside of, where only what
+    /// changed crosses. What moves every frame (a playhead, a scroll)
+    /// should move by its layer's animations ([`Layer::animated`]): its
+    /// host runs them and the view is not asked. A view that returns
+    /// layers is not asked to `paint`, and is asked for layers only when
+    /// input, a resize or [`Painter::invalidate`] may have changed them,
+    /// or while it says it is [`Self::animating`].
+    fn layers(&mut self, ctx: &ViewCtx) -> Option<Vec<(LayerKey, Layer)>> {
+        let _ = ctx;
+        None
+    }
+
+    /// Its named values ([`anim::Values`]) that a layer's animation may
+    /// read: asked with its layers, and only its own (`view.` names).
+    fn values(&mut self, ctx: &ViewCtx) -> Vec<(Name, f64)> {
+        let _ = ctx;
+        Vec::new()
+    }
+
+    /// What a pointer did to one of its layers' regions
+    /// ([`region::RegionEvent`]): enter, leave, press, release, or a
+    /// drag's value (at most once a frame). Whether what it draws
+    /// changed (it is asked for its layers again). Its host handles the
+    /// hover, the cursor, the highlight and the drag itself; a press on a
+    /// region is the region's, not a [`ViewInput`].
+    fn region(&mut self, ctx: &ViewCtx, event: &RegionEvent) -> bool {
+        let _ = (ctx, event);
+        false
+    }
+
     /// What is under `at` (logical pixels): the id of what it drew there.
     /// A host asks it for a tooltip, a context menu or an agent's look.
     fn hit(&self, ctx: &ViewCtx, at: Point) -> Option<u64> {
@@ -64,7 +115,9 @@ pub trait PaintView: 'static {
         None
     }
 
-    /// Whether it draws every frame (it is moving), not only after input.
+    /// Whether it must be asked for every frame, not only after input.
+    /// Layers that move by their animations need not be: their host
+    /// draws them every frame a clock they read runs.
     fn animating(&self, ctx: &ViewCtx) -> bool {
         let _ = ctx;
         false
@@ -231,6 +284,76 @@ pub struct Painter {
     view: Box<dyn PaintView>,
     stats: FrameStats,
     dirty: bool,
+    clocks: Clocks,
+    /// What a view of layers last returned, drawn again at each frame's
+    /// clocks without it.
+    held: Option<Held>,
+    /// Why its view failed: it is drawn as nothing and asked nothing
+    /// again, as a view in a process that sent what its host refused.
+    failed: Option<architect_scene::Error>,
+    /// A cursor its regions asked for since the host last looked.
+    cursor: Option<Cursor>,
+    /// The engine's values its layers read, when granted them.
+    engine: Option<Arc<architect_scene::engine::EngineTable>>,
+}
+
+/// A view's layers and values as its painter keeps them.
+#[derive(Debug, Default)]
+struct Held {
+    layers: architect_scene::Layers,
+    values: Values,
+    /// The clocks it was last drawn at.
+    drawn: Readings,
+    /// Its values' revision when it was last drawn.
+    drawn_values: u64,
+    /// What it highlighted when last drawn.
+    drawn_lit: Option<region::Lit>,
+    /// The pointer over its regions.
+    interaction: region::Interaction,
+}
+
+impl Held {
+    /// `layers` and `values` kept, checked as a host checks what a view
+    /// in a process sends it ([`architect_scene::ops::Receiver`]): the
+    /// same limits and the same errors, so a view fails the same way
+    /// linked in or not.
+    fn keep(
+        &mut self,
+        layers: Vec<(LayerKey, Layer)>,
+        values: Vec<(Name, f64)>,
+    ) -> Result<(), architect_scene::Error> {
+        use architect_scene::Error;
+        if layers.len() > architect_scene::ops::MAX_LAYERS {
+            return Err(Error::TooManyLayers(architect_scene::ops::MAX_LAYERS));
+        }
+        let mut animations = 0_usize;
+        for (_, layer) in &layers {
+            if let Some(a) = layer.animations.as_deref() {
+                anim::check(a)?;
+                animations = animations.saturating_add(a.len());
+            }
+        }
+        if animations > anim::MAX_ANIMATIONS {
+            return Err(Error::TooManyAnimations(anim::MAX_ANIMATIONS));
+        }
+        let mut regions = 0_usize;
+        for (key, layer) in &layers {
+            if let Some(r) = layer.regions.as_deref() {
+                region::check(r)?;
+                regions = regions.saturating_add(r.len());
+                let old = self.layers.get(*key).and_then(|l| l.regions.as_deref());
+                region::seed(old, r, &mut self.values)?;
+            }
+        }
+        if regions > region::MAX_REGIONS {
+            return Err(Error::TooManyRegions(region::MAX_REGIONS));
+        }
+        for (name, value) in values {
+            self.values.write(Space::View, &name, value)?;
+        }
+        self.layers = layers.into_iter().collect();
+        Ok(())
+    }
 }
 
 impl std::fmt::Debug for Painter {
@@ -250,12 +373,105 @@ impl Painter {
 
     #[must_use]
     pub fn boxed(ctx: ViewCtx, view: Box<dyn PaintView>) -> Self {
+        // Wall time is the pane's frame clock: one clock for the view
+        // and its animations.
+        let frames = ctx.clock.clone();
         Self {
             ctx,
             view,
             stats: FrameStats::new(),
             dirty: true,
+            clocks: Clocks::app().with_wall(move || frames.now().as_secs_f64()),
+            held: None,
+            failed: None,
+            cursor: None,
+            engine: None,
         }
+    }
+
+    /// Its layers read the engine's values from `table` (its extension
+    /// was granted `engine`): drawn at the level the engine last wrote,
+    /// every frame while it writes.
+    #[must_use]
+    pub fn with_engine(mut self, table: Arc<architect_scene::engine::EngineTable>) -> Self {
+        if let Some(held) = self.held.as_mut() {
+            held.values.set_engine(Some(Arc::clone(&table)));
+        }
+        self.engine = Some(table);
+        self
+    }
+
+    /// The engine's table its layers read, if granted one.
+    #[must_use]
+    pub const fn engine(&self) -> Option<&Arc<architect_scene::engine::EngineTable>> {
+        self.engine.as_ref()
+    }
+
+    /// A pointer event, handled by its layers' regions first: whether it
+    /// was theirs (a press on a region, a drag), and so not the view's.
+    /// Hover and drags are drawn without asking the view; what happened
+    /// reaches it at the next frame ([`PaintView::region`]).
+    pub fn pointer(&mut self, input: &ViewInput) -> bool {
+        let Some(held) = self.held.as_mut().filter(|_| self.failed.is_none()) else {
+            return false;
+        };
+        let now = self.clocks.read();
+        let (layers, values, i) = (&held.layers, &mut held.values, &mut held.interaction);
+        let at = |x: f32, y: f32| Point::new(f64::from(x), f64::from(y));
+        let outcome = match *input {
+            ViewInput::PointerMove { x, y, .. } => i.moved(layers, &now, values, at(x, y)),
+            ViewInput::PointerDown { x, y, .. } => i.pressed(layers, &now, values, at(x, y)),
+            ViewInput::PointerUp { x, y, .. } => i.released(layers, &now, values, at(x, y)),
+            ViewInput::Touch { x, y, phase, .. } => match phase {
+                "start" => i.pressed(layers, &now, values, at(x, y)),
+                "move" => i.moved(layers, &now, values, at(x, y)),
+                "end" => i.released(layers, &now, values, at(x, y)),
+                _ => i.left(),
+            },
+            ViewInput::Focus(false) => i.left(),
+            _ => return false,
+        };
+        if let Some(cursor) = outcome.cursor {
+            self.cursor = Some(cursor);
+        }
+        outcome.consumed
+    }
+
+    /// The cursor its regions asked for since last asked, if it changed
+    /// ([`Cursor::Default`]: the pane's own).
+    pub const fn take_cursor(&mut self) -> Option<Cursor> {
+        self.cursor.take()
+    }
+
+    /// Why its view failed, if it did: what it returned broke a rule a
+    /// host enforces on a view in a process.
+    #[must_use]
+    pub const fn failed(&self) -> Option<&architect_scene::Error> {
+        self.failed.as_ref()
+    }
+
+    /// When what it holds next changes on its own: every frame, after a
+    /// while (a step), or never.
+    #[must_use]
+    pub fn next(&self) -> anim::Next {
+        self.held
+            .as_ref()
+            .filter(|_| self.failed.is_none())
+            .map_or(anim::Next::Never, |h| h.layers.next(&self.clocks.read()))
+    }
+
+    /// Its animations run on `clocks` (the app's, with the pane's frame
+    /// clock as wall time, unless told).
+    #[must_use]
+    pub fn with_clocks(mut self, clocks: Clocks) -> Self {
+        self.clocks = clocks;
+        self
+    }
+
+    /// Its view's named values, once it returned layers.
+    #[must_use]
+    pub fn values(&self) -> Option<&Values> {
+        self.held.as_ref().map(|h| &h.values)
     }
 
     /// Recording its frames into `stats` (one the host reads elsewhere).
@@ -299,16 +515,45 @@ impl Painter {
     }
 
     /// Whether a frame would show something new: input changed it, input
-    /// is waiting, or it is moving.
+    /// is waiting, it is moving, or a clock its layers read moved.
     #[must_use]
     pub fn wants_frame(&self) -> bool {
-        self.dirty || !self.ctx.input.is_empty() || self.view.animating(&self.ctx)
+        if self.failed.is_some() {
+            return false;
+        }
+        let pointed = self.held.as_ref().is_some_and(|h| {
+            h.interaction.pending()
+                || h.interaction.lit() != h.drawn_lit
+                || h.values.revision() != h.drawn_values
+        });
+        pointed
+            || self.dirty
+            || !self.ctx.input.is_empty()
+            || self.view.animating(&self.ctx)
+            || self
+                .held
+                .as_ref()
+                .is_some_and(|h| h.layers.stale(&h.drawn, &self.clocks.read()))
     }
 
-    /// Whether it is moving (it draws every frame).
+    /// Whether it is moving (it draws every frame): the view says so, or
+    /// its layers move on a running clock.
     #[must_use]
     pub fn animating(&self) -> bool {
+        if self.failed.is_some() {
+            return false;
+        }
         self.view.animating(&self.ctx)
+            || self.held.as_ref().is_some_and(|h| {
+                h.layers.moving(&self.clocks.read())
+                    || h.interaction.coasting()
+                    || (h.values.engine().is_some() && h.values.revision() != h.drawn_values)
+            })
+    }
+
+    /// Whether the next frame asks the view, or draws what it holds.
+    fn asks(&self, resized: bool) -> bool {
+        self.dirty || resized || self.held.is_none() || self.view.animating(&self.ctx)
     }
 
     /// What is under `at`, in logical pixels ([`PaintView::hit`]).
@@ -320,17 +565,78 @@ impl Painter {
     /// One frame at `geometry`: the view's scene, scaled to physical
     /// pixels. Its time — the view's input and its recording, on the
     /// host's clock — goes into the stats.
+    ///
+    /// A view of layers is asked only when something it draws may have
+    /// changed (input, a resize, [`Self::invalidate`], or it says it is
+    /// [`PaintView::animating`]); otherwise its layers are drawn again
+    /// as their animations place them now.
     pub fn frame(&mut self, geometry: Geometry) -> Scene {
         let began = self.ctx.clock.now();
+        let resized = self.ctx.geometry != geometry;
         self.ctx.geometry = geometry;
         self.pump();
-        let mut scene = Scene::new();
-        self.view.paint(&self.ctx, &mut scene);
         let scale = f64::from(geometry.scale);
-        if (scale - 1.0).abs() > f64::EPSILON && scale > 0.0 {
-            let mut scaled = Scene::new();
-            scaled.append_scene(scene, Affine::scale(scale));
-            scene = scaled;
+        let scale = if scale > 0.0 { scale } else { 1.0 };
+        let mut scene = Scene::new();
+        if self.failed.is_some() {
+            self.dirty = false;
+            return scene;
+        }
+        // What its regions heard reaches the view first: what it answers
+        // may change what it draws.
+        if let Some(held) = self.held.as_mut() {
+            for event in held.interaction.take() {
+                self.dirty |= self.view.region(&self.ctx, &event);
+            }
+        }
+        let asked = if self.asks(resized) {
+            Some(self.view.layers(&self.ctx))
+        } else {
+            None
+        };
+        let held = match asked {
+            Some(Some(layers)) => {
+                let values = self.view.values(&self.ctx);
+                let engine = self.engine.clone();
+                let held = self.held.get_or_insert_with(|| Held {
+                    values: engine
+                        .map_or_else(Values::default, |t| Values::default().with_engine(t)),
+                    ..Held::default()
+                });
+                if let Err(why) = held.keep(layers, values) {
+                    self.failed = Some(why);
+                    self.held = None;
+                    self.dirty = false;
+                    return scene;
+                }
+                Some(held)
+            }
+            // A view that paints: no layers to hold.
+            Some(None) => {
+                self.held = None;
+                None
+            }
+            None => self.held.as_mut(),
+        };
+        if let Some(held) = held {
+            // Composed from where each layer's content is kept, at the
+            // clocks now.
+            let now = self.clocks.read();
+            // A flicked value coasts on: the host's, as a drag is.
+            held.interaction.coast(&now, &mut held.values);
+            let lit = held.interaction.lit();
+            held.layers
+                .compose_lit(&mut scene, Affine::scale(scale), &now, &held.values, lit);
+            held.drawn = now;
+            held.drawn_values = held.values.revision();
+            held.drawn_lit = lit;
+        } else {
+            self.view.paint(&self.ctx, &mut scene);
+            if (scale - 1.0).abs() > f64::EPSILON {
+                let mut scaled = Scene::new();
+                scaled.append_scene(scene, Affine::scale(scale));
+                scene = scaled;
+            }
         }
         self.stats
             .record(self.ctx.clock.now().saturating_sub(began));
@@ -341,3 +647,6 @@ impl Painter {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod anim_tests;

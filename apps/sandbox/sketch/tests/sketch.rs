@@ -5,6 +5,9 @@
 //! - panning and zooming send only the transform, not the scene again;
 //! - the graph, a paint view (`Builder::paint`) running in the process,
 //!   moves a node it is dragged by;
+//! - the timeline's playhead is run by the host: a frame of playback
+//!   sends nothing, and a pause, a seek or another rate on the app's
+//!   playhead moves the line with no message from the view;
 //! - `arrangement_budget` (ignored; `--ignored --nocapture`) measures a
 //!   50-track arrangement: its first scene's bytes, the bytes and the round
 //!   trip of each frame of panning, and the host's time to build its scene.
@@ -38,9 +41,12 @@ use architect_extensions::host::{Host, SharedSections};
 use architect_extensions::process::{ProcessRunner, Processes, Restart};
 use architect_extensions::proto::SOCKET;
 use architect_extensions::remote::{RemoteDocument, RemoteView, mounted_views};
-use architect_extensions::scene::{RenderCommand, Scene};
+use architect_extensions::scene::{Affine, RenderCommand, Scene, layers_value};
 use architect_extensions::{Origin, Package};
-use architect_sandbox_sketch::{ID, Sketch, arrangement_scene};
+use architect_sandbox_sketch::{ID, PLAYHEAD_SPEED, Sketch, arrangement_scene};
+use architect_scene::anim::{Clocks, Reading};
+use architect_scene::layers::Layer;
+use architect_scene::ops::Sender;
 use architect_workspace::paint::peniko::kurbo::Shape as _;
 use blitz_dom::{BaseDocument, Document as _, DocumentConfig};
 use blitz_traits::events::{
@@ -185,6 +191,12 @@ fn view(doc: &BaseDocument) -> Option<&RemoteDocument> {
     let at = *mounted_views(doc).first()?;
     let sub: &dyn Any = doc.subdoc(at)?;
     sub.downcast_ref::<RemoteDocument>()
+}
+
+fn view_mut(doc: &mut BaseDocument) -> Option<&mut RemoteDocument> {
+    let at = *mounted_views(doc).first()?;
+    let sub: &mut dyn Any = doc.subdoc_mut(at)?;
+    sub.downcast_mut::<RemoteDocument>()
 }
 
 /// How many bytes of scenes and transforms the view sent.
@@ -342,6 +354,447 @@ fn a_graph_node_drags_in_a_paint_view_served_by_its_process() {
         assert!(Instant::now() < deadline, "the node didn't follow the drag");
         app.pump("the node", |_| true);
     }
+}
+
+/// Where the playhead's line is in `commands`: its transform's x.
+fn playhead_x(commands: &[RenderCommand]) -> Option<f64> {
+    commands.iter().find_map(|c| match c {
+        RenderCommand::Stroke(s) => Some(s.transform.as_coeffs()[4]),
+        _ => None,
+    })
+}
+
+fn fills(commands: &[RenderCommand]) -> usize {
+    commands
+        .iter()
+        .filter(|c| matches!(c, RenderCommand::Fill(_)))
+        .count()
+}
+
+/// What a test's clocks read: wall seconds, and the playhead.
+#[derive(Clone, Default)]
+struct Hands(Arc<std::sync::Mutex<(f64, Option<Reading>)>>);
+
+impl Hands {
+    fn set(&self, wall: f64, playhead: Option<Reading>) {
+        *self.0.lock().unwrap() = (wall, playhead);
+    }
+
+    fn clocks(&self) -> Clocks {
+        let (wall, playhead) = (self.clone(), self.clone());
+        Clocks::new(
+            move || wall.0.lock().unwrap().0,
+            move || playhead.0.lock().unwrap().1,
+        )
+    }
+}
+
+const fn reading(time: f64, rate: f64) -> Reading {
+    Reading { time, rate }
+}
+
+/// A second at 240 frames.
+const FRAMES: u32 = 240;
+
+/// How many frames a fader is dragged for.
+const DRAGGED: u32 = 60;
+
+/// The timeline, its clips in the window, its animations on `hands`.
+fn timeline(hands: &Hands) -> App {
+    let mut app = open("timeline");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while fills(&app.window_scene()) < 2000 {
+        assert!(
+            Instant::now() < deadline,
+            "the clips never reached the window"
+        );
+        app.pump("the clips", |_| true);
+    }
+    view_mut(&mut app.doc.inner.borrow_mut())
+        .unwrap()
+        .set_clocks(hands.clocks());
+    app
+}
+
+/// Whether the window would draw another frame now, unasked.
+fn animating(app: &mut App) -> bool {
+    app.pump("a frame", |_| true);
+    app.doc.inner.borrow().is_animating()
+}
+
+#[test]
+fn playback_in_a_process_is_run_by_the_host_and_sends_nothing() {
+    let hands = Hands::default();
+    let mut app = timeline(&hands);
+    // What the clips and the playhead's motion cost to cross, once.
+    let once = bytes(&app.doc.inner.borrow());
+    assert!(once > 50_000, "the clips crossed in {once} bytes");
+    let mut last = playhead_x(&app.window_scene()).unwrap();
+    // A second at 240 frames: nothing on the playhead, so wall time. The
+    // view's process is alive and is sent nothing, and sends nothing;
+    // the line moves every frame.
+    for frame in 1..=FRAMES {
+        hands.set(f64::from(frame) / 240.0, None);
+        assert!(animating(&mut app), "frame {frame}: the window went idle");
+        let x = playhead_x(&app.window_scene()).unwrap();
+        assert!(
+            (x - last - PLAYHEAD_SPEED / 240.0).abs() < 1e-9,
+            "frame {frame}: the line went from {last} to {x}"
+        );
+        last = x;
+        assert!(fills(&app.window_scene()) >= 2000);
+    }
+    let playing = bytes(&app.doc.inner.borrow()) - once;
+    assert_eq!(playing, 0, "playback sent {playing} bytes");
+    // What a frame cost when the view sent its playhead's transform: a
+    // `MOVE` in the attribute, as the same encoder writes it.
+    let line = || Layer::new(Arc::new(arrangement_scene(1, 1)));
+    let mut sender = Sender::new();
+    let _ = sender.frame(&[(1, line())]);
+    let moved = sender
+        .frame(&[(1, line().at(Affine::translate((0.5, 0.0))))])
+        .unwrap();
+    let was = layers_value(u64::from(FRAMES), &moved).len();
+    println!(
+        "clips and motion once: {once} bytes; {FRAMES} frames of playback: {playing} bytes \
+         (a transform a frame was {was} bytes, {} over these frames)",
+        was * FRAMES as usize
+    );
+    // Still the view's: a pan crosses as before.
+    drag(
+        &mut app,
+        (200.0, 150.0),
+        (230.0, 150.0),
+        3,
+        Modifiers::empty(),
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while bytes(&app.doc.inner.borrow()) == once {
+        assert!(Instant::now() < deadline, "the pan never crossed");
+        app.pump("the pan", |_| true);
+    }
+    let panned = playhead_x(&app.window_scene()).unwrap();
+    assert!(
+        (panned - last - 30.0).abs() < 1e-6,
+        "{last} panned to {panned}"
+    );
+}
+
+#[test]
+fn the_playhead_moves_the_line_with_no_message_from_the_view() {
+    let hands = Hands::default();
+    let mut app = timeline(&hands);
+    let once = bytes(&app.doc.inner.borrow());
+    // Paused one second in: the line stands, and the window rests.
+    hands.set(10.0, Some(reading(1.0, 0.0)));
+    let at = playhead_x(&app.window_scene()).unwrap();
+    hands.set(11.0, Some(reading(1.0, 0.0)));
+    assert!(
+        !animating(&mut app),
+        "a paused playhead kept the window drawing"
+    );
+    assert_eq!(playhead_x(&app.window_scene()).unwrap(), at);
+    // A seek: drawn, the line where the playhead is.
+    hands.set(12.0, Some(reading(3.5, 0.0)));
+    assert!(animating(&mut app), "a seek wasn't drawn");
+    let sought = playhead_x(&app.window_scene()).unwrap();
+    assert!((sought - at - 2.5 * PLAYHEAD_SPEED).abs() < 1e-9);
+    assert!(!animating(&mut app));
+    // Playing at half speed: the playhead's time, not the wall's.
+    hands.set(20.0, Some(reading(3.75, 0.5)));
+    assert!(animating(&mut app));
+    let played = playhead_x(&app.window_scene()).unwrap();
+    assert!((played - sought - 0.25 * PLAYHEAD_SPEED).abs() < 1e-9);
+    // None of it from the view.
+    assert_eq!(bytes(&app.doc.inner.borrow()), once);
+}
+
+/// A window that counts the redraws it is asked for, and shows a cursor.
+#[derive(Default)]
+struct Window(
+    std::sync::atomic::AtomicUsize,
+    std::sync::Mutex<Option<cursor_icon::CursorIcon>>,
+);
+
+impl blitz_traits::shell::ShellProvider for Window {
+    fn request_redraw(&self) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn set_cursor(&self, icon: Option<cursor_icon::CursorIcon>) {
+        *self.1.lock().unwrap() = icon;
+    }
+}
+
+/// The y of the first fill in `commands` of `color`: where that layer is.
+fn fill_at(
+    commands: &[RenderCommand],
+    color: architect_workspace::paint::peniko::Color,
+) -> Option<(f64, f64)> {
+    commands.iter().find_map(|c| match c {
+        RenderCommand::Fill(f) if matches!(&f.brush, anyrender::Paint::Solid(c) if *c == color) => {
+            let t = f.transform.as_coeffs();
+            Some((t[4], t[5]))
+        }
+        _ => None,
+    })
+}
+
+/// The timeline with its window's shell, nothing moving on its own.
+fn mixer() -> (App, Arc<Window>) {
+    let hands = Hands::default();
+    hands.set(0.0, Some(reading(0.0, 0.0)));
+    let app = timeline(&hands);
+    let window = Arc::new(Window::default());
+    view_mut(&mut app.doc.inner.borrow_mut())
+        .unwrap()
+        .set_host_shell(architect_extensions::remote::HostShell::new(
+            window.clone(),
+            0.0,
+            0.0,
+        ));
+    let _ = app.window_scene();
+    (app, window)
+}
+
+#[test]
+fn a_fader_follows_the_pointer_with_nothing_from_the_view_and_hears_its_release() {
+    use architect_sandbox_sketch::{KNOB_COLOR, TRACK_AT, TRACK_HEIGHT, fader_value, level_value};
+    let (mut app, window) = mixer();
+    let pane = (40.0, 20.0);
+    let knob = |app: &App| fill_at(&app.window_scene(), KNOB_COLOR).unwrap().1;
+    // At its initial 0.75: a quarter down the track.
+    let top = pane.1 + TRACK_AT.1;
+    assert!((knob(&app) - (top + TRACK_HEIGHT * 0.25)).abs() < 1e-9);
+    let once = bytes(&app.doc.inner.borrow());
+    // Over it: its cursor, from the host.
+    let x = (pane.0 + TRACK_AT.0 + 12.0) as f32;
+    let mut y = (top + TRACK_HEIGHT * 0.25) as f32;
+    app.send(UiEvent::PointerMove(pointer(
+        (x, y),
+        FREE,
+        Modifiers::empty(),
+    )));
+    assert_eq!(
+        *window.1.lock().unwrap(),
+        Some(cursor_icon::CursorIcon::NsResize)
+    );
+    app.send(UiEvent::PointerDown(pointer(
+        (x, y),
+        HELD,
+        Modifiers::empty(),
+    )));
+    // Down a pixel a frame for 60 frames: the knob is under the pointer
+    // at every one, and the view's process sends nothing.
+    for frame in 1..=DRAGGED {
+        y += 1.0;
+        app.send(UiEvent::PointerMove(pointer(
+            (x, y),
+            HELD,
+            Modifiers::empty(),
+        )));
+        app.pump("a frame", |_| true);
+        assert!(
+            (knob(&app) - f64::from(y)).abs() < 1e-6,
+            "frame {frame}: the knob is at {}, the pointer at {y}",
+            knob(&app)
+        );
+    }
+    let dragging = bytes(&app.doc.inner.borrow()) - once;
+    assert_eq!(dragging, 0, "the view sent {dragging} bytes while dragged");
+    let level = {
+        let doc = app.doc.inner.borrow();
+        view(&doc)
+            .unwrap()
+            .scene_value(&fader_value().unwrap())
+            .unwrap()
+    };
+    assert!((level - (0.75 - f64::from(DRAGGED) / TRACK_HEIGHT)).abs() < 1e-6);
+    // Past the end of its track: it stops at 0, where the pointer leaves it.
+    app.send(UiEvent::PointerMove(pointer(
+        (x, y + 200.0),
+        HELD,
+        Modifiers::empty(),
+    )));
+    app.pump("past the end", |_| true);
+    assert!((knob(&app) - (top + TRACK_HEIGHT)).abs() < 1e-6);
+    app.send(UiEvent::PointerMove(pointer(
+        (x, y),
+        HELD,
+        Modifiers::empty(),
+    )));
+    app.pump("back", |_| true);
+    // Let go: the view hears where it was left, and keeps it as its own.
+    app.send(UiEvent::PointerUp(pointer(
+        (x, y),
+        FREE,
+        Modifiers::empty(),
+    )));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let kept = {
+            let doc = app.doc.inner.borrow();
+            view(&doc).unwrap().scene_value(&level_value().unwrap())
+        };
+        if kept.is_some_and(|k| (k - level).abs() < 1e-9) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the view never heard the release"
+        );
+        let _ = app.window_scene();
+        app.pump("the release", |_| true);
+    }
+    let released = bytes(&app.doc.inner.borrow()) - once;
+    assert!(released < 100, "the release sent {released} bytes");
+    println!(
+        "fader: {DRAGGED} frames dragged, {dragging} bytes from the view; its release, {released} bytes"
+    );
+}
+
+#[test]
+fn a_box_follows_the_pointer_anywhere_with_nothing_from_the_view() {
+    use architect_sandbox_sketch::{BOX_AT, BOX_COLOR};
+    let (mut app, _window) = mixer();
+    let pane = (40.0_f32, 20.0_f32);
+    let start = fill_at(&app.window_scene(), BOX_COLOR).unwrap();
+    let once = bytes(&app.doc.inner.borrow());
+    let at = (
+        pane.0 + BOX_AT.0 as f32 + 20.0,
+        pane.1 + BOX_AT.1 as f32 + 12.0,
+    );
+    app.send(UiEvent::PointerMove(pointer(at, FREE, Modifiers::empty())));
+    app.send(UiEvent::PointerDown(pointer(at, HELD, Modifiers::empty())));
+    for frame in 1..=40_u8 {
+        let (dx, dy) = (f32::from(frame) * 3.0, f32::from(frame) * 2.0);
+        app.send(UiEvent::PointerMove(pointer(
+            (at.0 + dx, at.1 + dy),
+            HELD,
+            Modifiers::empty(),
+        )));
+        app.pump("a frame", |_| true);
+        let now = fill_at(&app.window_scene(), BOX_COLOR).unwrap();
+        assert!(
+            (now.0 - start.0 - f64::from(dx)).abs() < 1e-6
+                && (now.1 - start.1 - f64::from(dy)).abs() < 1e-6,
+            "frame {frame}: the box is at {now:?}"
+        );
+    }
+    app.send(UiEvent::PointerUp(pointer(
+        (at.0 + 120.0, at.1 + 80.0),
+        FREE,
+        Modifiers::empty(),
+    )));
+    app.pump("the release", |_| true);
+    assert_eq!(bytes(&app.doc.inner.borrow()), once);
+}
+
+#[test]
+fn a_seek_wakes_the_window_a_resting_process_view_is_in() {
+    use std::sync::atomic::Ordering;
+    let hands = Hands::default();
+    let mut app = timeline(&hands);
+    hands.set(0.0, Some(reading(1.0, 0.0)));
+    let window = Arc::new(Window::default());
+    view_mut(&mut app.doc.inner.borrow_mut())
+        .unwrap()
+        .set_host_shell(architect_extensions::remote::HostShell::new(
+            window.clone(),
+            0.0,
+            0.0,
+        ));
+    let _ = app.window_scene();
+    assert!(!animating(&mut app), "paused, it rests");
+    let before = window.0.load(Ordering::Relaxed);
+    // Sought from elsewhere (the bar in another window): its window is
+    // woken, and draws.
+    hands.set(1.0, Some(reading(2.0, 0.0)));
+    architect_scene::wake::clocks_moved();
+    assert!(window.0.load(Ordering::Relaxed) > before);
+    assert!(animating(&mut app));
+}
+
+/// The meter's height, as a fraction of its track: its fill's scale.
+fn meter_scale(commands: &[RenderCommand]) -> Option<f64> {
+    use architect_sandbox_sketch::METER_COLOR;
+    commands.iter().find_map(|c| match c {
+        RenderCommand::Fill(f) if matches!(&f.brush, anyrender::Paint::Solid(c) if *c == METER_COLOR) => {
+            Some(f.transform.as_coeffs()[3])
+        }
+        _ => None,
+    })
+}
+
+#[test]
+fn a_meter_moves_at_the_engines_rate_with_nothing_from_the_view() {
+    use architect_sandbox_sketch::meter_value;
+    use architect_scene::engine::EngineTable;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let (mut app, window) = mixer();
+    // The engine's table, granted to the pane (`capabilities.ui =
+    // ["engine"]`): what the app does when an engine publishes one.
+    let (table, writer) = EngineTable::new([meter_value().unwrap()]).unwrap();
+    let slot = table.slot(&meter_value().unwrap()).unwrap();
+    view_mut(&mut app.doc.inner.borrow_mut())
+        .unwrap()
+        .set_engine(Some(Arc::clone(&table)));
+    assert_eq!(
+        meter_scale(&app.window_scene()),
+        Some(1.0),
+        "unwritten: as sent"
+    );
+    assert!(!animating(&mut app), "nothing moves: it rests");
+    let once = bytes(&app.doc.inner.borrow());
+    // An audio callback writing the meter every 2.67 ms for half a
+    // second, while the window draws.
+    let done = Arc::new(AtomicBool::new(false));
+    let engine = {
+        let done = Arc::clone(&done);
+        std::thread::spawn(move || {
+            for i in 0..188_u32 {
+                writer.write(slot, (f64::from(i) * 0.07).sin().abs());
+                std::thread::sleep(Duration::from_micros(2_667));
+            }
+            done.store(true, Ordering::Release);
+            writer
+        })
+    };
+    let mut frames = 0_u32;
+    let mut levels = std::collections::BTreeSet::new();
+    while !done.load(Ordering::Acquire) {
+        app.pump("a frame", |_| true);
+        let level = meter_scale(&app.window_scene()).unwrap();
+        levels.insert((level * 1e6) as i64);
+        frames += 1;
+    }
+    let writer = engine.join().unwrap();
+    let metering = bytes(&app.doc.inner.borrow()) - once;
+    assert_eq!(metering, 0, "metering sent {metering} bytes");
+    assert!(
+        levels.len() > 20,
+        "{} levels in {frames} frames",
+        levels.len()
+    );
+    println!(
+        "meter: {frames} frames over 188 engine writes, {} levels drawn, {metering} bytes from the view",
+        levels.len()
+    );
+    // The engine stopped: once the last level is drawn, the window rests.
+    let _ = app.window_scene();
+    assert!(
+        !animating(&mut app),
+        "a still meter kept the window drawing"
+    );
+    // It writes again: the window that rested is woken.
+    let before = window.0.load(std::sync::atomic::Ordering::Relaxed);
+    writer.write(slot, 0.5);
+    let began = Instant::now();
+    while window.0.load(std::sync::atomic::Ordering::Relaxed) == before {
+        assert!(began.elapsed() < Duration::from_secs(5), "never woken");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!((meter_scale(&app.window_scene()).unwrap() - 0.5).abs() < 1e-9);
 }
 
 fn p(samples: &mut [Duration], q: usize) -> f64 {

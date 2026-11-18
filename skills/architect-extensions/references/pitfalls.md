@@ -145,6 +145,13 @@ From `docs/content/architecture/embedded-views.md` ("Web views"):
 - **Tooling**: the component tooling is young (WASI 0.3, async components, needs Wasmtime 46+); old WIT versions are kept forever, so design WIT changes as additions.
 - **Source:** `docs/content/architecture/extensions.md` ("On each platform", "Risks"); `docs/content/guide/showcase.md`.
 
+### 18. `document::Style` in a process view
+
+- **Symptom:** a process copy's view is unstyled while the linked copy is fine.
+- **Cause:** a process view's `VirtualDom` has no document head for `document::Style` to reach.
+- **Fix:** a plain `style { {CSS} }` element in the view's tree when `guest::in_process()` (Keyflow's palettes sidebar does this); `document::Style` linked in.
+- **Source:** #840.
+
 ## Before calling an extension done
 
 1. `architect-desktop extensions check <folder>` (or `EXT_CHECK`) passes: manifest, scripts, load, each view rendered once.
