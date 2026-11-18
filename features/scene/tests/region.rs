@@ -18,7 +18,7 @@ use architect_scene::anim::{Animation, Clock, Input, Linear, Name, Property, Rea
 use architect_scene::layers::{Layer, Layers};
 use architect_scene::ops::{Receiver, Sender};
 use architect_scene::region::{
-    Axis, Cursor, Drag, Hit, Interaction, Lit, MAX_REGIONS, Region, RegionEvent, Shape,
+    Axis, Cursor, Drag, Hit, Interaction, Lit, MAX_REGIONS, Mods, Region, RegionEvent, Shape,
 };
 use peniko::kurbo::{Affine, Point, Rect};
 use peniko::{Color, Fill};
@@ -539,4 +539,144 @@ fn a_coast_stops_at_its_end_and_a_press_stops_it() {
     // Held still before the release: no flick.
     let _ = i.released(&layers, &at(10.5), &mut values, Point::new(50.0, 200.0));
     assert!(!i.coasting());
+}
+
+fn ink(color: Color) -> Arc<Vec<RenderCommand>> {
+    let mut scene = Scene::new();
+    scene.fill(
+        Fill::NonZero,
+        Affine::IDENTITY,
+        color,
+        None,
+        &Rect::new(2.0, 2.0, 8.0, 8.0),
+    );
+    Arc::new(scene.commands)
+}
+
+fn fills_of(commands: &[RenderCommand], color: Color) -> usize {
+    commands
+        .iter()
+        .filter(|c| {
+            matches!(c, RenderCommand::Fill(f)
+                if matches!(&f.brush, anyrender::Paint::Solid(c) if *c == color))
+        })
+        .count()
+}
+
+/// A region whose hover is its content redrawn (#844): a layer sent once,
+/// hidden, that the host draws in the region's layer's space while the
+/// region is hovered, and the press's while pressed. No box over it, and
+/// nothing from the view; across a process it is the same layer, and the
+/// batch that says so is of version 3.
+#[test]
+fn a_hovered_region_shows_its_hover_layer_in_its_own_space() {
+    const HOVERED: u64 = 50;
+    const PRESSED: u64 = 51;
+    let blue = Color::from_rgb8(0, 0, 255);
+    let red = Color::from_rgb8(255, 0, 0);
+    let note = Region::new(9, Shape::Rect(Rect::new(0.0, 0.0, 10.0, 10.0)))
+        .hover_layer(HOVERED)
+        .press_layer(PRESSED);
+    let page = Layer::new(content())
+        .at(Affine::translate((100.0, 0.0)))
+        .regions(vec![note]);
+    let hidden = |c| {
+        let mut l = Layer::new(ink(c));
+        l.visible = false;
+        l
+    };
+    let all = vec![(1, page), (HOVERED, hidden(blue)), (PRESSED, hidden(red))];
+    // Across a process: the same regions, at version 3.
+    let batch = Sender::new().frame(&all).unwrap();
+    assert_eq!(&batch[..4], b"ASO\x03");
+    let mut receiver = Receiver::new();
+    receiver.apply(&batch).unwrap();
+    let layers = receiver.layers();
+    assert_eq!(
+        layers.region(Hit { key: 1, id: 9 }).unwrap().hover_layer,
+        Some(HOVERED)
+    );
+    let v = Values::new();
+    let drawn = |lit: Option<Lit>| {
+        let mut scene = Scene::new();
+        layers.compose_lit(&mut scene, Affine::IDENTITY, &NONE, &v, lit);
+        scene.commands
+    };
+    // Not lit: neither is drawn (they are hidden).
+    assert_eq!(
+        fills_of(&drawn(None), blue) + fills_of(&drawn(None), red),
+        0
+    );
+    let hit = Hit { key: 1, id: 9 };
+    let hovered = drawn(Some(Lit {
+        hit,
+        pressed: false,
+    }));
+    assert_eq!((fills_of(&hovered, blue), fills_of(&hovered, red)), (1, 0));
+    // In the page's space: moved 100 right with it.
+    let at = hovered
+        .iter()
+        .find_map(|c| match c {
+            RenderCommand::Fill(f) if matches!(&f.brush, anyrender::Paint::Solid(c) if *c == blue) => {
+                Some(f.transform.as_coeffs()[4])
+            }
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(at, 100.0);
+    let pressed = drawn(Some(Lit { hit, pressed: true }));
+    assert_eq!((fills_of(&pressed, blue), fills_of(&pressed, red)), (0, 1));
+    // A batch with no layer swaps stays at version 2.
+    let plain = Sender::new()
+        .frame(&[(1, Layer::new(content()).regions(vec![button(1)]))])
+        .unwrap();
+    assert_eq!(&plain[..4], b"ASO\x02");
+}
+
+/// A region pressed with Shift or ⌘ held (#844): the view hears the press
+/// and the release with them, by the names its input uses.
+#[test]
+fn a_press_carries_the_modifiers_held() {
+    let mut layers = Layers::new();
+    layers.set(1, Layer::new(content()).regions(vec![button(10)]));
+    let mut v = Values::new();
+    let mut i = Interaction::new();
+    let at_point = || Point::new(5.0, 5.0);
+    let range = Mods::from_names(&["Shift"]);
+    let _ = i.pressed_with(&layers, &NONE, &mut v, at_point(), range);
+    let _ = i.released_with(&layers, &NONE, &mut v, at_point(), range);
+    let heard = i.take();
+    // Each just before its press and its release.
+    let at = |e: RegionEvent| heard.iter().position(|h| *h == e).unwrap();
+    assert_eq!(
+        at(RegionEvent::Modifiers(10, range)) + 1,
+        at(RegionEvent::Press(10)),
+        "{heard:?}"
+    );
+    assert_eq!(
+        heard
+            .iter()
+            .filter(|h| matches!(h, RegionEvent::Modifiers(..)))
+            .count(),
+        2
+    );
+    // None held: nothing new.
+    let _ = i.pressed(&layers, &NONE, &mut v, at_point());
+    let _ = i.released(&layers, &NONE, &mut v, at_point());
+    assert!(
+        !i.take()
+            .iter()
+            .any(|h| matches!(h, RegionEvent::Modifiers(..)))
+    );
+    assert!(range.has("Shift") && !range.has("Mod"));
+    assert_eq!(
+        Mods::from_names(&["Mod", "Shift"]).names(),
+        ["Mod", "Shift"]
+    );
+    let command = if cfg!(target_os = "macos") {
+        Mods::held(false, false, false, true)
+    } else {
+        Mods::held(false, false, true, false)
+    };
+    assert!(command.has("Mod"));
 }

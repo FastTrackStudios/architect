@@ -830,3 +830,87 @@ fn a_views_state_is_kept_by_its_pane_and_given_back_when_its_program_restarts() 
         });
     }
 }
+
+/// The pointer leaving the view (#844): the view hears a move to where it
+/// went and then `PointerLeave`, linked in and as a process alike, so a
+/// view that hit-tests for itself can clear its hover.
+#[test]
+fn a_view_hears_the_pointer_leave_linked_and_as_a_process() {
+    let _one = SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let dir = tempfile::tempdir().unwrap();
+    let mut logs = Vec::new();
+    for process in [false, true] {
+        let how = if process { "process" } else { "linked" };
+        let mut run = start_view(process, dir.path(), "probe");
+        let (ox, oy) = origin(&run.doc);
+        let free = MouseEventButtons::None;
+        run.send(UiEvent::PointerMove(pointer(
+            (ox + 50.0, oy + 40.0),
+            free,
+            Modifiers::empty(),
+        )));
+        run.pump_until(&format!("{how}: the move in"), |l| {
+            l.contains("input move 50 40")
+        });
+        // Out of the window past the view's left edge.
+        run.send(UiEvent::PointerLeave(pointer(
+            (ox - 5.0, oy + 40.0),
+            free,
+            Modifiers::empty(),
+        )));
+        run.pump_until(&format!("{how}: the leave"), |l| {
+            l.contains("input PointerLeave")
+        });
+        let log = run.log();
+        let tail: Vec<&str> = log.lines().filter(|l| l.starts_with("input ")).collect();
+        logs.push(tail.iter().map(|l| (*l).to_owned()).collect::<Vec<_>>());
+        assert_eq!(tail.last(), Some(&"input PointerLeave"), "{how}: {log}");
+    }
+    assert_eq!(logs[0], logs[1], "linked and process differ");
+}
+
+/// A Shift-click on a region (#844): the view hears the press and the
+/// release with Shift held, linked in and as a process alike.
+#[test]
+fn a_press_on_a_region_carries_its_modifiers_linked_and_as_a_process() {
+    let _one = SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let dir = tempfile::tempdir().unwrap();
+    let shift = format!(
+        "{:?}",
+        architect_workspace::paint::region::Mods::from_names(&["Shift"])
+    );
+    for process in [false, true] {
+        let how = if process { "process" } else { "linked" };
+        let mut run = start_view(process, dir.path(), "regions");
+        let (ox, oy) = origin(&run.doc);
+        let (x0, y0, _, _) = REGION_RECT;
+        let at = (ox + x0 as f32 + 30.0, oy + y0 as f32 + 20.0);
+        run.send(UiEvent::PointerMove(pointer(
+            at,
+            MouseEventButtons::None,
+            Modifiers::SHIFT,
+        )));
+        run.send(UiEvent::PointerDown(pointer(
+            at,
+            MouseEventButtons::Primary,
+            Modifiers::SHIFT,
+        )));
+        run.send(UiEvent::PointerUp(pointer(
+            at,
+            MouseEventButtons::None,
+            Modifiers::SHIFT,
+        )));
+        let mods = format!("region Modifiers({REGION}, {shift})");
+        let press = format!("region Press({REGION})");
+        let release = format!("region Release({REGION})");
+        run.pump_until(&format!("{how}: the shifted release"), |l| {
+            // The keys held, just before the press, and again before the
+            // release.
+            l.contains(&format!("{mods}\n{press}")) && l.contains(&format!("{mods}\n{release}"))
+        });
+    }
+}

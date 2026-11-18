@@ -185,6 +185,7 @@ impl PaintView for Grid {
                 text = true;
             }
             ViewInput::Focus(on) => self.state.update(|s| s.focused = *on),
+            ViewInput::PointerLeave => self.hover = None,
             ViewInput::PointerUp { .. } | ViewInput::Wheel { .. } | ViewInput::Key { .. } => {}
         }
         let (now_hover, now_picked) = (self.hover, self.picked);

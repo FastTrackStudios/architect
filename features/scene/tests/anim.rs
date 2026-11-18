@@ -579,14 +579,14 @@ fn a_batch_is_written_at_the_lowest_version_that_holds_it() {
         .frame(&[(1, Layer::new(square()).animated(vec![playhead()]))])
         .unwrap();
     assert_eq!(&moving[..4], b"ASO\x02");
-    assert_eq!(VERSION, 2);
+    assert_eq!(VERSION, 3);
     // A host that reads the first version only matches `MAGIC` exactly:
     // this batch is refused whole, as not one it reads.
     assert_ne!(&moving[..4], &MAGIC);
     // One from a later host than this: refused by its version.
     let mut later = moving.clone();
-    later[3] = 3;
-    assert_eq!(Receiver::new().apply(&later), Err(Error::Version(3, 2)));
+    later[3] = 4;
+    assert_eq!(Receiver::new().apply(&later), Err(Error::Version(4, 3)));
     // A first-version batch can't hold a later operation.
     let mut mislabelled = moving;
     mislabelled[3] = 1;

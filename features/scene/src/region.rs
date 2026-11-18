@@ -181,6 +181,14 @@ pub struct Region {
     pub hover: Option<Color>,
     /// Drawn over its shape while it is pressed.
     pub press: Option<Color>,
+    /// A layer of the pane's drawn while the pointer is on it, in this
+    /// region's layer's space, over it: what it shows hovered, recorded
+    /// once (a notehead in the hover colour). The view sends that layer
+    /// with `visible: false`; the host shows it with no word to the view.
+    pub hover_layer: Option<Key>,
+    /// The layer drawn while it is pressed, the same way (else its
+    /// `hover_layer`).
+    pub press_layer: Option<Key>,
     /// What dragging it writes: at most one along each axis (a fader
     /// one, a box that moves anywhere two).
     pub drags: Vec<Drag>,
@@ -196,8 +204,32 @@ impl Region {
             cursor: Cursor::Default,
             hover: None,
             press: None,
+            hover_layer: None,
+            press_layer: None,
             drags: Vec::new(),
         }
+    }
+
+    /// While hovered, layer `key` (sent hidden) is drawn over it in its
+    /// layer's space: its content redrawn as hovered, not a box over it.
+    #[must_use]
+    pub const fn hover_layer(mut self, key: Key) -> Self {
+        self.hover_layer = Some(key);
+        self
+    }
+
+    /// While pressed, layer `key` (sent hidden) is drawn over it.
+    #[must_use]
+    pub const fn press_layer(mut self, key: Key) -> Self {
+        self.press_layer = Some(key);
+        self
+    }
+
+    /// Whether it says what to draw with layers: a batch that says so is
+    /// of [`crate::ops::VERSION`] 3.
+    #[must_use]
+    pub const fn swaps(&self) -> bool {
+        self.hover_layer.is_some() || self.press_layer.is_some()
     }
 
     #[must_use]
@@ -378,8 +410,17 @@ fn content_point(transform: Affine, at: Point) -> Option<Point> {
     (p.x.is_finite() && p.y.is_finite()).then_some(p)
 }
 
-/// Draws `lit`'s highlight over its region, its layer at `at`.
-pub(crate) fn draw_lit(scene: &mut impl PaintScene, region: &Region, at: Affine, pressed: bool) {
+/// Draws `lit`'s highlight over its region, its layer at `at`: its
+/// colour over its shape, then the layer it shows (`swap`, the commands
+/// of [`Region::hover_layer`] or [`Region::press_layer`], when there is
+/// one), in the same space.
+pub(crate) fn draw_lit(
+    scene: &mut impl PaintScene,
+    region: &Region,
+    at: Affine,
+    pressed: bool,
+    swap: Option<&[anyrender::recording::RenderCommand]>,
+) {
     let color = if pressed {
         region.press.or(region.hover)
     } else {
@@ -387,6 +428,103 @@ pub(crate) fn draw_lit(scene: &mut impl PaintScene, region: &Region, at: Affine,
     };
     if let Some(color) = color {
         region.shape.fill(scene, at, color);
+    }
+    if let Some(commands) = swap {
+        crate::layers::replay(scene, commands, at);
+    }
+}
+
+/// The layer `region` shows while lit (pressed or not), if it names one.
+#[must_use]
+pub const fn shown_layer(region: &Region, pressed: bool) -> Option<Key> {
+    if pressed {
+        match region.press_layer {
+            Some(k) => Some(k),
+            None => region.hover_layer,
+        }
+    } else {
+        region.hover_layer
+    }
+}
+
+/// The modifier keys held as a region was pressed or let go, by the
+/// names a view's input gives them (`"Mod"`, `"Shift"`, `"Alt"`,
+/// `"Ctrl"`; `"Mod"` is ⌘ on a Mac and Ctrl elsewhere).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Mods(u8);
+
+impl Mods {
+    pub const NONE: Self = Self(0);
+    const MOD: u8 = 1;
+    const SHIFT: u8 = 2;
+    const ALT: u8 = 4;
+    const CTRL: u8 = 8;
+    const NAMES: [(u8, &'static str); 4] = [
+        (Self::MOD, "Mod"),
+        (Self::SHIFT, "Shift"),
+        (Self::ALT, "Alt"),
+        (Self::CTRL, "Ctrl"),
+    ];
+
+    /// The keys held, as a host's pointer event says them: ⌘ is `"Mod"`
+    /// on a Mac, Ctrl is `"Mod"` (and `"Ctrl"`) elsewhere.
+    #[must_use]
+    // A pointer event's four keys, as every host's event gives them.
+    #[allow(clippy::fn_params_excessive_bools)]
+    pub const fn held(shift: bool, alt: bool, ctrl: bool, meta: bool) -> Self {
+        let command = if cfg!(target_os = "macos") {
+            meta
+        } else {
+            ctrl
+        };
+        let mut bits = 0;
+        if command {
+            bits |= Self::MOD;
+        }
+        if shift {
+            bits |= Self::SHIFT;
+        }
+        if alt {
+            bits |= Self::ALT;
+        }
+        if ctrl {
+            bits |= Self::CTRL;
+        }
+        Self(bits)
+    }
+
+    /// From names as a view's input gives them; unknown names are none.
+    #[must_use]
+    pub fn from_names(names: &[&str]) -> Self {
+        Self(
+            Self::NAMES
+                .iter()
+                .filter(|(_, n)| names.contains(n))
+                .fold(0, |bits, (bit, _)| bits | bit),
+        )
+    }
+
+    /// Their names, in `"Mod"`, `"Shift"`, `"Alt"`, `"Ctrl"` order.
+    #[must_use]
+    pub fn names(self) -> Vec<&'static str> {
+        Self::NAMES
+            .iter()
+            .filter(|(bit, _)| self.0 & bit != 0)
+            .map(|(_, n)| *n)
+            .collect()
+    }
+
+    /// Whether `name` (`"Shift"`, `"Mod"`) is held.
+    #[must_use]
+    pub fn has(self, name: &str) -> bool {
+        Self::NAMES
+            .iter()
+            .any(|(bit, n)| *n == name && self.0 & bit != 0)
+    }
+
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
     }
 }
 
@@ -397,6 +535,11 @@ pub enum RegionEvent {
     Leave(u64),
     Press(u64),
     Release(u64),
+    /// The modifier keys held as the region was pressed or let go (a
+    /// Shift-click is a range, a ⌘-click a toggle): heard just before
+    /// that `Press` or `Release`, and only when a key is held. A view that
+    /// does not care is not told anything new.
+    Modifiers(u64, Mods),
     /// A drag's value along an axis: at most once a frame, and once more
     /// before its release.
     Value(u64, Axis, f64),
@@ -411,6 +554,7 @@ impl RegionEvent {
             | Self::Leave(id)
             | Self::Press(id)
             | Self::Release(id)
+            | Self::Modifiers(id, _)
             | Self::Value(id, _, _) => id,
         }
     }
@@ -613,6 +757,19 @@ impl Interaction {
         values: &mut Values,
         at: Point,
     ) -> Outcome {
+        self.pressed_with(layers, readings, values, at, Mods::NONE)
+    }
+
+    /// [`Self::pressed`] with `mods` held: what the view hears with the
+    /// press.
+    pub fn pressed_with(
+        &mut self,
+        layers: &Layers,
+        readings: &Readings,
+        values: &mut Values,
+        at: Point,
+        mods: Mods,
+    ) -> Outcome {
         let mut out = self.moved(layers, readings, values, at);
         if self.held.is_some() {
             return out;
@@ -647,6 +804,9 @@ impl Interaction {
         // A press stops what it coasts.
         self.coasting
             .retain(|c| !dragging.iter().any(|d| d.drag.value == c.drag.value));
+        if !mods.is_empty() {
+            self.queue.push(RegionEvent::Modifiers(hit.id, mods));
+        }
         self.queue.push(RegionEvent::Press(hit.id));
         self.held = Some(Held { hit, dragging });
         out.consumed = true;
@@ -663,10 +823,25 @@ impl Interaction {
         values: &mut Values,
         at: Point,
     ) -> Outcome {
+        self.released_with(layers, readings, values, at, Mods::NONE)
+    }
+
+    /// [`Self::released`] with `mods` held.
+    pub fn released_with(
+        &mut self,
+        layers: &Layers,
+        readings: &Readings,
+        values: &mut Values,
+        at: Point,
+        mods: Mods,
+    ) -> Outcome {
         let mut out = self.moved(layers, readings, values, at);
         let Some(held) = self.held.take() else {
             return out;
         };
+        if !mods.is_empty() {
+            self.queue.push(RegionEvent::Modifiers(held.hit.id, mods));
+        }
         self.queue.push(RegionEvent::Release(held.hit.id));
         // Let go while moving: a drag with inertia coasts on.
         for d in held.dragging {
@@ -772,6 +947,10 @@ const CIRCLE: u8 = 2;
 const HOVER: u8 = 1;
 const PRESS: u8 = 2;
 const DRAG: u8 = 4;
+/// A layer drawn while hovered: batch version 3.
+const HOVER_LAYER: u8 = 8;
+/// A layer drawn while pressed: batch version 3.
+const PRESS_LAYER: u8 = 16;
 const STEP: u8 = 1;
 const COAST: u8 = 2;
 
@@ -828,6 +1007,8 @@ pub(crate) fn write(w: &mut Writer, regions: &[Region]) {
             (region.hover.is_some(), HOVER),
             (region.press.is_some(), PRESS),
             (!region.drags.is_empty(), DRAG),
+            (region.hover_layer.is_some(), HOVER_LAYER),
+            (region.press_layer.is_some(), PRESS_LAYER),
         ]
         .into_iter()
         .filter(|(on, _)| *on)
@@ -835,6 +1016,12 @@ pub(crate) fn write(w: &mut Writer, regions: &[Region]) {
         w.u8(flags);
         for c in [region.hover, region.press].into_iter().flatten() {
             color(w, c);
+        }
+        for key in [region.hover_layer, region.press_layer]
+            .into_iter()
+            .flatten()
+        {
+            w.u64(key);
         }
         if !region.drags.is_empty() {
             w.u8(u8::try_from(region.drags.len()).unwrap_or(u8::MAX));
@@ -880,7 +1067,7 @@ pub(crate) fn read(r: &mut Reader<'_>) -> Result<Vec<Region>, Error> {
             .copied()
             .ok_or(Error::Unknown("cursor", c))?;
         let flags = r.u8()?;
-        if flags & !(HOVER | PRESS | DRAG) != 0 {
+        if flags & !(HOVER | PRESS | DRAG | HOVER_LAYER | PRESS_LAYER) != 0 {
             return Err(Error::Unknown("region", flags));
         }
         let hover = if flags & HOVER == 0 {
@@ -892,6 +1079,16 @@ pub(crate) fn read(r: &mut Reader<'_>) -> Result<Vec<Region>, Error> {
             None
         } else {
             Some(read_color(r)?)
+        };
+        let hover_layer = if flags & HOVER_LAYER == 0 {
+            None
+        } else {
+            Some(r.u64()?)
+        };
+        let press_layer = if flags & PRESS_LAYER == 0 {
+            None
+        } else {
+            Some(r.u64()?)
         };
         let count = if flags & DRAG == 0 { 0 } else { r.u8()? };
         if count > 2 {
@@ -937,6 +1134,8 @@ pub(crate) fn read(r: &mut Reader<'_>) -> Result<Vec<Region>, Error> {
             cursor,
             hover,
             press,
+            hover_layer,
+            press_layer,
             drags,
         });
     }

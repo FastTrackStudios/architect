@@ -265,7 +265,11 @@ pane's id, the host's theme as tokens and kept current, `mount`'s extras
 with its `PaintWake` (a wake from any thread asks for a frame), and every
 input kind with its modifiers: pointer, wheel (in logical pixels, signed
 as the web's, at the pointer's point in the view), touch, keys down and
-up, focus, composed text. A process view is told its pane's id and state
+up, focus, composed text, and the pointer leaving
+(`ViewInput::PointerLeave`, after a move to where it went;
+`architect_workspace::paint::left_view`; a `kind = "process"` program
+gets it as a move to NaN, which one built before it reads as a move
+that hits nothing). A process view is told its pane's id and state
 (`features/extensions/src/remote.rs` `RemotePaneView`,
 `linked::PANE_CLAIM`), which a view reads with `linked::use_pane_state`
 either way, and where it was in it (`linked::use_view_state`: zoom,

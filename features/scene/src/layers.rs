@@ -324,7 +324,12 @@ impl Layers {
                     .as_deref()
                     .and_then(|rs| rs.iter().find(|r| r.id == lit.hit.id))
             {
-                region::draw_lit(scene, r, root * placed.transform, lit.pressed);
+                // The layer it shows lit, sent hidden: drawn here, in
+                // this layer's space, whatever its own visibility.
+                let swap = region::shown_layer(r, lit.pressed)
+                    .and_then(|k| self.get(k))
+                    .map(|l| l.commands.as_slice());
+                region::draw_lit(scene, r, root * placed.transform, lit.pressed, swap);
             }
             if faded {
                 scene.pop_layer();

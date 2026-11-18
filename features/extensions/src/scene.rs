@@ -165,12 +165,13 @@ pub const REGION_EVENT: &str = "architect-region";
 #[must_use]
 pub fn region_value(event: &architect_scene::region::RegionEvent) -> String {
     use architect_scene::region::{Axis, RegionEvent as E};
-    let (kind, along) = match *event {
-        E::Enter(_) => ("enter", None),
-        E::Leave(_) => ("leave", None),
-        E::Press(_) => ("press", None),
-        E::Release(_) => ("release", None),
-        E::Value(_, axis, v) => ("value", Some((axis, v))),
+    let (kind, along, mods) = match *event {
+        E::Enter(_) => ("enter", None, None),
+        E::Leave(_) => ("leave", None, None),
+        E::Press(_) => ("press", None, None),
+        E::Release(_) => ("release", None, None),
+        E::Modifiers(_, m) => ("modifiers", None, Some(m)),
+        E::Value(_, axis, v) => ("value", Some((axis, v)), None),
     };
     let axis = along.map(|(a, _)| if a == Axis::X { "x" } else { "y" });
     // An id as a string: JSON's numbers lose a u64's last digits.
@@ -179,6 +180,7 @@ pub fn region_value(event: &architect_scene::region::RegionEvent) -> String {
         "kind": kind,
         "axis": axis,
         "value": along.map(|(_, v)| v),
+        "mods": mods.map(architect_scene::region::Mods::names).unwrap_or_default(),
     })
     .to_string()
 }
@@ -189,11 +191,20 @@ pub fn region_of_value(value: &str) -> Option<architect_scene::region::RegionEve
     use architect_scene::region::{Axis, RegionEvent as E};
     let v: serde_json::Value = serde_json::from_str(value).ok()?;
     let id: u64 = v.get("region")?.as_str()?.parse().ok()?;
+    // None from a host built before them.
+    let names: Vec<&str> = v
+        .get("mods")
+        .and_then(serde_json::Value::as_array)
+        .map(|a| a.iter().filter_map(serde_json::Value::as_str).collect())
+        .unwrap_or_default();
+    let mods = architect_scene::region::Mods::from_names(&names);
     Some(match v.get("kind")?.as_str()? {
         "enter" => E::Enter(id),
         "leave" => E::Leave(id),
         "press" => E::Press(id),
         "release" => E::Release(id),
+        // A process built before it reads past it (an unknown kind).
+        "modifiers" => E::Modifiers(id, mods),
         "value" => E::Value(
             id,
             match v.get("axis")?.as_str()? {
@@ -800,6 +811,7 @@ impl Painted {
         &mut self,
         kind: PointerKind,
         at: peniko::kurbo::Point,
+        mods: architect_scene::region::Mods,
     ) -> architect_scene::region::Outcome {
         let Some(receiver) = self.layers.as_mut() else {
             return architect_scene::region::Outcome::default();
@@ -813,8 +825,8 @@ impl Painted {
         let i = &mut self.interaction;
         match kind {
             PointerKind::Move => i.moved(layers, &now, values, at),
-            PointerKind::Down => i.pressed(layers, &now, values, at),
-            PointerKind::Up => i.released(layers, &now, values, at),
+            PointerKind::Down => i.pressed_with(layers, &now, values, at, mods),
+            PointerKind::Up => i.released_with(layers, &now, values, at, mods),
             PointerKind::Gone => i.left(),
         }
     }
@@ -1665,7 +1677,12 @@ mod remote_paint_ui {
                 // Gone, as a linked pane says it: where it went, so nothing
                 // is under it.
                 onpointerleave: move |e: PointerEvent| {
+                    let finger = e.pointer_type() == "touch";
                     leave(pointer(&e, "cancel", |x, y| ViewInput::PointerMove { x, y, mods: held(e.modifiers()) }));
+                    // Then that it left, as a linked pane says it.
+                    if !finger {
+                        leave(ViewInput::PointerLeave);
+                    }
                 },
                 onwheel: move |e: WheelEvent| {
                     let (x, y) = at(e.element_coordinates());
