@@ -171,7 +171,7 @@ fn a_linked_paint_view_takes_the_panes_input_and_draws_in_the_window() {
     // What it draws is in the window's scene.
     let mut scene = Scene::new();
     blitz_paint::paint_scene(&mut scene, &mut doc.inner.borrow_mut(), 1.0, 400, 300, 0, 0);
-    let drew = format!("{:?}", scene.commands);
+    let drew = format!("{:?}", scene.flattened());
     assert!(
         drew.contains(&format!("{INK:?}")),
         "no dot in the window's scene"
