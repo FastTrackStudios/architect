@@ -309,9 +309,46 @@ impl PartialEq for Store {
     }
 }
 
+/// The action the probe's view binds `N` to in its context
+/// (`[[keys]] when = "view:…"`): how many times it ran.
+static NOTED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+static NOTE: architect::action::ActionMeta = architect::action::ActionMeta {
+    id: "TEST_PROBE_NOTE",
+    trait_name: "",
+    method_name: "",
+    display_name: "Note",
+    description: "",
+    category: "",
+    group: "",
+    shortcut: "",
+    toggleable: false,
+    undo: false,
+};
+
+/// The keymap's actions, with `N` bound in the pane's view context.
+fn view_keys() -> Arc<ActionList> {
+    let list = ActionList::new();
+    list.register(&NOTE, architect::action::Effect::Mutating, |(): ()| {
+        NOTED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    })
+    .unwrap();
+    Arc::new(list)
+}
+
 /// One workspace pane, the probe's view in it: linked, or its process's.
 #[allow(non_snake_case)]
 fn App(props: AppProps) -> Element {
+    let commands = architect_commands::use_commands_provider();
+    architect_commands::use_action_list(use_hook(view_keys));
+    use_hook(move || {
+        commands.set_view_keys(vec![(
+            "view:probe".to_owned(),
+            "TEST_PROBE_NOTE".to_owned(),
+            "N".to_owned(),
+        )]);
+    });
     let store = props.store.0.clone();
     architect_theme::use_theme_store(move || store);
     let workspace = use_signal(|| {
@@ -650,6 +687,58 @@ fn a_press_on_a_region_focuses_the_view_linked_and_as_a_process() {
         assert!(
             !log.contains("input down"),
             "{how}: the region's press reached the view as a pointer press:\n{log}"
+        );
+    }
+}
+
+/// A plain letter bound in the view's context (`[[keys]] when =
+/// "view:…"`) runs its action through the keymap while the view has the
+/// focus, and the view never hears it; a letter bound there by nothing is
+/// still the view's. Linked and as a process alike.
+#[test]
+fn a_key_bound_in_a_views_context_runs_its_action_and_skips_the_view() {
+    use std::sync::atomic::Ordering;
+    let _one = SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let dir = tempfile::tempdir().unwrap();
+    for process in [false, true] {
+        let how = if process { "process" } else { "linked" };
+        let mut run = start_view(process, dir.path(), "probe");
+        let (ox, oy) = origin(&run.doc);
+        let at = (ox + 50.0, oy + 40.0);
+        run.send(UiEvent::PointerDown(pointer(
+            at,
+            MouseEventButtons::Primary,
+            Modifiers::empty(),
+        )));
+        run.send(UiEvent::PointerUp(pointer(
+            at,
+            MouseEventButtons::None,
+            Modifiers::empty(),
+        )));
+        run.pump_until("the focus", |l| l.contains("input Focus(true)"));
+        let before = NOTED.load(Ordering::SeqCst);
+        run.send(UiEvent::KeyDown(key(
+            "n",
+            KeyState::Pressed,
+            Modifiers::empty(),
+        )));
+        run.send(UiEvent::KeyDown(key(
+            "m",
+            KeyState::Pressed,
+            Modifiers::empty(),
+        )));
+        run.pump_until("the unbound key", |l| l.contains("key: \"m\", down: true"));
+        assert_eq!(
+            NOTED.load(Ordering::SeqCst),
+            before + 1,
+            "{how}: N didn't run"
+        );
+        let log = run.log();
+        assert!(
+            !log.contains("key: \"n\""),
+            "{how}: the view heard the bound key:\n{log}"
         );
     }
 }

@@ -424,7 +424,7 @@ one kind may not share an id.
 | `[[context]]` `ContextDecl` | `target` (`pane`, `tab`, `view:<kind>`, `file`, `file:<ext>`, `doc:<kind>`, `link`, `selection`, `toolbar`, `toolbar-item`), `action`, `title` | `apps/sandbox/extensions/metronome/extension.toml` |
 | `[[bar]]` `BarDecl` | `action`, `title`, `icon`: a phone's action bar | `extensions/calendar/extension.toml` |
 | `[[slots]]` `SlotDecl` | `slot` (`ribbon`, `left`, `right`, `tabs`, `status`, `title`), `view` | test: `features/extensions/tests/contributions.rs` |
-| `[[keys]]` `KeyDecl` | `chord` (`⌘K`), `action` | `features/palette/extension/extension.toml` |
+| `[[keys]]` `KeyDecl` | `chord` (`⌘K`, `A`), `action`, `when` (`view:<view>`: only while that view has the focus) | `features/palette/extension/extension.toml` |
 | `[[palette_views]]` `PaletteViewDecl` | `overlay` (`palette` or `quick-open`), `view` | `features/palette/extension/extension.toml` |
 | `[[palette_sources]]` `PaletteSourceDecl` | `id` (`a-z 0-9 - _`), `title`, `action`, `run`, `ranking` (`open` default, or `commands`) | `examples/showcase/openers-sampler/extension.toml` |
 | `[[keymaps]]` (editor-ext `KeymapEntry`) | `key` (`Mod-Enter`), `action`, `when` (`editor` or `node:<kind>`); needs `writes = ["editor"]` | `apps/sandbox/extensions/outline/extension.toml` |
@@ -660,8 +660,11 @@ Maps of service name (lower case, with a `.`) to a version.
 | `[requires]` | semver requirement | loads after a provider; refused without one |
 | `[uses]` | semver requirement | optional; calls answer "no provider" when none |
 
-A service may not be in both `[requires]` and `[uses]`, nor in what it
-provides itself.
+A service may not be in both `[requires]` and `[uses]`, and an extension
+may not `[requires]` what it provides. It may `[uses]` it: when several
+extensions provide a service, the one chosen (`EXT_SERVICE_USE`) answers,
+so a provider can be a client of another's (Keyflow hosts sessions and
+follows the `daw` engine's).
 
 ```toml
 [provides]

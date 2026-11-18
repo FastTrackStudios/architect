@@ -245,6 +245,19 @@ rsx! {
   not the app. The host decodes a frame's scenes on a thread of its own
   before it applies the frame (`scene::predecode`), so a large one
   doesn't stall the window.
+- **Frames paced to the display** (#840). A batch, and each change the
+  view's document makes, asks the window for a frame through its
+  `Pacer` (`features/workspace/src/pacing.rs`; `remote::HostShell::pacer`).
+  Asked right after a frame that waited for its swapchain image (its
+  render took at least half a refresh, so it ended at a refresh), the
+  requests until the next refresh share one frame started just before
+  the next image comes free: the window's thread is free meanwhile and
+  the frame shows the newest batch. Started at once instead, such a
+  frame built its scene in 0.6 ms and then waited about 7 ms of an
+  8.3 ms refresh (a 120 Hz Mac) for its image, its content a refresh
+  older than it had to be. After a frame that did not wait (an idle
+  window, a frame slower than a refresh) it asks at once, so no wait is
+  added where none was saved. `ARCHITECT_FRAME_PACING=0` turns it off.
 - **Pans don't resize.** A new transform or scene updates the element's
   widget in place; only a new box tells the view its size, and the
   resizes of a dragged window are coalesced like moves.
@@ -347,6 +360,34 @@ Four things are the host's own:
   for again every `PLACE_EVERY`, so an engine that starts later or
   restarts is found. The host checks the header, the names and the
   length before it maps (`engine::shared::open`).
+
+**On the wire** (#835). A process at wire 8 (`wire::BYTES_WIRE`) is
+opened with `ProcessExtension::scene_view`, and its batches cross as
+bytes beside its edits. Its frames may be `Frame::Batches { edits,
+batches }`. The element's `data-architect-layers` attribute holds the
+batch's number (`scene::layers_marker`), and the host takes that batch
+at the edit that sets it (`RemoteDocument::apply`). Before this, the
+attribute carried the batch as base64 (`scene::layers_value`), and an
+older peer still does: a host never opens an older process with
+`scene_view`, and a process sends bytes only when opened that way.
+
+- **Ordering against the edits** is exactly the attribute's:
+  - a batch applies after every edit before its attribute and before
+    every edit after it, in the same frame;
+  - a batch no edit names, a name with no batch, or a number sent twice
+    fails the view (`features/extensions/tests/scene_bytes.rs`).
+- **Back-pressure** is the view's frames': one stream, in order. The
+  view's thread awaits each frame's send, and while the host has not
+  answered an event, the moves after it are coalesced (see Input above).
+- **Copies.** On the guest, a batch is moved, not encoded, from the
+  scene component (`scene::outbox`) into the frame. On the host, vox
+  deserialises it once, and the receiver keeps a font or an image of at
+  least `ops::SHARE_AT` (64 KiB) as a share of the batch's own bytes
+  (`Receiver::apply_owned`, `Resource::from_shared`). A smaller one is
+  copied, so it does not keep its batch alive.
+- **Not yet on this path:** a WASI component's view (the WIT interface)
+  and a page in the browser (its worker's messages). They still send the
+  attribute.
 
 Values are named by whose they are: `view.` (the view writes them, a
 `VALUE` operation of a name and a number), `host.` (a drag, later a

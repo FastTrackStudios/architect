@@ -21,6 +21,8 @@
 //! | `EXT_LANGUAGES` | the editor's language registry (#512): the app's languages and every loaded extension's `[[languages]]`, or the one `{id}`, `{fence}` or `{path}` names: its file types, fences, grammar, highlights query, comment token, LSP server command and who registered it (`from`) |
 //! | `EXT_FILE_TYPES` | the file types that are vault notes: `md` and every declared one (`[[file_types]]`, `vault_proto::note_types`): its extension, name, icon, the `type` it reads as and who declared it (`from`) |
 //! | `EXT_CAPTURE_TARGETS` | every capture target loaded extensions add (`[[capture_targets]]`): its chips, tokens, action and owner |
+//! | `EXT_SERVICES` | every service loaded extensions provide: its providers, the one chosen for it and the one in use |
+//! | `EXT_SERVICE_USE` | chooses `{service, provider}`'s provider (`provider` null: the host's choice, the newest) |
 //! | `EXT_PALETTE` | the palette slot (#381): which extension's view draws each overlay (`[[palette_views]]`), the keys extensions bind (`[[keys]]`) and the palette's sources (`[[palette_sources]]`) |
 
 use architect::action::{
@@ -163,6 +165,28 @@ static DISABLE: ActionMeta = meta(
      items, menu entries, slots and runtime state go, its views close or say it is gone — and \
      left off until it is turned on.",
 );
+
+static SERVICES: ActionMeta = meta(
+    "EXT_SERVICES",
+    "Services and their providers",
+    "Every service loaded extensions provide (`[provides]`): each one's providers with their \
+     versions, the provider chosen for it (EXT_SERVICE_USE) and the one a call goes to now \
+     (`in_use`: the chosen one while it is loaded, else the newest, the first by id on a tie).",
+);
+static SERVICE_USE: ActionMeta = meta(
+    "EXT_SERVICE_USE",
+    "Choose a service's provider",
+    "Chooses extension `provider` for service `service` when several provide it: every call \
+     that extension meets goes to it while it is loaded. `provider` null gives the choice back \
+     to the host (the newest).",
+);
+
+/// `EXT_SERVICE_USE`'s arguments.
+#[derive(Debug, Facet)]
+pub struct ServiceUseArgs {
+    pub service: String,
+    pub provider: Option<String>,
+}
 
 /// `EXT_OPEN`'s arguments: one of `path`, `url`, `doc_kind`.
 #[derive(Debug, Facet)]
@@ -572,6 +596,31 @@ impl Extensions {
                 Ok::<_, String>(RawJson::from(answer.to_string()))
             },
         )?;
+        let me = self.clone();
+        list.register_with(
+            &SERVICES,
+            Effect::ReadOnly,
+            move |_: &ActionCaller, (): ()| {
+                Ok::<_, String>(RawJson::from(services_json(&me.host()).to_string()))
+            },
+        )?;
+        let me = self.clone();
+        list.register_with(
+            &SERVICE_USE,
+            Effect::Mutating,
+            move |_: &ActionCaller, a: ServiceUseArgs| {
+                let host = me.host();
+                if let Some(id) = &a.provider
+                    && host
+                        .get(id)
+                        .is_some_and(|l| !l.manifest.provides.contains_key(&a.service))
+                {
+                    return Err(format!("{id} does not provide {}", a.service));
+                }
+                host.use_provider(&a.service, a.provider.as_deref());
+                Ok::<_, String>(RawJson::from(services_json(&host).to_string()))
+            },
+        )?;
         for (meta, on) in [(&ENABLE, true), (&DISABLE, false)] {
             let me = self.clone();
             list.register_with(
@@ -626,6 +675,25 @@ impl Extensions {
             "state": reg.state(now_ms()),
         })
     }
+}
+
+/// `EXT_SERVICES`' answer.
+fn services_json(host: &crate::host::Host) -> Value {
+    let services: Vec<Value> = host
+        .service_providers()
+        .into_iter()
+        .map(|s| {
+            json!({
+                "service": s.service,
+                "providers": s.providers.iter()
+                    .map(|(id, v)| json!({ "id": id, "version": v.to_string() }))
+                    .collect::<Vec<_>>(),
+                "chosen": s.chosen,
+                "in_use": s.in_use,
+            })
+        })
+        .collect();
+    json!({ "services": services })
 }
 
 /// Every inline embed, with its owner and claims.

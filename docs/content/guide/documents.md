@@ -303,6 +303,28 @@ node's edits, a linked one that may only read, and the refusals;
 `the_windows_extension_edits_the_nodes_copy_of_its_document` is the same
 against a running node.
 
+Deleting such a file deletes the document everywhere, as a note's delete
+does. A file the node listed and finds gone at its next listing
+(`features/vault/vault-collab/src/lib.rs` `VaultCollab::notice_deletes`,
+after `apps/desktop/src/node/catalog.rs` `VaultCatalog::notes`) sets the
+document's tombstone (`meta.deleted`), which reaches every other holder and
+removes its file there. A deleted document is kept under the node's
+`crdt/deleted-documents/`, which also says the id is deleted: a peer that
+still lists it, a later sweep or a restart never makes its file again
+(`features/vault/vault-collab/src/documents.rs`). A file of it put back (a
+restore) is the document again on its next open. One deleted while nobody
+had it open is tombstoned as soon as a peer's history reaches it.
+`apps/desktop/tests/node.rs` `an_extensions_document_deleted_on_one_node_is_deleted_on_the_other`
+is two nodes doing it.
+
+One document is one file per node. A copy carries the id it was copied
+from: while the first file is there the copy is not listed or synced (and
+is said once in the log); give it an id of its own to keep both. A rename
+moves the document with the file on that node, with no delete and no
+second file, but is not sent: another node keeps its file at the path it
+has. A delete the node did not see happen (the file removed while the node
+was stopped) is not noticed yet.
+
 <!-- media: doc-share-link-join — a share link copied on one device and opened on another, the document joining live -->
 <!-- media: lan-device-found — a device on the same network appearing by name, ready to sync -->
 

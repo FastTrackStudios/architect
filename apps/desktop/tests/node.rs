@@ -569,6 +569,88 @@ fn an_extensions_path_names_its_vault() {
     assert_eq!(node::vault_path(&[], "a.session"), None);
 }
 
+/// A document of an extension's kind deleted on one node (its file
+/// removed outside the document, as `rm` does) is deleted on the other,
+/// and stays deleted on both through the sweeps and relistings that
+/// follow: the node that still listed it does not make it again.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_extensions_document_deleted_on_one_node_is_deleted_on_the_other() {
+    let origin = issuer().await;
+    let tmp = tempfile::tempdir().unwrap();
+
+    let always_dir = tmp.path().join("always-on");
+    std::fs::create_dir_all(always_dir.join("data/vaults/notes/Songs")).unwrap();
+    let kind = install_sessions(&always_dir);
+    let made = always_dir.join("data/vaults/notes/Songs/take.session");
+    let doc_id = {
+        let file = crdt::DocFile::create(crdt::file::DiskStorage::open(&made).unwrap(), &kind)
+            .await
+            .unwrap();
+        let mut main = file.open_branch(crdt::file::MAIN).await.unwrap();
+        main.transact("Type", |doc| {
+            doc.get_text("body")
+                .insert(0, "Made on the always-on node.")
+                .unwrap();
+        })
+        .await
+        .unwrap();
+        file.id().await.unwrap()
+    };
+    let always = config(
+        "always-on",
+        &always_dir,
+        &origin,
+        session(&origin, &always_dir).await,
+    );
+    let always = node::start(always).await.unwrap();
+
+    let laptop_dir = tmp.path().join("laptop");
+    install_sessions(&laptop_dir);
+    let mut laptop = config(
+        "laptop",
+        &laptop_dir,
+        &origin,
+        session(&origin, &laptop_dir).await,
+    );
+    laptop.peers = vec![always.dial().unwrap()];
+    let laptop = node::start(laptop).await.unwrap();
+    let (a, l) = (always.endpoint_id(), laptop.endpoint_id());
+    until("each node lets the other in", || {
+        always.state.admits(&l) && laptop.state.admits(&a)
+    })
+    .await;
+    let there = laptop
+        .state
+        .vault_root("notes")
+        .unwrap()
+        .join("Songs/take.session");
+    until_session(&there, &kind, "Made on the always-on node.").await;
+    assert_eq!(crdt::DocFile::peek(&there).unwrap().id, doc_id);
+
+    // Deleted on the always-on node: gone on the laptop.
+    std::fs::remove_file(&made).unwrap();
+    until("the laptop's copy is deleted", || !there.exists()).await;
+
+    // Still gone on both after the sweeps (every second) and relistings
+    // (every few seconds) that follow.
+    tokio::time::sleep(Duration::from_secs(8)).await;
+    assert!(!made.exists(), "the always-on node made it again");
+    assert!(!there.exists(), "the laptop made it again");
+    let doc = laptop.document(doc_id).await.expect("the laptop keeps it");
+    assert!(
+        matches!(
+            doc.loro().get_map("meta").get("deleted"),
+            Some(crdt::loro::ValueOrContainer::Value(
+                crdt::loro::LoroValue::Bool(true)
+            ))
+        ),
+        "the laptop's document carries the tombstone"
+    );
+
+    laptop.stop().await;
+    always.stop().await;
+}
+
 /// The app signed in as `email`, in org `indie`, with its Action List.
 async fn app(origin: &str, email: &str) -> (Accounts, Arc<ActionList>) {
     let store = Arc::new(AccountStore::in_memory(Arc::new(MemorySecrets::new())));
