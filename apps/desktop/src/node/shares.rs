@@ -2768,6 +2768,32 @@ fn shut(admit: Admit) -> GuestFault {
 }
 
 impl GuestLane {
+    /// What link `code` serves the holder of `token` now: the vault it
+    /// shares from, and the vault paths of the notes it lists and the
+    /// files it serves at its layer. A guest's reads stay inside it: a
+    /// note's text, a file, a live document of a kind (`node::guest_live`).
+    pub(crate) async fn served(
+        &self,
+        code: &str,
+        token: String,
+    ) -> Result<(String, std::collections::HashSet<String>), GuestFault> {
+        let (share, audience) = self.opened(code, token).await?;
+        let mount = link_path(code);
+        let link = Link {
+            share: &share,
+            audience: audience.as_ref(),
+            mount: &mount,
+            listen: share.listen_for(audience.as_ref()),
+        };
+        let (notes, files) = listing(&self.0, &link, link.listen).await.map_err(shut)?;
+        let served = notes
+            .iter()
+            .map(|n| n.path.clone())
+            .chain(files.iter().map(|f| f.path.clone()))
+            .collect();
+        Ok((share.vault.clone(), served))
+    }
+
     /// The link `code` opens and its audience, open to the holder of
     /// `token` now.
     async fn opened(

@@ -348,6 +348,15 @@ impl VaultCollab {
         documents::list(&self.shared, header.id, vault_id, path).then_some(header.id)
     }
 
+    /// The vault file `(vault_id, path)` the document `doc_id` of a kind
+    /// is, as listed, while its kind is registered: the reverse of
+    /// [`Self::document_of`] (what a share link's scope is checked
+    /// against before its guest follows the document).
+    #[must_use]
+    pub fn document_route(&self, doc_id: Uuid) -> Option<(String, String)> {
+        document_route(&self.shared, doc_id)
+    }
+
     /// After a listing ([`Self::document_of`] for every file there is):
     /// each document of a kind whose listed file is gone was deleted
     /// outside the document, and is tombstoned so the delete travels to

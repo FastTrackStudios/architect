@@ -62,6 +62,14 @@ pub mod catalog;
 pub mod cli;
 pub mod config;
 mod files;
+mod guest_live;
+
+/// How often a share guest's live session asks again whether its link
+/// still serves the document (`/s/<code>/_guest/live`, #847).
+#[must_use]
+pub const fn guest_live_recheck() -> std::time::Duration {
+    guest_live::RECHECK
+}
 pub mod kinds;
 mod live;
 pub mod org;
@@ -565,14 +573,27 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
         let engine: Arc<dyn architect_permissions::PermissionEngine> = lane.engine.clone();
         access = access.org_docs(lane.org.id.0.clone(), engine);
     }
-    let registry = collab.registry().clone().with_authorizer({
+    // Who may open a document: the node's links and devices, itself, the
+    // org's members; and a vault share link's guest, read-only, for a
+    // document its link serves while its session lasts (#847).
+    let opens: Arc<dyn Fn(Option<&Principal>, uuid::Uuid) -> bool + Send + Sync> = {
         let (access, lane) = (access.clone(), lane.clone());
-        move |who, doc_id| {
+        Arc::new(move |who, doc_id| {
             access.admits(who, doc_id)
                 || matches!(who, Some(Principal::Service { name }) if name == SELF)
                 || matches!((who, &lane), (Some(who), Some(lane)) if lane.opens(who, doc_id))
-        }
-    });
+        })
+    };
+    let guest_grants = guest_live::GuestGrants::default();
+    let registry = collab
+        .registry()
+        .clone()
+        .with_authorizer({
+            let (opens, grants) = (opens.clone(), guest_grants.clone());
+            move |who, doc_id| opens(who, doc_id) || grants.holds(who, doc_id)
+        })
+        // A share guest never writes: only the rule above without it.
+        .with_write_authorizer(move |who, doc_id| opens(who, doc_id));
     let _ = files_registry.set(registry.clone());
     let catalog = VaultCatalog::new(backend.clone())
         .with_files(files.clone())
@@ -846,6 +867,14 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
     // which the gate passes through, each call checked as the link's
     // pages are.
     host = host.plugin(shares::GuestLane(shares.clone()).into_http_router());
+    // Their live documents, read-only (#847): `/s/<code>/_guest/live`.
+    host = guest_live::mount(
+        host,
+        shares::GuestLane(shares.clone()),
+        registry.clone(),
+        collab.clone(),
+        guest_grants,
+    );
     // Universal links: the iOS apps this node's links open in, from its
     // configuration; absent when none is configured.
     if let Some(body) = shares::apple_app_site_association(&config.apple_app_ids) {

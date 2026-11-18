@@ -4722,3 +4722,262 @@ async fn with_no_rules_an_unreadable_note_holds_back_no_other_notes_files() {
     page_with(&format!("{url}Songs/eve.png"), None, "PNG EVE").await;
     w.host.stop().await;
 }
+
+/// The package of an installed extension declaring one document kind,
+/// `.session` files.
+const LIVE_SESSIONS_EXTENSION: &str = r#"
+id = "test.sessions"
+name = "Sessions"
+version = "0.1.0"
+kind = "data"
+
+[[doc_kinds]]
+id = "test.session"
+name = "Session"
+files = ["session"]
+schema = 1
+"#;
+
+/// Makes the document file `path` of kind `kind`, its `body` `text`.
+fn make_session(path: &Path, kind: &crdt::DocKind, text: &str) {
+    tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(async {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let file = crdt::DocFile::create(crdt::file::DiskStorage::open(path).unwrap(), kind)
+                .await
+                .unwrap();
+            let mut main = file.open_branch(crdt::file::MAIN).await.unwrap();
+            main.transact("Type", |doc| doc.get_text("body").insert(0, text).unwrap())
+                .await
+                .unwrap();
+        });
+    });
+}
+
+/// A presence peer on document `doc_id` of `registry`, calling as the
+/// node itself (the host's own transport, as an engine on it publishes).
+async fn node_presence(
+    registry: crdt::DocRegistry,
+    doc_id: uuid::Uuid,
+) -> crdt::sync::PresencePeer {
+    use architect::permissions_gate::{PermissionsGate, StaticPrincipal, UnlistedPolicy};
+    use crdt::sync::{
+        DocPresenceClient, DocPresenceDispatcher, PresencePeer, doc_presence_service_descriptor,
+    };
+    let router = architect::LayerRouter::new().with(
+        doc_presence_service_descriptor(),
+        DocPresenceDispatcher::new(registry),
+    );
+    let me = architect_permissions::Principal::Service {
+        name: "doc-peer".to_owned(),
+    };
+    let gated = PermissionsGate::new(
+        std::sync::Arc::new(architect_permissions::AllowAll),
+        std::sync::Arc::new(StaticPrincipal(me)),
+    )
+    .unlisted(UnlistedPolicy::Allow)
+    .wrap(router);
+    let (client_link, server_link) = vox::memory_link_pair(64);
+    tokio::spawn(async move {
+        if let Ok(connection) = vox::acceptor_on(server_link)
+            .on_lane(architect::layer::handler_acceptor(gated))
+            .establish_connection()
+            .await
+        {
+            let _hold = connection;
+            std::future::pending::<()>().await;
+        }
+    });
+    let client: DocPresenceClient = vox::initiator_on(client_link).establish().await.unwrap();
+    let (peer, mut driver) = PresencePeer::new(doc_id, 30_000);
+    tokio::spawn(async move {
+        let _ = driver.run(&client).await;
+    });
+    peer
+}
+
+/// Until `doc`'s body holds `want`.
+async fn until_body(doc: &crdt::CrdtDoc, what: &str, want: &str) {
+    for _ in 0..200 {
+        if doc.loro().get_text("body").to_string().contains(want) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!(
+        "timed out: {what}: {:?}",
+        doc.loro().get_text("body").to_string()
+    );
+}
+
+/// A share link's guest follows a live document its link serves (a
+/// `.session` a listed note links to), read-only, on `/s/<code>/_guest/live`
+/// (#847): it gets every edit live; an update it sends up ends its
+/// session and nothing is applied; what it publishes in presence reaches
+/// nobody, and the shared clock answers it; a document outside the
+/// link is unknown to it; and once the link is revoked its session ends
+/// and a new one is refused.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_share_links_guest_follows_its_live_document_read_only() {
+    use architect::connect::{Endpoint, pool};
+    use architect_extensions::live::KindDocuments as _;
+    use crdt::sync::{DocPresenceClient, DocSyncClient, PresencePeer, SyncedDoc};
+
+    let kind = architect_extensions::Manifest::parse(LIVE_SESSIONS_EXTENSION)
+        .unwrap()
+        .contributes
+        .doc_kinds[0]
+        .to_doc_kind();
+    let seed_kind = kind.clone();
+    let w = world_full(
+        architect_sites::Blocks::default(),
+        Vec::new(),
+        move |vault| {
+            let dir = vault.parent().unwrap().parent().unwrap();
+            let slot = dir.join("extensions/test.sessions");
+            std::fs::create_dir_all(&slot).unwrap();
+            std::fs::write(slot.join("extension.toml"), LIVE_SESSIONS_EXTENSION).unwrap();
+            make_session(&vault.join("Live/take.session"), &seed_kind, "Take one.");
+            make_session(
+                &vault.join("Private/secret.session"),
+                &seed_kind,
+                "The secret.",
+            );
+            touch(
+                vault,
+                "Live/song.md",
+                "# Song\n\nThe take: ![[take.session]]\n",
+            );
+        },
+    )
+    .await;
+    let share = w
+        .share(
+            ShareScope::Folder("Live".to_owned()),
+            Audience::Link,
+            ShareAccess::Read,
+        )
+        .await;
+    let code = share.code.clone();
+    // Built: the guest reads the note, as its page would be read.
+    for _ in 0..200 {
+        if guest(&w)
+            .read(code.clone(), String::new(), "Live/song.md".to_owned())
+            .await
+            .is_ok()
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let documents = w.host.kind_documents();
+    let take = documents.resolve("Live/take.session").unwrap().doc_id;
+    let secret = documents.resolve("Private/secret.session").unwrap().doc_id;
+    let live = w
+        .url(&format!("/s/{code}/_guest/live"))
+        .replacen("http://", "ws://", 1);
+
+    // It follows the document live.
+    let sync: DocSyncClient = pool().client(&Endpoint::url(&live)).await.unwrap();
+    let mut at_guest = SyncedDoc::new(take, crdt::CrdtDoc::ephemeral()).read_only();
+    let follows = at_guest.doc().clone();
+    let following = tokio::spawn(async move { at_guest.run(&sync).await });
+    until_body(&follows, "the guest gets the document", "Take one.").await;
+    let at_host = w.host.document(take).await.expect("the node keeps it");
+    let body = at_host.loro().get_text("body");
+    body.insert(body.len_unicode(), " Take two.").unwrap();
+    at_host.loro().commit();
+    until_body(&follows, "the guest follows an edit live", "Take two.").await;
+
+    // An update sent up anyway: refused, nothing applied.
+    let rogue: DocSyncClient = pool().client(&Endpoint::url(&live)).await.unwrap();
+    let (up_tx, up_rx) = vox::channel::<Vec<u8>>();
+    let (down_tx, mut down_rx) = vox::channel::<crdt::sync::SyncDown>();
+    let mut call = std::pin::pin!(rogue.sync(take, Vec::new(), up_rx, down_tx));
+    tokio::select! {
+        res = &mut call => panic!("the guest's session ended before attaching: {res:?}"),
+        frame = down_rx.recv() => { frame.expect("down channel").expect("attached"); }
+    }
+    let defaced = {
+        let doc = crdt::loro::LoroDoc::new();
+        doc.get_text("body").insert(0, "Defaced. ").unwrap();
+        doc.commit();
+        doc.export(crdt::loro::ExportMode::all_updates()).unwrap()
+    };
+    let (pushed, ended) = tokio::join!(
+        up_tx.send(defaced),
+        tokio::time::timeout(Duration::from_secs(5), call)
+    );
+    pushed.expect("the update went up");
+    let err = ended
+        .expect("the session ended")
+        .expect_err("a guest's write");
+    assert!(
+        matches!(&err, vox::VoxError::User(e) if matches!(**e, crdt::sync::SyncError::Forbidden)),
+        "expected Forbidden, got {err:?}"
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        !at_host
+            .loro()
+            .get_text("body")
+            .to_string()
+            .contains("Defaced")
+    );
+
+    // Presence: it sees the host's transport and the clock answers it;
+    // what it publishes reaches nobody.
+    let lead = node_presence(documents.registry(), take).await;
+    lead.set("lead/play", "playing at 10");
+    let presence: DocPresenceClient = pool().client(&Endpoint::url(&live)).await.unwrap();
+    let (peer, mut driver) = PresencePeer::new(take, 30_000);
+    tokio::spawn(async move {
+        let _ = driver.run(&presence).await;
+    });
+    for _ in 0..200 {
+        if peer.states().contains_key("lead/play") && peer.clock().offset_ms().is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        peer.states().contains_key("lead/play"),
+        "the guest sees the transport"
+    );
+    assert!(
+        peer.clock().offset_ms().is_some(),
+        "the clock answers the guest"
+    );
+    peer.set("lead/play", "stopped by the guest");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(
+        lead.states().get("lead/play"),
+        Some(&crdt::loro::LoroValue::from("playing at 10")),
+        "a guest took the transport"
+    );
+
+    // A document the link does not serve: unknown.
+    let outside: DocSyncClient = pool().client(&Endpoint::url(&live)).await.unwrap();
+    let mut at_outside = SyncedDoc::new(secret, crdt::CrdtDoc::ephemeral()).read_only();
+    let refused = tokio::time::timeout(Duration::from_secs(5), at_outside.run(&outside))
+        .await
+        .expect("refused at once");
+    assert!(refused.is_err(), "a document outside the link: {refused:?}");
+    assert!(
+        !at_outside
+            .doc()
+            .loro()
+            .get_text("body")
+            .to_string()
+            .contains("secret")
+    );
+
+    // Revoked: its session ends, and a new one is refused.
+    let links: ShareLinksClient = w.lane(&w.grace).await;
+    links.revoke(code.clone()).await.unwrap();
+    let ended = tokio::time::timeout(node::guest_live_recheck().saturating_mul(3), following).await;
+    assert!(ended.is_ok(), "the guest's session outlived its link");
+    pool().evict(&Endpoint::url(&live));
+    let again = pool().client::<DocSyncClient>(&Endpoint::url(&live)).await;
+    assert!(again.is_err(), "a revoked link's lane opened");
+}
