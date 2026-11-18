@@ -225,9 +225,14 @@ is one too, so a Keyflow `.session` in a vault reaches the person's other
 devices, and the org's node, with no sync host of its own. The extension
 declares the kind in its manifest (`[[doc_kinds]]` with `files` and an
 optional `schema`); the node registers it while the extension is compiled
-in or installed (`apps/desktop/src/node/kinds.rs` `ExtensionKinds`, into the
-shared `features/crdt/crdt/src/kinds.rs` `SharedDocKinds`) and takes it off
-when the extension is uninstalled. Such a file is listed by the id in its
+in, installed, or loaded in the app's window — a development copy
+(`architect-desktop dev --extension <folder>`, `EXT_DEV`, `EXT_CLONE`)
+among them (`apps/desktop/src/node/kinds.rs` `ExtensionKinds`, into the
+shared `features/crdt/crdt/src/kinds.rs` `SharedDocKinds`; the window's
+extension host's contributions are followed by `kinds::follow` into
+`Parts::loaded_kinds`). It takes the kind off when the extension is
+uninstalled, unloaded, or reloaded without it — unless another of those
+still declares it. Such a file is listed by the id in its
 header (`features/crdt/crdt/src/file/mod.rs` `DocFile::peek`), opened with
 the file itself as its storage, its `main` branch, and attached to as a
 note is, under the vault's write guard for the file; another device makes
