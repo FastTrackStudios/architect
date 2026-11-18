@@ -175,7 +175,7 @@ main.save("Mix sent to Dan").await?;                     // names a checkpoint, 
 - A crash leaves a torn last record; `open` drops it (`recovered()`) and replays the steps since the last snapshot.
 - Branches: `fork`, `open_branch` (side by side), `merge`, `DocFile::delete_branch` (not `main`); versions: `DocFile::versions`, `open_version` (read-only), `restore` (a new branch).
 - In the browser: `DocFile::from_bytes(bytes, &kind)`; the whole folded file to send is `to_bytes()`.
-- To sync a branch with `DocSync`, back the `CrdtDoc` with `file.persistence(MAIN)`. A file for a catalogue's doc: `DocFile::create_as(storage, &kind, id)` (made here) or `DocFile::adopt(storage, &kind, id)` (made elsewhere, `main` empty).
+- To sync a branch with `DocSync`, back the `CrdtDoc` with `file.persistence(MAIN)` and make its `SyncedDoc` `.durable()`, or the file keeps only this device's edits (`features/crdt/crdt/tests/file.rs` `a_synced_file_replica_keeps_what_it_received_only_when_durable`). A file for a catalogue's doc: `DocFile::create_as(storage, &kind, id)` (made here) or `DocFile::adopt(storage, &kind, id)` (made elsewhere, `main` empty).
 
 ## Pitfalls
 
