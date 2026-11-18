@@ -245,6 +245,19 @@ rsx! {
   not the app. The host decodes a frame's scenes on a thread of its own
   before it applies the frame (`scene::predecode`), so a large one
   doesn't stall the window.
+- **Frames paced to the display** (#840). A batch, and each change the
+  view's document makes, asks the window for a frame through its
+  `Pacer` (`features/workspace/src/pacing.rs`; `remote::HostShell::pacer`).
+  Asked right after a frame that waited for its swapchain image (its
+  render took at least half a refresh, so it ended at a refresh), the
+  requests until the next refresh share one frame started just before
+  the next image comes free: the window's thread is free meanwhile and
+  the frame shows the newest batch. Started at once instead, such a
+  frame built its scene in 0.6 ms and then waited about 7 ms of an
+  8.3 ms refresh (a 120 Hz Mac) for its image, its content a refresh
+  older than it had to be. After a frame that did not wait (an idle
+  window, a frame slower than a refresh) it asks at once, so no wait is
+  added where none was saved. `ARCHITECT_FRAME_PACING=0` turns it off.
 - **Pans don't resize.** A new transform or scene updates the element's
   widget in place; only a new box tells the view its size, and the
   resizes of a dragged window are coalesced like moves.
