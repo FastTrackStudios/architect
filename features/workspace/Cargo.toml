@@ -46,7 +46,7 @@ home = ["actions", "dep:serde_json"]
 # A view that paints a scene each frame (`PaintView`, `Painter`, `Marks`).
 paint = ["ctx", "dep:anyrender", "dep:peniko", "dep:architect-scene"]
 # Drawn in-process by Blitz in a pane (`PaintPane`, a `PaintWidget`).
-paint-ui = ["paint", "ui", "dep:blitz-dom", "dep:blitz-traits", "dep:dioxus-native-dom"]
+paint-ui = ["paint", "ui", "dep:blitz-dom", "dep:blitz-traits", "dep:cursor-icon", "dep:dioxus-native-dom"]
 # A host-driven WebGL2 canvas for paint scenes (wasm32 only).
 paint-web = ["paint", "dep:anyrender_vello_hybrid", "dep:vello_gpu", "dep:vello_common", "dep:rustc-hash", "dep:web-sys", "dep:wasm-bindgen"]
 # Dioxus canvas, DOM input and demand-driven browser frames.
@@ -69,6 +69,8 @@ blitz-shell = { workspace = true, optional = true }
 # A window's HTML parser, so `dangerous_inner_html` makes nodes (feature `native`).
 blitz-html = { workspace = true, optional = true }
 blitz-traits = { workspace = true, optional = true }
+# A hit region's cursor, set on the window (`paint-ui`).
+cursor-icon = { workspace = true, optional = true }
 dioxus-asset-resolver = { workspace = true, optional = true }
 dioxus-devtools = { workspace = true, optional = true }
 # What the platform says about a pointer let go outside a window, heard in

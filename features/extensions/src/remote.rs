@@ -164,6 +164,9 @@ pub struct RemoteDocument {
     /// What its layers' animations read (`architect_scene::anim`): the
     /// app's clocks unless told.
     clocks: architect_scene::Clocks,
+    /// Wakes its window at its layers' next step and when a clock jumps
+    /// (`architect_scene::wake`), once it has a window.
+    alarm: Option<Arc<architect_scene::wake::Alarm>>,
 }
 
 impl std::fmt::Debug for RemoteDocument {
@@ -232,6 +235,7 @@ impl RemoteDocument {
             painted: HashMap::new(),
             scene_bytes: 0,
             clocks: architect_scene::Clocks::app(),
+            alarm: None,
         }
     }
 
@@ -504,6 +508,7 @@ impl RemoteDocument {
             layers: None,
             clocks: self.clocks.clone(),
             drawn: architect_scene::Readings::NONE,
+            alarm: self.alarm.clone(),
             transform: transform.unwrap_or(Affine::IDENTITY),
             element,
             dirty: true,
@@ -529,6 +534,14 @@ impl RemoteDocument {
     /// Gives the view the host window's input method, clipboard and
     /// redraws ([`HostShell`]): a field in it can be composed into.
     pub fn set_host_shell(&mut self, shell: HostShell) {
+        let window = Arc::clone(&shell.window);
+        let alarm = Arc::new(architect_scene::wake::Alarm::new(Arc::new(move || {
+            window.request_redraw();
+        })));
+        for painted in self.painted.values() {
+            painted.lock().unwrap_or_else(PoisonError::into_inner).alarm = Some(Arc::clone(&alarm));
+        }
+        self.alarm = Some(alarm);
         self.doc.set_shell_provider(Arc::new(shell));
     }
 
@@ -1178,6 +1191,10 @@ impl HostShell {
 impl ShellProvider for HostShell {
     fn request_redraw(&self) {
         self.window.request_redraw();
+    }
+
+    fn set_cursor(&self, icon: Option<cursor_icon::CursorIcon>) {
+        self.window.set_cursor(icon);
     }
 
     fn set_ime_enabled(&self, is_enabled: bool) {

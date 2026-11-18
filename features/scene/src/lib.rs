@@ -37,6 +37,7 @@ pub mod fragment;
 pub mod layers;
 pub mod ops;
 pub mod resource;
+pub mod wake;
 
 pub use anim::{Animation, Clock, Clocks, Input, Linear, Map, Property, Readings, Values};
 pub use anyrender::recording::RenderCommand;
@@ -143,4 +144,8 @@ pub enum Error {
     TooManyValues(usize),
     #[error("a value it may not {0}: {1}")]
     Denied(&'static str, String),
+    #[error("a batch of version {0}: this host reads up to version {1}")]
+    Version(u8, u8),
+    #[error("a view that failed: {0}")]
+    Failed(String),
 }

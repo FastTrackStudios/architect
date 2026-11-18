@@ -647,6 +647,9 @@ impl Painted {
                     .layers()
                     .compose_at(scene, at * self.transform, &now, layers.values());
                 self.drawn = now;
+                if let Some(alarm) = &self.alarm {
+                    let _ = alarm.drawn(layers.layers().next(&now));
+                }
             }
             None => architect_scene::layers::replay(scene, &self.commands, at * self.transform),
         }
@@ -684,6 +687,8 @@ pub(crate) struct Painted {
     pub(crate) clocks: architect_scene::Clocks,
     /// The clocks it was last drawn at.
     pub(crate) drawn: architect_scene::Readings,
+    /// Wakes its window at its layers' next step and when a clock jumps.
+    pub(crate) alarm: Option<Arc<architect_scene::wake::Alarm>>,
     pub(crate) transform: Affine,
     pub(crate) element: u64,
     pub(crate) dirty: bool,

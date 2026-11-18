@@ -32,8 +32,18 @@ use crate::layers::{Key, Layer, Layers};
 use crate::resource::{Resource, Resources};
 use crate::{Error, Id};
 
-/// How a batch starts: its format and that format's version.
+/// How a batch starts: its format and that format's first version, which
+/// a batch of the first seven operations alone still is.
 pub const MAGIC: [u8; 4] = *b"ASO\x01";
+
+/// The latest version of a batch this host reads and writes.
+///
+/// 2 added animations, values, hit regions and drags. A batch is written at the
+/// lowest version that holds what it says, so a host that reads only
+/// the first refuses one it can't read whole, by its version
+/// ([`Error::NotAFragment`] there, [`Error::Version`] here), before it
+/// applies any of it.
+pub const VERSION: u8 = 2;
 
 /// The most bytes one batch may be.
 pub const MAX_BATCH_BYTES: usize = 64 * 1024 * 1024;
@@ -129,6 +139,7 @@ impl Sender {
         let mut w = Writer::default();
         w.bytes(&MAGIC);
         let start = w.out.len();
+        let mut later = false;
         for (key, layer) in layers {
             let known = self
                 .sent
@@ -149,6 +160,7 @@ impl Sender {
                 .filter(|_| placed.is_some())
                 .map(|sent| &sent.layer.animations);
             if animated_as.is_some_and(|was| *was != layer.animations) {
+                later = true;
                 w.u8(ANIMATE);
                 w.u64(*key);
                 anim::write(&mut w, layer.animations.as_deref().unwrap_or_default());
@@ -176,6 +188,7 @@ impl Sender {
                     w.bool(layer.visible);
                     // A layer comes still: it moves once told how.
                     if let Some(animations) = &layer.animations {
+                        later = true;
                         w.u8(ANIMATE);
                         w.u64(*key);
                         anim::write(&mut w, animations);
@@ -215,10 +228,14 @@ impl Sender {
             let bits = value.to_bits();
             if self.values.get(name) != Some(&bits) {
                 self.values.insert(name.clone(), bits);
+                later = true;
                 w.u8(VALUE);
                 anim::write_name(&mut w, name);
                 w.f64(*value);
             }
+        }
+        if later && let Some(version) = w.out.get_mut(MAGIC.len().saturating_sub(1)) {
+            *version = VERSION;
         }
         (w.out.len() > start).then_some(w.out)
     }
@@ -307,17 +324,23 @@ impl Receiver {
             return Err(Error::TooLarge(batch.len(), MAX_BATCH_BYTES));
         }
         let mut r = Reader::new(batch);
-        if r.take(MAGIC.len()).ok() != Some(&MAGIC) {
-            return Err(Error::NotAFragment);
-        }
+        let version = match r.take(MAGIC.len()).map_err(|_| Error::NotAFragment)? {
+            [b'A', b'S', b'O', v] if (1..=VERSION).contains(v) => *v,
+            [b'A', b'S', b'O', v] if *v > VERSION => return Err(Error::Version(*v, VERSION)),
+            _ => return Err(Error::NotAFragment),
+        };
         while r.left() > 0 {
-            self.op(&mut r)?;
+            self.op(&mut r, version)?;
         }
         Ok(())
     }
 
-    fn op(&mut self, r: &mut Reader<'_>) -> Result<(), Error> {
-        match r.u8()? {
+    fn op(&mut self, r: &mut Reader<'_>, version: u8) -> Result<(), Error> {
+        let op = r.u8()?;
+        if op > CLEAR && version < 2 {
+            return Err(Error::Unknown("operation of version 1", op));
+        }
+        match op {
             RESOURCE => {
                 let kind = r.u8()?;
                 let len = r.count()?;

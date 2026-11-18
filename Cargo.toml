@@ -350,6 +350,8 @@ dioxus-ssr = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b
 blitz-dom = "=0.3.0-beta.4"
 blitz-paint = "=0.3.0-beta.4"
 blitz-traits = "=0.3.0-beta.4"
+# A window's cursor, as Blitz sets it: what a scene's hit region asks for.
+cursor-icon = "1.2"
 # The workspace's pop-out windows drive Blitz's window views themselves
 # (architect-workspace `native`), and serve the bundle's assets to them.
 blitz-shell = "=0.3.0-beta.4"

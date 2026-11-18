@@ -38,6 +38,8 @@ const LINE: f64 = 20.0;
 pub struct PaintWidget {
     painter: Painter,
     wake: PaintWake,
+    /// Wakes its window at its layers' next step and when a clock jumps.
+    alarm: architect_scene::wake::Alarm,
 }
 
 impl std::fmt::Debug for PaintWidget {
@@ -49,14 +51,17 @@ impl std::fmt::Debug for PaintWidget {
 impl PaintWidget {
     #[must_use]
     pub fn new(painter: Painter) -> Self {
-        Self {
-            painter,
-            wake: PaintWake::new(),
-        }
+        Self::with_wake(painter, PaintWake::new())
     }
 
-    const fn with_wake(painter: Painter, wake: PaintWake) -> Self {
-        Self { painter, wake }
+    fn with_wake(painter: Painter, wake: PaintWake) -> Self {
+        let redraw = wake.clone();
+        let alarm = architect_scene::wake::Alarm::new(Arc::new(move || redraw.redraw()));
+        Self {
+            painter,
+            wake,
+            alarm,
+        }
     }
 
     fn frame(&mut self, geometry: Geometry) -> Scene {
@@ -65,7 +70,10 @@ impl PaintWidget {
             self.painter.invalidate();
         }
         self.sync_theme();
-        self.painter.frame(geometry)
+        let frame = self.painter.frame(geometry);
+        // Resting until its next step: the alarm wakes its window then.
+        let _ = self.alarm.drawn(self.painter.next());
+        frame
     }
 }
 
@@ -158,6 +166,12 @@ impl PaintWake {
     /// Mark the pane dirty and wake its window, including from a worker thread.
     pub fn wake(&self) {
         self.0.dirty.store(true, Ordering::Release);
+        self.redraw();
+    }
+
+    /// Wake its window to draw the pane's layers again, without asking its
+    /// view: a clock moved, or a layer's next step came.
+    pub fn redraw(&self) {
         let window = self
             .0
             .window
@@ -477,6 +491,7 @@ mod tests {
     use dioxus::core::NoOpMutations;
     use std::cell::RefCell;
     use std::sync::atomic::AtomicUsize;
+    use std::time::Instant;
 
     #[derive(Default)]
     struct Window(AtomicUsize);
@@ -594,6 +609,112 @@ mod tests {
         );
         let _ = widget.frame(geometry);
         assert!(!widget.needs_redraw());
+    }
+
+    /// A view of one layer that moves as `animation` says.
+    struct Moves(architect_scene::anim::Animation);
+
+    impl PaintView for Moves {
+        fn input(&mut self, _: &ViewCtx, _: &ViewInput) -> bool {
+            false
+        }
+
+        fn paint(&mut self, _: &ViewCtx, _: &mut Scene) {}
+
+        fn layers(
+            &mut self,
+            _: &ViewCtx,
+        ) -> Option<Vec<(super::super::LayerKey, super::super::Layer)>> {
+            let mut dot = Scene::new();
+            dot.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                peniko::Color::BLACK,
+                None,
+                &Rect::new(0.0, 0.0, 1.0, 1.0),
+            );
+            Some(vec![(
+                1,
+                super::super::Layer::new(Arc::new(dot.commands)).animated(vec![self.0.clone()]),
+            )])
+        }
+    }
+
+    fn resting(
+        animation: architect_scene::anim::Animation,
+        playhead: Arc<Mutex<Option<architect_scene::anim::Reading>>>,
+    ) -> (PaintWidget, Arc<Window>) {
+        let ctx = ViewCtx::new(
+            PaneId::new("popout"),
+            KindId::paint(),
+            (ViewHost::Blitz, Placement::Pane),
+            (ActionList::new(), ActionCaller::app()),
+            FrameClock::new(Duration::from_millis(4), || Duration::ZERO),
+        );
+        let clocks = architect_scene::Clocks::new(|| 0.0, move || *playhead.lock().unwrap());
+        let wake = PaintWake::new();
+        let window = Arc::new(Window::default());
+        wake.attach(Some(window.clone()));
+        let painter = Painter::new(ctx, Moves(animation)).with_clocks(clocks);
+        let mut widget = PaintWidget::with_wake(painter, wake);
+        let _ = widget.frame(Geometry {
+            width: 10.0,
+            height: 10.0,
+            scale: 1.0,
+        });
+        (widget, window)
+    }
+
+    #[test]
+    fn a_seek_while_paused_wakes_a_pop_out_that_rests() {
+        use architect_scene::anim::{Animation, Clock, Input, Linear, Property, Reading};
+        let playhead = Arc::new(Mutex::new(Some(Reading::still(1.0))));
+        let (widget, window) = resting(
+            Animation::linear(
+                Property::X,
+                Input::clock(Clock::Playhead),
+                Linear::new(100.0, 0.0),
+            ),
+            Arc::clone(&playhead),
+        );
+        assert!(
+            !widget.requires_redraw() && !widget.needs_redraw(),
+            "paused: it rests"
+        );
+        let before = window.0.load(Ordering::Relaxed);
+        // The main window's bar seeks; the deck says its clock moved.
+        *playhead.lock().unwrap() = Some(Reading::still(2.0));
+        architect_scene::wake::clocks_moved();
+        assert!(
+            window.0.load(Ordering::Relaxed) > before,
+            "the pop-out wasn't woken"
+        );
+        assert!(widget.needs_redraw());
+    }
+
+    #[test]
+    fn a_step_wakes_its_window_when_it_comes_and_not_before() {
+        use architect_scene::anim::{Animation, Clock, Input, Map, Property, Steps};
+        let (widget, window) = resting(
+            Animation::new(
+                Property::Visible,
+                Input::clock(Clock::Wall),
+                Map::Steps(Steps {
+                    before: 0.0,
+                    steps: vec![(0.04, 1.0)],
+                }),
+            ),
+            Arc::default(),
+        );
+        // Wall time runs, but nothing drawn changes for 40 ms: no frames.
+        assert!(!widget.requires_redraw());
+        let began = Instant::now();
+        let before = window.0.load(Ordering::Relaxed);
+        while window.0.load(Ordering::Relaxed) == before {
+            assert!(began.elapsed() < Duration::from_secs(5), "never woken");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(began.elapsed() >= Duration::from_millis(40));
     }
 
     thread_local! {

@@ -389,8 +389,8 @@ impl Hands {
     }
 }
 
-const fn reading(time: f64, running: bool) -> Reading {
-    Reading { time, running }
+const fn reading(time: f64, rate: f64) -> Reading {
+    Reading { time, rate }
 }
 
 /// A second at 240 frames.
@@ -483,27 +483,62 @@ fn the_playhead_moves_the_line_with_no_message_from_the_view() {
     let mut app = timeline(&hands);
     let once = bytes(&app.doc.inner.borrow());
     // Paused one second in: the line stands, and the window rests.
-    hands.set(10.0, Some(reading(1.0, false)));
+    hands.set(10.0, Some(reading(1.0, 0.0)));
     let at = playhead_x(&app.window_scene()).unwrap();
-    hands.set(11.0, Some(reading(1.0, false)));
+    hands.set(11.0, Some(reading(1.0, 0.0)));
     assert!(
         !animating(&mut app),
         "a paused playhead kept the window drawing"
     );
     assert_eq!(playhead_x(&app.window_scene()).unwrap(), at);
     // A seek: drawn, the line where the playhead is.
-    hands.set(12.0, Some(reading(3.5, false)));
+    hands.set(12.0, Some(reading(3.5, 0.0)));
     assert!(animating(&mut app), "a seek wasn't drawn");
     let sought = playhead_x(&app.window_scene()).unwrap();
     assert!((sought - at - 2.5 * PLAYHEAD_SPEED).abs() < 1e-9);
     assert!(!animating(&mut app));
     // Playing at half speed: the playhead's time, not the wall's.
-    hands.set(20.0, Some(reading(3.75, true)));
+    hands.set(20.0, Some(reading(3.75, 0.5)));
     assert!(animating(&mut app));
     let played = playhead_x(&app.window_scene()).unwrap();
     assert!((played - sought - 0.25 * PLAYHEAD_SPEED).abs() < 1e-9);
     // None of it from the view.
     assert_eq!(bytes(&app.doc.inner.borrow()), once);
+}
+
+/// A window that counts the redraws it is asked for.
+#[derive(Default)]
+struct Window(std::sync::atomic::AtomicUsize);
+
+impl blitz_traits::shell::ShellProvider for Window {
+    fn request_redraw(&self) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+#[test]
+fn a_seek_wakes_the_window_a_resting_process_view_is_in() {
+    use std::sync::atomic::Ordering;
+    let hands = Hands::default();
+    let mut app = timeline(&hands);
+    hands.set(0.0, Some(reading(1.0, 0.0)));
+    let window = Arc::new(Window::default());
+    view_mut(&mut app.doc.inner.borrow_mut())
+        .unwrap()
+        .set_host_shell(architect_extensions::remote::HostShell::new(
+            window.clone(),
+            0.0,
+            0.0,
+        ));
+    let _ = app.window_scene();
+    assert!(!animating(&mut app), "paused, it rests");
+    let before = window.0.load(Ordering::Relaxed);
+    // Sought from elsewhere (the bar in another window): its window is
+    // woken, and draws.
+    hands.set(1.0, Some(reading(2.0, 0.0)));
+    architect_scene::wake::clocks_moved();
+    assert!(window.0.load(Ordering::Relaxed) > before);
+    assert!(animating(&mut app));
 }
 
 fn p(samples: &mut [Duration], q: usize) -> f64 {

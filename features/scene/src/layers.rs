@@ -284,23 +284,31 @@ impl Layers {
             .filter_map(|layer| layer.animations.as_deref())
     }
 
-    /// Whether a layer moves on its own at `readings`: one of its
-    /// animations reads a clock that is running. Its host draws every
-    /// frame while one does, and only then.
+    /// When what it draws next changes on its own at `readings`: every
+    /// frame while a layer moves on a running clock, at the next step or
+    /// clamp, or never. Its host draws every frame only while it is
+    /// [`anim::Next::Every`], and sleeps until the next change otherwise.
     #[must_use]
-    pub fn moving(&self, readings: &Readings) -> bool {
-        self.animations > 0 && self.animated().any(|a| anim::moving(a, readings))
+    pub fn next(&self, readings: &Readings) -> anim::Next {
+        if self.animations == 0 {
+            return anim::Next::Never;
+        }
+        self.animated()
+            .fold(anim::Next::Never, |n, a| n.and(anim::next(a, readings)))
     }
 
-    /// Whether what it draws at `now` may differ from what it drew at
-    /// `drawn`: a layer moves on its own, or a clock one reads was moved
-    /// (a seek while paused).
+    /// Whether a layer moves every frame at `readings`.
+    #[must_use]
+    pub fn moving(&self, readings: &Readings) -> bool {
+        self.next(readings) == anim::Next::Every
+    }
+
+    /// Whether what it draws at `now` differs from what it drew at
+    /// `drawn` by its clocks: a frame of playback, a step reached, a
+    /// seek that moves something.
     #[must_use]
     pub fn stale(&self, drawn: &Readings, now: &Readings) -> bool {
-        self.animations > 0
-            && self
-                .animated()
-                .any(|a| anim::moving(a, now) || anim::differs(a, drawn, now))
+        self.animations > 0 && self.animated().any(|a| anim::differs(a, drawn, now))
     }
 }
 

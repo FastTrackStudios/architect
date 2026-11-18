@@ -39,17 +39,11 @@ impl Hands {
 }
 
 const fn playing(time: f64) -> Option<Reading> {
-    Some(Reading {
-        time,
-        running: true,
-    })
+    Some(Reading::moving(time, 1.0))
 }
 
 const fn paused(time: f64) -> Option<Reading> {
-    Some(Reading {
-        time,
-        running: false,
-    })
+    Some(Reading::still(time))
 }
 
 /// A playhead's line, a lyric line shown from 1 s to 2 s, a meter bound
@@ -262,14 +256,134 @@ fn a_painters_values_are_its_views_own() {
         }
     }
     let mine = Name::new("view.a").unwrap();
+    let mut painter = Painter::new(ctx(), Writes(vec![(mine.clone(), 1.0)]));
+    let _ = painter.frame(AT);
+    assert_eq!(painter.values().unwrap().get(&mine), Some(1.0));
+    // Another space's value fails the view, as from a process
+    // (`a_view_fails_the_same_way_linked_in_or_across_the_wire`).
     let hosts = Name::new("host.fader").unwrap();
+    let mut painter = Painter::new(ctx(), Writes(vec![(hosts, 2.0)]));
+    let _ = painter.frame(AT);
+    assert!(matches!(
+        painter.failed(),
+        Some(architect_scene::Error::Denied("write", _))
+    ));
+}
+
+/// A view that returns `layers` and `values`, counting the times asked.
+struct Returns {
+    layers: Vec<(LayerKey, Layer)>,
+    values: Vec<(Name, f64)>,
+    asked: Arc<AtomicUsize>,
+}
+
+impl PaintView for Returns {
+    fn input(&mut self, _: &ViewCtx, _: &ViewInput) -> bool {
+        false
+    }
+
+    fn paint(&mut self, _: &ViewCtx, _: &mut Scene) {}
+
+    fn layers(&mut self, _: &ViewCtx) -> Option<Vec<(LayerKey, Layer)>> {
+        self.asked.fetch_add(1, Ordering::Relaxed);
+        Some(self.layers.clone())
+    }
+
+    fn values(&mut self, _: &ViewCtx) -> Vec<(Name, f64)> {
+        self.values.clone()
+    }
+}
+
+#[test]
+fn a_view_fails_the_same_way_linked_in_or_across_the_wire() {
+    let content = Song::new(Arc::default()).content;
+    let wrapped = |every: f64| {
+        Layer::new(Arc::clone(&content)).animated(vec![Animation::linear(
+            Property::X,
+            Input::clock(Clock::Wall),
+            Linear::new(1.0, 0.0).wrap(every),
+        )])
+    };
+    let bound_to = |name: &str| {
+        Layer::new(Arc::clone(&content)).animated(vec![Animation::linear(
+            Property::X,
+            Input::Value(Name::new(name).unwrap()),
+            Linear::new(1.0, 0.0),
+        )])
+    };
+    let cases: Vec<(Vec<(LayerKey, Layer)>, Vec<(Name, f64)>)> = vec![
+        // A wrap of nothing.
+        (vec![(1, wrapped(0.0))], vec![]),
+        // Bound to the engine's value, ungranted.
+        (vec![(1, bound_to("engine.peak"))], vec![]),
+        // Writing the host's value.
+        (vec![], vec![(Name::new("host.fader").unwrap(), 1.0)]),
+    ];
+    for (layers, values) in cases {
+        let across = Receiver::new()
+            .apply(&Sender::new().frame_with(&layers, &values).unwrap())
+            .unwrap_err();
+        let asked = Arc::new(AtomicUsize::new(0));
+        let mut linked = Painter::new(
+            ctx(),
+            Returns {
+                layers,
+                values,
+                asked: Arc::clone(&asked),
+            },
+        );
+        let drawn = linked.frame(AT);
+        assert_eq!(linked.failed(), Some(&across));
+        assert!(drawn.commands.is_empty(), "a failed view draws nothing");
+        // ...and is asked nothing again, and wants no frame.
+        linked.invalidate();
+        assert!(!linked.wants_frame());
+        let _ = linked.frame(AT);
+        assert_eq!(asked.load(Ordering::Relaxed), 1);
+    }
+    // A well-formed one doesn't fail.
+    let mut fine = Painter::new(
+        ctx(),
+        Returns {
+            layers: vec![(1, wrapped(10.0))],
+            values: vec![],
+            asked: Arc::default(),
+        },
+    );
+    let _ = fine.frame(AT);
+    assert_eq!(fine.failed(), None);
+}
+
+#[test]
+fn a_stepped_layer_rests_until_its_step_and_a_line_moves_every_frame() {
+    use architect_scene::anim::Next;
+    let hands = Hands::default();
+    let content = Song::new(Arc::default()).content;
+    let lyric = Layer::new(Arc::clone(&content)).animated(vec![Animation::new(
+        Property::Visible,
+        Input::clock(Clock::Playhead),
+        Map::Steps(Steps {
+            before: 0.0,
+            steps: vec![(1.0, 1.0), (2.0, 0.0)],
+        }),
+    )]);
     let mut painter = Painter::new(
         ctx(),
-        Writes(vec![(mine.clone(), 1.0), (hosts.clone(), 2.0)]),
-    );
+        Returns {
+            layers: vec![(1, lyric)],
+            values: vec![],
+            asked: Arc::default(),
+        },
+    )
+    .with_clocks(hands.clocks());
+    hands.set(0.0, playing(0.5));
     let _ = painter.frame(AT);
-    let values = painter.values().unwrap();
-    assert_eq!(values.get(&mine), Some(1.0));
-    // As a host refuses it from a process: not the view's to write.
-    assert_eq!(values.get(&hosts), None);
+    // Playing, but nothing drawn changes for half a second: no frames.
+    assert_eq!(painter.next(), Next::In(0.5));
+    assert!(!painter.animating());
+    hands.set(0.1, playing(0.75));
+    assert!(!painter.wants_frame());
+    // Its step came: a frame.
+    hands.set(0.6, playing(1.1));
+    assert!(painter.wants_frame());
 }

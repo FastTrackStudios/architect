@@ -261,14 +261,35 @@ impl Animation {
     }
 }
 
-/// One clock's reading: where it is, and whether it moves on its own.
+/// One clock's reading: where it is, and how fast it moves on its own.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Reading {
     /// Seconds.
     pub time: f64,
-    /// Whether it moves without being told to: wall time always does, a
-    /// playhead while it plays.
-    pub running: bool,
+    /// Its seconds a second of wall time: 1 for wall time, a playhead's
+    /// rate while it plays, 0 while it stands (paused, or at the end of
+    /// what it plays).
+    pub rate: f64,
+}
+
+impl Reading {
+    /// A clock standing at `time`.
+    #[must_use]
+    pub const fn still(time: f64) -> Self {
+        Self { time, rate: 0.0 }
+    }
+
+    /// A clock at `time`, moving at `rate`.
+    #[must_use]
+    pub const fn moving(time: f64, rate: f64) -> Self {
+        Self { time, rate }
+    }
+
+    /// Whether it moves on its own.
+    #[must_use]
+    pub fn running(&self) -> bool {
+        self.rate != 0.0
+    }
 }
 
 /// Every clock, read once for a frame.
@@ -291,10 +312,7 @@ impl Readings {
     pub const fn clock(&self, clock: Clock) -> Option<Reading> {
         match clock {
             Clock::Wall => match self.wall {
-                Some(time) => Some(Reading {
-                    time,
-                    running: true,
-                }),
+                Some(time) => Some(Reading::moving(time, 1.0)),
                 None => None,
             },
             Clock::Playhead => self.playhead,
@@ -379,7 +397,7 @@ impl Clocks {
     pub fn read(&self) -> Readings {
         Readings {
             wall: Some((self.wall)()).filter(|t| t.is_finite()),
-            playhead: (self.playhead)().filter(|r| r.time.is_finite()),
+            playhead: (self.playhead)().filter(|r| r.time.is_finite() && r.rate.is_finite()),
         }
     }
 }
@@ -671,22 +689,123 @@ const fn narrow(v: f64) -> f32 {
     v as f32
 }
 
-/// Whether any of `animations` reads a clock that moves on its own: the
+/// When what an animation draws next changes on its own.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Next {
+    /// Every frame: a line on a running clock.
+    Every,
+    /// In this many seconds of wall time: the next step on a running
+    /// clock, or a clamp the line reaches.
+    In(f64),
+    /// Not until something else changes: a still clock, a value, a line
+    /// held at its clamp.
+    Never,
+}
+
+impl Next {
+    /// The sooner of the two.
+    #[must_use]
+    pub const fn and(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Every, _) | (_, Self::Every) => Self::Every,
+            (Self::In(a), Self::In(b)) => Self::In(a.min(b)),
+            (Self::In(a), Self::Never) | (Self::Never, Self::In(a)) => Self::In(a),
+            (Self::Never, Self::Never) => Self::Never,
+        }
+    }
+}
+
+impl Linear {
+    // The input to output slope times the clock's rate.
+    fn next(&self, x: f64, rate: f64) -> Next {
+        let slope = self.scale * rate;
+        if slope == 0.0 {
+            return Next::Never;
+        }
+        if self.wrap.is_some() {
+            return Next::Every;
+        }
+        let y = self.scale.mul_add(x, self.offset);
+        // Held at a clamp it moves further into: still. Short of a clamp
+        // it moves away from... it moves now.
+        match (self.min, self.max) {
+            (_, Some(max)) if y >= max && slope > 0.0 => Next::Never,
+            (Some(min), _) if y <= min && slope < 0.0 => Next::Never,
+            (_, Some(max)) if y > max => Next::In((max - y) / slope),
+            (Some(min), _) if y < min => Next::In((min - y) / slope),
+            _ => Next::Every,
+        }
+    }
+}
+
+impl Steps {
+    fn next(&self, x: f64, rate: f64) -> Next {
+        let crossing = if rate > 0.0 {
+            // The first step past where it is.
+            self.steps
+                .iter()
+                .find(|(from, _)| *from > x)
+                .map(|(from, _)| (from - x) / rate)
+        } else {
+            // Going back: when it drops below the step it is on.
+            self.steps
+                .iter()
+                .rev()
+                .find(|(from, _)| *from <= x)
+                .map(|(from, _)| (x - from) / -rate)
+        };
+        crossing.map_or(Next::Never, Next::In)
+    }
+}
+
+impl Animation {
+    /// When what it draws next changes on its own, at `readings`.
+    #[must_use]
+    pub fn next(&self, readings: &Readings) -> Next {
+        let Some(r) = self.input.reading(readings) else {
+            return Next::Never;
+        };
+        if !r.running() {
+            return Next::Never;
+        }
+        match &self.map {
+            Map::Linear(l) => l.next(r.time, r.rate),
+            Map::Steps(s) => s.next(r.time, r.rate),
+        }
+    }
+
+    /// What it sets its property to at these clocks, if it reads one.
+    fn output(&self, readings: &Readings) -> Option<f64> {
+        match &self.input {
+            Input::Clock { .. } => self.input.reading(readings).map(|r| self.map.apply(r.time)),
+            Input::Value(_) => None,
+        }
+    }
+}
+
+/// When what `animations` draw next changes on its own.
+#[must_use]
+pub fn next(animations: &[Animation], readings: &Readings) -> Next {
+    animations
+        .iter()
+        .fold(Next::Never, |n, a| n.and(a.next(readings)))
+}
+
+/// Whether any of `animations` reads a clock that moves every frame: the
 /// host draws every frame while one does.
 #[must_use]
 pub fn moving(animations: &[Animation], readings: &Readings) -> bool {
-    animations
-        .iter()
-        .any(|a| a.input.reading(readings).is_some_and(|r| r.running))
+    next(animations, readings) == Next::Every
 }
 
-/// Whether any of `animations` reads a clock that reads differently in
-/// `now` than in `drawn`: a seek while paused.
+/// Whether any of `animations` on a clock draws something else at `now`
+/// than at `drawn`: a frame of playback, a step reached, a seek past a
+/// step. A seek that changes nothing drawn is not.
 #[must_use]
 pub fn differs(animations: &[Animation], drawn: &Readings, now: &Readings) -> bool {
     animations
         .iter()
-        .any(|a| a.input.reading(drawn) != a.input.reading(now))
+        .any(|a| a.output(drawn).map(f64::to_bits) != a.output(now).map(f64::to_bits))
 }
 
 // The bytes of an `ops::ANIMATE` and an `ops::VALUE`.

@@ -47,6 +47,7 @@ pub use architect_scene::Layer;
 pub use architect_scene::anim::{self, Clocks, Readings};
 use architect_scene::anim::{Access, Name, Space, Values};
 pub use architect_scene::layers::Key as LayerKey;
+pub use architect_scene::wake;
 pub use peniko;
 use peniko::kurbo::{Affine, Point, Rect};
 use peniko::{Color, Fill};
@@ -272,6 +273,11 @@ pub struct Painter {
     /// What a view of layers last returned, drawn again at each frame's
     /// clocks without it.
     held: Option<Held>,
+    /// What its view may read ([`Access`]).
+    access: Access,
+    /// Why its view failed: it is drawn as nothing and asked nothing
+    /// again, as a view in a process that sent what its host refused.
+    failed: Option<architect_scene::Error>,
 }
 
 /// A view's layers and values as its painter keeps them.
@@ -284,31 +290,35 @@ struct Held {
 }
 
 impl Held {
-    /// `layers` kept, each animation checked as a host checks one sent
-    /// to it: a layer whose animations fail, or that would take the pane
-    /// past its cap, is kept still.
-    fn keep(&mut self, layers: Vec<(LayerKey, Layer)>, values: Vec<(Name, f64)>) {
-        let mut budget = anim::MAX_ANIMATIONS;
-        self.layers = layers
-            .into_iter()
-            .map(|(key, mut layer)| {
-                let count = layer.animation_count();
-                let fits = layer
-                    .animations
-                    .as_deref()
-                    .is_none_or(|a| anim::check(a, Access::default()).is_ok());
-                match budget.checked_sub(count) {
-                    Some(left) if fits => budget = left,
-                    _ => layer.animations = None,
-                }
-                (key, layer)
-            })
-            .collect();
-        for (name, value) in values {
-            // Another space's name, or past the cap: not the view's to
-            // write, as a host refuses it from a process.
-            let _ = self.values.write(Space::View, &name, value);
+    /// `layers` and `values` kept, checked as a host checks what a view
+    /// in a process sends it ([`architect_scene::ops::Receiver`]): the
+    /// same limits and the same errors, so a view fails the same way
+    /// linked in or not.
+    fn keep(
+        &mut self,
+        layers: Vec<(LayerKey, Layer)>,
+        values: Vec<(Name, f64)>,
+        access: Access,
+    ) -> Result<(), architect_scene::Error> {
+        use architect_scene::Error;
+        if layers.len() > architect_scene::ops::MAX_LAYERS {
+            return Err(Error::TooManyLayers(architect_scene::ops::MAX_LAYERS));
         }
+        let mut animations = 0_usize;
+        for (_, layer) in &layers {
+            if let Some(a) = layer.animations.as_deref() {
+                anim::check(a, access)?;
+                animations = animations.saturating_add(a.len());
+            }
+        }
+        if animations > anim::MAX_ANIMATIONS {
+            return Err(Error::TooManyAnimations(anim::MAX_ANIMATIONS));
+        }
+        for (name, value) in values {
+            self.values.write(Space::View, &name, value)?;
+        }
+        self.layers = layers.into_iter().collect();
+        Ok(())
     }
 }
 
@@ -339,7 +349,34 @@ impl Painter {
             dirty: true,
             clocks: Clocks::app().with_wall(move || frames.now().as_secs_f64()),
             held: None,
+            access: Access::default(),
+            failed: None,
         }
+    }
+
+    /// Its view may read what `access` lets it (the engine's values when
+    /// its extension was granted them).
+    #[must_use]
+    pub const fn with_access(mut self, access: Access) -> Self {
+        self.access = access;
+        self
+    }
+
+    /// Why its view failed, if it did: what it returned broke a rule a
+    /// host enforces on a view in a process.
+    #[must_use]
+    pub const fn failed(&self) -> Option<&architect_scene::Error> {
+        self.failed.as_ref()
+    }
+
+    /// When what it holds next changes on its own: every frame, after a
+    /// while (a step), or never.
+    #[must_use]
+    pub fn next(&self) -> anim::Next {
+        self.held
+            .as_ref()
+            .filter(|_| self.failed.is_none())
+            .map_or(anim::Next::Never, |h| h.layers.next(&self.clocks.read()))
     }
 
     /// Its animations run on `clocks` (the app's, with the pane's frame
@@ -400,6 +437,9 @@ impl Painter {
     /// is waiting, it is moving, or a clock its layers read moved.
     #[must_use]
     pub fn wants_frame(&self) -> bool {
+        if self.failed.is_some() {
+            return false;
+        }
         self.dirty
             || !self.ctx.input.is_empty()
             || self.view.animating(&self.ctx)
@@ -413,6 +453,9 @@ impl Painter {
     /// its layers move on a running clock.
     #[must_use]
     pub fn animating(&self) -> bool {
+        if self.failed.is_some() {
+            return false;
+        }
         self.view.animating(&self.ctx)
             || self
                 .held
@@ -447,6 +490,10 @@ impl Painter {
         let scale = f64::from(geometry.scale);
         let scale = if scale > 0.0 { scale } else { 1.0 };
         let mut scene = Scene::new();
+        if self.failed.is_some() {
+            self.dirty = false;
+            return scene;
+        }
         let asked = if self.asks(resized) {
             Some(self.view.layers(&self.ctx))
         } else {
@@ -456,7 +503,12 @@ impl Painter {
             Some(Some(layers)) => {
                 let values = self.view.values(&self.ctx);
                 let held = self.held.get_or_insert_with(Held::default);
-                held.keep(layers, values);
+                if let Err(why) = held.keep(layers, values, self.access) {
+                    self.failed = Some(why);
+                    self.held = None;
+                    self.dirty = false;
+                    return scene;
+                }
                 Some(held)
             }
             // A view that paints: no layers to hold.
