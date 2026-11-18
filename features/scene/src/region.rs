@@ -447,13 +447,95 @@ pub const fn shown_layer(region: &Region, pressed: bool) -> Option<Key> {
     }
 }
 
+/// The modifier keys held as a region was pressed or let go, by the
+/// names a view's input gives them (`"Mod"`, `"Shift"`, `"Alt"`,
+/// `"Ctrl"`; `"Mod"` is ⌘ on a Mac and Ctrl elsewhere).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Mods(u8);
+
+impl Mods {
+    pub const NONE: Self = Self(0);
+    const MOD: u8 = 1;
+    const SHIFT: u8 = 2;
+    const ALT: u8 = 4;
+    const CTRL: u8 = 8;
+    const NAMES: [(u8, &'static str); 4] = [
+        (Self::MOD, "Mod"),
+        (Self::SHIFT, "Shift"),
+        (Self::ALT, "Alt"),
+        (Self::CTRL, "Ctrl"),
+    ];
+
+    /// The keys held, as a host's pointer event says them: ⌘ is `"Mod"`
+    /// on a Mac, Ctrl is `"Mod"` (and `"Ctrl"`) elsewhere.
+    #[must_use]
+    pub const fn held(shift: bool, alt: bool, ctrl: bool, meta: bool) -> Self {
+        let command = if cfg!(target_os = "macos") {
+            meta
+        } else {
+            ctrl
+        };
+        let mut bits = 0;
+        if command {
+            bits |= Self::MOD;
+        }
+        if shift {
+            bits |= Self::SHIFT;
+        }
+        if alt {
+            bits |= Self::ALT;
+        }
+        if ctrl {
+            bits |= Self::CTRL;
+        }
+        Self(bits)
+    }
+
+    /// From names as a view's input gives them; unknown names are none.
+    #[must_use]
+    pub fn from_names(names: &[&str]) -> Self {
+        Self(
+            Self::NAMES
+                .iter()
+                .filter(|(_, n)| names.contains(n))
+                .fold(0, |bits, (bit, _)| bits | bit),
+        )
+    }
+
+    /// Their names, in `"Mod"`, `"Shift"`, `"Alt"`, `"Ctrl"` order.
+    #[must_use]
+    pub fn names(self) -> Vec<&'static str> {
+        Self::NAMES
+            .iter()
+            .filter(|(bit, _)| self.0 & bit != 0)
+            .map(|(_, n)| *n)
+            .collect()
+    }
+
+    /// Whether `name` (`"Shift"`, `"Mod"`) is held.
+    #[must_use]
+    pub fn has(self, name: &str) -> bool {
+        Self::NAMES
+            .iter()
+            .any(|(bit, n)| *n == name && self.0 & bit != 0)
+    }
+
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+}
+
 /// What happened to a region, as its view hears it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RegionEvent {
     Enter(u64),
     Leave(u64),
-    Press(u64),
-    Release(u64),
+    /// Pressed, with the modifiers held (a Shift-click is a range, a
+    /// ⌘-click a toggle).
+    Press(u64, Mods),
+    /// Let go, with the modifiers held then.
+    Release(u64, Mods),
     /// A drag's value along an axis: at most once a frame, and once more
     /// before its release.
     Value(u64, Axis, f64),
@@ -466,8 +548,8 @@ impl RegionEvent {
         match *self {
             Self::Enter(id)
             | Self::Leave(id)
-            | Self::Press(id)
-            | Self::Release(id)
+            | Self::Press(id, _)
+            | Self::Release(id, _)
             | Self::Value(id, _, _) => id,
         }
     }
@@ -670,6 +752,19 @@ impl Interaction {
         values: &mut Values,
         at: Point,
     ) -> Outcome {
+        self.pressed_with(layers, readings, values, at, Mods::NONE)
+    }
+
+    /// [`Self::pressed`] with `mods` held: what the view hears with the
+    /// press.
+    pub fn pressed_with(
+        &mut self,
+        layers: &Layers,
+        readings: &Readings,
+        values: &mut Values,
+        at: Point,
+        mods: Mods,
+    ) -> Outcome {
         let mut out = self.moved(layers, readings, values, at);
         if self.held.is_some() {
             return out;
@@ -704,7 +799,7 @@ impl Interaction {
         // A press stops what it coasts.
         self.coasting
             .retain(|c| !dragging.iter().any(|d| d.drag.value == c.drag.value));
-        self.queue.push(RegionEvent::Press(hit.id));
+        self.queue.push(RegionEvent::Press(hit.id, mods));
         self.held = Some(Held { hit, dragging });
         out.consumed = true;
         out.redraw = true;
@@ -720,11 +815,23 @@ impl Interaction {
         values: &mut Values,
         at: Point,
     ) -> Outcome {
+        self.released_with(layers, readings, values, at, Mods::NONE)
+    }
+
+    /// [`Self::released`] with `mods` held.
+    pub fn released_with(
+        &mut self,
+        layers: &Layers,
+        readings: &Readings,
+        values: &mut Values,
+        at: Point,
+        mods: Mods,
+    ) -> Outcome {
         let mut out = self.moved(layers, readings, values, at);
         let Some(held) = self.held.take() else {
             return out;
         };
-        self.queue.push(RegionEvent::Release(held.hit.id));
+        self.queue.push(RegionEvent::Release(held.hit.id, mods));
         // Let go while moving: a drag with inertia coasts on.
         for d in held.dragging {
             let (Some(tau), Some(now), [Some((t0, v0)), Some((t1, v1))]) =
@@ -766,7 +873,8 @@ impl Interaction {
     pub fn left(&mut self) -> Outcome {
         let mut out = Outcome::default();
         if let Some(held) = self.held.take() {
-            self.queue.push(RegionEvent::Release(held.hit.id));
+            self.queue
+                .push(RegionEvent::Release(held.hit.id, Mods::NONE));
             out.redraw = true;
         }
         let hover = self.hover(None);

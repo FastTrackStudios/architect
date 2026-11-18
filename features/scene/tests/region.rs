@@ -18,7 +18,7 @@ use architect_scene::anim::{Animation, Clock, Input, Linear, Name, Property, Rea
 use architect_scene::layers::{Layer, Layers};
 use architect_scene::ops::{Receiver, Sender};
 use architect_scene::region::{
-    Axis, Cursor, Drag, Hit, Interaction, Lit, MAX_REGIONS, Region, RegionEvent, Shape,
+    Axis, Cursor, Drag, Hit, Interaction, Lit, MAX_REGIONS, Mods, Region, RegionEvent, Shape,
 };
 use peniko::kurbo::{Affine, Point, Rect};
 use peniko::{Color, Fill};
@@ -149,8 +149,8 @@ fn hover_and_press_are_the_hosts_and_the_view_hears_them_by_id() {
         i.take(),
         [
             RegionEvent::Enter(10),
-            RegionEvent::Press(10),
-            RegionEvent::Release(10),
+            RegionEvent::Press(10, Mods::NONE),
+            RegionEvent::Release(10, Mods::NONE),
             RegionEvent::Leave(10),
         ]
     );
@@ -228,12 +228,12 @@ fn a_drag_writes_the_hosts_value_and_a_layer_bound_to_it_follows() {
     // the release.
     let heard = i.take();
     assert_eq!(heard.first(), Some(&RegionEvent::Enter(7)));
-    assert_eq!(heard[1], RegionEvent::Press(7));
+    assert_eq!(heard[1], RegionEvent::Press(7, Mods::NONE));
     match heard[2] {
         RegionEvent::Value(7, Axis::Y, v) => assert!((v - 0.67).abs() < 1e-9),
         ref other => panic!("{other:?}"),
     }
-    assert_eq!(heard[3], RegionEvent::Release(7));
+    assert_eq!(heard[3], RegionEvent::Release(7, Mods::NONE));
 }
 
 #[test]
@@ -631,4 +631,32 @@ fn a_hovered_region_shows_its_hover_layer_in_its_own_space() {
         .frame(&[(1, Layer::new(content()).regions(vec![button(1)]))])
         .unwrap();
     assert_eq!(&plain[..4], b"ASO\x02");
+}
+
+/// A region pressed with Shift or ⌘ held (#844): the view hears the press
+/// and the release with them, by the names its input uses.
+#[test]
+fn a_press_carries_the_modifiers_held() {
+    let mut layers = Layers::new();
+    layers.set(1, Layer::new(content()).regions(vec![button(10)]));
+    let mut v = Values::new();
+    let mut i = Interaction::new();
+    let at = Point::new(5.0, 5.0);
+    let range = Mods::from_names(&["Shift"]);
+    let _ = i.pressed_with(&layers, &NONE, &mut v, at, range);
+    let _ = i.released_with(&layers, &NONE, &mut v, at, range);
+    let heard = i.take();
+    assert!(heard.contains(&RegionEvent::Press(10, range)), "{heard:?}");
+    assert!(heard.contains(&RegionEvent::Release(10, range)));
+    assert!(range.has("Shift") && !range.has("Mod"));
+    assert_eq!(
+        Mods::from_names(&["Mod", "Shift"]).names(),
+        ["Mod", "Shift"]
+    );
+    let command = if cfg!(target_os = "macos") {
+        Mods::held(false, false, false, true)
+    } else {
+        Mods::held(false, false, true, false)
+    };
+    assert!(command.has("Mod"));
 }

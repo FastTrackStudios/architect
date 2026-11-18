@@ -870,3 +870,44 @@ fn a_view_hears_the_pointer_leave_linked_and_as_a_process() {
     }
     assert_eq!(logs[0], logs[1], "linked and process differ");
 }
+
+/// A Shift-click on a region (#844): the view hears the press and the
+/// release with Shift held, linked in and as a process alike.
+#[test]
+fn a_press_on_a_region_carries_its_modifiers_linked_and_as_a_process() {
+    let _one = SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let dir = tempfile::tempdir().unwrap();
+    let shift = format!(
+        "{:?}",
+        architect_workspace::paint::region::Mods::from_names(&["Shift"])
+    );
+    for process in [false, true] {
+        let how = if process { "process" } else { "linked" };
+        let mut run = start_view(process, dir.path(), "regions");
+        let (ox, oy) = origin(&run.doc);
+        let (x0, y0, _, _) = REGION_RECT;
+        let at = (ox + x0 as f32 + 30.0, oy + y0 as f32 + 20.0);
+        run.send(UiEvent::PointerMove(pointer(
+            at,
+            MouseEventButtons::None,
+            Modifiers::SHIFT,
+        )));
+        run.send(UiEvent::PointerDown(pointer(
+            at,
+            MouseEventButtons::Primary,
+            Modifiers::SHIFT,
+        )));
+        run.send(UiEvent::PointerUp(pointer(
+            at,
+            MouseEventButtons::None,
+            Modifiers::SHIFT,
+        )));
+        let press = format!("region Press({REGION}, {shift})");
+        let release = format!("region Release({REGION}, {shift})");
+        run.pump_until(&format!("{how}: the shifted release"), |l| {
+            l.contains(&press) && l.contains(&release)
+        });
+    }
+}

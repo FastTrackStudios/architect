@@ -420,8 +420,20 @@ impl Painter {
         let at = |x: f32, y: f32| Point::new(f64::from(x), f64::from(y));
         let outcome = match *input {
             ViewInput::PointerMove { x, y, .. } => i.moved(layers, &now, values, at(x, y)),
-            ViewInput::PointerDown { x, y, .. } => i.pressed(layers, &now, values, at(x, y)),
-            ViewInput::PointerUp { x, y, .. } => i.released(layers, &now, values, at(x, y)),
+            ViewInput::PointerDown { x, y, ref mods, .. } => i.pressed_with(
+                layers,
+                &now,
+                values,
+                at(x, y),
+                region::Mods::from_names(mods),
+            ),
+            ViewInput::PointerUp { x, y, ref mods, .. } => i.released_with(
+                layers,
+                &now,
+                values,
+                at(x, y),
+                region::Mods::from_names(mods),
+            ),
             ViewInput::Touch { x, y, phase, .. } => match phase {
                 "start" => i.pressed(layers, &now, values, at(x, y)),
                 "move" => i.moved(layers, &now, values, at(x, y)),

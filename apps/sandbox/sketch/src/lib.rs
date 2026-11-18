@@ -536,7 +536,7 @@ impl PaintView for Timeline {
                 self.heard = v;
                 false
             }
-            RegionEvent::Release(FADER) => {
+            RegionEvent::Release(FADER, _) => {
                 self.level = Some(self.heard);
                 true
             }

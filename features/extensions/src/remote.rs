@@ -311,6 +311,12 @@ impl RemoteDocument {
             return (false, false);
         }
         let (x, y) = (p.coords.client_x, p.coords.client_y);
+        let mods = architect_scene::region::Mods::held(
+            p.mods.contains(Modifiers::SHIFT),
+            p.mods.contains(Modifiers::ALT),
+            p.mods.contains(Modifiers::CONTROL),
+            p.mods.contains(Modifiers::META),
+        );
         let holding = self.pointed.filter(|node| {
             self.painted.get(node).is_some_and(|p| {
                 p.lock()
@@ -339,7 +345,11 @@ impl RemoteDocument {
             && let Some(painted) = self.painted.get(&was)
         {
             let mut p = painted.lock().unwrap_or_else(PoisonError::into_inner);
-            outcomes.push(p.pointer(PointerKind::Gone, peniko::kurbo::Point::ZERO));
+            outcomes.push(p.pointer(
+                PointerKind::Gone,
+                peniko::kurbo::Point::ZERO,
+                architect_scene::region::Mods::NONE,
+            ));
         }
         self.pointed = target.map(|(node, _)| node);
         if let Some((node, at)) = target
@@ -348,7 +358,7 @@ impl RemoteDocument {
             let outcome = painted
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
-                .pointer(kind, at);
+                .pointer(kind, at, mods);
             outcomes.push(outcome);
             if kind == PointerKind::Gone {
                 self.pointed = None;

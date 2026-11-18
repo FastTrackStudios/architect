@@ -532,13 +532,22 @@ fn a_linked_fader_follows_the_pointer_without_its_view_and_draws_as_one_across_t
     // It heard each frame's value once, and the release.
     let heard = heard.lock().unwrap();
     assert_eq!(heard[0], RegionEvent::Enter(9));
-    assert_eq!(heard[1], RegionEvent::Press(9));
+    assert_eq!(
+        heard[1],
+        RegionEvent::Press(9, architect_scene::region::Mods::NONE)
+    );
     let values = heard
         .iter()
         .filter(|e| matches!(e, RegionEvent::Value(9, Axis::Y, _)))
         .count();
     assert_eq!(values, 30);
-    assert_eq!(heard.last(), Some(&RegionEvent::Release(9)));
+    assert_eq!(
+        heard.last(),
+        Some(&RegionEvent::Release(
+            9,
+            architect_scene::region::Mods::NONE
+        ))
+    );
 }
 
 #[test]

@@ -91,20 +91,22 @@ pub const REGION_EVENT: &str = "architect-region";
 #[must_use]
 pub fn region_value(event: &architect_scene::region::RegionEvent) -> String {
     use architect_scene::region::{Axis, RegionEvent as E};
-    let (kind, along) = match *event {
-        E::Enter(_) => ("enter", None),
-        E::Leave(_) => ("leave", None),
-        E::Press(_) => ("press", None),
-        E::Release(_) => ("release", None),
-        E::Value(_, axis, v) => ("value", Some((axis, v))),
+    let (kind, along, mods) = match *event {
+        E::Enter(_) => ("enter", None, None),
+        E::Leave(_) => ("leave", None, None),
+        E::Press(_, m) => ("press", None, Some(m)),
+        E::Release(_, m) => ("release", None, Some(m)),
+        E::Value(_, axis, v) => ("value", Some((axis, v)), None),
     };
     let axis = along.map(|(a, _)| if a == Axis::X { "x" } else { "y" });
-    // An id as a string: JSON's numbers lose a u64's last digits.
+    // An id as a string: JSON's numbers lose a u64's last digits. A
+    // process built before `mods` reads past them.
     serde_json::json!({
         "region": event.id().to_string(),
         "kind": kind,
         "axis": axis,
         "value": along.map(|(_, v)| v),
+        "mods": mods.map(architect_scene::region::Mods::names).unwrap_or_default(),
     })
     .to_string()
 }
@@ -115,11 +117,18 @@ pub fn region_of_value(value: &str) -> Option<architect_scene::region::RegionEve
     use architect_scene::region::{Axis, RegionEvent as E};
     let v: serde_json::Value = serde_json::from_str(value).ok()?;
     let id: u64 = v.get("region")?.as_str()?.parse().ok()?;
+    // None from a host built before them.
+    let names: Vec<&str> = v
+        .get("mods")
+        .and_then(serde_json::Value::as_array)
+        .map(|a| a.iter().filter_map(serde_json::Value::as_str).collect())
+        .unwrap_or_default();
+    let mods = architect_scene::region::Mods::from_names(&names);
     Some(match v.get("kind")?.as_str()? {
         "enter" => E::Enter(id),
         "leave" => E::Leave(id),
-        "press" => E::Press(id),
-        "release" => E::Release(id),
+        "press" => E::Press(id, mods),
+        "release" => E::Release(id, mods),
         "value" => E::Value(
             id,
             match v.get("axis")?.as_str()? {
@@ -726,6 +735,7 @@ impl Painted {
         &mut self,
         kind: PointerKind,
         at: peniko::kurbo::Point,
+        mods: architect_scene::region::Mods,
     ) -> architect_scene::region::Outcome {
         let Some(receiver) = self.layers.as_mut() else {
             return architect_scene::region::Outcome::default();
@@ -739,8 +749,8 @@ impl Painted {
         let i = &mut self.interaction;
         match kind {
             PointerKind::Move => i.moved(layers, &now, values, at),
-            PointerKind::Down => i.pressed(layers, &now, values, at),
-            PointerKind::Up => i.released(layers, &now, values, at),
+            PointerKind::Down => i.pressed_with(layers, &now, values, at, mods),
+            PointerKind::Up => i.released_with(layers, &now, values, at, mods),
             PointerKind::Gone => i.left(),
         }
     }
