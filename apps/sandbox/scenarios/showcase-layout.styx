@@ -32,7 +32,7 @@ steps (
         do @run{id WORKSPACE_CLOSE_TAB}
         done {
             on (@changed"workspace")
-            check ({id WORKSPACE_LAYOUT, has {windows ({docked ({tabs (files search)} {tabs (outline backlinks)})})}})
+            check ({id WORKSPACE_LAYOUT, has {windows ({docked ({tabs (files)} {tabs (outline backlinks)})})}})
         }
         hide true
     }
