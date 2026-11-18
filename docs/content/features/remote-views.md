@@ -420,6 +420,78 @@ Measured (`cargo test -p architect-sandbox-sketch --test sketch --
 | 188 engine writes at audio-callback rate, 3,436 frames drawn | 0 bytes |
 | an engine write (p50 / p99 / max) | 167 ns / 500 ns / 3.2 µs, no allocation |
 
+## Frames: measuring a view in its window
+
+**Measuring.** `APP_FRAMES {seconds, label, path, drive, rate}`
+(`features/workspace/src/frames.rs`; without `seconds`, the main
+window's always-on meter) has the window record its own frames: per frame (`FrameRecord`) when it began and ended, its draw
+(Blitz building the scene's commands) and its render (rasterise,
+composite, present, waiting for an image included), the display's
+refresh, the first input and the first batch it shows. The summary (`Report`): presented fps, refreshes dropped, the
+interval, work, draw and render, input to frame and batch to frame, at
+p50, p95, p99 and the most. `drive` feeds the window wheel or drag input
+through its own event handler, so a run needs no OS input. `just frames`
+(`scripts/frames.sh`) runs the sandbox's Sketch (`timeline`, 2,000 clips;
+`timeline-20k`; `arrangement`) linked in (`architect-sandbox`) and as a
+process (`architect-desktop dev --extension`), playing,
+wheeling, panning and dragging, each in an instance of its own, and
+prints a table. On the owner's ultrawide: `WIDTH=5120 HEIGHT=1440 just frames`.
+
+Measured on voyager (MacBook Pro, M1 Max; its built-in display at
+120 Hz, which is what it reports; the window 2560 × 1640 pixels; the
+dev profile, renderer crates at opt-level 3; a machine shared with
+another build, load average 30 to 90, so p99s and fps vary by tens of
+percent between runs), 5 s each, fps and p50 / p99 in ms:
+
+| | fps | interval | draw | render | input to frame |
+|---|---:|---:|---:|---:|---:|
+| `timeline`, playing, linked | 82.1 | 8.54 / 29.4 | 0.70 / 0.94 | 7.62 / 28.5 | — |
+| `timeline`, playing, process | 76.7 | 8.50 / 33.6 | 0.64 / 0.92 | 7.67 / 32.8 | — |
+| `timeline`, wheel, linked | 72.6 | 8.47 / 37.7 | 0.73 / 1.06 | 7.42 / 36.6 | 8.40 / 37.6 |
+| `timeline`, wheel, process | 74.2 | 8.59 / 37.5 | 0.63 / 0.87 | 7.63 / 33.1 | 8.58 / 37.5 |
+| `timeline`, drag (host-run box), linked | 83.8 | 9.08 / 39.5 | 0.95 / 13.5 | 7.20 / 35.9 | 8.85 / 44.4 |
+| `timeline`, drag, process | 87.6 | 8.90 / 34.3 | 0.80 / 9.26 | 7.26 / 31.5 | 8.84 / 34.3 |
+| `timeline-20k`, playing, linked | 25.0 | 33.1 / 122 | 15.6 / 83.9 | 10.2 / 70.6 | — |
+| `timeline-20k`, playing, process | 35.7 | 21.4 / 104 | 5.78 / 79.0 | 7.40 / 68.6 | — |
+| `timeline-20k`, drag, linked | 56.2 | 11.7 / 66.8 | 8.78 / 11.0 | 1.45 / 57.7 | 11.7 / 66.8 |
+| `timeline-20k`, drag, process | 66.5 | 8.60 / 49.8 | 4.80 / 5.54 | 3.38 / 44.5 | 8.58 / 49.8 |
+| `arrangement`, wheel, linked | 40.6 | 26.1 / 40.9 | 0.27 / 0.45 | 1.15 / 28.2 | 21.2 / 37.9 |
+| `arrangement`, wheel, process | 91.4 | 8.50 / 32.6 | 0.83 / 2.34 | 7.12 / 31.2 | 8.46 / 32.4 |
+
+What it shows, and what it can't:
+
+- **A process view is not late here.** On this machine a runtime view
+  draws as soon and as often as the same view linked in; input to frame
+  is the same to a tenth of a millisecond at p50. Keyflow's 14 ms
+  `present` against 0.46 ms (#840, a 60 Hz Linux session) does not
+  reproduce on macOS. The mechanism #840 supposed does: a frame started
+  right after another waits most of a refresh for its image (7.3 ms of
+  its 8 ms here), one started after an idle gap does not (1 ms). But
+  while input arrives the window draws every refresh anyway, linked or
+  not: Blitz's document reports itself animating and asks for each next
+  frame itself (`APP_FRAMES`' `again_animating`, 84 of 82 frames a
+  second), so every frame, linked or not, waits for its image as a
+  vsync-locked loop does.
+- **What holds a view under 120 fps here is the window's GPU work, not
+  the runtime.** With vsync off and the GPU waited for each frame
+  (`FTS_PRESENT=immediate FTS_GPU_BARRIER=1`) a frame of the arrangement
+  costs 6.8 ms (process) and 8.4 ms (linked) at 2560 × 1640: the page is
+  rasterised whole after every wheel or click, which is nearly the whole
+  8.3 ms of a 120 Hz refresh, so some frames take two or three. The
+  20,000-clip timeline also spends 5 to 9 ms a frame building its clips'
+  commands on the host; linked it is slower still (15.6 ms while
+  playing). Neither is a runtime cost; both are the compositor's to fix
+  (rasterise only the layers that changed; keep a layer's rasterised
+  content between frames).
+- **A linked Dioxus view is paced to 30 fps.** The linked `arrangement`
+  is a component whose scene changes with its state: Blitz paces those
+  redraws to `FTS_MAX_FPS` (30 unless set), so it draws at 40 fps and
+  21 ms from input to frame where the same view as a process draws at
+  91 fps and 8.5 ms.
+- **Not shown above 120 Hz.** This display's top rate is 120 Hz. 240 Hz,
+  and 5120 × 1440, are the owner's ultrawide's: `WIDTH=5120 HEIGHT=1440
+  just frames` there, release profile by default.
+
 ## Tests to read
 
 - `features/extensions/tests/remote_view.rs` (the test binary starts itself

@@ -46,3 +46,12 @@ kind = "paint"
 id = "arrangement"
 title = "Arrangement"
 icon = "rows-3"
+
+# The timeline at 20,000 clips (200 tracks of 100): the arrangement the
+# frame-time report measures (#839), linked in the sandbox and as a
+# process here.
+[[views]]
+id = "timeline-20k"
+title = "Timeline (20,000 clips)"
+icon = "play"
+kind = "paint"

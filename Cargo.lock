@@ -852,6 +852,7 @@ dependencies = [
  "architect-process-view",
  "architect-projects",
  "architect-sandbox-board",
+ "architect-sandbox-sketch",
  "architect-scripting",
  "architect-settings",
  "architect-settings-sheet",

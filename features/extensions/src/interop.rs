@@ -264,7 +264,12 @@ pub fn check(d: &Decls<'_>) -> Result<(), Bad> {
                 return Err(bad(field, "not a service's name"));
             }
             VersionReq::parse(req).map_err(|e| bad(field.clone(), format!("{req}: {e}")))?;
-            if d.provides.contains_key(service) {
+            // A provider may use its own service: another extension can
+            // be chosen to answer it (`EXT_SERVICE_USE`), as Keyflow
+            // follows the engine's session while it hosts sessions of
+            // its own. Requiring what it provides would only ever be met
+            // by itself.
+            if table == "requires" && d.provides.contains_key(service) {
                 return Err(bad(field, "it provides that service itself"));
             }
         }
@@ -448,6 +453,9 @@ fn validate_at(schema: &Value, value: &Value, at: &str) -> Result<(), String> {
 
 /// A service's provider as the host chooses it: the newest loaded
 /// version that meets `req`, from `providers` (id and version).
+///
+/// Of two at the same version, the first by id (a person picks another
+/// with `EXT_SERVICE_USE`).
 #[must_use]
 pub fn choose_provider<'a>(
     providers: &'a [(String, Version)],
@@ -456,7 +464,7 @@ pub fn choose_provider<'a>(
     providers
         .iter()
         .filter(|(_, v)| req.matches(v))
-        .max_by(|a, b| a.1.cmp(&b.1))
+        .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
 }
 
 #[cfg(test)]
