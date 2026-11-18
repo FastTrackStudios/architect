@@ -39,7 +39,7 @@
 //! | one of the owner's devices (`Host`, `Grant::Account`) | `DocSync`, `DocPeer` | whatever the registry's authorizer allows ([`NodeAccess::admits`]: every document) |
 //! | a device enrolled in the node's org (`Host`, `Grant::Org`, [`NodeAccess::org_docs`]) | `DocSync`, `DocPeer` when its role may write `docs/**` | what the org's engine gives its role there (`org/<org>/docs/<id>`) |
 //! | a paired device (`Host`, `Grant::Paired`) | `DocSync` | the documents its scopes name (`docs/<id>`) |
-//! | a link's guest (`Guest`, a live key) | `DocSync` | the link's document only |
+//! | a link's guest (`Guest`, a live key) | `DocSync` | the link's document only: to edit through a write link ([`Shares::share`]), to follow through a read link ([`Shares::share_with`] at [`Access::Read`]) |
 //! | any other endpoint | nothing | nothing |
 
 use std::collections::HashMap;
@@ -57,6 +57,7 @@ use architect_permissions::{
 };
 use uuid::Uuid;
 
+pub use crate::link::Access;
 use crate::link::{DocLink, LINK_BEARER_PREFIX};
 use crate::peer::{DocCatalog, DocPeerDispatcher, DocPeerHost, doc_peer_service_descriptor};
 use crate::registry::DocRegistry;
@@ -68,6 +69,8 @@ use crate::sync::{DocSync, DocSyncDispatcher, SyncDown, SyncError, doc_sync_serv
 #[derive(Debug, Clone)]
 struct Share {
     doc_id: Uuid,
+    /// What its guest may do to the document.
+    access: Access,
     /// Names the link in `Principal::Guest` and audit lines; the key
     /// itself is never logged.
     link_id: String,
@@ -99,23 +102,39 @@ impl Shares {
         Self::default()
     }
 
-    /// Open `doc_id` to whoever holds the link this returns: a fresh key
-    /// on this node (`endpoint`, its iroh endpoint id). Each call is a
-    /// separate link, revoked on its own.
+    /// Open `doc_id` to whoever holds the link this returns, to edit: a
+    /// fresh key on this node (`endpoint`, its iroh endpoint id). Each
+    /// call is a separate link, revoked on its own.
     #[must_use]
     pub fn share(&self, endpoint: &str, doc_id: Uuid) -> DocLink {
+        self.share_with(endpoint, doc_id, Access::Write)
+    }
+
+    /// [`Self::share`] with what the link's guest may do:
+    /// [`Access::Read`] follows the document live (its edits, and
+    /// presence when the lane serves it) and writes nothing.
+    #[must_use]
+    pub fn share_with(&self, endpoint: &str, doc_id: Uuid, access: Access) -> DocLink {
         let key = Uuid::new_v4().simple().to_string();
         let link_id = Uuid::new_v4().to_string();
-        self.write().insert(key.clone(), Share { doc_id, link_id });
+        self.write().insert(
+            key.clone(),
+            Share {
+                doc_id,
+                access,
+                link_id,
+            },
+        );
         DocLink {
             endpoint: endpoint.to_ascii_lowercase(),
             doc_id,
             key,
+            access,
         }
     }
 
     /// Close one link: its key is refused from the next call on, and a
-    /// guest editing through it is cut off.
+    /// guest editing or following through it is cut off.
     pub fn revoke(&self, link: &DocLink) {
         self.write().remove(&link.key);
         self.revoked.send_modify(|n| *n = n.wrapping_add(1));
@@ -160,6 +179,13 @@ impl Shares {
         self.read()
             .values()
             .any(|share| share.link_id == link_id && share.doc_id == doc_id)
+    }
+
+    /// Whether the link `link_id` is live and lets its guest write `doc_id`.
+    fn writes(&self, link_id: &str, doc_id: Uuid) -> bool {
+        self.read().values().any(|share| {
+            share.link_id == link_id && share.doc_id == doc_id && share.access == Access::Write
+        })
     }
 
     /// Whether the link `link_id` is live at all.
@@ -284,12 +310,26 @@ impl NodeAccess {
             })
     }
 
-    /// Whether `who` may open `doc_id`: one of the owner's devices any
-    /// document, a paired device the documents its scopes name, a link's
-    /// guest the link's. Hand it to [`DocRegistry::with_authorizer`],
-    /// beside the app's own rules.
+    /// Whether `who` may open `doc_id` (follow it): one of the owner's
+    /// devices any document, a paired device the documents its scopes
+    /// name, a link's guest the link's, whatever its access. Hand it to
+    /// [`DocRegistry::with_authorizer`], beside the app's own rules, and
+    /// [`Self::admits_write`] to [`DocRegistry::with_write_authorizer`].
     #[must_use]
     pub fn admits(&self, who: Option<&Principal>, doc_id: Uuid) -> bool {
+        match who {
+            Some(Principal::Guest { link_id, .. }) => self.shares.opens(link_id, doc_id),
+            _ => self.admits_write(who, doc_id),
+        }
+    }
+
+    /// Whether `who` may write `doc_id`: a device as [`Self::admits`]
+    /// says, a link's guest only through a write link
+    /// ([`Shares::share`], or [`Shares::share_with`] at
+    /// [`Access::Write`]). [`node_router`] holds a read link's guest to
+    /// reading whatever the registry's write rule says.
+    #[must_use]
+    pub fn admits_write(&self, who: Option<&Principal>, doc_id: Uuid) -> bool {
         match who {
             Some(Principal::Host { endpoint }) => {
                 self.devices.allows(
@@ -298,7 +338,7 @@ impl NodeAccess {
                     &Action::write(),
                 ) || self.org_allows(endpoint, &format!("docs/{doc_id}"), &Action::write())
             }
-            Some(Principal::Guest { link_id, .. }) => self.shares.opens(link_id, doc_id),
+            Some(Principal::Guest { link_id, .. }) => self.shares.writes(link_id, doc_id),
             _ => false,
         }
     }
@@ -356,9 +396,12 @@ impl DocSync for NodeSync {
         up: vox::Rx<Vec<u8>>,
         down: vox::Tx<SyncDown>,
     ) -> Result<(), SyncError> {
-        let session = self.registry.sync(doc_id, from, up, down);
         match architect::permissions_gate::caller() {
             Some(Principal::Guest { link_id, .. }) => {
+                // A read link's guest follows, whatever the registry's
+                // write rule says: the link, not the app, sets its access.
+                let read_only = !self.shares.writes(&link_id, doc_id);
+                let session = self.registry.sync_as(doc_id, from, up, down, read_only);
                 tokio::select! {
                     res = session => res,
                     () = self.shares.until_revoked(&link_id) => {
@@ -368,6 +411,7 @@ impl DocSync for NodeSync {
                 }
             }
             Some(Principal::Host { endpoint }) => {
+                let session = self.registry.sync(doc_id, from, up, down);
                 tokio::select! {
                     res = session => res,
                     () = self.devices.ends(&endpoint) => {
@@ -376,7 +420,7 @@ impl DocSync for NodeSync {
                     }
                 }
             }
-            _ => session.await,
+            _ => self.registry.sync(doc_id, from, up, down).await,
         }
     }
 }
@@ -602,5 +646,31 @@ mod tests {
         assert!(!access.admits(Some(&guest), doc));
         let any = Resource::new("docs/**");
         assert!(!access.check(&guest, &any, &Action::write()).allowed());
+    }
+
+    #[test]
+    fn a_read_link_opens_its_document_to_follow_not_to_write() {
+        let access = access();
+        let doc = Uuid::from_u128(1);
+        let read = access
+            .shares
+            .share_with(&"cd".repeat(32), doc, Access::Read);
+        let write = access.shares.share(&"cd".repeat(32), doc);
+        assert_eq!(read.access, Access::Read);
+        assert_eq!(write.access, Access::Write);
+        let reader = access.caller(STRANGER, Some(&read.bearer()));
+        let writer = access.caller(STRANGER, Some(&write.bearer()));
+        assert!(access.admits(Some(&reader), doc));
+        assert!(!access.admits_write(Some(&reader), doc));
+        assert!(access.admits(Some(&writer), doc));
+        assert!(access.admits_write(Some(&writer), doc));
+
+        // A device writes what it opens.
+        let device = access.caller(DEVICE, None);
+        assert!(access.admits_write(Some(&device), doc));
+
+        access.shares.revoke_doc(doc);
+        assert!(!access.admits(Some(&reader), doc));
+        assert!(!access.admits(Some(&writer), doc));
     }
 }

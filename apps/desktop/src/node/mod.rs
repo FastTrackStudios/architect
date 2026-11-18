@@ -359,9 +359,13 @@ pub struct Parts {
     /// (`Distribution::doc_kinds`): a vault file of one syncs like a note.
     pub doc_kinds: Vec<architect_extensions::contrib::DocKindDecl>,
     /// The kinds its vaults' documents are of, shared: the node adds its
-    /// extensions' ([`kinds`]), and an embedder (the window, as its
-    /// extensions load and unload) may register more while it runs.
+    /// extensions' ([`kinds`]), its embedder's among them
+    /// ([`Self::loaded_kinds`]).
     pub kinds: crdt::SharedDocKinds,
+    /// The kinds the embedder's extensions declare while they are loaded
+    /// (the window's: its development copies too, [`kinds::follow`]): a
+    /// kind it stops declaring goes, unless another source still does.
+    pub loaded_kinds: kinds::LoadedKinds,
 }
 
 impl Parts {
@@ -377,6 +381,7 @@ impl Parts {
             account: None,
             doc_kinds: dist.doc_kinds(),
             kinds: crdt::SharedDocKinds::new(),
+            loaded_kinds: kinds::LoadedKinds::new(),
         }
     }
 
@@ -440,6 +445,7 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
         account,
         doc_kinds,
         kinds,
+        loaded_kinds,
     } = parts;
     let data = &config.data_dir;
     // An installed extension draws over a compiled-in one claiming the
@@ -475,11 +481,12 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
         .map_err(StartError::Other)?;
     let collab =
         vault_collab::VaultCollab::with_kinds(backend.clone(), data.join("crdt"), kinds.clone());
-    let extension_kinds = Arc::new(kinds::ExtensionKinds::new(
+    let extension_kinds = kinds::ExtensionKinds::new(
         kinds,
         doc_kinds,
         Some(config.extensions_dir()),
-    ));
+        loaded_kinds,
+    );
     let collab = match &files {
         Some(engine) => {
             let engine = engine.clone();
