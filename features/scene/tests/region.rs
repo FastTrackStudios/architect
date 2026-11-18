@@ -579,7 +579,7 @@ fn a_hovered_region_shows_its_hover_layer_in_its_own_space() {
         .press_layer(PRESSED);
     let page = Layer::new(content())
         .at(Affine::translate((100.0, 0.0)))
-        .regions(vec![note.clone()]);
+        .regions(vec![note]);
     let hidden = |c| {
         let mut l = Layer::new(ink(c));
         l.visible = false;

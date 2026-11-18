@@ -322,7 +322,7 @@ pub fn view_input(event: &UiEvent) -> Option<ViewInput> {
 /// leaving the view: what a host sends after [`view_input`]'s move to
 /// where it went.
 #[must_use]
-pub fn left_view(event: &UiEvent) -> Option<ViewInput> {
+pub const fn left_view(event: &UiEvent) -> Option<ViewInput> {
     match event {
         UiEvent::PointerLeave(p) if !matches!(p.id, BlitzPointerId::Finger(_)) => {
             Some(ViewInput::PointerLeave)

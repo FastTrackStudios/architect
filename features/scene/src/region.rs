@@ -469,6 +469,8 @@ impl Mods {
     /// The keys held, as a host's pointer event says them: ⌘ is `"Mod"`
     /// on a Mac, Ctrl is `"Mod"` (and `"Ctrl"`) elsewhere.
     #[must_use]
+    // A pointer event's four keys, as every host's event gives them.
+    #[allow(clippy::fn_params_excessive_bools)]
     pub const fn held(shift: bool, alt: bool, ctrl: bool, meta: bool) -> Self {
         let command = if cfg!(target_os = "macos") {
             meta
