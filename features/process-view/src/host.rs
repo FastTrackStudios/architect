@@ -8,8 +8,8 @@
 //!   program without restarting it.
 //! - [`ProcessViewWidget`] is the Blitz custom widget: it says hello with
 //!   the pane's size and the window's GPU adapter, imports the program's
-//!   frames into the window's own wgpu device (dma-bufs in place, or
-//!   uploads from shared memory), draws the newest, forwards the pane's
+//!   frames into the window's own wgpu device (dma-bufs or `IOSurface`s
+//!   in place, or uploads from shared memory), draws the newest, forwards the pane's
 //!   input and resizes, and releases each frame when it no longer needs
 //!   it.
 //! - [`ProcessViewPane`] is the pane around it: the widget, a line of
@@ -23,7 +23,7 @@
 //! rectangle, and it is handed input only while the pane has it.
 
 use std::collections::{HashMap, VecDeque};
-use std::os::fd::{AsFd as _, OwnedFd};
+use std::os::fd::OwnedFd;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
@@ -41,6 +41,7 @@ use peniko::kurbo::{Affine, Rect};
 use peniko::{Color, Fill, ImageBrush, ImageSampler};
 
 use crate::gpu;
+use crate::shm;
 use crate::sock::Socket;
 use crate::wire::{self, ToGuest, ToHost, Transport};
 
@@ -158,10 +159,48 @@ pub enum Status {
 }
 
 /// The last frame's buffers the program announced, with their
-/// descriptors (kept so a new widget can import them again).
+/// descriptors or surfaces (kept so a new widget can import them again).
 struct Announced {
     message: ToHost,
     fds: Vec<OwnedFd>,
+    /// macOS: the slots' `IOSurface`s ([`Transport::IoSurface`]).
+    #[cfg(target_os = "macos")]
+    surfaces: Vec<crate::surface::IoSurface>,
+}
+
+/// What came beside a message: descriptors, and on macOS the surfaces
+/// the program sent the rendezvous for it.
+#[derive(Default)]
+struct Beside {
+    fds: Vec<OwnedFd>,
+    #[cfg(target_os = "macos")]
+    surfaces: Vec<crate::surface::IoSurface>,
+}
+
+/// How long the session waits for a program's surfaces once it has read
+/// the message announcing them (they travel on another channel).
+#[cfg(target_os = "macos")]
+const SURFACES_WITHIN: Duration = Duration::from_secs(2);
+
+/// Whether a window's `device` can take frames the GPU shares: a dma-buf
+/// importer on Linux; a Metal device on macOS, with this process's
+/// `IOSurface` rendezvous registered.
+fn zero_copy(device: &wgpu::Device) -> bool {
+    #[cfg(target_os = "macos")]
+    let reachable = crate::surface::Rendezvous::get().is_some();
+    #[cfg(target_os = "linux")]
+    let reachable = true;
+    reachable && gpu::can_share(device)
+}
+
+/// The rendezvous stops taking surfaces from `pid` (its program ended).
+fn forget_pid(pid: Option<u32>) {
+    #[cfg(target_os = "macos")]
+    if let (Some(pid), Some(r)) = (pid, crate::surface::Rendezvous::get()) {
+        r.forget(pid);
+    }
+    #[cfg(target_os = "linux")]
+    let _ = pid;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -444,6 +483,7 @@ impl Session {
             let _ = child.kill();
             let _ = child.wait();
         }
+        forget_pid(state.pid);
         state.generation = state.generation.saturating_add(1);
         state.socket = None;
         state.buffers = None;
@@ -483,6 +523,7 @@ impl Session {
             let _ = child.kill();
             let _ = child.wait();
         }
+        forget_pid(state.pid);
         state.socket = None;
         state.ended = true;
         // Its reader sees an older generation and says nothing more.
@@ -499,7 +540,12 @@ impl Session {
             match socket.recv() {
                 Ok(Some((bytes, fds))) => match ToHost::decode(&bytes) {
                     Ok(message) => {
-                        if !self.arrived(generation, message, fds) {
+                        let beside = Beside {
+                            #[cfg(target_os = "macos")]
+                            surfaces: self.surfaces(&message),
+                            fds,
+                        };
+                        if !self.arrived(generation, message, beside) {
                             return;
                         }
                     }
@@ -516,6 +562,7 @@ impl Session {
         let exit = state.child.as_mut().and_then(|c| wait_briefly(c));
         state.child = None;
         state.socket = None;
+        forget_pid(state.pid);
         let why = match (exit, reason.is_empty()) {
             (Some(exit), true) => exit,
             (Some(exit), false) => format!("{reason}; {exit}"),
@@ -556,8 +603,27 @@ impl Session {
         }
     }
 
+    /// The surfaces the program sent for buffers `message` announces
+    /// (macOS, [`Transport::IoSurface`]); none for any other message. Waits
+    /// for them without holding the session's state.
+    #[cfg(target_os = "macos")]
+    fn surfaces(&self, message: &ToHost) -> Vec<crate::surface::IoSurface> {
+        let ToHost::Buffers {
+            id,
+            transport: Transport::IoSurface,
+            ..
+        } = *message
+        else {
+            return Vec::new();
+        };
+        let pid = lock(&self.state).pid;
+        pid.zip(crate::surface::Rendezvous::get())
+            .and_then(|(pid, r)| r.take(pid, id, SURFACES_WITHIN))
+            .unwrap_or_default()
+    }
+
     /// One message from the program; false once this generation is over.
-    fn arrived(&self, generation: u64, message: ToHost, fds: Vec<OwnedFd>) -> bool {
+    fn arrived(&self, generation: u64, message: ToHost, beside: Beside) -> bool {
         let mut state = lock(&self.state);
         if state.generation != generation {
             return false;
@@ -566,7 +632,12 @@ impl Session {
             ToHost::Buffers { transport, .. } => {
                 state.transport = Some(transport);
                 state.frames.clear();
-                state.buffers = Some(Announced { message, fds });
+                state.buffers = Some(Announced {
+                    message,
+                    fds: beside.fds,
+                    #[cfg(target_os = "macos")]
+                    surfaces: beside.surfaces,
+                });
             }
             ToHost::Frame {
                 buffers,
@@ -689,6 +760,11 @@ fn spawn(program: &Program) -> std::io::Result<(Child, Arc<Socket>)> {
     let child = command.spawn()?;
     // Only the program holds its end now: its exit closes the socket.
     drop(guest);
+    // macOS: its surfaces are taken, and no one else's in its name.
+    #[cfg(target_os = "macos")]
+    if let Some(r) = crate::surface::Rendezvous::get() {
+        r.expect(child.id());
+    }
     Ok((child, Arc::new(host)))
 }
 
@@ -714,7 +790,7 @@ impl Session {
             height,
             scale: 1.0,
             adapter,
-            dmabuf: false,
+            zero_copy: false,
             theme,
         });
     }
@@ -778,27 +854,16 @@ fn wait_briefly(child: &mut Child) -> Option<String> {
 
 /// The frames of one set of buffers, in the window's device.
 enum Imported {
-    /// One registered texture per slot.
-    Dmabuf { ids: Vec<ResourceId> },
+    /// One registered texture per slot, the program's own memory (a
+    /// dma-buf, an `IOSurface`).
+    Textures { ids: Vec<ResourceId> },
     /// One texture frames are uploaded into, and the program's memory.
     Shm {
         id: ResourceId,
         texture: wgpu::Texture,
-        map: Map,
+        map: shm::Shared,
         stride: u32,
     },
-}
-
-struct Map {
-    ptr: *mut std::ffi::c_void,
-    len: usize,
-}
-
-impl Drop for Map {
-    fn drop(&mut self) {
-        // SAFETY: mapped by `import` with this length.
-        let _ = unsafe { rustix::mm::munmap(self.ptr, self.len) };
-    }
 }
 
 struct Gpu {
@@ -848,7 +913,7 @@ impl ProcessViewWidget {
 
     fn forget(&mut self, ctx: &mut dyn RenderContext) {
         match self.imported.take() {
-            Some((_, _, Imported::Dmabuf { ids })) => {
+            Some((_, _, Imported::Textures { ids })) => {
                 for id in ids {
                     ctx.unregister_resource(id);
                 }
@@ -884,7 +949,7 @@ impl ProcessViewWidget {
                 height,
                 scale,
                 adapter: gpu.adapter.clone(),
-                dmabuf: gpu::can_share(&gpu.device),
+                zero_copy: zero_copy(&gpu.device),
                 theme,
             });
         } else if resize {
@@ -902,9 +967,12 @@ impl ProcessViewWidget {
     /// The announced buffers in the window's device, if they are new.
     fn import(&mut self, gpu: &Gpu, ctx: &mut dyn RenderContext) {
         let state = lock(&self.session.state);
-        let Some(Announced { message, fds }) = &state.buffers else {
+        let Some(announced) = &state.buffers else {
             return;
         };
+        let (message, fds) = (&announced.message, &announced.fds);
+        #[cfg(target_os = "macos")]
+        let surfaces = announced.surfaces.clone();
         let ToHost::Buffers {
             id,
             transport,
@@ -925,15 +993,34 @@ impl ProcessViewWidget {
         drop(state);
         self.forget(ctx);
         let imported = match transport {
-            Transport::Dmabuf => {
+            Transport::Dmabuf | Transport::IoSurface => {
+                // Each slot's texture of this window's device, in place.
+                #[cfg(target_os = "linux")]
+                let textures = (transport == Transport::Dmabuf).then(|| {
+                    dup.into_iter()
+                        .take(usize::from(slots))
+                        .map(|fd| {
+                            gpu::import_dmabuf(
+                                &gpu.device,
+                                fd,
+                                (width, height),
+                                (stride, offset, modifier),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                });
+                #[cfg(target_os = "macos")]
+                let textures = (transport == Transport::IoSurface).then(|| {
+                    let _ = (dup, stride, offset, modifier);
+                    surfaces
+                        .iter()
+                        .take(usize::from(slots))
+                        .map(|surface| gpu::import_surface(&gpu.device, surface))
+                        .collect::<Vec<_>>()
+                });
                 let mut ids = Vec::new();
-                for fd in dup.into_iter().take(usize::from(slots)) {
-                    match gpu::import_dmabuf(
-                        &gpu.device,
-                        fd,
-                        (width, height),
-                        (stride, offset, modifier),
-                    ) {
+                for texture in textures.into_iter().flatten() {
+                    match texture {
                         Ok(texture) => match ctx.try_register_custom_resource(Box::new(texture)) {
                             Ok(rid) => ids.push(rid),
                             Err(_) => break,
@@ -949,7 +1036,7 @@ impl ProcessViewWidget {
                     self.fallback(gpu, (width, height));
                     return;
                 }
-                Imported::Dmabuf { ids }
+                Imported::Textures { ids }
             }
             Transport::Shm => {
                 let Some(fd) = dup.into_iter().next() else {
@@ -962,19 +1049,9 @@ impl ProcessViewWidget {
                 else {
                     return;
                 };
-                // SAFETY: a read-only shared mapping of the program's
-                // frames, `len` long as it announced; the program writes
-                // a slot only while the app doesn't hold it.
-                let Ok(ptr) = (unsafe {
-                    rustix::mm::mmap(
-                        std::ptr::null_mut(),
-                        len,
-                        rustix::mm::ProtFlags::READ,
-                        rustix::mm::MapFlags::SHARED,
-                        fd.as_fd(),
-                        0,
-                    )
-                }) else {
+                // A read-only mapping of the program's frames, `len` long
+                // as it announced (a shorter file is refused).
+                let Ok(map) = shm::Shared::map(fd, len, false) else {
                     return;
                 };
                 let texture = gpu::upload_texture(&gpu.device, width, height);
@@ -984,7 +1061,7 @@ impl ProcessViewWidget {
                 Imported::Shm {
                     id: rid,
                     texture,
-                    map: Map { ptr, len },
+                    map,
                     stride,
                 }
             }
@@ -992,8 +1069,8 @@ impl ProcessViewWidget {
         self.imported = Some((id, (width, height), imported));
     }
 
-    /// Says hello again without dma-bufs: the program switches to
-    /// shared memory.
+    /// Says hello again without GPU-shared frames: the program switches
+    /// to shared memory.
     fn fallback(&self, gpu: &Gpu, (width, height): (u32, u32)) {
         let (scale, theme) = {
             let state = lock(&self.session.state);
@@ -1005,7 +1082,7 @@ impl ProcessViewWidget {
             height,
             scale,
             adapter: gpu.adapter.clone(),
-            dmabuf: false,
+            zero_copy: false,
             theme,
         });
     }
@@ -1034,7 +1111,7 @@ impl ProcessViewWidget {
             }
         }
         match imported {
-            Imported::Dmabuf { .. } => {
+            Imported::Textures { .. } => {
                 if let Some(previous) = self.current.replace((newest.buffers, newest.slot)) {
                     self.shown.push_back(previous);
                 }
@@ -1054,11 +1131,9 @@ impl ProcessViewWidget {
                 let start = usize::try_from(slot_len.saturating_mul(u64::from(newest.slot)))
                     .unwrap_or(usize::MAX);
                 let len = usize::try_from(slot_len).unwrap_or(usize::MAX);
-                if start.checked_add(len).is_some_and(|end| end <= map.len) {
-                    // SAFETY: inside the mapping (checked); the program
-                    // doesn't write this slot until it is released below.
-                    let bytes =
-                        unsafe { std::slice::from_raw_parts(map.ptr.cast::<u8>().add(start), len) };
+                // SAFETY: the program doesn't write this slot until it is
+                // released below.
+                if let Some(bytes) = unsafe { map.bytes(start, len) } {
                     gpu.queue.write_texture(
                         texture.as_image_copy(),
                         bytes,
@@ -1159,7 +1234,7 @@ impl Widget for ProcessViewWidget {
             && buffers == *id
         {
             let rid = match imported {
-                Imported::Dmabuf { ids } => ids.get(usize::from(slot)).copied(),
+                Imported::Textures { ids } => ids.get(usize::from(slot)).copied(),
                 Imported::Shm { id, .. } => Some(*id),
             };
             if let Some(rid) = rid {
@@ -1313,6 +1388,7 @@ fn ms(d: Duration) -> f64 {
 pub fn status_line(s: &Snapshot) -> String {
     let transport = match s.transport {
         Some(Transport::Dmabuf) => "dma-buf",
+        Some(Transport::IoSurface) => "IOSurface",
         Some(Transport::Shm) => "shared memory",
         None => "–",
     };

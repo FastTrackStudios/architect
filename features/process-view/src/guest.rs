@@ -4,17 +4,17 @@
 //! [`serve`] is the whole of it. It takes the socket the app handed the
 //! program ([`crate::sock::FD_ENV`]), waits for the pane's size, makes a
 //! wgpu device on the app's adapter, and from then on records the view
-//! with Vello into the frames it shares: each frame a dma-buf texture
-//! the app's GPU reads in place ([`Transport::Dmabuf`]), or, where the
-//! app can't import one, shared memory it uploads
-//! ([`Transport::Shm`]). The view is the same trait a linked view
+//! with Vello into the frames it shares: each frame a texture the app's
+//! GPU reads in place (a dma-buf on Linux, [`Transport::Dmabuf`]; an
+//! `IOSurface` on macOS, [`Transport::IoSurface`]), or, where the app
+//! can't import one, shared memory it uploads ([`Transport::Shm`]). The view is the same trait a linked view
 //! implements, so one view runs linked or in a process unchanged.
 //!
 //! Frames are paced by the app: the program draws only into a slot the
 //! app released, so it draws as often as the app shows frames, and not
 //! at all while nothing changes (a still view costs nothing).
 
-use std::os::fd::{AsFd as _, OwnedFd};
+use std::os::fd::AsFd as _;
 use std::time::{Duration, Instant};
 
 use architect::action::{ActionCaller, ActionList};
@@ -25,12 +25,20 @@ use architect_workspace::{
 use vello::peniko::kurbo::Affine;
 
 use crate::gpu::{self, Exported};
+use crate::shm;
 use crate::sock::Socket;
 use crate::wire::{self, Adapter, ToGuest, ToHost, Transport};
 
-/// Forces a transport: `shm` (or `dmabuf`, which falls back to `shm`
-/// when it can't).
+/// Forces a transport: `shm` (anything else is the GPU-shared one, which
+/// falls back to `shm` when it can't).
 pub const TRANSPORT_ENV: &str = "ARCHITECT_PROCESS_VIEW_TRANSPORT";
+
+/// The transport frames the GPU shares go by here.
+#[cfg(target_os = "linux")]
+pub const GPU_TRANSPORT: Transport = Transport::Dmabuf;
+/// The transport frames the GPU shares go by here.
+#[cfg(target_os = "macos")]
+pub const GPU_TRANSPORT: Transport = Transport::IoSurface;
 
 /// Frames in flight: the one the app shows, the one before it (its GPU
 /// may still read it), and two to draw into.
@@ -76,7 +84,7 @@ pub fn serve(make: impl FnOnce(&ViewCtx) -> Box<dyn PaintView>) -> Result<(), Gu
         height,
         scale,
         adapter,
-        dmabuf,
+        zero_copy,
         theme,
     } = hello
     else {
@@ -87,8 +95,15 @@ pub fn serve(make: impl FnOnce(&ViewCtx) -> Box<dyn PaintView>) -> Result<(), Gu
     }
     let (device, queue) = pollster::block_on(open_device(&adapter))?;
     let forced_shm = std::env::var(TRANSPORT_ENV).is_ok_and(|v| v == "shm");
-    let transport = if dmabuf && !forced_shm && gpu::can_share(&device) {
-        Transport::Dmabuf
+    // macOS: the surfaces go to the app's rendezvous, if it named one.
+    #[cfg(target_os = "macos")]
+    let sender = crate::surface::Sender::from_env().ok().flatten();
+    #[cfg(target_os = "macos")]
+    let reachable = sender.is_some();
+    #[cfg(target_os = "linux")]
+    let reachable = true;
+    let transport = if zero_copy && !forced_shm && reachable && gpu::can_share(&device) {
+        GPU_TRANSPORT
     } else {
         Transport::Shm
     };
@@ -116,6 +131,8 @@ pub fn serve(make: impl FnOnce(&ViewCtx) -> Box<dyn PaintView>) -> Result<(), Gu
         device,
         queue,
         socket,
+        #[cfg(target_os = "macos")]
+        sender,
         scale,
         seq: 0,
         input: 0,
@@ -130,10 +147,10 @@ pub fn serve(make: impl FnOnce(&ViewCtx) -> Box<dyn PaintView>) -> Result<(), Gu
 /// first that has one.
 async fn open_device(want: &Adapter) -> Result<(wgpu::Device, wgpu::Queue), GuestError> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-        backends: wgpu::Backends::VULKAN,
+        backends: gpu::BACKENDS,
         ..wgpu::InstanceDescriptor::new_without_display_handle()
     });
-    let adapters = instance.enumerate_adapters(wgpu::Backends::VULKAN).await;
+    let adapters = instance.enumerate_adapters(gpu::BACKENDS).await;
     let adapter = adapters
         .iter()
         .find(|a| {
@@ -142,7 +159,7 @@ async fn open_device(want: &Adapter) -> Result<(wgpu::Device, wgpu::Queue), Gues
         })
         .or_else(|| adapters.first())
         .ok_or(GuestError::NoAdapter)?;
-    let features = adapter.features() & wgpu::Features::VULKAN_EXTERNAL_MEMORY_DMA_BUF;
+    let features = gpu::sharing_features(adapter);
     let (device, queue) = adapter
         .request_device(&wgpu::DeviceDescriptor {
             label: Some("process view"),
@@ -168,28 +185,15 @@ struct Frames {
 }
 
 enum Shared {
-    Dmabuf(Vec<Exported>),
+    /// One texture per slot the app's GPU reads in place
+    /// ([`GPU_TRANSPORT`]).
+    Gpu(Vec<Exported>),
     Shm {
-        file: OwnedFd,
-        map: Map,
+        map: shm::Shared,
         /// Where a frame is read back to, rows padded to 256 bytes.
         readback: wgpu::Buffer,
         padded: u32,
     },
-}
-
-/// A shared mapping, unmapped when dropped.
-struct Map {
-    ptr: *mut std::ffi::c_void,
-    len: usize,
-}
-
-impl Drop for Map {
-    fn drop(&mut self) {
-        // SAFETY: mapped by `Map::new` with this length, used by nothing
-        // else once dropped.
-        let _ = unsafe { rustix::mm::munmap(self.ptr, self.len) };
-    }
 }
 
 impl Frames {
@@ -214,9 +218,15 @@ impl Frames {
             view_formats: &[],
         });
         let shared = match transport {
-            Transport::Dmabuf => Shared::Dmabuf(
+            Transport::Dmabuf | Transport::IoSurface => Shared::Gpu(
                 (0..SLOTS)
-                    .map(|_| gpu::export_texture(device, width, height))
+                    .map(|_| {
+                        #[cfg(target_os = "linux")]
+                        let exported = gpu::export_texture(device, width, height);
+                        #[cfg(target_os = "macos")]
+                        let exported = gpu::export_surface(device, width, height);
+                        exported
+                    })
                     .collect::<Result<_, _>>()?,
             ),
             Transport::Shm => {
@@ -227,25 +237,7 @@ impl Frames {
                 let len = slot_len(row, height)?
                     .checked_mul(usize::from(SLOTS))
                     .ok_or(gpu::GpuError::Range)?;
-                let file = rustix::fs::memfd_create(
-                    "architect-process-view",
-                    rustix::fs::MemfdFlags::CLOEXEC,
-                )
-                .map_err(std::io::Error::from)?;
-                rustix::fs::ftruncate(&file, u64::try_from(len).map_err(|_| gpu::GpuError::Range)?)
-                    .map_err(std::io::Error::from)?;
-                // SAFETY: a fresh mapping of a file we own, `len` long.
-                let ptr = unsafe {
-                    rustix::mm::mmap(
-                        std::ptr::null_mut(),
-                        len,
-                        rustix::mm::ProtFlags::READ | rustix::mm::ProtFlags::WRITE,
-                        rustix::mm::MapFlags::SHARED,
-                        &file,
-                        0,
-                    )
-                }
-                .map_err(std::io::Error::from)?;
+                let map = shm::Shared::create(len)?;
                 let readback = device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("process view readback"),
                     size: u64::from(padded)
@@ -255,8 +247,7 @@ impl Frames {
                     mapped_at_creation: false,
                 });
                 Shared::Shm {
-                    file,
-                    map: Map { ptr, len },
+                    map,
                     readback,
                     padded,
                 }
@@ -275,17 +266,26 @@ impl Frames {
     /// The message announcing these buffers.
     fn message(&self) -> ToHost {
         match &self.shared {
-            Shared::Dmabuf(slots) => {
+            Shared::Gpu(slots) => {
                 let first = slots.first();
+                #[cfg(target_os = "linux")]
+                let (stride, offset, modifier) = (
+                    first.map_or(0, |e| e.stride),
+                    first.map_or(0, |e| e.offset),
+                    first.map_or(gpu::LINEAR, |e| e.modifier),
+                );
+                #[cfg(target_os = "macos")]
+                let (stride, offset, modifier) =
+                    (first.map_or(0, |e| e.surface.stride()), 0, gpu::LINEAR);
                 ToHost::Buffers {
                     id: self.id,
-                    transport: Transport::Dmabuf,
+                    transport: GPU_TRANSPORT,
                     width: self.width,
                     height: self.height,
                     slots: SLOTS,
-                    stride: first.map_or(0, |e| e.stride),
-                    offset: first.map_or(0, |e| e.offset),
-                    modifier: first.map_or(gpu::LINEAR, |e| e.modifier),
+                    stride,
+                    offset,
+                    modifier,
                 }
             }
             Shared::Shm { .. } => ToHost::Buffers {
@@ -322,6 +322,9 @@ struct Guest {
     painter: Painter,
     frames: Frames,
     socket: Socket,
+    /// macOS: the app's rendezvous, where the surfaces go.
+    #[cfg(target_os = "macos")]
+    sender: Option<crate::surface::Sender>,
     scale: f32,
     seq: u64,
     /// The last input event given to the view.
@@ -336,11 +339,22 @@ impl Guest {
     fn announce(&self) -> Result<(), GuestError> {
         let bytes = self.frames.message().encode()?;
         match &self.frames.shared {
-            Shared::Dmabuf(slots) => {
+            #[cfg(target_os = "linux")]
+            Shared::Gpu(slots) => {
                 let fds: Vec<_> = slots.iter().map(|e| e.fd.as_fd()).collect();
                 self.socket.send(&bytes, &fds)?;
             }
-            Shared::Shm { file, .. } => self.socket.send(&bytes, &[file.as_fd()])?,
+            // The surfaces first, on the Mach port; then the message that
+            // names them.
+            #[cfg(target_os = "macos")]
+            Shared::Gpu(slots) => {
+                let surfaces: Vec<_> = slots.iter().map(|e| e.surface.clone()).collect();
+                if let Some(sender) = &self.sender {
+                    sender.send(self.frames.id, &surfaces)?;
+                }
+                self.socket.send(&bytes, &[])?;
+            }
+            Shared::Shm { map, .. } => self.socket.send(&bytes, &[map.as_fd()])?,
         }
         Ok(())
     }
@@ -387,7 +401,7 @@ impl Guest {
                 let size = (width.max(1), height.max(1));
                 if size != (self.frames.width, self.frames.height) {
                     let transport = match self.frames.shared {
-                        Shared::Dmabuf(_) => Transport::Dmabuf,
+                        Shared::Gpu(_) => GPU_TRANSPORT,
                         Shared::Shm { .. } => Transport::Shm,
                     };
                     let id = self.frames.id.saturating_add(1);
@@ -403,10 +417,11 @@ impl Guest {
             }
             ToGuest::Tick => self.credit = true,
             ToGuest::Theme(theme) => self.painter.set_theme(theme),
-            // A second hello: the app could not import the dma-bufs (it
-            // asks for shared memory), or a new pane for the same program.
-            ToGuest::Hello { dmabuf, .. } => {
-                if !dmabuf && matches!(self.frames.shared, Shared::Dmabuf(_)) {
+            // A second hello: the app could not import the shared
+            // textures (it asks for shared memory), or a new pane for the
+            // same program.
+            ToGuest::Hello { zero_copy, .. } => {
+                if !zero_copy && matches!(self.frames.shared, Shared::Gpu(_)) {
                     let size = (self.frames.width, self.frames.height);
                     let id = self.frames.id.saturating_add(1);
                     self.frames = Frames::new(&self.device, Transport::Shm, size, id)?;
@@ -459,7 +474,7 @@ impl Guest {
             depth_or_array_layers: 1,
         };
         match &self.frames.shared {
-            Shared::Dmabuf(slots) => {
+            Shared::Gpu(slots) => {
                 if let Some(to) = slots.get(usize::from(slot)) {
                     encoder.copy_texture_to_texture(
                         self.frames.target.as_image_copy(),
@@ -521,7 +536,7 @@ impl Guest {
 fn copy_out(
     device: &wgpu::Device,
     readback: &wgpu::Buffer,
-    map: &Map,
+    map: &shm::Shared,
     (padded, width, height): (u32, u32, u32),
     slot: u8,
 ) -> Result<(), GuestError> {
@@ -537,17 +552,18 @@ fn copy_out(
     let start = len
         .checked_mul(usize::from(slot))
         .ok_or(gpu::GpuError::Range)?;
-    if start.checked_add(len).is_none_or(|end| end > map.len) {
-        return Err(gpu::GpuError::Range.into());
-    }
     {
         let Ok(data) = range.get_mapped_range() else {
             readback.unmap();
             return Ok(());
         };
-        // SAFETY: `start..start + len` is inside the mapping (checked
-        // above); the app reads this slot only after the frame message.
-        let out = unsafe { std::slice::from_raw_parts_mut(map.ptr.cast::<u8>().add(start), len) };
+        // SAFETY: the app reads this slot only after the frame message,
+        // and doesn't hold it now (it is free); nothing else here writes it.
+        let Some(out) = (unsafe { map.bytes_mut(start, len) }) else {
+            drop(data);
+            readback.unmap();
+            return Err(gpu::GpuError::Range.into());
+        };
         for (to, from) in out.chunks_exact_mut(row).zip(data.chunks(padded)) {
             if let Some(from) = from.get(..row) {
                 to.copy_from_slice(from);

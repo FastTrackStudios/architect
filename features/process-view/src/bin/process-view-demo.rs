@@ -3,7 +3,7 @@
 //! `ARCHITECT_VIEW_FD`; run by hand it says so and exits.
 
 fn main() -> std::process::ExitCode {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         use architect_process_view::{demo, guest};
         match guest::serve(|ctx| Box::new(demo::Orbits::new(ctx))) {
@@ -14,9 +14,9 @@ fn main() -> std::process::ExitCode {
             }
         }
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
-        eprintln!("process-view-demo: process views run on Linux only for now");
+        eprintln!("process-view-demo: process views run on Linux and macOS only for now");
         std::process::ExitCode::FAILURE
     }
 }
