@@ -64,9 +64,9 @@ use blitz_dom::{
     LocalName, Namespace, Node, NodeId, QualName, UserAgentStylesheet,
 };
 use blitz_traits::events::{
-    BlitzImeEvent, BlitzKeyEvent, BlitzPointerEvent, BlitzPointerId, BlitzWheelDelta,
-    BlitzWheelEvent, DomEvent, DomEventData, EventState, Location, Modifiers, MouseEventButton,
-    UiEvent,
+    BlitzFocusEvent, BlitzImeEvent, BlitzKeyEvent, BlitzPointerEvent, BlitzPointerId,
+    BlitzWheelDelta, BlitzWheelEvent, DomEvent, DomEventData, EventState, Location, Modifiers,
+    MouseEventButton, UiEvent,
 };
 use blitz_traits::shell::{ClipboardError, ShellProvider};
 use dioxus::prelude::*;
@@ -760,6 +760,46 @@ impl RemoteDocument {
         self.doc.mutate().set_node_text(self.theme, css);
     }
 
+    /// A press on `node` focuses the nearest element at or above it that
+    /// takes the focus, the old one hearing `blur` and the new `focus`, as
+    /// Blitz does for a press it sees. A press a hit region takes never
+    /// reaches Blitz, so without this the view's keys went to whatever had
+    /// the focus before (or nowhere). Whether the focus moved.
+    pub fn focus_pressed(&mut self, node: NodeId) -> bool {
+        let mut at = Some(node);
+        let target = loop {
+            let Some(id) = at else { return false };
+            let Some(n) = self.doc.get_node(id) else {
+                return false;
+            };
+            if n.is_focussable() {
+                break id;
+            }
+            at = n.parent;
+        };
+        let old = self.doc.get_focussed_node_id();
+        if old == Some(target) || !self.doc.set_focus_to(target) {
+            return false;
+        }
+        let forward = Forward {
+            listeners: &self.listeners,
+            events: &self.events,
+            held: &mut self.held,
+            composing: &mut self.composing,
+        };
+        let mut driver = EventDriver::new(&mut self.doc, forward);
+        if let Some(old) = old {
+            driver.handle_dom_event(DomEvent::new(old, DomEventData::Blur(BlitzFocusEvent)));
+            driver.handle_dom_event(DomEvent::new(old, DomEventData::FocusOut(BlitzFocusEvent)));
+        }
+        driver.handle_dom_event(DomEvent::new(target, DomEventData::Focus(BlitzFocusEvent)));
+        driver.handle_dom_event(DomEvent::new(
+            target,
+            DomEventData::FocusIn(BlitzFocusEvent),
+        ));
+        true
+    }
+
     /// Its Blitz document, to read.
     #[must_use]
     pub const fn document(&self) -> &BaseDocument {
@@ -1138,6 +1178,13 @@ impl Document for RemoteDocument {
         // host's, and the view hears what its regions heard instead.
         let (consumed, cursor) = self.regions_event(&event);
         if consumed {
+            // A press a region took still focuses the view it landed on, as
+            // a press anywhere else in it does: its keys come next.
+            if let UiEvent::PointerDown(p) = &event
+                && let Some((node, _)) = self.painted_at(p.coords.client_x, p.coords.client_y)
+            {
+                let _ = self.focus_pressed(node);
+            }
             self.region_cursor(cursor);
             return;
         }
