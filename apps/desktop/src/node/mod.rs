@@ -952,22 +952,21 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
     })
 }
 
-/// Which of `vaults` the extension's path `path` is in, and the path in
-/// it: with one vault, the path is in it (as the window's vault-relative
-/// paths are); with several, its first folder names the vault
+/// Which of `vaults` the extension's path `path` is in, and its path there.
+///
+/// With one vault, the path is in it (as the window's vault-relative paths
+/// are); with several, its first folder names the vault
 /// (`notes/Songs/a.session`).
 #[must_use]
 pub fn vault_path<'a>(vaults: &'a [String], path: &'a str) -> Option<(&'a str, &'a str)> {
-    match vaults {
-        [only] => Some((only.as_str(), path)),
-        _ => {
-            let (vault, rest) = path.split_once('/')?;
-            vaults
-                .iter()
-                .find(|v| *v == vault)
-                .map(|v| (v.as_str(), rest))
-        }
+    if let [only] = vaults {
+        return Some((only.as_str(), path));
     }
+    let (vault, rest) = path.split_once('/')?;
+    vaults
+        .iter()
+        .find(|v| *v == vault)
+        .map(|v| (v.as_str(), rest))
 }
 
 /// `architect-desktop serve [--config <file>]`: the node of `dist` until

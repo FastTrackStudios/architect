@@ -160,7 +160,7 @@ static WAITING_HOST: Mutex<WaitingHost> = Mutex::new(Vec::new());
 /// (`Host::set_kind_documents`), so an extension edits the node's copy of
 /// a vault document of its kind (`architect_extensions::live`).
 pub fn on_host(f: impl FnOnce(&Host) + Send + 'static) {
-    let mut waiting = lock(&WAITING_HOST);
+    let mut waiting = WAITING_HOST.lock().unwrap_or_else(PoisonError::into_inner);
     if let Some(host) = HOST.get() {
         drop(waiting);
         f(host);
@@ -172,7 +172,7 @@ pub fn on_host(f: impl FnOnce(&Host) + Send + 'static) {
 /// The window's extension host is made: what waited for it hears it.
 fn host_made(host: &Host) {
     let waiting = {
-        let mut waiting = lock(&WAITING_HOST);
+        let mut waiting = WAITING_HOST.lock().unwrap_or_else(PoisonError::into_inner);
         if HOST.set(host.clone()).is_err() {
             return;
         }

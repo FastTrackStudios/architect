@@ -494,7 +494,9 @@ async fn the_windows_extension_edits_the_nodes_copy_of_its_document() {
         std::fs::create_dir_all(&at).unwrap();
         std::fs::write(
             at.join("extension.toml"),
-            format!("id = \"{id}\"\nname = \"{id}\"\nversion = \"1.0.0\"\nkind = \"data\"\n{tables}"),
+            format!(
+                "id = \"{id}\"\nname = \"{id}\"\nversion = \"1.0.0\"\nkind = \"data\"\n{tables}"
+            ),
         )
         .unwrap();
         host.load(
@@ -509,8 +511,11 @@ async fn the_windows_extension_edits_the_nodes_copy_of_its_document() {
         path: "Songs/take.session".to_owned(),
     };
     let answer = host.api("test.editor").call(open.clone()).await.unwrap();
-    let lane = DocLane::from_answer(answer, serve_in_memory(host.api("test.editor")).await.unwrap())
-        .unwrap();
+    let lane = DocLane::from_answer(
+        answer,
+        serve_in_memory(host.api("test.editor")).await.unwrap(),
+    )
+    .unwrap();
     assert_eq!((lane.doc().doc_id, lane.doc().writable), (doc_id, true));
     let replica = lane.replica();
     replica.attached().await.unwrap();
