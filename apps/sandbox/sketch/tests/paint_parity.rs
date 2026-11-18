@@ -358,6 +358,10 @@ effect = "read_only"
 "#
     }
 
+    fn files(&self) -> &'static [(&'static str, &'static str)] {
+        &[("icons/probe.svg", "<svg viewBox=\"0 0 1 1\"/>")]
+    }
+
     fn build(&self, ext: &mut Builder) {
         ext.view("probe", ProbeView)
             .view("regions", RegionsView)
@@ -1005,4 +1009,18 @@ fn a_process_view_has_the_theme_its_styles_and_its_actions() {
             .join("\n")
     };
     assert!(styled.contains("rgb(1, 2, 3)"), "no style: {styled:?}");
+    // The files its code holds, sent to its host as it connected.
+    let host = run._host.clone().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while host
+        .contributions()
+        .runtime_file(ID, "icons/probe.svg")
+        .is_none()
+    {
+        assert!(
+            Instant::now() < deadline,
+            "its files never reached the host"
+        );
+        run.pump_until("a moment", |_| true);
+    }
 }

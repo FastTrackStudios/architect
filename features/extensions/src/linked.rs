@@ -642,7 +642,10 @@ impl crate::guest::Guest {
         for (id, run) in built.actions {
             guest = guest.action_in(id, move |args, cx| run(args, cx));
         }
-        if !built.contribution.is_empty() {
+        // Its files reach the host with its contribution, sent even when
+        // it adds nothing else.
+        crate::guest::set_files(extension.files());
+        if !built.contribution.is_empty() || !extension.files().is_empty() {
             guest = guest.contribution(&built.contribution);
         }
         guest

@@ -113,9 +113,37 @@ fn post(update: Update) {
 /// Checked by the host against its manifest, as the manifest's own
 /// tables are.
 pub fn contribute(contribution: &Contribution) {
-    let json = serde_json::to_string(contribution).unwrap_or_default();
+    let mut json = serde_json::to_value(contribution).unwrap_or(Json::Null);
+    // Its files go with it, under a key a host built before them reads
+    // past (`Contribution` takes no `files`).
+    let files = files_cell().get().filter(|f| !f.is_empty());
+    if let (Some(files), Some(map)) = (files, json.as_object_mut()) {
+        map.insert(
+            crate::contrib::FILES_KEY.to_owned(),
+            serde_json::json!(files),
+        );
+    }
+    let json = json.to_string();
     *outbox().last.lock().unwrap_or_else(PoisonError::into_inner) = Some(json.clone());
     post(Update::Contribute { json });
+}
+
+fn files_cell() -> &'static OnceLock<Vec<(String, String)>> {
+    static FILES: OnceLock<Vec<(String, String)>> = OnceLock::new();
+    &FILES
+}
+
+/// The files a linked extension's code holds (`Extension::files`: its
+/// toolbars' images, read from its package linked in), sent to the host
+/// with what it contributes, so its process copy's host can read them too.
+/// Set once, before it serves.
+pub fn set_files(files: &[(&str, &str)]) {
+    let _ = files_cell().set(
+        files
+            .iter()
+            .map(|(p, t)| ((*p).to_owned(), (*t).to_owned()))
+            .collect(),
+    );
 }
 
 /// Writes one piece of its runtime state (a status item's text: its key
