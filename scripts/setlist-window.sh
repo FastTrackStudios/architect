@@ -96,6 +96,12 @@ for p in daw:daw-extension arrangement:studio-arrangement mixer:studio-mixer; do
 done
 pack "$keyflow/features/extension" "$pkg/keyflow"
 cp "$(target_of "$keyflow")/debug/keyflow-extension" "$pkg/keyflow/"
+# Until Keyflow's manifest has it (asked of Keyflow; Architect allows it
+# since #873): Keyflow follows the engine's session as a client of
+# fts.session, which it also provides. Nothing is taken out.
+if ! grep -q '^\[uses\]' "$pkg/keyflow/extension.toml"; then
+  printf '\n[uses]\n"fts.session" = "^0.1"\n' >> "$pkg/keyflow/extension.toml"
+fi
 pack "$ignition/features/lighting/pane" "$pkg/ignition"
 it=$(target_of "$ignition")/$host/desktop-dev
 mkdir -p "$pkg/ignition/bin" && cp "$it/ignition" "$it/ignition-pane" "$pkg/ignition/bin/"
