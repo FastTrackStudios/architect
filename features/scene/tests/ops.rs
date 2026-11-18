@@ -219,3 +219,93 @@ fn a_large_font_in_a_batch_given_whole_is_not_copied() {
         "the font was copied out of its batch"
     );
 }
+
+/// A scroll of many layers (Keyflow's pages and systems, 1,851 of them):
+/// each crosses as its transform alone, 57 bytes, and nothing else, and the
+/// sender spends a pointer comparison on each one's content.
+#[test]
+fn a_frame_that_moves_every_layer_writes_a_move_each_and_nothing_else() {
+    let content: Vec<_> = (0..2000).map(|_| squares(2)).collect();
+    let at = |dy: f64| -> Vec<(u64, Layer)> {
+        content
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let y = f64::from(u32::try_from(i).unwrap()).mul_add(20.0, dy);
+                (
+                    u64::try_from(i).unwrap(),
+                    Layer::new(Arc::clone(c)).at(Affine::translate((0.0, y))),
+                )
+            })
+            .collect()
+    };
+    let mut sender = Sender::new();
+    let mut receiver = Receiver::new();
+    receiver.apply(&sender.frame(&at(0.0)).unwrap()).unwrap();
+    let moved = sender.frame(&at(-7.0)).unwrap();
+    // The header, then a MOVE (1), a key (8) and a transform (48) a layer.
+    assert_eq!(moved.len(), 4 + 2000 * 57);
+    receiver.apply(&moved).unwrap();
+    // Still: nothing.
+    assert!(sender.frame(&at(-7.0)).is_none());
+}
+
+/// After frames that change nothing, a layer left out is still removed
+/// and the fragment only it drew let go.
+#[test]
+fn a_layer_left_out_after_still_frames_is_removed() {
+    let (a, b) = (squares(1), squares(3));
+    let both = vec![
+        (1, Layer::new(Arc::clone(&a))),
+        (2, Layer::new(Arc::clone(&b))),
+    ];
+    let mut sender = Sender::new();
+    let mut receiver = Receiver::new();
+    receiver.apply(&sender.frame(&both).unwrap()).unwrap();
+    assert!(sender.frame(&both).is_none());
+    assert!(sender.frame(&both).is_none());
+    let one = sender.frame(&[(1, Layer::new(Arc::clone(&a)))]).unwrap();
+    receiver.apply(&one).unwrap();
+    assert_eq!(receiver.layers().len(), 1);
+    assert!(receiver.layers().get(2).is_none());
+    // Shown again, it crosses whole: its fragment was let go.
+    let again = sender.frame(&both).unwrap();
+    assert!(again.len() > 4 + 57, "{} bytes", again.len());
+}
+
+/// What a frame that moves every one of Keyflow's 1,851 layers costs the
+/// sender (`--ignored --nocapture`): p50 and p99 over 400 frames.
+#[test]
+#[ignore = "it times things: --ignored --nocapture"]
+#[allow(clippy::print_stdout)]
+fn sender_frame_cost_for_a_scroll_of_1851_layers() {
+    let content: Vec<_> = (0..1851).map(|_| squares(4)).collect();
+    let at = |dy: f64| -> Vec<(u64, Layer)> {
+        content
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let y = f64::from(u32::try_from(i).unwrap()).mul_add(20.0, dy);
+                (
+                    u64::try_from(i).unwrap(),
+                    Layer::new(Arc::clone(c)).at(Affine::translate((0.0, y))),
+                )
+            })
+            .collect()
+    };
+    let mut sender = Sender::new();
+    let _ = sender.frame(&at(0.0));
+    let mut times = Vec::new();
+    for frame in 1..=400_u32 {
+        let layers = at(-f64::from(frame));
+        let t = std::time::Instant::now();
+        let _ = sender.frame(&layers);
+        times.push(t.elapsed());
+    }
+    times.sort();
+    println!(
+        "sender, 1,851 layers moved: p50 {:?}, p99 {:?}",
+        times[times.len() / 2],
+        times[times.len() * 99 / 100]
+    );
+}
