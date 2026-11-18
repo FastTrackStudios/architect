@@ -33,7 +33,7 @@ fn square(x: f64) -> Layer {
 /// The translation of each fill in `scene`, in paint order.
 fn fills(scene: &Scene) -> Vec<(f64, f64)> {
     scene
-        .commands
+        .flattened()
         .iter()
         .filter_map(|c| match c {
             RenderCommand::Fill(f) => {
@@ -91,7 +91,7 @@ fn a_hidden_or_transparent_layer_is_not_drawn() {
     layers.set(1, square(0.0));
     layers.set(2, square(0.0).opacity(0.0));
     layers.update(1, |l| l.visible = false);
-    assert!(composed(&layers, Affine::IDENTITY).commands.is_empty());
+    assert!(composed(&layers, Affine::IDENTITY).flattened().is_empty());
 }
 
 #[test]
@@ -105,7 +105,7 @@ fn a_clip_and_a_fade_wrap_the_layer_and_are_closed() {
     );
     let scene = composed(&layers, Affine::IDENTITY);
     let kinds: Vec<&str> = scene
-        .commands
+        .flattened()
         .iter()
         .map(|c| match c {
             RenderCommand::PushClipLayer(_) => "clip",

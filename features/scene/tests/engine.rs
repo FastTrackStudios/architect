@@ -90,7 +90,7 @@ fn meter() -> Layer {
 fn height(layers: &Layers, values: &Values) -> f64 {
     let mut scene = Scene::new();
     layers.compose_at(&mut scene, Affine::IDENTITY, &Readings::NONE, values);
-    match &scene.commands[0] {
+    match &scene.flattened()[0] {
         RenderCommand::Fill(f) => f.transform.as_coeffs()[3] * 100.0,
         other => panic!("{other:?}"),
     }

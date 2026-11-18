@@ -168,7 +168,7 @@ fn a_hovered_region_is_drawn_lit() {
     let draw = |lit| {
         let mut scene = Scene::new();
         layers.compose_lit(&mut scene, Affine::IDENTITY, &NONE, &Values::new(), lit);
-        scene.commands.len()
+        scene.flattened().len()
     };
     let hit = Hit { key: 1, id: 10 };
     assert_eq!(draw(None), 1);
@@ -201,7 +201,7 @@ fn a_drag_writes_the_hosts_value_and_a_layer_bound_to_it_follows() {
     let knob_y = |values: &Values| {
         let mut scene = Scene::new();
         layers.compose_at(&mut scene, Affine::IDENTITY, &NONE, values);
-        match &scene.commands[1] {
+        match &scene.flattened()[1] {
             RenderCommand::Fill(f) => f.transform.as_coeffs()[5],
             other => panic!("{other:?}"),
         }
@@ -600,7 +600,7 @@ fn a_hovered_region_shows_its_hover_layer_in_its_own_space() {
     let drawn = |lit: Option<Lit>| {
         let mut scene = Scene::new();
         layers.compose_lit(&mut scene, Affine::IDENTITY, &NONE, &v, lit);
-        scene.commands
+        scene.flattened()
     };
     // Not lit: neither is drawn (they are hidden).
     assert_eq!(
