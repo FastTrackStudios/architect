@@ -735,6 +735,24 @@ fn use_palette(ui: ExtensionUi, host: Host, revision: Signal<u64>) {
                 .map(|(_, action, chord)| (action, chord))
                 .collect(),
         );
+        // A view an opener shows a file in edits that document: ⌘Z and
+        // ⇧⌘Z there are its own undo (`DOC_UNDO`), under the keys the
+        // extension binds there itself.
+        let mut in_views = in_views;
+        for by in contributions.openers() {
+            let Some(view) = by
+                .item
+                .view
+                .as_deref()
+                .filter(|_| !by.item.files.is_empty() || !by.item.doc_kinds.is_empty())
+            else {
+                continue;
+            };
+            let context = format!("view:{}/{view}", by.owner);
+            for (action, chord) in [("DOC_UNDO", "⌘Z"), ("DOC_REDO", "⇧⌘Z")] {
+                in_views.push((context.clone(), action.to_owned(), chord.to_owned()));
+            }
+        }
         commands.set_view_keys(in_views);
         let now = contributions.palette_sources();
         let ids: Vec<String> = now.iter().map(|p| p.item.id.clone()).collect();

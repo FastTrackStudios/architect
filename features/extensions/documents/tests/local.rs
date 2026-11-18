@@ -141,3 +141,47 @@ async fn the_client_reaches_the_documents_through_the_gate() {
         DocsError::Unsupported(_)
     ));
 }
+
+/// A document's undo through the service (#844): each edit one step, by
+/// its name; undo and redo walk them, gated as a write; a step is taken
+/// back only while the text is as it left it (in memory: no merge).
+#[tokio::test(flavor = "multi_thread")]
+async fn undo_and_redo_walk_a_documents_steps() {
+    let (_scope, docs) = client().await;
+    let s = |x: &str| x.to_owned();
+    let path = || s("notes/Welcome.md");
+    let append = |t: &str| vec![Edit::Append { text: s(t) }];
+    // Nothing to undo yet.
+    assert_eq!(docs.undo(s("lab.writer"), path()).await.unwrap(), None);
+    assert_eq!(
+        refused(docs.undo(s("lab.reader"), path()).await),
+        "writes.documents"
+    );
+    docs.edit(s("lab.writer"), path(), append("A\n"), s("Note A"))
+        .await
+        .unwrap();
+    docs.edit(s("lab.writer"), path(), append("B\n"), s("Note B"))
+        .await
+        .unwrap();
+    let undone = docs.undo(s("lab.writer"), path()).await.unwrap().unwrap();
+    assert_eq!(
+        (undone.step.as_str(), undone.text.as_str()),
+        ("Note B", "# Welcome\nA\n")
+    );
+    let undone = docs.undo(s("lab.writer"), path()).await.unwrap().unwrap();
+    assert_eq!(undone.text, "# Welcome\n");
+    let redone = docs.redo(s("lab.writer"), path()).await.unwrap().unwrap();
+    assert_eq!(
+        (redone.step.as_str(), redone.text.as_str()),
+        ("Note A", "# Welcome\nA\n")
+    );
+    // A new edit: nothing to redo any more.
+    docs.edit(s("lab.writer"), path(), append("C\n"), s("Note C"))
+        .await
+        .unwrap();
+    assert_eq!(docs.redo(s("lab.writer"), path()).await.unwrap(), None);
+    assert_eq!(
+        docs.read(s("lab.reader"), path()).await.unwrap(),
+        "# Welcome\nA\nC\n"
+    );
+}

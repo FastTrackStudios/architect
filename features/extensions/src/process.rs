@@ -926,8 +926,21 @@ fn apply(manifest: &Manifest, contributions: &Contributions, update: Update) -> 
     let source = format!("ext:{}", manifest.id);
     match update {
         Update::Contribute { json } => {
-            let added: Contribution =
+            let mut value: serde_json::Value =
                 serde_json::from_str(&json).map_err(|e| format!("its contribution: {e}"))?;
+            // The files its code holds (a linked extension's
+            // `Extension::files`), sent beside its contribution.
+            let files = value
+                .as_object_mut()
+                .and_then(|m| m.remove(crate::contrib::FILES_KEY));
+            if let Some(files) = files {
+                let files: Vec<(String, String)> =
+                    serde_json::from_value(files).map_err(|e| format!("its files: {e}"))?;
+                crate::contrib::check_files(&files)?;
+                contributions.put_runtime_files(&manifest.id, files);
+            }
+            let added: Contribution =
+                serde_json::from_value(value).map_err(|e| format!("its contribution: {e}"))?;
             let views = manifest.view_ids();
             added
                 .check(&manifest.rules(&views))
@@ -1349,5 +1362,57 @@ mod hello_tests {
             uncovered(&manifest, &hello(&[])).as_deref(),
             Some("it does not draw its view panel")
         );
+    }
+}
+
+#[cfg(test)]
+mod files_tests {
+    use super::apply;
+    use crate::contrib::{Contribution, Contributions, FILES_KEY};
+    use crate::manifest::Manifest;
+    use crate::wire::Update;
+
+    /// A process copy of a linked extension sends the files its code holds
+    /// (`Extension::files`) beside its contribution (#840): the host keeps
+    /// them, its toolbars read their images from them, and the
+    /// contribution applies as before (a host built before them reads past
+    /// the key). A file outside its package is refused.
+    #[test]
+    fn a_process_copys_files_reach_its_host() {
+        let manifest = Manifest::parse(
+            "id = \"lab.chart\"\nname = \"Chart\"\nversion = \"0.1.0\"\nkind = \"process\"\n\
+             [entry]\npath = \"bin/chart\"\n",
+        )
+        .unwrap();
+        let reg = Contributions::new();
+        reg.put("lab.chart", Contribution::default());
+        let send = |files: serde_json::Value| {
+            let mut json = serde_json::to_value(Contribution::default()).unwrap();
+            json.as_object_mut()
+                .unwrap()
+                .insert(FILES_KEY.to_owned(), files);
+            apply(
+                &manifest,
+                &reg,
+                Update::Contribute {
+                    json: json.to_string(),
+                },
+            )
+        };
+        send(serde_json::json!([["icons/note.svg", "<svg/>"]])).unwrap();
+        assert_eq!(
+            reg.runtime_file("lab.chart", "icons/note.svg").as_deref(),
+            Some("<svg/>")
+        );
+        assert!(send(serde_json::json!([["../escape.svg", "x"]])).is_err());
+        // A contribution with the key is one an older host reads whole.
+        let mut json = serde_json::to_value(Contribution::default()).unwrap();
+        json.as_object_mut()
+            .unwrap()
+            .insert(FILES_KEY.to_owned(), serde_json::json!([]));
+        let read: Contribution = serde_json::from_value(json).unwrap();
+        assert_eq!(read, Contribution::default());
+        reg.withdraw("lab.chart");
+        assert_eq!(reg.runtime_file("lab.chart", "icons/note.svg"), None);
     }
 }

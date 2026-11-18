@@ -237,6 +237,71 @@ fn RegionsView() -> Element {
     probe(Recorder::with_regions)
 }
 
+/// A view that keeps where it is in its pane (`linked::use_view_state`):
+/// it logs what it was given when it first has its pane (in a process,
+/// the pane's input arrives just after the first render) and on every
+/// change, and keeps `zoom=2` the first time it starts with nothing kept.
+#[allow(non_snake_case)]
+fn MemoView() -> Element {
+    let kept = architect_extensions::linked::use_view_state();
+    let last = use_hook(|| std::rc::Rc::new(std::cell::RefCell::new(None::<String>)));
+    if let Some(k) = &kept {
+        let was = last.borrow().clone();
+        match was {
+            None => log(&format!("start view_state={}", k.value)),
+            Some(v) if v != k.value => log(&format!("view_state={}", k.value)),
+            Some(_) => {}
+        }
+        last.replace(Some(k.value.clone()));
+    }
+    use_effect(use_reactive((&kept,), |(kept,)| {
+        if let Some(k) = kept
+            && k.value.is_empty()
+        {
+            k.set("zoom=2");
+        }
+    }));
+    rsx! { div { {kept.map(|k| k.value).unwrap_or_default()} } }
+}
+
+/// What a process view gets that a linked one gets from the app (#840):
+/// the theme store's theme, `document::Style` in its document, and the
+/// actions it may run in its `ViewCtx`.
+#[allow(non_snake_case)]
+fn ThemedView() -> Element {
+    let ink = architect_theme::use_resolved()
+        .get("ink")
+        .map(str::to_owned);
+    let mount = use_hook(|| PaintMount::new(Recorder::new));
+    // The paint view's ctx, as a process gives it: its actions.
+    let probe = use_hook(|| {
+        PaintMount::new(|ctx: &ViewCtx| {
+            let actions = ctx.actions.clone();
+            std::thread::spawn(move || {
+                for _ in 0..200 {
+                    if actions.info("TEST_PROBE_PING").is_some() {
+                        log("actions: TEST_PROBE_PING");
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                log("actions: none");
+            });
+            Recorder::new(ctx)
+        })
+    });
+    if let Some(ink) = ink {
+        log(&format!("theme ink={ink}"));
+    }
+    let _ = mount;
+    rsx! {
+        document::Style { "#themed-probe {{ color: rgb(1, 2, 3); }}" }
+        div { id: "themed-probe", style: "width: 100%; height: 100%;",
+            PaintPane { mount: probe }
+        }
+    }
+}
+
 fn probe(make: fn(&ViewCtx) -> Recorder) -> Element {
     let mount = use_hook(|| {
         let mount = PaintMount::new(make);
@@ -276,11 +341,35 @@ title = "Probe"
 [[views]]
 id = "regions"
 title = "Regions"
+
+[[views]]
+id = "memo"
+title = "Memo"
+
+[[views]]
+id = "themed"
+title = "Themed"
+
+[[actions]]
+id = "TEST_PROBE_PING"
+name = "Ping"
+description = "Answers pong."
+effect = "read_only"
 "#
     }
 
+    fn files(&self) -> &'static [(&'static str, &'static str)] {
+        &[("icons/probe.svg", "<svg viewBox=\"0 0 1 1\"/>")]
+    }
+
     fn build(&self, ext: &mut Builder) {
-        ext.view("probe", ProbeView).view("regions", RegionsView);
+        ext.view("probe", ProbeView)
+            .view("regions", RegionsView)
+            .view("memo", MemoView)
+            .view("themed", ThemedView)
+            .action("TEST_PROBE_PING", |_| async {
+                Ok(serde_json::json!("pong"))
+            });
     }
 }
 
@@ -371,6 +460,8 @@ fn App(props: AppProps) -> Element {
                     RemotePaneView { processes, extension: ID, view }
                 },
                 (None, "regions") => rsx! { RegionsView {} },
+                (None, "memo") => rsx! { MemoView {} },
+                (None, "themed") => rsx! { ThemedView {} },
                 (None, _) => rsx! { ProbeView {} },
             },
         ))
@@ -386,7 +477,8 @@ fn App(props: AppProps) -> Element {
 struct Run {
     doc: DioxusDocument,
     out: PathBuf,
-    _host: Option<Host>,
+    host: Option<Host>,
+    processes: Option<architect_extensions::process::Processes>,
 }
 
 impl Run {
@@ -459,6 +551,7 @@ fn start_view(process: bool, dir: &Path, view: &'static str) -> Run {
     } else {
         (None, None)
     };
+    let kept = processes.clone();
     let vdom = VirtualDom::new_with_props(
         App,
         AppProps {
@@ -478,9 +571,16 @@ fn start_view(process: bool, dir: &Path, view: &'static str) -> Run {
     let mut run = Run {
         doc,
         out,
-        _host: host,
+        host,
+        processes: kept,
     };
-    run.pump_until("the view at its size", |l| l.contains("size "));
+    if view == "memo" || view == "themed" {
+        run.pump_until("the view", |l| {
+            l.contains("start view_state=") || l.contains("ctx pane=")
+        });
+    } else {
+        run.pump_until("the view at its size", |l| l.contains("size "));
+    }
     run
 }
 
@@ -740,5 +840,190 @@ fn a_key_bound_in_a_views_context_runs_its_action_and_skips_the_view() {
             !log.contains("key: \"n\""),
             "{how}: the view heard the bound key:\n{log}"
         );
+    }
+}
+
+/// Where a view is (`linked::use_view_state`) is kept by its pane and
+/// given back on start: linked in, and in a process whose program is
+/// killed and started again (a development copy rebuilt), which starts
+/// where it was.
+#[test]
+fn a_views_state_is_kept_by_its_pane_and_given_back_when_its_program_restarts() {
+    let _one = SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let dir = tempfile::tempdir().unwrap();
+    for process in [false, true] {
+        let how = if process { "process" } else { "linked" };
+        let mut run = start_view(process, dir.path(), "memo");
+        // It started with nothing kept, kept zoom=2, and was given it back.
+        run.pump_until(&format!("{how}: the kept state"), |l| {
+            l.contains("\nview_state=zoom=2")
+        });
+        assert!(
+            run.log().starts_with("start view_state=\n"),
+            "{how}: {}",
+            run.log()
+        );
+        if !process {
+            continue;
+        }
+        let processes = run.processes.clone().unwrap();
+        let p = processes.get(ID).unwrap();
+        let pid = p.pid().unwrap();
+        let killed = std::process::Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .status()
+            .unwrap();
+        assert!(killed.success());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while p.pid() == Some(pid) {
+            assert!(Instant::now() < deadline, "the process never died");
+            run.pump_until("a moment", |_| true);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        p.restart();
+        // The new program's view starts where the old one was.
+        run.pump_until("the view started again", |l| {
+            l.matches("start view_state=zoom=2").count() == 1
+        });
+    }
+}
+
+/// The pointer leaving the view (#844): the view hears a move to where it
+/// went and then `PointerLeave`, linked in and as a process alike, so a
+/// view that hit-tests for itself can clear its hover.
+#[test]
+fn a_view_hears_the_pointer_leave_linked_and_as_a_process() {
+    let _one = SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let dir = tempfile::tempdir().unwrap();
+    let mut logs = Vec::new();
+    for process in [false, true] {
+        let how = if process { "process" } else { "linked" };
+        let mut run = start_view(process, dir.path(), "probe");
+        let (ox, oy) = origin(&run.doc);
+        let free = MouseEventButtons::None;
+        run.send(UiEvent::PointerMove(pointer(
+            (ox + 50.0, oy + 40.0),
+            free,
+            Modifiers::empty(),
+        )));
+        run.pump_until(&format!("{how}: the move in"), |l| {
+            l.contains("input move 50 40")
+        });
+        // Out of the window past the view's left edge.
+        run.send(UiEvent::PointerLeave(pointer(
+            (ox - 5.0, oy + 40.0),
+            free,
+            Modifiers::empty(),
+        )));
+        run.pump_until(&format!("{how}: the leave"), |l| {
+            l.contains("input PointerLeave")
+        });
+        let log = run.log();
+        let tail: Vec<&str> = log.lines().filter(|l| l.starts_with("input ")).collect();
+        logs.push(tail.iter().map(|l| (*l).to_owned()).collect::<Vec<_>>());
+        assert_eq!(tail.last(), Some(&"input PointerLeave"), "{how}: {log}");
+    }
+    assert_eq!(logs[0], logs[1], "linked and process differ");
+}
+
+/// A Shift-click on a region (#844): the view hears the press and the
+/// release with Shift held, linked in and as a process alike.
+#[test]
+fn a_press_on_a_region_carries_its_modifiers_linked_and_as_a_process() {
+    let _one = SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let dir = tempfile::tempdir().unwrap();
+    let shift = format!(
+        "{:?}",
+        architect_workspace::paint::region::Mods::from_names(&["Shift"])
+    );
+    for process in [false, true] {
+        let how = if process { "process" } else { "linked" };
+        let mut run = start_view(process, dir.path(), "regions");
+        let (ox, oy) = origin(&run.doc);
+        let (x0, y0, _, _) = REGION_RECT;
+        let at = (ox + x0 as f32 + 30.0, oy + y0 as f32 + 20.0);
+        run.send(UiEvent::PointerMove(pointer(
+            at,
+            MouseEventButtons::None,
+            Modifiers::SHIFT,
+        )));
+        run.send(UiEvent::PointerDown(pointer(
+            at,
+            MouseEventButtons::Primary,
+            Modifiers::SHIFT,
+        )));
+        run.send(UiEvent::PointerUp(pointer(
+            at,
+            MouseEventButtons::None,
+            Modifiers::SHIFT,
+        )));
+        let mods = format!("region Modifiers({REGION}, {shift})");
+        let press = format!("region Press({REGION})");
+        let release = format!("region Release({REGION})");
+        run.pump_until(&format!("{how}: the shifted release"), |l| {
+            // The keys held, just before the press, and again before the
+            // release.
+            l.contains(&format!("{mods}\n{press}")) && l.contains(&format!("{mods}\n{release}"))
+        });
+    }
+}
+
+/// A process view gets what a linked view gets from the app (#840): the
+/// app's theme through the theme store (`architect_theme::use_resolved`),
+/// its `document::Style` applied in its document, and in its paint
+/// view's `ViewCtx` the actions it may run (its own here).
+#[test]
+fn a_process_view_has_the_theme_its_styles_and_its_actions() {
+    let _one = SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let dir = tempfile::tempdir().unwrap();
+    let mut run = start_view(true, dir.path(), "themed");
+    run.pump_until("the theme's ink", |l| l.contains("theme ink=#"));
+    run.pump_until("its actions", |l| l.contains("actions: "));
+    assert!(
+        run.log().contains("actions: TEST_PROBE_PING"),
+        "{}",
+        run.log()
+    );
+    // Its style, in the view's own document.
+    let styled = {
+        let d = run.doc.inner.borrow();
+        let at = *architect_extensions::remote::mounted_views(&d)
+            .first()
+            .unwrap();
+        let sub: &dyn std::any::Any = d.subdoc(at).unwrap();
+        let remote = sub
+            .downcast_ref::<architect_extensions::remote::RemoteDocument>()
+            .unwrap();
+        let doc = blitz_dom::Document::inner(remote);
+        doc.query_selector_all("style")
+            .unwrap()
+            .iter()
+            .filter_map(|n| doc.get_node(*n))
+            .map(blitz_dom::Node::text_content)
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert!(styled.contains("rgb(1, 2, 3)"), "no style: {styled:?}");
+    // The files its code holds, sent to its host as it connected.
+    let host = run.host.clone().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while host
+        .contributions()
+        .runtime_file(ID, "icons/probe.svg")
+        .is_none()
+    {
+        assert!(
+            Instant::now() < deadline,
+            "its files never reached the host"
+        );
+        run.pump_until("a moment", |_| true);
     }
 }

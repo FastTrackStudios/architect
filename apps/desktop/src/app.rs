@@ -274,6 +274,7 @@ fn Window() -> Element {
     use_hook(|| Rc::new(serve_window(&list)));
     // `APP_SHOT`: the window draws itself to a PNG.
     architect_workspace::shot::use_app_shot(&list);
+    // `APP_FRAMES`: the window's frame times, and a recording of them (#839).
     use_hook(|| {
         let _ = architect_workspace::frames::register(&list);
     });
@@ -480,6 +481,12 @@ fn start_node(dist: &'static Distribution) {
                             http = %running.http,
                             "the app's node is up"
                         );
+                        // The window's extensions edit the node's copy of a
+                        // vault document of their kind, not its file.
+                        let documents = Arc::new(running.kind_documents());
+                        architect_app::on_extension_host(move |host| {
+                            host.set_kind_documents(documents);
+                        });
                         // Until the process ends, with the app.
                         std::future::pending::<()>().await;
                         drop(running);

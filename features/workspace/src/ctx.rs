@@ -154,6 +154,11 @@ pub enum ViewInput {
     },
     /// The view got (`true`) or lost the keyboard focus.
     Focus(bool),
+    /// The pointer left the view: its hover ends. It comes after a
+    /// [`PointerMove`](Self::PointerMove) to where the pointer went
+    /// (outside the view), the same in-process, in a process and in a
+    /// browser.
+    PointerLeave,
 }
 
 /// Where a host sends a view's input: the host pushes, the kind drains

@@ -1243,6 +1243,8 @@ impl ExtensionApi {
             | HostRequest::RenameDocument { .. }
             | HostRequest::MoveDocument { .. }
             | HostRequest::DeleteDocument { .. }
+            | HostRequest::UndoDocument { .. }
+            | HostRequest::RedoDocument { .. }
             | HostRequest::WatchDocuments { .. } => self.document(&host, manifest, request).await,
             HostRequest::EditorState
             | HostRequest::EditEditor { .. }
@@ -1485,6 +1487,58 @@ impl ExtensionApi {
                     )
                     .await?;
                 Ok(Value::Null)
+            }
+            HostRequest::Actions => {
+                let effect = |e: architect::action::Effect| match e {
+                    architect::action::Effect::ReadOnly => "read_only",
+                    architect::action::Effect::Mutating => "mutating",
+                    architect::action::Effect::Destructive => "destructive",
+                };
+                let listed: Vec<Value> = host
+                    .list()
+                    .infos()
+                    .into_iter()
+                    .filter(|i| {
+                        let run = HostRequest::Run {
+                            action: i.id.clone(),
+                            args: Value::Null,
+                            ticket: None,
+                        };
+                        crate::hostcall::check(manifest, &may, &run, reach(i.effect))
+                            .1
+                            .is_ok()
+                    })
+                    .map(|i| {
+                        serde_json::json!({
+                            "id": i.id,
+                            "display_name": i.display_name,
+                            "description": i.description,
+                            "category": i.category,
+                            "group": i.group,
+                            "shortcut": i.shortcut,
+                            "effect": effect(i.effect),
+                            "params_schema": i.params_schema,
+                            "result_schema": i.result_schema,
+                            "enabled": i.enabled,
+                            "checked": i.checked,
+                        })
+                    })
+                    .collect();
+                Ok(Value::Array(listed))
+            }
+            HostRequest::SetViewState { pane, state } => {
+                #[cfg(feature = "remote")]
+                {
+                    crate::remote::offer_view_state(&self.id, &pane, &state);
+                    Ok(Value::Null)
+                }
+                #[cfg(not(feature = "remote"))]
+                {
+                    let _ = (pane, state);
+                    Err(HostError::Unsupported {
+                        what: "set_view_state: this host shows no process views".to_owned(),
+                    })
+                }
             }
             HostRequest::Log { text, level } => {
                 host.logs().push(
@@ -1876,6 +1930,16 @@ impl ExtensionApi {
                     .map_err(fail)?;
                 (info(moved), Some(DocEvent::Renamed { from: path, to }))
             }
+            HostRequest::UndoDocument { path } => {
+                let path = path_ok(&path)?;
+                let undone = docs.undo(me, path.clone()).await.map_err(fail)?;
+                undone_answer(undone, path)
+            }
+            HostRequest::RedoDocument { path } => {
+                let path = path_ok(&path)?;
+                let redone = docs.redo(me, path.clone()).await.map_err(fail)?;
+                undone_answer(redone, path)
+            }
             HostRequest::DeleteDocument { path } => {
                 let path = path_ok(&path)?;
                 docs.delete(me, path.clone()).await.map_err(fail)?;
@@ -2156,4 +2220,19 @@ async fn keep_toast(host: &Host, from: &str, toast: &Value) {
         .list_of(&action)
         .run_json_async_with(&caller, &action, toast.to_string().as_bytes())
         .await;
+}
+
+/// An undo's or a redo's answer: `{step, text}` and a save, or `null`
+/// and nothing when there was no step.
+fn undone_answer(
+    done: Option<architect_documents::Undone>,
+    path: String,
+) -> (Value, Option<crate::events::DocEvent>) {
+    match done {
+        Some(u) => (
+            serde_json::json!({ "step": u.step, "text": u.text }),
+            Some(crate::events::DocEvent::Saved { path }),
+        ),
+        None => (Value::Null, None),
+    }
 }

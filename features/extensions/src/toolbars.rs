@@ -947,6 +947,66 @@ impl Toolbars {
         uri
     }
 
+    /// A toolbar image (`uri`, a `data:` URI) as drawn in `ink`: an SVG's
+    /// `currentColor` is `ink`, and with `all` (an item's `tint`) every
+    /// fill and stroke colour it names too, and its own fill where it
+    /// names none. Not an SVG, or an ink that is not a plain colour: as
+    /// it is.
+    #[must_use]
+    pub fn tinted(uri: &str, ink: &str, all: bool) -> String {
+        use base64::Engine as _;
+        const SVG: &str = "data:image/svg+xml;base64,";
+        let plain = !ink.is_empty()
+            && !ink.starts_with("var(")
+            && ink
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || " #(),.%-".contains(c));
+        let Some(text) = uri
+            .strip_prefix(SVG)
+            .filter(|_| plain)
+            .and_then(|b| base64::engine::general_purpose::STANDARD.decode(b).ok())
+            .and_then(|b| String::from_utf8(b).ok())
+        else {
+            return uri.to_owned();
+        };
+        let mut svg = text.replace("currentColor", ink);
+        if all {
+            static COLOURED: std::sync::LazyLock<Option<regex::Regex>> = std::sync::LazyLock::new(
+                || {
+                    regex::Regex::new(
+                        r#"(?i)\b(fill|stroke)(\s*=\s*"|\s*:\s*)(#[0-9a-f]{3,8}|rgba?\([^)]*\)|hsla?\([^)]*\)|[a-z]+)"#,
+                    )
+                    .ok()
+                },
+            );
+            if let Some(coloured) = COLOURED.as_ref() {
+                svg = coloured
+                    .replace_all(&svg, |c: &regex::Captures<'_>| {
+                        let value = &c[3];
+                        if value.eq_ignore_ascii_case("none")
+                            || value.eq_ignore_ascii_case("transparent")
+                        {
+                            c[0].to_owned()
+                        } else {
+                            format!("{}{}{ink}", &c[1], &c[2])
+                        }
+                    })
+                    .into_owned();
+            }
+            // A shape that names no fill is drawn black: its root's fill.
+            if let Some(at) = svg.find("<svg")
+                && let Some(tag) = svg.get(at..).and_then(|rest| rest.split('>').next())
+                && !tag.contains("fill=")
+            {
+                svg.insert_str(at.saturating_add(4), &format!(" fill=\"{ink}\""));
+            }
+        }
+        format!(
+            "{SVG}{}",
+            base64::engine::general_purpose::STANDARD.encode(svg.as_bytes())
+        )
+    }
+
     /// A toolbar image of an extension linked in, which has no folder: file
     /// `image` among its `files` (`Extension::files`), as a `data:` URI.
     /// None when it is not one of them or not an image.
@@ -996,6 +1056,57 @@ mod tests {
     use super::*;
     use crate::contrib::Contribution;
     use crate::toolbar::ToolItem;
+
+    fn svg_uri(svg: &str) -> String {
+        use base64::Engine as _;
+        format!(
+            "data:image/svg+xml;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(svg)
+        )
+    }
+
+    fn svg_of(uri: &str) -> String {
+        use base64::Engine as _;
+        let b = uri.strip_prefix("data:image/svg+xml;base64,").unwrap();
+        String::from_utf8(base64::engine::general_purpose::STANDARD.decode(b).unwrap()).unwrap()
+    }
+
+    /// A toolbar image follows the theme (#844): `currentColor` is the
+    /// item's ink, and with `tint` every colour a glyph was drawn in.
+    #[test]
+    fn a_toolbar_image_is_drawn_in_the_items_ink() {
+        let glyph = svg_uri(
+            r##"<svg viewBox="0 0 10 10"><path fill="#8b919c" d="M0 0h10v10z"/><rect style="stroke: #000; fill:none" fill-rule="evenodd"/><circle fill="currentColor"/></svg>"##,
+        );
+        // Dark chrome, then light: the same file in each theme's ink.
+        for ink in ["#e4e4e7", "#18181b"] {
+            let own = svg_of(&Toolbars::tinted(&glyph, ink, false));
+            assert!(own.contains(&format!(r#"<circle fill="{ink}"/>"#)), "{own}");
+            assert!(own.contains("#8b919c"), "untinted, its own colours stay");
+            let tinted = svg_of(&Toolbars::tinted(&glyph, ink, true));
+            assert!(
+                !tinted.contains("#8b919c") && !tinted.contains("#000"),
+                "{tinted}"
+            );
+            assert!(tinted.contains(&format!(r#"fill="{ink}""#)));
+            assert!(tinted.contains("fill:none"), "none stays none");
+            assert!(tinted.contains("fill-rule=\"evenodd\""));
+        }
+        // A shape with no fill is drawn black: tinted, its root's fill.
+        let bare = svg_of(&Toolbars::tinted(
+            &svg_uri("<svg><path d=\"M0 0\"/></svg>"),
+            "#fff",
+            true,
+        ));
+        assert!(bare.starts_with(r##"<svg fill="#fff">"##), "{bare}");
+        // Not an SVG, or not a plain colour: as it is.
+        assert_eq!(
+            Toolbars::tinted("data:image/png;base64,AA==", "#fff", true),
+            "data:image/png;base64,AA=="
+        );
+        assert_eq!(Toolbars::tinted(&glyph, "var(--ink)", true), glyph);
+        assert_eq!(Toolbars::tinted(&glyph, "red\"/><script>", true), glyph);
+    }
 
     fn bar(id: &str, action: &str) -> ToolbarDecl {
         ToolbarDecl {

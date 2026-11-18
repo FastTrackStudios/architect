@@ -265,13 +265,24 @@ pane's id, the host's theme as tokens and kept current, `mount`'s extras
 with its `PaintWake` (a wake from any thread asks for a frame), and every
 input kind with its modifiers: pointer, wheel (in logical pixels, signed
 as the web's, at the pointer's point in the view), touch, keys down and
-up, focus, composed text. A process view is told its pane's id and state
+up, focus, composed text, and the pointer leaving
+(`ViewInput::PointerLeave`, after a move to where it went;
+`architect_workspace::paint::left_view`; a `kind = "process"` program
+gets it as a move to NaN, which one built before it reads as a move
+that hits nothing). A process view is told its pane's id and state
 (`features/extensions/src/remote.rs` `RemotePaneView`,
 `linked::PANE_CLAIM`), which a view reads with `linked::use_pane_state`
-either way. Test: `apps/sandbox/sketch/tests/paint_parity.rs` (one view
-both ways, the same log). Not the same yet: a process's `ViewCtx` has an
-empty `ActionList`, and `document::Style` in a process view reaches no
-head (put a `style` element inline).
+either way, and where it was in it (`linked::use_view_state`: zoom,
+scroll, selection, a mode, as one string the pane keeps,
+`architect_workspace::Pane::view_state`), given back when its program
+restarts or its pane moves or pops out; `ViewState::set` keeps a new
+one (in a process, the host call `set_view_state`, taken only by a pane
+showing that extension's view). Test: `apps/sandbox/sketch/tests/paint_parity.rs` (one view
+both ways, the same log). In a process the `ViewCtx`'s `ActionList` is
+the app's actions the extension may run, each run through its host
+(`guest::app_actions`, the host call `actions`), and the view is drawn
+under a root that gives it the app's theme store and a document whose
+`document::Style` its host applies.
 
 ## Composite kinds
 

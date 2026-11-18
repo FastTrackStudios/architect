@@ -347,6 +347,12 @@ impl RemoteDocument {
             return (false, false);
         }
         let (x, y) = (p.coords.client_x, p.coords.client_y);
+        let mods = architect_scene::region::Mods::held(
+            p.mods.contains(Modifiers::SHIFT),
+            p.mods.contains(Modifiers::ALT),
+            p.mods.contains(Modifiers::CONTROL),
+            p.mods.contains(Modifiers::META),
+        );
         let holding = self.pointed.filter(|node| {
             self.painted.get(node).is_some_and(|p| {
                 p.lock()
@@ -375,7 +381,11 @@ impl RemoteDocument {
             && let Some(painted) = self.painted.get(&was)
         {
             let mut p = painted.lock().unwrap_or_else(PoisonError::into_inner);
-            outcomes.push(p.pointer(PointerKind::Gone, peniko::kurbo::Point::ZERO));
+            outcomes.push(p.pointer(
+                PointerKind::Gone,
+                peniko::kurbo::Point::ZERO,
+                architect_scene::region::Mods::NONE,
+            ));
         }
         self.pointed = target.map(|(node, _)| node);
         if let Some((node, at)) = target
@@ -384,7 +394,7 @@ impl RemoteDocument {
             let outcome = painted
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
-                .pointer(kind, at);
+                .pointer(kind, at, mods);
             outcomes.push(outcome);
             if kind == PointerKind::Gone {
                 self.pointed = None;
@@ -2010,6 +2020,9 @@ async fn follow(
             // An event is always answered (wire 5), with no edits when the
             // view did not change: that answer is timed, not drawn.
             let changes = !matches!(&frame, Frame::Edits { edits } if edits.is_empty());
+            if changes {
+                architect_workspace::frames::batch_arrived();
+            }
             // Its scenes decoded off the UI thread first.
             let (frame, decoded) = decode_scenes(frame).await;
             let applied = with_doc(&node, |doc, at| {
@@ -2033,6 +2046,7 @@ async fn follow(
                 // take the next present's place, and the frame that does
                 // change it waits a refresh behind (#840).
                 if changes {
+                    architect_workspace::frames::batch_applied();
                     pacer.request();
                 }
                 (applied, held)
@@ -2232,6 +2246,39 @@ pub fn RemoteView(
     }
 }
 
+/// What process views asked their panes to keep (`set_view_state`), by
+/// pane: `(extension, state)`, taken by the pane's [`RemotePaneView`].
+static VIEW_STATES: std::sync::LazyLock<(
+    Mutex<HashMap<String, (String, String)>>,
+    tokio::sync::watch::Sender<u64>,
+)> = std::sync::LazyLock::new(|| (Mutex::default(), tokio::sync::watch::Sender::new(0)));
+
+/// Extension `extension` asks pane `pane` to keep `state` as where its
+/// view is (`HostRequest::SetViewState`): the pane takes it if it shows
+/// one of that extension's views.
+pub fn offer_view_state(extension: &str, pane: &str, state: &str) {
+    VIEW_STATES
+        .0
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(pane.to_owned(), (extension.to_owned(), state.to_owned()));
+    VIEW_STATES.1.send_modify(|n| *n = n.wrapping_add(1));
+}
+
+/// What `extension` offered pane `pane`, taken.
+fn take_view_state(extension: &str, pane: &str) -> Option<String> {
+    let mut all = VIEW_STATES.0.lock().unwrap_or_else(PoisonError::into_inner);
+    match all.get(pane) {
+        Some((from, _)) if from == extension => all.remove(pane).map(|(_, s)| s),
+        // Another extension's pane: not its to change.
+        Some(_) => {
+            all.remove(pane);
+            None
+        }
+        None => None,
+    }
+}
+
 /// [`RemoteView`] in a workspace pane: told the pane's id and state
 /// (`linked::PANE_CLAIM`), now and whenever the state changes, so a view
 /// opened on a file (an opener's) knows which.
@@ -2250,11 +2297,34 @@ pub fn RemotePaneView(
             .as_ref()
             .map(architect_workspace::PaneHandle::state)
             .unwrap_or_default(),
+        &pane
+            .as_ref()
+            .map(architect_workspace::PaneHandle::view_state)
+            .unwrap_or_default(),
     );
     let mut input = use_signal(|| now.clone());
     if *input.peek() != now {
         input.set(now);
     }
+    // What its view keeps (`set_view_state`): its pane takes it, from
+    // this extension only, and gives it back on every start.
+    let keeper = pane;
+    let owner = extension.clone();
+    use_future(move || {
+        let (pane, owner) = (keeper.clone(), owner.clone());
+        async move {
+            let Some(pane) = pane else { return };
+            let mut changes = VIEW_STATES.1.subscribe();
+            loop {
+                if let Some(state) = take_view_state(&owner, &pane.id.0) {
+                    pane.set_view_state(state);
+                }
+                if changes.changed().await.is_err() {
+                    return;
+                }
+            }
+        }
+    });
     rsx! { RemoteView { processes, extension, view, overlay, engine, input: Some(input) } }
 }
 
@@ -2652,10 +2722,16 @@ mod image_tests {
 
     impl NetHandler for Keep {
         fn bytes(self: Box<Self>, _url: String, bytes: Bytes) {
-            *self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Ok(bytes.to_vec()));
+            *self
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Ok(bytes.to_vec()));
         }
         fn error(self: Box<Self>, _url: String, why: String) {
-            *self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Err(why));
+            *self
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Err(why));
         }
     }
 
@@ -2663,7 +2739,9 @@ mod image_tests {
         let got = Got::default();
         let url = Url::parse(url).unwrap_or_else(|e| panic!("{url}: {e}"));
         DataOnly.fetch(0, Request::get(url), Box::new(Keep(Arc::clone(&got))));
-        got.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()
+        got.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
     }
 
     /// A view's `<img src="data:…">` (Keyflow's palette glyphs) gets its

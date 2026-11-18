@@ -376,6 +376,7 @@ pub fn WebPaintPane(mount: WebPaintMount, #[props(default)] theme: ThemeTokens) 
                 onpointermove: { let core = core.clone(); move |e| if let Some(event) = e.data().try_as_web_event() { pointer(&core, event, "move"); } },
                 onpointerup: { let core = core.clone(); move |e| if let Some(event) = e.data().try_as_web_event() { pointer(&core, event, "end"); } },
                 onpointercancel: { let core = core.clone(); move |e| if let Some(event) = e.data().try_as_web_event() { pointer(&core, event, "cancel"); } },
+                onpointerleave: { let core = core.clone(); move |e| if e.data().pointer_type() != "touch" { input(&core, ViewInput::PointerLeave); } },
                 onwheel: { let core = core.clone(); move |e| { e.prevent_default(); if let Some(event) = e.data().try_as_web_event() { wheel(&core, event); } } },
                 onkeydown: { let core = core.clone(); move |e| if let Some(event) = e.data().try_as_web_event() { key(&core, event, true); } },
                 onkeyup: { let core = core.clone(); move |e| if let Some(event) = e.data().try_as_web_event() { key(&core, event, false); } },

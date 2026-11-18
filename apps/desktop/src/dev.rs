@@ -59,6 +59,10 @@ pub const DEV_ENV: &str = "ARCHITECT_DEV";
 const ONLY_ENV: &str = "ARCHITECT_DEV_ONLY";
 const EXTENSIONS_ENV: &str = "ARCHITECT_DEV_EXTENSIONS";
 const OPEN_ENV: &str = "ARCHITECT_DEV_OPEN";
+
+/// How long `--open` waits for a development copy's opener to claim the
+/// file (its program started and said what it opens).
+const OPENER_WAIT: Duration = Duration::from_secs(20);
 const LAYOUT_ENV: &str = "ARCHITECT_DEV_LAYOUT";
 const VAULT_ENV: &str = "ARCHITECT_DEV_VAULT";
 const SEED_ENV: &str = "ARCHITECT_DEV_SEED";
@@ -908,7 +912,7 @@ fn apply(inst: &Instance, ask: &Ask) -> Result<(), String> {
         failed.push(e);
     }
     if let Some(path) = &ask.open
-        && let Err(e) = open(&socket, path)
+        && let Err(e) = open(&socket, path, !ask.extensions.is_empty())
     {
         failed.push(e);
     }
@@ -1064,9 +1068,24 @@ fn hide(inst: &Instance, socket: &Path, parts: &[String]) -> Result<(), String> 
 /// Opens `path` (a vault path): with the extension that claims it
 /// (`EXT_OPEN`: a `.kf` chart), else as a note of the person's vault
 /// (`@me`), beside the document on show (`WORKSPACE_OPEN`).
-fn open(socket: &Path, path: &str) -> Result<(), String> {
-    let Err(why) = act(socket, "EXT_OPEN", &json!({ "path": path })) else {
-        return Ok(());
+///
+/// With development copies (`dev_copies`) the opener may be one of
+/// theirs that is not there yet: a process copy's program says what it
+/// opens once it runs. It is asked again until one claims it, for up to
+/// [`OPENER_WAIT`], before the path opens as a note.
+fn open(socket: &Path, path: &str, dev_copies: bool) -> Result<(), String> {
+    let began = Instant::now();
+    // A note is the vault's: nothing to wait for.
+    let note = path.starts_with('@') || path.to_ascii_lowercase().ends_with(".md");
+    let wait = dev_copies && !note;
+    let why = loop {
+        match act(socket, "EXT_OPEN", &json!({ "path": path })) {
+            Ok(_) => return Ok(()),
+            Err(_) if wait && began.elapsed() < OPENER_WAIT => {
+                std::thread::sleep(Duration::from_millis(250));
+            }
+            Err(why) => break why,
+        }
     };
     let layout = act(socket, "WORKSPACE_LAYOUT", &Value::Null)?;
     let beside = layout

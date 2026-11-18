@@ -63,6 +63,7 @@ mod ctx;
 pub mod deck;
 mod drop;
 mod field_focus;
+pub mod frames;
 pub mod guide;
 #[cfg(feature = "home")]
 pub mod home;

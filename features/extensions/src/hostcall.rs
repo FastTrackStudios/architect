@@ -23,6 +23,7 @@
 //! | `edit_document {path, edits, name?}` | edits as one CRDT transaction, one undo step (`DocEdit`s): its text after | `writes = ["documents"]` |
 //! | `rename_document {path, to}` / `move_document {path, folder}` | a new path (or folder) for it, its history kept: its `DocInfo` | `writes = ["documents"]` |
 //! | `delete_document {path}` | deletes it | `writes = ["documents"]` |
+//! | `undo_document {path}` / `redo_document {path}` | takes back the document's last undo step (its own history: a CRDT document's every step, a vault note's edits made through the documents) or makes it again; edits made since stay: `{step, text}`, `null` when there is none | `writes = ["documents"]` |
 //! | `watch_documents {action \| script, function?}` | its action (script) on every `doc.created/saved/renamed/deleted`: the hooks' keys | `reads = ["documents"]` |
 //! | `editor_state` | the editor being typed in: `{editor, context, text, selection, primary, cursor, node, version}` (`crate::editor::EditorView`; `node` is the block at the cursor: a list item, a table cell and its table's cells, …) | `reads = ["editor"]` or `writes = ["editor"]` |
 //! | `edit_editor {changes, selection?, name?, base?}` | its changes (byte offsets into the text it read) and selection as one transaction, one undo step named `name`, made as the extension (`architect_editor::ext::EditCommand`): the editor after | `writes = ["editor"]` |
@@ -31,6 +32,8 @@
 //! | `setting {key}` / `set_setting {key, value}` | one of its own settings (`<id>.…`) | nothing |
 //! | `data {key}` / `set_data {key, value?}` | its own data, kept for it | nothing |
 //! | `log {text, level?}` | a line in its log (`EXT_LOGS`) | nothing |
+//! | `actions` | the app's actions it may run (its own, and what `capabilities.actions` reaches), each as the Action List describes it: what a process view's `ViewCtx::actions` holds | nothing |
+//! | `set_view_state {pane, state}` | keeps where its view in pane `pane` is (zoom, scroll, selection, a mode), given back when the view starts again: its program restarted, the pane moved or popped out (`linked::use_view_state`, which calls it from a process) | its own view's pane |
 //! | `service {service, method, args?}` | calls another extension's service: its provider's action `<PREFIX><METHOD>`, as this extension | `[requires] <service>`, and `capabilities.effect` |
 //! | `point {point}` | the items of one of its own points (`[[points]]`) | owning it |
 //! | `window {id, open, state?}` | opens or closes one of its own windows (`[[windows]]`) | nothing |
@@ -161,6 +164,15 @@ pub enum HostRequest {
     DeleteDocument {
         path: String,
     },
+    /// Takes back document `path`'s last undo step: `{step, text}`, or
+    /// `null` with none.
+    UndoDocument {
+        path: String,
+    },
+    /// Makes the step of document `path` undone last again.
+    RedoDocument {
+        path: String,
+    },
     /// Its action (a Luau script) on every document event —
     /// `doc.created`, `doc.saved`, `doc.renamed`, `doc.deleted` — as
     /// hooks made at run time: their keys.
@@ -215,6 +227,18 @@ pub enum HostRequest {
         key: String,
         #[serde(default)]
         value: Option<Value>,
+    },
+    /// The app's actions it may run (`run`): its own and those its
+    /// capabilities reach, each `{id, display_name, description,
+    /// category, group, shortcut, effect, params_schema, result_schema,
+    /// enabled, checked}`. What a process view's `ViewCtx::actions` lists.
+    Actions,
+    /// Keeps where its view in pane `pane` is (zoom, scroll, selection),
+    /// given back when the view starts again (`linked::use_view_state`):
+    /// only a pane showing one of its own views.
+    SetViewState {
+        pane: String,
+        state: String,
     },
     Log {
         text: String,
@@ -768,6 +792,8 @@ impl HostRequest {
             Self::RenameDocument { .. } => "rename_document",
             Self::MoveDocument { .. } => "move_document",
             Self::DeleteDocument { .. } => "delete_document",
+            Self::UndoDocument { .. } => "undo_document",
+            Self::RedoDocument { .. } => "redo_document",
             Self::WatchDocuments { .. } => "watch_documents",
             Self::EditorState => "editor_state",
             Self::EditEditor { .. } => "edit_editor",
@@ -779,6 +805,8 @@ impl HostRequest {
             Self::Data { .. } => "data",
             Self::SetData { .. } => "set_data",
             Self::Log { .. } => "log",
+            Self::SetViewState { .. } => "set_view_state",
+            Self::Actions => "actions",
             Self::Service { .. } => "service",
             Self::Point { .. } => "point",
             Self::Window { .. } => "window",
@@ -987,7 +1015,9 @@ pub fn check(
         | HostRequest::EditDocument { .. }
         | HostRequest::RenameDocument { .. }
         | HostRequest::MoveDocument { .. }
-        | HostRequest::DeleteDocument { .. } => (
+        | HostRequest::DeleteDocument { .. }
+        | HostRequest::UndoDocument { .. }
+        | HostRequest::RedoDocument { .. } => (
             "writes",
             if may.may_write(DOCUMENTS) {
                 Ok(())
@@ -1041,6 +1071,10 @@ pub fn check(
         HostRequest::Data { .. } | HostRequest::SetData { .. } => ("data", Ok(())),
         HostRequest::ReadFile { .. } | HostRequest::WriteFile { .. } => ("files", Ok(())),
         HostRequest::Log { .. } => ("log", Ok(())),
+        // Its own panes only: the pane that shows its view takes it.
+        HostRequest::SetViewState { .. } => ("set_view_state", Ok(())),
+        // It lists only what it may run.
+        HostRequest::Actions => ("actions", Ok(())),
         // Checked by the host that answers them: a service against its
         // [requires] and the method's effect, a point and a window as its own.
         HostRequest::Service { .. } => ("requires", Ok(())),

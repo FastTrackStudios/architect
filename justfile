@@ -621,3 +621,12 @@ check-token-mints:
 # release-sums.sh and release-publish.sh's decisions (PR checks run it)
 release-sums-test:
     bash scripts/release-sums-test.sh
+
+# The window's frame-time report (#839): the sandbox's Sketch timelines
+# (2,000 and 20,000 clips) and arrangement, linked in and as a process,
+# playing, wheeling, panning and dragging, on this
+# display at its own refresh rate. Isolated instances, scratch folders.
+# WIDTH=5120 HEIGHT=1440 sizes the window; PROFILE=dev, SECONDS_EACH,
+# VIEWS, SCENARIOS, OUT as scripts/frames.sh says.
+frames:
+    bash scripts/frames.sh
