@@ -1978,6 +1978,9 @@ async fn follow(
             // An event is always answered (wire 5), with no edits when the
             // view did not change: that answer is timed, not drawn.
             let changes = !matches!(&frame, Frame::Edits { edits } if edits.is_empty());
+            if changes {
+                architect_workspace::frames::batch_arrived();
+            }
             // Its scenes decoded off the UI thread first.
             let (frame, decoded) = decode_scenes(frame).await;
             let applied = with_doc(&node, |doc, at| {
@@ -2001,6 +2004,7 @@ async fn follow(
                 // take the next present's place, and the frame that does
                 // change it waits a refresh behind (#840).
                 if changes {
+                    architect_workspace::frames::batch_applied();
                     pacer.request();
                 }
                 (applied, held)
