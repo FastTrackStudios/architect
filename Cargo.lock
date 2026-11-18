@@ -1445,6 +1445,9 @@ dependencies = [
  "tracing",
  "unicode-normalization",
  "url",
+ "uuid",
+ "vault-collab",
+ "vault-live",
  "vault-proto",
  "vault-query",
  "vox",
@@ -2095,6 +2098,7 @@ dependencies = [
  "anyrender",
  "anyrender_vello_cpu",
  "architect",
+ "architect-commands",
  "architect-extensions",
  "architect-scene",
  "architect-theme",
@@ -7111,8 +7115,8 @@ dependencies = [
 
 [[package]]
 name = "editor-keyflow"
-version = "0.0.1-alpha"
-source = "git+https://github.com/FastTrackStudios/keyflow?rev=337842d994b8025aadd810c49281cc9cc8a10985#337842d994b8025aadd810c49281cc9cc8a10985"
+version = "0.5.5"
+source = "git+https://github.com/FastTrackStudios/keyflow?rev=d9b55251b7f23b505a789d6914f1f8ad1ce40bac#d9b55251b7f23b505a789d6914f1f8ad1ce40bac"
 dependencies = [
  "dioxus",
  "editor-state",
@@ -7275,8 +7279,8 @@ checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 
 [[package]]
 name = "engraver"
-version = "0.0.1-alpha"
-source = "git+https://github.com/FastTrackStudios/keyflow?rev=337842d994b8025aadd810c49281cc9cc8a10985#337842d994b8025aadd810c49281cc9cc8a10985"
+version = "0.5.5"
+source = "git+https://github.com/FastTrackStudios/keyflow?rev=d9b55251b7f23b505a789d6914f1f8ad1ce40bac#d9b55251b7f23b505a789d6914f1f8ad1ce40bac"
 dependencies = [
  "anyrender",
  "bitflags 2.13.2",
@@ -10628,8 +10632,8 @@ dependencies = [
 
 [[package]]
 name = "keyflow"
-version = "0.0.1-alpha"
-source = "git+https://github.com/FastTrackStudios/keyflow?rev=337842d994b8025aadd810c49281cc9cc8a10985#337842d994b8025aadd810c49281cc9cc8a10985"
+version = "0.5.5"
+source = "git+https://github.com/FastTrackStudios/keyflow?rev=d9b55251b7f23b505a789d6914f1f8ad1ce40bac#d9b55251b7f23b505a789d6914f1f8ad1ce40bac"
 dependencies = [
  "color-eyre",
  "colored 3.1.1",
@@ -10647,8 +10651,8 @@ dependencies = [
 
 [[package]]
 name = "keyflow-lang"
-version = "0.0.1-alpha"
-source = "git+https://github.com/FastTrackStudios/keyflow?rev=337842d994b8025aadd810c49281cc9cc8a10985#337842d994b8025aadd810c49281cc9cc8a10985"
+version = "0.5.5"
+source = "git+https://github.com/FastTrackStudios/keyflow?rev=d9b55251b7f23b505a789d6914f1f8ad1ce40bac#d9b55251b7f23b505a789d6914f1f8ad1ce40bac"
 dependencies = [
  "keyflow-proto",
  "thiserror 2.0.20",
@@ -10658,7 +10662,7 @@ dependencies = [
 [[package]]
 name = "keyflow-proto"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/keyflow?rev=337842d994b8025aadd810c49281cc9cc8a10985#337842d994b8025aadd810c49281cc9cc8a10985"
+source = "git+https://github.com/FastTrackStudios/keyflow?rev=d9b55251b7f23b505a789d6914f1f8ad1ce40bac#d9b55251b7f23b505a789d6914f1f8ad1ce40bac"
 dependencies = [
  "architect",
  "color-palette",
@@ -10674,7 +10678,7 @@ dependencies = [
 [[package]]
 name = "keyflow-ui"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/keyflow?rev=337842d994b8025aadd810c49281cc9cc8a10985#337842d994b8025aadd810c49281cc9cc8a10985"
+source = "git+https://github.com/FastTrackStudios/keyflow?rev=d9b55251b7f23b505a789d6914f1f8ad1ce40bac#d9b55251b7f23b505a789d6914f1f8ad1ce40bac"
 dependencies = [
  "anyrender",
  "architect-ui",
@@ -19736,6 +19740,7 @@ version = "0.1.0"
 dependencies = [
  "architect-telemetry",
  "architect-workspace-hack",
+ "async-trait",
  "crdt",
  "sha2 0.10.9",
  "tempfile",

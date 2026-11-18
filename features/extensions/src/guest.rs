@@ -306,8 +306,18 @@ impl Guest {
         {
             *host_slot().lock().unwrap_or_else(PoisonError::into_inner) = Some(client);
         }
+        // Live documents, on the same connection (`crate::live`).
+        #[cfg(feature = "doc-sync")]
+        if let Ok(client) = connection.open_lane::<crdt::sync::DocSyncClient>().await {
+            *docs_slot().lock().unwrap_or_else(PoisonError::into_inner) = Some(client);
+        }
         connection.closed().await;
         host_slot()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        #[cfg(feature = "doc-sync")]
+        docs_slot()
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take();
@@ -351,6 +361,47 @@ pub async fn host(
             message: format!("the host service: {e}"),
         })?;
     crate::hostcall::HostAnswer::from_json(&answer).into_result()
+}
+
+#[cfg(feature = "doc-sync")]
+fn docs_slot() -> &'static Mutex<Option<crdt::sync::DocSyncClient>> {
+    static DOCS: OnceLock<Mutex<Option<crdt::sync::DocSyncClient>>> = OnceLock::new();
+    DOCS.get_or_init(|| Mutex::new(None))
+}
+
+/// The `DocSync` lane to the host, on this process's connection
+/// (`crate::live`): what a [`crate::live::DocLane`] syncs over.
+///
+/// # Errors
+///
+/// Not connected yet.
+#[cfg(feature = "doc-sync")]
+pub fn doc_sync() -> Result<crate::live::SyncClient, crate::hostcall::HostError> {
+    docs_slot()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+        .map(crate::live::SyncClient::new)
+        .ok_or_else(|| crate::hostcall::HostError::Failed {
+            message: "no documents lane: not connected to the host".to_owned(),
+        })
+}
+
+/// The vault file `path`, a document of a kind this extension declares, as
+/// a live document of the node's: a lane to sync a replica of it over
+/// (`crate::live`).
+///
+/// # Errors
+///
+/// The host refused it (not its kind, no `reads = ["documents"]`, no such
+/// document) or has no live documents.
+#[cfg(feature = "doc-sync")]
+pub async fn document(path: &str) -> Result<crate::live::DocLane, crate::hostcall::HostError> {
+    let answer = host(crate::hostcall::HostRequest::LiveDocument {
+        path: path.to_owned(),
+    })
+    .await?;
+    crate::live::DocLane::from_answer(answer, doc_sync()?)
 }
 
 /// The views open now, by pane: where their events go.
@@ -471,6 +522,18 @@ impl ProcessExtensionStreamSource for Served {
     }
 
     fn view_attach(&self, open: Open, sink: EventSink<Frame>) {
+        self.attach(open, sink, false);
+    }
+
+    fn scene_view_attach(&self, open: Open, sink: EventSink<Frame>) {
+        self.attach(open, sink, true);
+    }
+}
+
+impl Served {
+    /// Mounts `open`'s view on a thread of its own; `bytes`: its scene
+    /// batches cross as bytes beside its edits (`crate::wire::BYTES_WIRE`).
+    fn attach(&self, open: Open, sink: EventSink<Frame>, bytes: bool) {
         let root = self.guest.views.get(&open.view).copied();
         let (to, events) = mpsc::unbounded_channel();
         self.panes
@@ -484,6 +547,9 @@ impl ProcessExtensionStreamSource for Served {
                 let span =
                     tracing::info_span!("ext.view", ext.view = %open.view, ext.pane = open.pane);
                 let _entered = span.enter();
+                if bytes {
+                    crate::scene::outbox::enable();
+                }
                 match root {
                     Some(root) => render(root, events, &sink),
                     None => refuse(&sink, format!("no view {}", open.view)),
@@ -840,10 +906,21 @@ impl WireWriter {
         self.edits.is_empty()
     }
 
-    /// What was written since the last take, as one frame.
+    /// What was written since the last take, as one frame: with the
+    /// layers batches its edits name, as bytes, in a view that sends
+    /// them so (`crate::wire::BYTES_WIRE`).
     pub fn take(&mut self) -> Frame {
-        Frame::Edits {
-            edits: std::mem::take(&mut self.edits),
+        let edits = std::mem::take(&mut self.edits);
+        let batches = crate::scene::outbox::take();
+        if batches.is_empty() {
+            return Frame::Edits { edits };
+        }
+        Frame::Batches {
+            edits,
+            batches: batches
+                .into_iter()
+                .map(|(n, bytes)| crate::wire::Batch { n, bytes })
+                .collect(),
         }
     }
 }
@@ -980,7 +1057,7 @@ mod click_tests {
         vdom.rebuild(&mut writer);
         let id = match writer.take() {
             // The node a handler was put on: the `PushId` before `Listen`.
-            Frame::Edits { edits } => edits
+            Frame::Edits { edits } | Frame::Batches { edits, .. } => edits
                 .windows(2)
                 .find_map(|w| match w {
                     [Edit::PushId { id }, Edit::Listen { .. }] => Some(*id),

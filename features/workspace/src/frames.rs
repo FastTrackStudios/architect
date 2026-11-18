@@ -213,6 +213,30 @@ static ON: AtomicBool = AtomicBool::new(false);
 static BATCH_ARRIVED: AtomicU64 = AtomicU64::new(0);
 static BATCH_APPLIED: AtomicU64 = AtomicU64::new(0);
 static BATCHES: AtomicU64 = AtomicU64::new(0);
+/// Frames a runtime view asked for since the last frame: at once, and
+/// paced to the display ([`crate::pacing`]).
+static ASKED_NOW: AtomicU64 = AtomicU64::new(0);
+static ASKED_PACED: AtomicU64 = AtomicU64::new(0);
+
+/// How a runtime view asked for a frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Asked {
+    /// At once: no wait would save anything.
+    Now,
+    /// After waiting for its refresh's turn.
+    Paced,
+}
+
+/// A runtime view asked its window for a frame ([`crate::pacing`]).
+pub fn asked(how: Asked) {
+    if !ON.load(Ordering::Relaxed) {
+        return;
+    }
+    match how {
+        Asked::Now => ASKED_NOW.fetch_add(1, Ordering::Relaxed),
+        Asked::Paced => ASKED_PACED.fetch_add(1, Ordering::Relaxed),
+    };
+}
 
 struct Recording {
     began: Instant,
@@ -260,6 +284,10 @@ pub struct FrameRecord {
     pub batch_arrived_us: Option<u64>,
     pub batch_applied_us: Option<u64>,
     pub batches: u32,
+    /// Frames a runtime view asked for since the last frame, at once and
+    /// paced ([`crate::pacing`]).
+    pub asked_now: u32,
+    pub asked_paced: u32,
 }
 
 /// Starts a recording (dropping one under way). `false` if one was
@@ -280,6 +308,8 @@ pub fn start() -> bool {
     BATCH_ARRIVED.store(0, Ordering::Relaxed);
     BATCH_APPLIED.store(0, Ordering::Relaxed);
     BATCHES.store(0, Ordering::Relaxed);
+    ASKED_NOW.store(0, Ordering::Relaxed);
+    ASKED_PACED.store(0, Ordering::Relaxed);
     ON.store(true, Ordering::Release);
     !was
 }
@@ -397,6 +427,8 @@ pub fn frame(window: u64, began: Instant, ended: Instant, draw: Duration, render
     let arrived = BATCH_ARRIVED.swap(0, Ordering::Relaxed);
     let applied = BATCH_APPLIED.swap(0, Ordering::Relaxed);
     let batches = BATCHES.swap(0, Ordering::Relaxed);
+    let asked_now = ASKED_NOW.swap(0, Ordering::Relaxed);
+    let asked_paced = ASKED_PACED.swap(0, Ordering::Relaxed);
     let at = |v: u64| (v > 0).then(|| v - 1);
     with(|r| {
         let (input, inputs) = r
@@ -428,6 +460,8 @@ pub fn frame(window: u64, began: Instant, ended: Instant, draw: Duration, render
             batch_arrived_us: at(arrived),
             batch_applied_us: at(applied),
             batches: u32::try_from(batches).unwrap_or(u32::MAX),
+            asked_now: u32::try_from(asked_now).unwrap_or(u32::MAX),
+            asked_paced: u32::try_from(asked_paced).unwrap_or(u32::MAX),
         });
     });
 }
@@ -512,6 +546,12 @@ pub struct Recorded {
     pub inputs: u32,
     pub frames_with_batch: u32,
     pub batches: u32,
+    /// Frames a runtime view asked for at once, and paced to the display
+    /// ([`crate::pacing`]).
+    #[facet(default)]
+    pub frames_asked_now: u32,
+    #[facet(default)]
+    pub frames_paced: u32,
     /// Records past [`MAX_FRAMES`], not kept.
     pub not_kept: u64,
 }
@@ -612,6 +652,8 @@ impl Recorded {
             frames_with_input: count(&mine, |f| f.inputs > 0),
             inputs: mine.iter().map(|f| f.inputs).sum(),
             frames_with_batch: count(&mine, |f| f.batches > 0),
+            frames_asked_now: count(&mine, |f| f.asked_now > 0),
+            frames_paced: count(&mine, |f| f.asked_paced > 0),
             batches: mine.iter().map(|f| f.batches).sum(),
             not_kept,
         }
@@ -965,6 +1007,8 @@ mod tests {
             batch_arrived_us: None,
             batch_applied_us: None,
             batches: 0,
+            asked_now: 0,
+            asked_paced: 0,
         }
     }
 

@@ -168,6 +168,19 @@ One host per org, mounted on the org's lane behind the permissions gate
 (the [identity chapter](@/guide/identity.md)). Every refusal answers
 "unknown document", so a caller cannot tell forbidden from absent.
 
+A caller who may `read` a document but not `write` it **follows** it on
+the registry: its sync session brings the document and every later edit
+down, and the first update it sends up ends the session with
+`SyncError::Forbidden`, nothing of it applied. Its presence shows it
+everyone (a leader's transport included) and drops what it publishes, and
+`DocPresence::now` answers it as anyone. A reader's app runs
+`SyncedDoc::new(doc_id, doc).read_only()`, which never sends up. Without
+`DocPermissions`, `registry.with_authorizer(..)` says who may open (read)
+and `with_write_authorizer(..)` who may also write; the second defaults to
+the first (`a_reader_follows_live_and_cannot_write`,
+`a_readers_presence_reads_and_publishes_nothing` in
+`features/crdt/crdt/tests/registry.rs`).
+
 ### Lineage
 
 A document is created once, on one device, and adopted by the others. Two
@@ -197,8 +210,15 @@ architect_devices::serve(&endpoint, access.devices.clone(), move |remote| {
   Whoever holds it edits that one document until `shares.revoke(&link)`. The
   other side parses it, dials the endpoint, presents the key with
   `LinkKey::new(&link)` as middleware on a `DocSyncClient`, and runs
-  `SyncedDoc::new(link.doc_id, doc).run(&client)`. A link is a credential;
-  there are no read-only links yet.
+  `SyncedDoc::new(link.doc_id, doc).run(&client)`. A link is a credential.
+  `shares.share_with(&endpoint_id, doc_id, Access::Read)` makes a **read
+  link**: its guest follows the document live and writes nothing (an edit
+  it sends ends its session), so it joins with `SyncedDoc::read_only()`.
+  Its text carries `&access=read`, for display only: the node decides from
+  the key. Hand `access.admits` to the registry's `with_authorizer` and
+  `access.admits_write` to `with_write_authorizer`; `node_router` holds a
+  read link's guest to reading either way. Revoking cuts both kinds
+  (`a_read_link_follows_and_cannot_write`).
 - **The person's devices.** Run the account pass,
   `architect_devices::account::pass(&devices_client, &token, &this_device, &node, &access.devices)`
   (or `drive`, on every reconnect): it registers this device and lets the
@@ -225,9 +245,14 @@ is one too, so a Keyflow `.session` in a vault reaches the person's other
 devices, and the org's node, with no sync host of its own. The extension
 declares the kind in its manifest (`[[doc_kinds]]` with `files` and an
 optional `schema`); the node registers it while the extension is compiled
-in or installed (`apps/desktop/src/node/kinds.rs` `ExtensionKinds`, into the
-shared `features/crdt/crdt/src/kinds.rs` `SharedDocKinds`) and takes it off
-when the extension is uninstalled. Such a file is listed by the id in its
+in, installed, or loaded in the app's window — a development copy
+(`architect-desktop dev --extension <folder>`, `EXT_DEV`, `EXT_CLONE`)
+among them (`apps/desktop/src/node/kinds.rs` `ExtensionKinds`, into the
+shared `features/crdt/crdt/src/kinds.rs` `SharedDocKinds`; the window's
+extension host's contributions are followed by `kinds::follow` into
+`Parts::loaded_kinds`). It takes the kind off when the extension is
+uninstalled, unloaded, or reloaded without it — unless another of those
+still declares it. Such a file is listed by the id in its
 header (`features/crdt/crdt/src/file/mod.rs` `DocFile::peek`), opened with
 the file itself as its storage, its `main` branch, and attached to as a
 note is, under the vault's write guard for the file; another device makes
@@ -237,6 +262,60 @@ it empty, of the same lineage, before the first session fills it
 is two nodes doing it. An app edits the node's copy
 (`apps/desktop/src/node/mod.rs` `Running::document`), not the file: the file
 has one writer at a time.
+
+**An extension edits the node's copy.** The extension that owns the kind
+never opens the file either. It names the document by its vault path and
+syncs a replica of the node's copy through the host, linked in or as a
+process (`features/extensions/src/live.rs`):
+
+```rust
+// In an action or a view: `handle` is its `linked::Handle`
+// (`guest::document(path)` does the same in a plain process guest).
+let lane = handle.document("Songs/Opener.session").await?; // LiveDoc: doc_id, kind, writable
+let replica = lane.replica();          // an in-memory CrdtDoc, kept in step
+replica.attached().await?;
+let body = replica.doc().loro().get_text("body");
+body.insert(0, "Intro")?;
+replica.doc().loro().commit();         // reaches the node, its file, every device
+// Or drive a `SyncedDoc` of your own CrdtDoc: `lane.sync(&mut synced).await`.
+```
+
+The host answers `live_document` only for a file of a kind the extension's
+manifest declares (`[[doc_kinds]]`), and only with `reads = ["documents"]`;
+its edits reach the node only with `writes = ["documents"]`, otherwise it
+follows (a share-link guest, whose capabilities have no `writes`, only
+follows). The session is the ordinary `DocSync` one, on the connection a
+process already has to the host (a linked extension's is in memory),
+relayed to the node's registry as the extension, for whoever it acts for, so
+the registry's authorizer and the vault's write guard decide
+(`features/extensions/src/live.rs` `ExtensionDocSync`). The app gives its
+host the node's documents with `Host::set_kind_documents`
+(`features/extensions/src/live.rs` `RegistryDocuments` over a
+`VaultCollab`). `features/extensions/tests/live_documents.rs` is a process
+extension editing a `.session` in a vault and following the node's edits,
+a linked one that may only read, and the refusals.
+
+Deleting such a file deletes the document everywhere, as a note's delete
+does. A file the node listed and finds gone at its next listing
+(`features/vault/vault-collab/src/lib.rs` `VaultCollab::notice_deletes`,
+after `apps/desktop/src/node/catalog.rs` `VaultCatalog::notes`) sets the
+document's tombstone (`meta.deleted`), which reaches every other holder and
+removes its file there. A deleted document is kept under the node's
+`crdt/deleted-documents/`, which also says the id is deleted: a peer that
+still lists it, a later sweep or a restart never makes its file again
+(`features/vault/vault-collab/src/documents.rs`). A file of it put back (a
+restore) is the document again on its next open. One deleted while nobody
+had it open is tombstoned as soon as a peer's history reaches it.
+`apps/desktop/tests/node.rs` `an_extensions_document_deleted_on_one_node_is_deleted_on_the_other`
+is two nodes doing it.
+
+One document is one file per node. A copy carries the id it was copied
+from: while the first file is there the copy is not listed or synced (and
+is said once in the log); give it an id of its own to keep both. A rename
+moves the document with the file on that node, with no delete and no
+second file, but is not sent: another node keeps its file at the path it
+has. A delete the node did not see happen (the file removed while the node
+was stopped) is not noticed yet.
 
 <!-- media: doc-share-link-join — a share link copied on one device and opened on another, the document joining live -->
 <!-- media: lan-device-found — a device on the same network appearing by name, ready to sync -->

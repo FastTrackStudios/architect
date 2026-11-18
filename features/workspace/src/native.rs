@@ -136,6 +136,7 @@ pub fn launch_with_fonts(
         own,
         own_queue,
         fonts,
+        refresh_known: false,
     };
     // An event loop that cannot run has no window to say so in; the
     // process ends either way.
@@ -623,6 +624,8 @@ struct App {
     /// The main window, once it had an event: where `APP_FRAMES`'s
     /// driver sends its input.
     main: Option<OsId>,
+    /// Whether [`crate::pacing`] has the display's refresh.
+    refresh_known: bool,
 }
 
 /// Wakes the loop for `APP_FRAMES`'s driver.
@@ -639,6 +642,14 @@ pub fn refresh_hz(window: &dyn OsWindow) -> Option<f64> {
     let mode = window.current_monitor()?.current_video_mode()?;
     let mhz = mode.refresh_rate_millihertz()?;
     Some(f64::from(mhz.get()) / 1000.0)
+}
+
+/// How long the last frame's renderer call took (rasterise, composite,
+/// present: waiting for a swapchain image included), as Blitz keeps it.
+fn last_render() -> std::time::Duration {
+    std::time::Duration::from_micros(
+        blitz_traits::LAST_PRESENT_MICROS.load(std::sync::atomic::Ordering::Relaxed),
+    )
 }
 
 /// Whether `event` is a person's input (what a frame record counts).
@@ -882,6 +893,16 @@ impl ApplicationHandler for App {
     }
 
     fn window_event(&mut self, event_loop: &dyn ActiveEventLoop, window: OsId, event: WindowEvent) {
+        // The display's refresh, for pacing runtime views' frames
+        // (`crate::pacing`): learned at the first frame, again when a
+        // window may have moved to another display.
+        if matches!(
+            event,
+            WindowEvent::Moved(_) | WindowEvent::ScaleFactorChanged { .. }
+        ) || !self.refresh_known
+        {
+            self.learn_refresh(window);
+        }
         if !crate::frames::recording_now() {
             // The meter (`APP_FRAMES`): every frame of the main window.
             if matches!(event, WindowEvent::RedrawRequested) && !self.popouts.contains_key(&window)
@@ -898,7 +919,14 @@ impl ApplicationHandler for App {
                 }
                 let start = std::time::Instant::now();
                 self.window_event_now(event_loop, window, event);
-                crate::frames::record(start, std::time::Instant::now());
+                let ended = std::time::Instant::now();
+                crate::frames::record(start, ended);
+                crate::pacing::frame_ended(ended, last_render());
+                return;
+            }
+            if matches!(event, WindowEvent::RedrawRequested) {
+                self.window_event_now(event_loop, window, event);
+                crate::pacing::frame_ended(std::time::Instant::now(), last_render());
                 return;
             }
             return self.window_event_now(event_loop, window, event);
@@ -935,6 +963,9 @@ impl ApplicationHandler for App {
         let before = blitz_traits::LAST_FRAME_MICROS.load(std::sync::atomic::Ordering::Relaxed);
         self.window_event_now(event_loop, window, event);
         let ended = std::time::Instant::now();
+        // When it ended and how long its render took: when the next
+        // swapchain image comes free (`crate::pacing`).
+        crate::pacing::frame_ended(ended, last_render());
         if !self.popouts.contains_key(&window) {
             crate::frames::record(began, ended);
         }
@@ -967,6 +998,26 @@ impl ApplicationHandler for App {
 }
 
 impl App {
+    /// The refresh of the display window `window` is on, for
+    /// [`crate::pacing`].
+    fn learn_refresh(&mut self, window: OsId) {
+        let os = if self.popouts.contains_key(&window) {
+            self.popouts
+                .get(&window)
+                .map(|o| Arc::clone(&o.view.window))
+        } else {
+            self.desk.main.borrow().clone()
+        };
+        let hz = os.and_then(|w| {
+            let mode = w.current_monitor()?.current_video_mode()?;
+            Some(f64::from(mode.refresh_rate_millihertz()?.get()) / 1000.0)
+        });
+        if let Some(hz) = hz.filter(|hz| *hz > 1.0) {
+            crate::pacing::set_refresh(std::time::Duration::from_secs_f64(1.0 / hz));
+            self.refresh_known = true;
+        }
+    }
+
     /// `APP_FRAMES`'s input due now, to the main window, as the platform
     /// would send it.
     fn drive(&mut self, event_loop: &dyn ActiveEventLoop) {

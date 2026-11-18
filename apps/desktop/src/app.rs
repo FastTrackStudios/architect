@@ -5,7 +5,7 @@ use std::io::Write as _;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use architect::action::{ActionList, Principal};
@@ -415,6 +415,10 @@ pub fn run(distribution: Distribution) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Keeps the node's kinds following the window's extensions
+/// (`start_node`) for as long as the app runs.
+static FOLLOWING: Mutex<Option<architect_extensions::contrib::Subscription>> = Mutex::new(None);
+
 /// The app's node (`crate::node`), started in this process: the same
 /// `start_parts` as `serve`, from the same configuration (`$ARCHITECT_CONFIG`,
 /// then `ARCHITECT_*`) over the window's defaults
@@ -447,6 +451,14 @@ fn start_node(dist: &'static Distribution) {
         "127.0.0.1:0".clone_into(&mut config.bind);
     }
     let parts = crate::node::Parts::of(dist, &config).with_account(signed_in_account(dir));
+    // The extensions the window loads — a development copy among them —
+    // declare document kinds too: the node's follow them as they load,
+    // reload and unload.
+    let loaded = parts.loaded_kinds.clone();
+    architect_app::on_extension_contributions(move |contributions| {
+        let following = crate::node::kinds::follow(contributions, loaded);
+        *FOLLOWING.lock().unwrap_or_else(PoisonError::into_inner) = Some(following);
+    });
     let spawned = std::thread::Builder::new()
         .name("architect-node".to_owned())
         .spawn(move || {

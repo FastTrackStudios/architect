@@ -26,10 +26,10 @@ process-views = ["dep:architect-process-view", "architect-workspace/external-tex
 process-views-lab = ["process-views", "architect-process-view?/demo"]
 
 [dependencies]
-keyflow = { git = "https://github.com/FastTrackStudios/keyflow", rev = "337842d994b8025aadd810c49281cc9cc8a10985", features = ["text", "paint"], default-features = false, optional = true }
-keyflow-ui = { git = "https://github.com/FastTrackStudios/keyflow", rev = "337842d994b8025aadd810c49281cc9cc8a10985", features = ["native-chart-editor"], default-features = false, optional = true }
+keyflow = { git = "https://github.com/FastTrackStudios/keyflow", rev = "d9b55251b7f23b505a789d6914f1f8ad1ce40bac", features = ["text", "paint"], default-features = false, optional = true }
+keyflow-ui = { git = "https://github.com/FastTrackStudios/keyflow", rev = "d9b55251b7f23b505a789d6914f1f8ad1ce40bac", features = ["native-chart-editor"], default-features = false, optional = true }
 # The source editor on its own, for the Editor tab (src/keyflow.rs).
-editor-keyflow = { git = "https://github.com/FastTrackStudios/keyflow", rev = "337842d994b8025aadd810c49281cc9cc8a10985", features = ["native"], optional = true }
+editor-keyflow = { git = "https://github.com/FastTrackStudios/keyflow", rev = "d9b55251b7f23b505a789d6914f1f8ad1ce40bac", features = ["native"], optional = true }
 architect-shell = { workspace = true, features = ["ui"] }
 # The note editor (src/note_editor.rs): the FastTrackStudios editor on
 # Blitz, through architect's door (#512), worked by extensions through

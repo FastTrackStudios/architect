@@ -417,14 +417,14 @@ one kind may not share an id.
 | table | keys (type) | example |
 |---|---|---|
 | `[[openers]]` `OpenerDecl` | `id`, `kind`, `title`, `prefix`, `action`, `open` (strings); `files`, `doc_kinds`, `urls` (string lists; `urls` are regexes); `view` | `examples/showcase/openers-sampler/extension.toml` |
-| `[[doc_kinds]]` `DocKindDecl` | `id` (`<app>.<kind>`), `name`, `files`, `icon`, `view`, `schema` (default 1; no migrations). A vault file of its first `files` extension that is a document file of the kind syncs between the person's devices and through the org's node like a note, while the extension is installed (`DocKindDecl::to_doc_kind`) | `apps/sandbox/board/extension.toml` |
+| `[[doc_kinds]]` `DocKindDecl` | `id` (`<app>.<kind>`), `name`, `files`, `icon`, `view`, `schema` (default 1; no migrations). A vault file of its first `files` extension that is a document file of the kind syncs between the person's devices and through the org's node like a note, while the extension is compiled in, installed or loaded in the app's window (a development copy too; gone when it unloads or reloads without it, unless another source still declares it: `DocKindDecl::to_doc_kind`, `apps/desktop/src/node/kinds.rs` `follow`) | `apps/sandbox/board/extension.toml` |
 | `[[tabs]]` `TabDecl` | `id`, `title`, `icon`, `view` (all required in effect) | `apps/sandbox/board/extension.toml` |
 | `[[status]]` `StatusDecl` | `id`, `text`, `icon`, `hint`, `side` (`left`/`right`, default `right`), `action` | `examples/showcase/toolbar-sampler/extension.toml` |
 | `[[menus]]` `MenuDecl` | `menu` (menu title), `action` | `extensions/projects/extension.toml` |
 | `[[context]]` `ContextDecl` | `target` (`pane`, `tab`, `view:<kind>`, `file`, `file:<ext>`, `doc:<kind>`, `link`, `selection`, `toolbar`, `toolbar-item`), `action`, `title` | `apps/sandbox/extensions/metronome/extension.toml` |
 | `[[bar]]` `BarDecl` | `action`, `title`, `icon`: a phone's action bar | `extensions/calendar/extension.toml` |
 | `[[slots]]` `SlotDecl` | `slot` (`ribbon`, `left`, `right`, `tabs`, `status`, `title`), `view` | test: `features/extensions/tests/contributions.rs` |
-| `[[keys]]` `KeyDecl` | `chord` (`⌘K`), `action` | `features/palette/extension/extension.toml` |
+| `[[keys]]` `KeyDecl` | `chord` (`⌘K`, `A`), `action`, `when` (`view:<view>`: only while that view has the focus) | `features/palette/extension/extension.toml` |
 | `[[palette_views]]` `PaletteViewDecl` | `overlay` (`palette` or `quick-open`), `view` | `features/palette/extension/extension.toml` |
 | `[[palette_sources]]` `PaletteSourceDecl` | `id` (`a-z 0-9 - _`), `title`, `action`, `run`, `ranking` (`open` default, or `commands`) | `examples/showcase/openers-sampler/extension.toml` |
 | `[[keymaps]]` (editor-ext `KeymapEntry`) | `key` (`Mod-Enter`), `action`, `when` (`editor` or `node:<kind>`); needs `writes = ["editor"]` | `apps/sandbox/extensions/outline/extension.toml` |
