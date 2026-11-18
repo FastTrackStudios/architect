@@ -273,7 +273,9 @@ fn PageView(props: PageProps) -> Element {
 pub(super) struct PopoutProps {
     window: WindowId,
     workspace: Signal<Workspace>,
-    views: Views,
+    /// The main window's views, live: a view an extension adds reaches a
+    /// pane of the pop-out waiting for it (architect#877).
+    views: Signal<Views>,
     /// The main window's colours, live: a theme change reaches the pop-out.
     theme: Signal<ShellTheme>,
     sizes: Sizes,
@@ -348,7 +350,7 @@ pub(super) fn PopoutSync(bridge: Bridge) -> Element {
             root: Root::Workspace(PopoutProps {
                 window: id,
                 workspace: host.workspace,
-                views: host.views.peek().clone(),
+                views: host.views,
                 theme: host.theme,
                 sizes: *host.sizes.peek(),
                 status: host.status,
@@ -416,7 +418,7 @@ fn PopoutView(props: PopoutProps) -> Element {
     let title_row = try_use_context::<super::TitleRow>();
     let host = use_context_provider(|| Host {
         workspace: props.workspace,
-        views: CopyValue::new(props.views.clone()),
+        views: props.views,
         commands: CopyValue::new(props.commands.clone()),
         // A pop-out has no main area of its own to offer new notes in.
         empty: CopyValue::new(Vec::new()),
