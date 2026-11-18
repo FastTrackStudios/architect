@@ -963,10 +963,13 @@ fn a_press_on_a_region_carries_its_modifiers_linked_and_as_a_process() {
             MouseEventButtons::None,
             Modifiers::SHIFT,
         )));
-        let press = format!("region Press({REGION}, {shift})");
-        let release = format!("region Release({REGION}, {shift})");
+        let mods = format!("region Modifiers({REGION}, {shift})");
+        let press = format!("region Press({REGION})");
+        let release = format!("region Release({REGION})");
         run.pump_until(&format!("{how}: the shifted release"), |l| {
-            l.contains(&press) && l.contains(&release)
+            // The keys held, just before the press, and again before the
+            // release.
+            l.contains(&format!("{mods}\n{press}")) && l.contains(&format!("{mods}\n{release}"))
         });
     }
 }

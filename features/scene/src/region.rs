@@ -533,11 +533,13 @@ impl Mods {
 pub enum RegionEvent {
     Enter(u64),
     Leave(u64),
-    /// Pressed, with the modifiers held (a Shift-click is a range, a
-    /// ⌘-click a toggle).
-    Press(u64, Mods),
-    /// Let go, with the modifiers held then.
-    Release(u64, Mods),
+    Press(u64),
+    Release(u64),
+    /// The modifier keys held as the region was pressed or let go (a
+    /// Shift-click is a range, a ⌘-click a toggle): heard just before
+    /// that `Press` or `Release`, and only when a key is held. A view that
+    /// does not care is not told anything new.
+    Modifiers(u64, Mods),
     /// A drag's value along an axis: at most once a frame, and once more
     /// before its release.
     Value(u64, Axis, f64),
@@ -550,8 +552,9 @@ impl RegionEvent {
         match *self {
             Self::Enter(id)
             | Self::Leave(id)
-            | Self::Press(id, _)
-            | Self::Release(id, _)
+            | Self::Press(id)
+            | Self::Release(id)
+            | Self::Modifiers(id, _)
             | Self::Value(id, _, _) => id,
         }
     }
@@ -801,7 +804,10 @@ impl Interaction {
         // A press stops what it coasts.
         self.coasting
             .retain(|c| !dragging.iter().any(|d| d.drag.value == c.drag.value));
-        self.queue.push(RegionEvent::Press(hit.id, mods));
+        if !mods.is_empty() {
+            self.queue.push(RegionEvent::Modifiers(hit.id, mods));
+        }
+        self.queue.push(RegionEvent::Press(hit.id));
         self.held = Some(Held { hit, dragging });
         out.consumed = true;
         out.redraw = true;
@@ -833,7 +839,10 @@ impl Interaction {
         let Some(held) = self.held.take() else {
             return out;
         };
-        self.queue.push(RegionEvent::Release(held.hit.id, mods));
+        if !mods.is_empty() {
+            self.queue.push(RegionEvent::Modifiers(held.hit.id, mods));
+        }
+        self.queue.push(RegionEvent::Release(held.hit.id));
         // Let go while moving: a drag with inertia coasts on.
         for d in held.dragging {
             let (Some(tau), Some(now), [Some((t0, v0)), Some((t1, v1))]) =
@@ -875,8 +884,7 @@ impl Interaction {
     pub fn left(&mut self) -> Outcome {
         let mut out = Outcome::default();
         if let Some(held) = self.held.take() {
-            self.queue
-                .push(RegionEvent::Release(held.hit.id, Mods::NONE));
+            self.queue.push(RegionEvent::Release(held.hit.id));
             out.redraw = true;
         }
         let hover = self.hover(None);

@@ -168,13 +168,13 @@ pub fn region_value(event: &architect_scene::region::RegionEvent) -> String {
     let (kind, along, mods) = match *event {
         E::Enter(_) => ("enter", None, None),
         E::Leave(_) => ("leave", None, None),
-        E::Press(_, m) => ("press", None, Some(m)),
-        E::Release(_, m) => ("release", None, Some(m)),
+        E::Press(_) => ("press", None, None),
+        E::Release(_) => ("release", None, None),
+        E::Modifiers(_, m) => ("modifiers", None, Some(m)),
         E::Value(_, axis, v) => ("value", Some((axis, v)), None),
     };
     let axis = along.map(|(a, _)| if a == Axis::X { "x" } else { "y" });
-    // An id as a string: JSON's numbers lose a u64's last digits. A
-    // process built before `mods` reads past them.
+    // An id as a string: JSON's numbers lose a u64's last digits.
     serde_json::json!({
         "region": event.id().to_string(),
         "kind": kind,
@@ -201,8 +201,10 @@ pub fn region_of_value(value: &str) -> Option<architect_scene::region::RegionEve
     Some(match v.get("kind")?.as_str()? {
         "enter" => E::Enter(id),
         "leave" => E::Leave(id),
-        "press" => E::Press(id, mods),
-        "release" => E::Release(id, mods),
+        "press" => E::Press(id),
+        "release" => E::Release(id),
+        // A process built before it reads past it (an unknown kind).
+        "modifiers" => E::Modifiers(id, mods),
         "value" => E::Value(
             id,
             match v.get("axis")?.as_str()? {
