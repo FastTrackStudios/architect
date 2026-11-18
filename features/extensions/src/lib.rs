@@ -128,6 +128,8 @@ pub mod luau_calls;
 pub use invocation::{caller_json, invocation_json};
 #[cfg(any(feature = "linked-core", all(feature = "guest", unix)))]
 pub mod linked;
+#[cfg(feature = "doc-sync")]
+pub mod live;
 #[cfg(feature = "host")]
 pub mod logs;
 #[cfg(all(feature = "host", not(target_family = "wasm")))]

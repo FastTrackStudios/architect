@@ -229,6 +229,14 @@ pub(crate) struct Services {
     /// The ports extensions have open, and the control surfaces running
     /// (`crate::ports`).
     ports: crate::ports::PortsState,
+    /// The node's documents of a kind (`crate::live`), for extensions'
+    /// live documents.
+    #[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
+    kind_docs: Mutex<Option<Arc<dyn crate::live::KindDocuments>>>,
+    /// The live documents each extension was answered (`live_document`):
+    /// by extension, each document's kind. Only these it may sync.
+    #[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
+    live: Mutex<BTreeMap<String, BTreeMap<uuid::Uuid, String>>>,
 }
 
 /// A path a person picked for an extension.
@@ -258,6 +266,9 @@ impl Services {
         crate::pickers_ios::stop_scopes(id);
         #[cfg(feature = "net")]
         self.net.forget(id);
+        // Its live documents: a later session needs a new answer.
+        #[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
+        lock(&self.live).remove(id);
         self.ports.forget(id);
     }
 
@@ -307,12 +318,34 @@ impl Default for Services {
             #[cfg(feature = "net")]
             net: crate::net::Net::default(),
             ports: crate::ports::PortsState::default(),
+            #[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
+            kind_docs: Mutex::new(None),
+            #[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
+            live: Mutex::new(BTreeMap::new()),
         }
     }
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Whether `manifest` declares document kind `kind` (`[[doc_kinds]]`).
+#[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
+fn declares_kind(manifest: &Manifest, kind: &str) -> bool {
+    manifest.contributes.doc_kinds.iter().any(|k| k.id == kind)
+}
+
+/// One extension's `DocSync` session, as the host lets it run
+/// (`ExtensionApi::live_session`).
+#[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
+pub(crate) struct LiveSession {
+    /// The node's registry it is relayed to.
+    pub(crate) registry: crdt::registry::DocRegistry,
+    /// Who it attaches as: the extension, for whoever it acts for.
+    pub(crate) principal: Principal,
+    /// Whether its updates go up (`writes = ["documents"]`).
+    pub(crate) writable: bool,
 }
 
 const fn reach(effect: architect::action::Effect) -> Reach {
@@ -445,6 +478,29 @@ impl Host {
     #[must_use]
     pub fn documents(&self) -> Option<Arc<dyn Documents>> {
         lock(&self.services().documents).clone()
+    }
+
+    /// The node's documents of a kind (`crate::live`): what an
+    /// extension's `live_document` resolves, and the registry its sessions
+    /// are relayed to.
+    #[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
+    #[must_use]
+    pub fn with_kind_documents(self, documents: impl crate::live::KindDocuments + 'static) -> Self {
+        self.set_kind_documents(Arc::new(documents));
+        self
+    }
+
+    /// [`Self::with_kind_documents`] on a host already shared.
+    #[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
+    pub fn set_kind_documents(&self, documents: Arc<dyn crate::live::KindDocuments>) {
+        *lock(&self.services().kind_docs) = Some(documents);
+    }
+
+    /// The node's documents of a kind, when the app gave them.
+    #[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
+    #[must_use]
+    pub fn kind_documents(&self) -> Option<Arc<dyn crate::live::KindDocuments>> {
+        lock(&self.services().kind_docs).clone()
     }
 
     /// A vault for extensions: its `documents` and its query service's
@@ -786,6 +842,121 @@ impl ExtensionApi {
         self
     }
 
+    /// `live_document`: the document of a kind the vault file `path` is,
+    /// when its kind is one the extension declares (`[[doc_kinds]]`),
+    /// remembered so its sessions may reach it (`crate::live`).
+    fn live_document(
+        &self,
+        host: &Host,
+        manifest: &Manifest,
+        may: &Capabilities,
+        path: &str,
+    ) -> Result<Value, HostError> {
+        #[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
+        {
+            let path = crate::documents::checked_path(path)
+                .map_err(|message| HostError::Failed { message })?;
+            let docs = host
+                .kind_documents()
+                .ok_or_else(|| HostError::Unsupported {
+                    what: "live documents: this app gives its extensions no node documents"
+                        .to_owned(),
+                })?;
+            let found = docs.resolve(path)?;
+            if !declares_kind(manifest, &found.kind) {
+                return Self::decide(
+                    "doc_kinds",
+                    Err((
+                        format!("doc_kinds.{}", found.kind),
+                        format!(
+                            "{path} is a document of kind {}, which this extension does not declare ([[doc_kinds]])",
+                            found.kind
+                        ),
+                    )),
+                )
+                .map(|()| Value::Null);
+            }
+            lock(&host.services().live)
+                .entry(self.id.clone())
+                .or_default()
+                .insert(found.doc_id, found.kind.clone());
+            let answer = crate::live::LiveDoc {
+                doc_id: found.doc_id,
+                kind: found.kind,
+                path: path.to_owned(),
+                writable: may.may_write(crate::capabilities::DOCUMENTS),
+            };
+            serde_json::to_value(answer).map_err(|e| HostError::Failed {
+                message: e.to_string(),
+            })
+        }
+        #[cfg(not(all(feature = "doc-sync", not(target_family = "wasm"))))]
+        {
+            let _ = (host, manifest, may, path);
+            Err(HostError::Unsupported {
+                what: "live documents: this host was built without them (feature doc-sync)"
+                    .to_owned(),
+            })
+        }
+    }
+
+    /// Whether a `DocSync` session of this extension may reach document
+    /// `doc_id`, and how: it was answered it by `live_document`, still
+    /// declares its kind and may still read documents (writes only with
+    /// `writes`). Refused as a document that does not exist.
+    ///
+    /// # Errors
+    ///
+    /// [`crdt::sync::SyncError::UnknownDoc`]: not one it may reach.
+    #[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
+    pub(crate) fn live_session(
+        &self,
+        doc_id: uuid::Uuid,
+    ) -> Result<LiveSession, crdt::sync::SyncError> {
+        let refused = |why: &str| {
+            tracing::warn!(
+                ext.id = %self.id,
+                doc.id = %doc_id,
+                perm.decision = "deny",
+                perm.reason = why,
+                "a live document session was refused"
+            );
+            if let Some(host) = self.host.upgrade() {
+                host.logs().push(
+                    &self.id,
+                    Level::Warn,
+                    "host",
+                    format!("doc_sync {doc_id}: {why}"),
+                );
+            }
+            crdt::sync::SyncError::UnknownDoc
+        };
+        let host = self
+            .host
+            .upgrade()
+            .ok_or_else(|| refused("the app is closing"))?;
+        let loaded = host.get(&self.id).ok_or_else(|| refused("not loaded"))?;
+        let may = host.capabilities_of(&loaded.manifest, loaded.origin);
+        if !may.may_read(crate::capabilities::DOCUMENTS) {
+            return Err(refused("it may not read documents (capabilities.reads)"));
+        }
+        let kind = lock(&host.services().live)
+            .get(&self.id)
+            .and_then(|docs| docs.get(&doc_id).cloned())
+            .ok_or_else(|| refused("not a document live_document answered it"))?;
+        if !declares_kind(&loaded.manifest, &kind) {
+            return Err(refused("its kind is not one it declares ([[doc_kinds]])"));
+        }
+        let docs = host
+            .kind_documents()
+            .ok_or_else(|| refused("this app gives no node documents"))?;
+        Ok(LiveSession {
+            registry: docs.registry(),
+            principal: self.principal(),
+            writable: may.may_write(crate::capabilities::DOCUMENTS),
+        })
+    }
+
     /// Why a health call is refused, when it is: health data is the app's
     /// own compiled-in extensions' alone, for the person using the app
     /// (the Health bundle, #371). Not from an installed or development
@@ -1048,6 +1219,7 @@ impl ExtensionApi {
                     message: format!("the query service's answer: {e}"),
                 })
             }
+            HostRequest::LiveDocument { path } => self.live_document(&host, manifest, &may, &path),
             HostRequest::ListDocuments { .. }
             | HostRequest::CreateDocument { .. }
             | HostRequest::EditDocument { .. }

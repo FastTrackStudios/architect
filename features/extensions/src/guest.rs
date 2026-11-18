@@ -306,8 +306,18 @@ impl Guest {
         {
             *host_slot().lock().unwrap_or_else(PoisonError::into_inner) = Some(client);
         }
+        // Live documents, on the same connection (`crate::live`).
+        #[cfg(feature = "doc-sync")]
+        if let Ok(client) = connection.open_lane::<crdt::sync::DocSyncClient>().await {
+            *docs_slot().lock().unwrap_or_else(PoisonError::into_inner) = Some(client);
+        }
         connection.closed().await;
         host_slot()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        #[cfg(feature = "doc-sync")]
+        docs_slot()
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take();
@@ -351,6 +361,47 @@ pub async fn host(
             message: format!("the host service: {e}"),
         })?;
     crate::hostcall::HostAnswer::from_json(&answer).into_result()
+}
+
+#[cfg(feature = "doc-sync")]
+fn docs_slot() -> &'static Mutex<Option<crdt::sync::DocSyncClient>> {
+    static DOCS: OnceLock<Mutex<Option<crdt::sync::DocSyncClient>>> = OnceLock::new();
+    DOCS.get_or_init(|| Mutex::new(None))
+}
+
+/// The `DocSync` lane to the host, on this process's connection
+/// (`crate::live`): what a [`crate::live::DocLane`] syncs over.
+///
+/// # Errors
+///
+/// Not connected yet.
+#[cfg(feature = "doc-sync")]
+pub fn doc_sync() -> Result<crate::live::SyncClient, crate::hostcall::HostError> {
+    docs_slot()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+        .map(crate::live::SyncClient::new)
+        .ok_or_else(|| crate::hostcall::HostError::Failed {
+            message: "no documents lane: not connected to the host".to_owned(),
+        })
+}
+
+/// The vault file `path`, a document of a kind this extension declares, as
+/// a live document of the node's: a lane to sync a replica of it over
+/// (`crate::live`).
+///
+/// # Errors
+///
+/// The host refused it (not its kind, no `reads = ["documents"]`, no such
+/// document) or has no live documents.
+#[cfg(feature = "doc-sync")]
+pub async fn document(path: &str) -> Result<crate::live::DocLane, crate::hostcall::HostError> {
+    let answer = host(crate::hostcall::HostRequest::LiveDocument {
+        path: path.to_owned(),
+    })
+    .await?;
+    crate::live::DocLane::from_answer(answer, doc_sync()?)
 }
 
 /// The views open now, by pane: where their events go.

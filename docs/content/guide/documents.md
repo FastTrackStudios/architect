@@ -238,6 +238,38 @@ is two nodes doing it. An app edits the node's copy
 (`apps/desktop/src/node/mod.rs` `Running::document`), not the file: the file
 has one writer at a time.
 
+**An extension edits the node's copy.** The extension that owns the kind
+never opens the file either. It names the document by its vault path and
+syncs a replica of the node's copy through the host, linked in or as a
+process (`features/extensions/src/live.rs`):
+
+```rust
+// In an action or a view: `handle` is its `linked::Handle`
+// (`guest::document(path)` does the same in a plain process guest).
+let lane = handle.document("Songs/Opener.session").await?; // LiveDoc: doc_id, kind, writable
+let replica = lane.replica();          // an in-memory CrdtDoc, kept in step
+replica.attached().await?;
+let body = replica.doc().loro().get_text("body");
+body.insert(0, "Intro")?;
+replica.doc().loro().commit();         // reaches the node, its file, every device
+// Or drive a `SyncedDoc` of your own CrdtDoc: `lane.sync(&mut synced).await`.
+```
+
+The host answers `live_document` only for a file of a kind the extension's
+manifest declares (`[[doc_kinds]]`), and only with `reads = ["documents"]`;
+its edits reach the node only with `writes = ["documents"]`, otherwise it
+follows (a share-link guest, whose capabilities have no `writes`, only
+follows). The session is the ordinary `DocSync` one, on the connection a
+process already has to the host (a linked extension's is in memory),
+relayed to the node's registry as the extension, for whoever it acts for, so
+the registry's authorizer and the vault's write guard decide
+(`features/extensions/src/live.rs` `ExtensionDocSync`). The app gives its
+host the node's documents with `Host::set_kind_documents`
+(`features/extensions/src/live.rs` `RegistryDocuments` over a
+`VaultCollab`). `features/extensions/tests/live_documents.rs` is a process
+extension editing a `.session` in a vault and following the node's edits,
+a linked one that may only read, and the refusals.
+
 <!-- media: doc-share-link-join — a share link copied on one device and opened on another, the document joining live -->
 <!-- media: lan-device-found — a device on the same network appearing by name, ready to sync -->
 

@@ -56,13 +56,18 @@ pub fn gate_principal() -> Option<String> {
     account_of(architect::permissions_gate::caller().as_ref()).map(str::to_owned)
 }
 
-/// The account `who` is, for a [`WriteGuard`]: a signed-in user's id;
-/// `None` for everyone else (a node, the server itself), whom the guard
-/// does not govern.
+/// The account `who` is, for a [`WriteGuard`]: a signed-in user's id,
+/// and an extension acting for one is held to that user's (its session
+/// with a node's document, `architect_extensions::live`); `None` for
+/// everyone else (a node, the server itself), whom the guard does not
+/// govern.
 #[must_use]
 pub fn account_of(who: Option<&architect_permissions::Principal>) -> Option<&str> {
     match who {
         Some(architect_permissions::Principal::User { user_id }) => Some(user_id),
+        Some(architect_permissions::Principal::Extension { on_behalf_of, .. }) => {
+            account_of(on_behalf_of.as_deref())
+        }
         _ => None,
     }
 }
@@ -128,6 +133,22 @@ mod tests {
             assert_eq!(current_caller().as_deref(), Some("alice"));
         }
         assert_eq!(current_caller(), None);
+    }
+
+    /// An extension acting for a person is held to that person's rules;
+    /// one acting for no one, or for the app, is not a person.
+    #[test]
+    fn an_extension_is_held_to_whom_it_acts_for() {
+        use architect_permissions::Principal;
+        let alice = Principal::User {
+            user_id: "alice".into(),
+        };
+        let ext = Principal::extension("fts.keyflow", Some(alice.clone()));
+        assert_eq!(account_of(Some(&alice)), Some("alice"));
+        assert_eq!(account_of(Some(&ext)), Some("alice"));
+        let app = Principal::extension("fts.keyflow", None);
+        assert_eq!(account_of(Some(&app)), None);
+        assert_eq!(account_of(None), None);
     }
 }
 
