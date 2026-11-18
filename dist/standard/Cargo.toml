@@ -71,15 +71,15 @@ architect-mobile = { path = "../../apps/mobile" }
 tempfile = "3"
 
 [patch.crates-io]
-anyrender = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+anyrender = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
 anyrender_vello = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
 anyrender_vello_hybrid = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
-blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-html = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-net = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-traits = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-html = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-net = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-traits = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
 facet-core = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.4.0" }
 phon = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.4.0" }
 phon-jit = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.2.3" }
@@ -173,13 +173,13 @@ vault-obsidian = { path = "../../features/vault/vault-obsidian" }
 vault-proto = { path = "../../features/vault/vault-proto" }
 
 [patch."https://github.com/FastTrackStudios/blitz"]
-anyrender = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-html = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-net = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
-blitz-traits = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+anyrender = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-html = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-net = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
+blitz-traits = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb" }
 
 [patch."https://github.com/FastTrackStudios/daw"]
 daw = { git = "https://github.com/FastTrackStudios/studio", tag = "v26.11.4" }

@@ -37,9 +37,9 @@ bit-vec = { version = "0.8.0" }
 bitflags = { version = "2.13.2", default-features = false, features = ["serde", "std"] }
 blake2 = { version = "0.10.6" }
 blake3 = { version = "1.8.7" }
-blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101", features = ["autofocus"] }
-blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101", features = ["apple-font-embolden", "custom-widget"] }
-blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101", features = ["data-uri"] }
+blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb", features = ["autofocus"] }
+blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb", features = ["apple-font-embolden", "custom-widget"] }
+blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "8009ce1572aee1c7f4fbed25856189e5e79da4fb", features = ["data-uri"] }
 bytemuck = { version = "1.25.2", default-features = false, features = ["aarch64_simd", "derive", "extern_crate_alloc", "min_const_generics", "wasm_simd"] }
 byteorder = { version = "1.5.0" }
 bytes = { version = "1.12.1", features = ["serde"] }
