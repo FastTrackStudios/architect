@@ -320,7 +320,12 @@ pub fn use_window_chrome() -> Option<WindowChrome> {
             WindowChrome::MAC_LIGHTS_LEFT,
         );
     }
-    (!full && device == Device::Native).then_some(chrome)
+    // Off a Mac the app draws the window's buttons itself, and keeps them
+    // in full screen (a Mac's own bar slides down there): a window a rule
+    // opened full screen still has its close and its way out, and the
+    // title row keeps their room.
+    let lights = cfg!(not(target_os = "macos")) || !full;
+    (lights && device == Device::Native).then_some(chrome)
 }
 
 /// Hears every finger at the window, whatever the page does with its

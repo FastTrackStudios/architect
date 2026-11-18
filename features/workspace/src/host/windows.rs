@@ -416,6 +416,10 @@ fn window_title(host: Host, w: &Workspace, win: &Window) -> String {
 fn PopoutView(props: PopoutProps) -> Element {
     use_hook(|| props.bridge.provide());
     let title_row = try_use_context::<super::TitleRow>();
+    // The window's own buttons, where it has no system title bar.
+    let buttons = try_use_context::<super::PopoutButtons>();
+    // Its document, where `APP_SHOT` finds it by this window's id.
+    crate::shot::use_window_shot(&props.window.0);
     let host = use_context_provider(|| Host {
         workspace: props.workspace,
         views: props.views,
@@ -557,6 +561,27 @@ fn PopoutView(props: PopoutProps) -> Element {
                 }
             }
             architect_shell::motion::MotionFrames {}
+            if let Some(buttons) = buttons {
+                div {
+                    style: "position:absolute; top:0; left:14px; height:40px; display:flex; align-items:center; \
+                            gap:8px; z-index:30;",
+                    button {
+                        "aria-label": "Close",
+                        style: "width:12px; height:12px; padding:0; border:none; border-radius:50%; background:#ff5f57;",
+                        onclick: move |_| buttons.on_close.call(()),
+                    }
+                    button {
+                        "aria-label": "Minimize",
+                        style: "width:12px; height:12px; padding:0; border:none; border-radius:50%; background:#febc2e;",
+                        onclick: move |_| buttons.on_minimize.call(()),
+                    }
+                    button {
+                        "aria-label": "Maximize",
+                        style: "width:12px; height:12px; padding:0; border:none; border-radius:50%; background:#28c840;",
+                        onclick: move |_| buttons.on_zoom.call(()),
+                    }
+                }
+            }
             DropHighlight {}
             DragLayer {}
             MenuLayer {}
