@@ -112,7 +112,11 @@ impl PaintView for Orbits {
         scene.fill(
             Fill::NonZero,
             Affine::IDENTITY,
-            Color::from_rgba8(14, 14, 20, 255),
+            theme_color(
+                ctx,
+                &["background", "sheet"],
+                Color::from_rgba8(14, 14, 20, 255),
+            ),
             None,
             &Rect::new(0.0, 0.0, w, h),
         );
@@ -164,7 +168,12 @@ impl PaintView for Orbits {
             scene.stroke(
                 &Stroke::new(3.0),
                 Affine::IDENTITY,
-                Color::from_rgba8(250, 250, 250, alpha),
+                theme_color(
+                    ctx,
+                    &["foreground", "ink"],
+                    Color::from_rgba8(250, 250, 250, 255),
+                )
+                .with_alpha(f32::from(alpha) / 255.0),
                 None,
                 &Circle::new(*at, 90.0f64.mul_add(k, 8.0)),
             );
@@ -211,4 +220,13 @@ impl PaintView for Orbits {
 )]
 const fn u8_of(v: f64) -> u8 {
     v.clamp(0.0, 255.0) as u8
+}
+
+/// The first of `names` the app's theme has as a colour, else `fallback`:
+/// the scene follows the app's light and dark.
+fn theme_color(ctx: &ViewCtx, names: &[&str], fallback: Color) -> Color {
+    names
+        .iter()
+        .find_map(|n| ctx.theme.color(n))
+        .unwrap_or(fallback)
 }

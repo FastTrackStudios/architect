@@ -379,8 +379,10 @@ pub fn shell_tokens(theme: &ShellTheme) -> ThemeTokens {
 }
 
 /// The tokens a pane sees now: the app's theme store's whole resolved
-/// theme when there is one, else the shell's colours, else none.
-fn pane_tokens() -> ThemeTokens {
+/// theme when there is one, else the shell's colours, else none. Read in
+/// a render, the component renders again when the theme changes.
+#[must_use]
+pub fn pane_tokens() -> ThemeTokens {
     if let Some(store) = architect_theme::try_use_theme() {
         return ThemeTokens::from(&*store.resolved().read());
     }
