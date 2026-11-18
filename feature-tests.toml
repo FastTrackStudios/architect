@@ -42,12 +42,15 @@ features = [
 ]
 
 # The sandbox's Keyflow editor tab (apps/ui/src/keyflow.rs): it fills its
-# pane, in the app's theme.
-[[pass]]
-name = "lab-keyflow"
-workspace = true
-packages = ["architect-app"]
-features = ["architect-app/keyflow-lab"]
+# pane, in the app's theme. Skipped: the Keyflow revision `keyflow-lab`
+# pins (apps/ui/Cargo.toml) predates `ViewInput`'s `mods` (14a88479) and no
+# longer compiles, and Keyflow's own branch that does is unreleased. Keyflow
+# is a runtime extension now (#840); the pin moves when Keyflow tags a
+# release against Architect's, and this goes back to a pass.
+[[skip]]
+package = "architect-app"
+file = "src/keyflow.rs"
+reason = "keyflow-lab's pinned Keyflow predates ViewInput's mods; repinned once Keyflow tags a release against Architect's (#840)"
 
 # `CodeEditor`'s story played headlessly on Blitz against its golden
 # (`features/editor/tests/story.rs`, #512): `architect-editor`'s `stories`

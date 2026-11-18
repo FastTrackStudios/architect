@@ -14,6 +14,8 @@ name: extension-index
 
 on:
   pull_request:
+    # Not on a draft: marking the PR ready starts the check.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "extensions/index.toml"
       - "extensions/archives/**"
@@ -34,6 +36,7 @@ permissions:
 jobs:
   index:
     name: ext-index
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

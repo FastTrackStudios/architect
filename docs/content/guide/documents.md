@@ -21,6 +21,9 @@ the app declares its kinds and edits. In this chapter you will:
 
 All of it is the `crdt` crate (`features/crdt/crdt`) unless said otherwise.
 Each step names the test that proves it; read the test beside the step.
+A crate that depends on `crdt` from outside the fleet's feature union (a
+library with no UI) patches architect's workspace-hack out; the recipe is
+in `skills/architect/references/xtask-tooling.md` ("Outside the union").
 
 Rows a server owns and validates (a task's status, a member list) are not
 documents: they are entities and services with optimistic updates (the
@@ -96,7 +99,12 @@ let back = file.restore(&file.versions(MAIN).await?[3], "from v3").await?;
   `features/crdt/crdt/tests/file.rs` kills a writer mid-edit to prove it.
 - **Kind.** Opening refuses another kind or a newer schema.
 - **Sync.** `file.persistence(MAIN)` is the branch as a `Persistence`, so a
-  `CrdtDoc` and its sync keep their replica in the file.
+  `CrdtDoc` and its sync keep their replica in the file. Make its
+  `SyncedDoc` durable (`SyncedDoc::new(id, doc).durable()`): imports fire
+  no local-update subscription, so without it the file keeps only this
+  device's edits and what arrived from others is gone after a restart
+  (`a_synced_file_replica_keeps_what_it_received_only_when_durable` in
+  `features/crdt/crdt/tests/file.rs`). The org driver does this for you.
 
 Not yet: undo that survives reopening, an IndexedDB `Storage`, one writer
 per file across processes.
@@ -211,6 +219,25 @@ architect_devices::serve(&endpoint, access.devices.clone(), move |remote| {
 
 `features/crdt/crdt/tests/p2p.rs` is all three over real iroh endpoints.
 
+**A document file in a vault syncs like a note.** The app's node keeps
+each vault note as a document; a vault file of a kind an extension declares
+is one too, so a Keyflow `.session` in a vault reaches the person's other
+devices, and the org's node, with no sync host of its own. The extension
+declares the kind in its manifest (`[[doc_kinds]]` with `files` and an
+optional `schema`); the node registers it while the extension is compiled
+in or installed (`apps/desktop/src/node/kinds.rs` `ExtensionKinds`, into the
+shared `features/crdt/crdt/src/kinds.rs` `SharedDocKinds`) and takes it off
+when the extension is uninstalled. Such a file is listed by the id in its
+header (`features/crdt/crdt/src/file/mod.rs` `DocFile::peek`), opened with
+the file itself as its storage, its `main` branch, and attached to as a
+note is, under the vault's write guard for the file; another device makes
+it empty, of the same lineage, before the first session fills it
+(`features/vault/vault-collab/src/lib.rs` `VaultCollab::register_document`).
+`apps/desktop/tests/node.rs` `an_extensions_document_syncs_between_two_nodes_like_a_note`
+is two nodes doing it. An app edits the node's copy
+(`apps/desktop/src/node/mod.rs` `Running::document`), not the file: the file
+has one writer at a time.
+
 <!-- media: doc-share-link-join — a share link copied on one device and opened on another, the document joining live -->
 <!-- media: lan-device-found — a device on the same network appearing by name, ready to sync -->
 
@@ -236,6 +263,30 @@ let marks = roster.pointers(clock_ms(), |place| arrange_pixels(place));
 
 Draw them with the workspace's `PresenceLayer` as the view's last child
 (the [UI chapter](@/guide/ui.md)). Never call `sweep()` in a render.
+
+### A playhead, in the host's clock
+
+A playhead in presence (`PlayState`) says where it was and *when*, so a
+peer extrapolates it every frame instead of streaming it. "When" has to be
+one clock for both peers, and two processes never share one: each
+`clock_ms` starts at its own first call. So the presence host serves its
+clock (`DocPresence::now`), each `PresenceDriver` pings it ten times a
+second into its peer's `SharedClock` (`features/crdt/crdt/src/clock.rs`,
+NTP's estimate over the fastest quarter of the last 32 exchanges), and a
+playhead is stamped in it:
+
+```rust
+// The leader: false until the driver has an estimate.
+here.play_now(playing, position_seconds, rate);
+// A follower, each frame:
+if let (Some(play), Some(now)) = (play_state, peer.clock().now_ms()) {
+    let at = play.position_at(now);
+}
+```
+
+The error is at most half the fastest round trip (`SharedClock::round_trip_ms`):
+under a millisecond on a LAN. A host older than this serves no clock; the
+driver's pings then stop and presence carries on, with no estimate.
 
 <!-- media: presence-pointers-overlay — two people in one arrangement: the other's named pointer and selection wash drawn over the pane -->
 
