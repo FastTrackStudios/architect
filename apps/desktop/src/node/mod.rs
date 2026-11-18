@@ -63,6 +63,13 @@ pub mod cli;
 pub mod config;
 mod files;
 mod guest_live;
+
+/// How often a share guest's live session asks again whether its link
+/// still serves the document (`/s/<code>/_guest/live`, #847).
+#[must_use]
+pub const fn guest_live_recheck() -> std::time::Duration {
+    guest_live::RECHECK
+}
 pub mod kinds;
 mod live;
 pub mod org;
@@ -860,7 +867,7 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
     // which the gate passes through, each call checked as the link's
     // pages are.
     host = host.plugin(shares::GuestLane(shares.clone()).into_http_router());
-    // Their live documents, read-only (#847): `/s/<code>/_live`.
+    // Their live documents, read-only (#847): `/s/<code>/_guest/live`.
     host = guest_live::mount(
         host,
         shares::GuestLane(shares.clone()),

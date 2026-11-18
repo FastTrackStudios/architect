@@ -1,7 +1,7 @@
 //! A vault share link's live documents, read-only (#847, part 3).
 //!
 //! A link's guest follows a live document of a kind (a `.session`: its
-//! chart, cue list and transport) on `/s/<code>/_live`, a vox WebSocket
+//! chart, cue list and transport) on `/s/<code>/_guest/live`, a vox WebSocket
 //! serving `DocSync` and `DocPresence`. It is read-only throughout:
 //!
 //! - **Who:** every call on the lane is the link's guest,
@@ -184,7 +184,7 @@ impl DocPresence for GuestLive {
     }
 }
 
-/// Serves share links' live documents at `/s/{code}/_live` on `host`.
+/// Serves share links' live documents at `/s/{code}/_guest/live` on `host`.
 ///
 /// The upgrade itself is refused unless link `code` is live for the
 /// bearer (an issuer session for a link for signed-in people; none
@@ -197,7 +197,7 @@ pub fn mount(
     collab: VaultCollab,
     grants: GuestGrants,
 ) -> EngineHost {
-    host.vox_at_permissioned("/s/{code}/_live", move |head: RequestHead| {
+    host.vox_at_permissioned("/s/{code}/_guest/live", move |head: RequestHead| {
         let (lane, registry, collab, grants) = (
             lane.clone(),
             registry.clone(),
