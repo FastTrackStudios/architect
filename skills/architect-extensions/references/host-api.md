@@ -312,6 +312,7 @@ All of these need `ui = [...]`. `pick`, `prompt` and `menu` wait for the person 
 
 - **Spellings.** Linked: `Handle::service`. TSX: `services.call(service, method, args)` (the action `EXT_SERVICE_CALL`). WIT: `call-service`. Luau: `host.service`.
 - **Declaring a service.** A provider declares `[provides] "lab.tempo" = "1.2.0"`. See `features/extensions/src/interop.rs`; the host's check is `features/extensions/src/hostapi.rs` `ExtensionApi::service`.
+- **Two providers of one service.** The host takes the newest version; at the same version, the first by id (`features/extensions/src/interop.rs` `choose_provider`). A person or a launcher picks another with `EXT_SERVICE_USE {service, provider}` (`null` gives the choice back), kept while that provider is loaded; `EXT_SERVICES` lists each service's providers, the chosen one and the one in use (`features/extensions/src/host.rs` `Host::use_provider`, `Host::service_providers`). The setlist window chooses the `daw` engine for `fts.session` over Keyflow (`scripts/setlist-window.sh`).
 - **The call runs as the caller.** The provider's action runs as the calling extension, so a health call relayed this way is refused.
 
 ## Share-link guests

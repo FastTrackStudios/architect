@@ -967,6 +967,10 @@ struct Inner {
     events: crate::host_events::EventState,
     /// Where its extensions' node actions run (`crate::node`).
     node: Mutex<NodeSide>,
+    /// The provider chosen for a service several loaded extensions
+    /// provide (`EXT_SERVICE_USE`), by service: used while it is loaded
+    /// and meets the caller's requirement.
+    chosen_providers: Mutex<BTreeMap<String, String>>,
 }
 
 /// Where a host's node actions (`runs = "node"`) run.
@@ -1081,6 +1085,7 @@ impl Host {
                 delivered: std::sync::atomic::AtomicU64::new(0),
                 events: crate::host_events::EventState::default(),
                 node: Mutex::new(NodeSide::App),
+                chosen_providers: Mutex::new(BTreeMap::new()),
             }),
         };
         // Icons and badges on rows and tabs (`crate::hostui`).
@@ -2725,12 +2730,93 @@ impl Host {
         events
     }
 
-    /// The loaded provider of `service` that meets `req`: the newest.
+    /// The loaded provider of `service` that meets `req`: the one chosen
+    /// for it ([`Host::use_provider`]) while that is loaded and meets
+    /// `req`, else the newest (on a tie, the first by id).
     #[must_use]
     pub fn provider(&self, service: &str, req: &semver::VersionReq) -> Option<(String, Version)> {
         let providers = providers_of(service, self.loaded().iter().map(|l| &l.manifest));
+        let chosen = self
+            .inner
+            .chosen_providers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(service)
+            .cloned();
+        if let Some(chosen) = chosen
+            && let Some(found) = providers
+                .iter()
+                .find(|(id, v)| *id == chosen && req.matches(v))
+        {
+            return Some(found.clone());
+        }
         crate::interop::choose_provider(&providers, req).cloned()
     }
+
+    /// Chooses `provider` for `service` (`None`: the host's own choice
+    /// again, the newest). A choice of an extension that is not loaded,
+    /// or that does not provide `service`, is kept and waits for it.
+    pub fn use_provider(&self, service: &str, provider: Option<&str>) {
+        let mut chosen = self
+            .inner
+            .chosen_providers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        match provider {
+            Some(id) => {
+                chosen.insert(service.to_owned(), id.to_owned());
+            }
+            None => {
+                chosen.remove(service);
+            }
+        }
+    }
+
+    /// Every service loaded extensions provide: its providers (id and
+    /// version), the one chosen for it (`EXT_SERVICE_USE`) and the one a
+    /// call meets now with any requirement (`in_use`).
+    #[must_use]
+    pub fn service_providers(&self) -> Vec<ServiceProviders> {
+        let loaded = self.loaded();
+        let chosen = self
+            .inner
+            .chosen_providers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let mut names: BTreeSet<String> = loaded
+            .iter()
+            .flat_map(|l| l.manifest.provides.keys().cloned())
+            .collect();
+        names.extend(chosen.keys().cloned());
+        names
+            .into_iter()
+            .map(|service| {
+                let providers = providers_of(&service, loaded.iter().map(|l| &l.manifest));
+                let in_use = self
+                    .provider(&service, &semver::VersionReq::STAR)
+                    .map(|(id, _)| id);
+                ServiceProviders {
+                    chosen: chosen.get(&service).cloned(),
+                    providers,
+                    in_use,
+                    service,
+                }
+            })
+            .collect()
+    }
+}
+
+/// A service and who provides it ([`Host::service_providers`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServiceProviders {
+    pub service: String,
+    /// Every loaded provider, with its version.
+    pub providers: Vec<(String, Version)>,
+    /// The provider chosen for it (`EXT_SERVICE_USE`), loaded or not.
+    pub chosen: Option<String>,
+    /// The provider a call with no particular requirement goes to.
+    pub in_use: Option<String>,
 }
 
 /// The loaded providers of `service` among `manifests`, with their versions.
