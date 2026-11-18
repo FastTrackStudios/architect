@@ -306,7 +306,9 @@ Build it with `cargo build --target wasm32-wasip2` inside `devenv --profile wasi
 - Motion on a clock: a layer's `X`, `Y`, `ScaleX`, `ScaleY`, `Opacity` or `Visible` from `Clock::Wall` or `Clock::Playhead` (`features/scene/src/anim.rs` `Animation`, `Linear`, `Steps`). A playhead line, a scrolling arrangement, a lyric line. Don't return `animating` true for these: the view would be asked every frame.
 - Hit regions and drags (`features/scene/src/region.rs` `Region`, `Drag`): hover, cursor, highlight and a fader or drag box following the pointer, all on the host; the view hears `RegionEvent`s by id (`PaintView::region`), a drag's value at most once a frame.
 - Named values a layer is bound to (`PaintView::values`, `view.` names); the engine's lock-free `engine.` values with `capabilities.ui = ["engine"]` (`features/scene/src/engine.rs`). An engine in a process of its own shares its table in shared memory (`features/scene/src/engine/shared.rs` `create`, `open`), found through the service the view's extension `[uses]` or `[requires]` (`engine::read_from`).
-- A malformed animation, region or value fails the view, linked in or not. The example: `apps/sandbox/sketch` `Timeline`.
+- A malformed animation, region or value fails the view, linked in or not. The example: `apps/sandbox/sketch` `Timeline` (and `LargeTimeline`, 20,000 clips, view `timeline-20k`).
+
+**Measure a view's frames** in the window it is in (#839): measure a view with `APP_FRAMES` (`features/workspace/src/frames.rs`: per frame its draw, render, refresh, the input and batches it shows; `drive` feeds wheel or drag input) or `just frames` (`scripts/frames.sh`: Sketch linked against process). Numbers and what they show: `docs/content/features/remote-views.md`, "Frames".
 
 **Example** (`examples/extension/counter`):
 
