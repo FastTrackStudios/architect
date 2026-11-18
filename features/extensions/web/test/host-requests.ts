@@ -18,6 +18,7 @@ export const requests: HostRequest[] = /* BEGIN */ [
   { "op": "rename_document", "path": "notes/b.md", "to": "notes/c.md" },
   { "op": "move_document", "path": "notes/c.md", "folder": "archive" },
   { "op": "delete_document", "path": "archive/c.md" },
+  { "op": "set_view_state", "pane": "chart-1", "state": "zoom=2" },
   { "op": "undo_document", "path": "notes/a.md" },
   { "op": "redo_document", "path": "notes/a.md" },
   { "op": "watch_documents", "action": "DEMO_ON_DOC" },
