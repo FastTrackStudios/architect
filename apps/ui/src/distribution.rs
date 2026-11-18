@@ -36,6 +36,10 @@ pub fn sandbox() -> Distribution {
         .linked(&architect_sandbox_board::Board)
         // Setlists: the decks demo (#441), a setlist's songs as decks.
         .linked(&crate::setlists::SetlistsExtension)
+        // Sketch (#175): its scenes and timelines linked in, the same
+        // views a development copy runs as a process; what the frame-time
+        // report compares (#839).
+        .linked(&architect_sandbox_sketch::Sketch)
 }
 
 static SANDBOX: OnceLock<Distribution> = OnceLock::new();

@@ -61,6 +61,7 @@ pub mod control;
 #[cfg(feature = "ctx")]
 mod ctx;
 pub mod deck;
+pub mod frames;
 mod drop;
 pub mod guide;
 #[cfg(feature = "home")]

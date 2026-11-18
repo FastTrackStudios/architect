@@ -88,6 +88,13 @@ pub fn launch_with_fonts(
     // to this one, so neither drops the other's.
     let (proxy, queue) = BlitzShellProxy::new(winit_proxy.clone());
     let (own, own_queue) = BlitzShellProxy::new(winit_proxy);
+    // `APP_FRAMES`'s driver wakes the loop at its input's rate.
+    {
+        let own = own.clone();
+        crate::frames::set_waker(move || {
+            own.send_event(BlitzShellEvent::embedder_event(FramesTick));
+        });
+    }
     let desk = Rc::new(Desk {
         wake: own.clone(),
         requests: RefCell::new(Vec::new()),
@@ -125,6 +132,7 @@ pub fn launch_with_fonts(
         desk,
         popouts: HashMap::new(),
         devices: Vec::new(),
+        main: None,
         own,
         own_queue,
         fonts,
@@ -612,6 +620,38 @@ struct App {
     own_queue: Receiver<BlitzShellEvent>,
     /// The app's faces, for each pop-out's document.
     fonts: &'static [&'static [u8]],
+    /// The main window, once it had an event: where `APP_FRAMES`'s
+    /// driver sends its input.
+    main: Option<OsId>,
+}
+
+/// Wakes the loop for `APP_FRAMES`'s driver.
+struct FramesTick;
+
+/// A window's platform id as a frame record names it.
+fn window_key(window: OsId) -> u64 {
+    u64::try_from(window.into_raw()).unwrap_or(u64::MAX)
+}
+
+/// The refresh rate of the display `window` is on, Hz.
+#[must_use]
+pub fn refresh_hz(window: &dyn OsWindow) -> Option<f64> {
+    let mode = window.current_monitor()?.current_video_mode()?;
+    let mhz = mode.refresh_rate_millihertz()?;
+    Some(f64::from(mhz.get()) / 1000.0)
+}
+
+/// Whether `event` is a person's input (what a frame record counts).
+const fn is_input(event: &WindowEvent) -> bool {
+    matches!(
+        event,
+        WindowEvent::PointerMoved { .. }
+            | WindowEvent::PointerButton { .. }
+            | WindowEvent::MouseWheel { .. }
+            | WindowEvent::KeyboardInput { .. }
+            | WindowEvent::Ime(_)
+            | WindowEvent::PinchGesture { .. }
+    )
 }
 
 impl App {
@@ -842,6 +882,120 @@ impl ApplicationHandler for App {
     }
 
     fn window_event(&mut self, event_loop: &dyn ActiveEventLoop, window: OsId, event: WindowEvent) {
+        if !crate::frames::recording_now() {
+            return self.window_event_now(event_loop, window, event);
+        }
+        // A frame record (`crate::frames`): the frame's times, read from
+        // what Blitz keeps of the frame it just drew.
+        if is_input(&event) {
+            crate::frames::input(window_key(window));
+        }
+        if !matches!(event, WindowEvent::RedrawRequested) {
+            return self.window_event_now(event_loop, window, event);
+        }
+        let key = window_key(window);
+        if !crate::frames::knows_refresh(key) {
+            let os = if self.popouts.contains_key(&window) {
+                self.popouts.get(&window).map(|o| Arc::clone(&o.view.window))
+            } else {
+                self.desk.main.borrow().clone()
+            };
+            if let Some(os) = os {
+                let size = os.surface_size();
+                crate::frames::size(key, size.width, size.height);
+                if let Some(hz) = refresh_hz(os.as_ref()).filter(|hz| *hz > 1.0) {
+                    crate::frames::refresh(key, std::time::Duration::from_secs_f64(1.0 / hz));
+                }
+            }
+        }
+        let began = std::time::Instant::now();
+        let before = blitz_traits::LAST_FRAME_MICROS.load(std::sync::atomic::Ordering::Relaxed);
+        self.window_event_now(event_loop, window, event);
+        let ended = std::time::Instant::now();
+        let micros = |a: &std::sync::atomic::AtomicU64| {
+            std::time::Duration::from_micros(a.load(std::sync::atomic::Ordering::Relaxed))
+        };
+        // Not drawn (hidden, or waiting for a resource): no frame.
+        if blitz_traits::LAST_FRAME_MICROS.load(std::sync::atomic::Ordering::Relaxed) == before
+            && ended.duration_since(began) < std::time::Duration::from_micros(200)
+        {
+            return;
+        }
+        crate::frames::frame(
+            key,
+            began,
+            ended,
+            micros(&blitz_traits::LAST_ENCODE_MICROS),
+            micros(&blitz_traits::LAST_PRESENT_MICROS),
+        );
+    }
+
+    fn proxy_wake_up(&mut self, event_loop: &dyn ActiveEventLoop) {
+        self.drive(event_loop);
+        self.own_events();
+        self.asks(event_loop);
+        self.inner.proxy_wake_up(event_loop);
+        // The main window's turn may have asked for more.
+        self.asks(event_loop);
+    }
+}
+
+impl App {
+    /// `APP_FRAMES`'s input due now, to the main window, as the platform
+    /// would send it.
+    fn drive(&mut self, event_loop: &dyn ActiveEventLoop) {
+        let Some(main) = self.main else {
+            return;
+        };
+        let driven = crate::frames::driven_now();
+        if driven.is_empty() {
+            return;
+        }
+        let scale = self
+            .desk
+            .main
+            .borrow()
+            .as_ref()
+            .map_or(1.0, |w| w.scale_factor());
+        let at = |x: f64, y: f64| dioxus_native::winit::dpi::PhysicalPosition::new(x * scale, y * scale);
+        for input in driven {
+            use dioxus_native::winit::event::{ButtonSource, MouseButton, MouseScrollDelta, PointerSource, ScrollSource, TouchPhase};
+            let event = match input {
+                crate::frames::Driven::Move(x, y) => WindowEvent::PointerMoved {
+                    device_id: None,
+                    primary: true,
+                    position: at(x, y),
+                    source: PointerSource::Mouse,
+                },
+                crate::frames::Driven::Press(x, y) | crate::frames::Driven::Release(x, y) => {
+                    WindowEvent::PointerButton {
+                        device_id: None,
+                        primary: true,
+                        state: if matches!(input, crate::frames::Driven::Press(..)) {
+                            ElementState::Pressed
+                        } else {
+                            ElementState::Released
+                        },
+                        position: at(x, y),
+                        button: ButtonSource::Mouse(MouseButton::Left),
+                        is_macos_activation_click: false,
+                    }
+                }
+                crate::frames::Driven::Wheel(_, _, dy) => {
+                    WindowEvent::MouseWheel {
+                        device_id: None,
+                        // winit's sign: a positive y scrolls up.
+                        delta: MouseScrollDelta::LineDelta(0.0, -narrow(dy)),
+                        phase: TouchPhase::Moved,
+                        source: ScrollSource::Unknown,
+                    }
+                }
+            };
+            self.window_event(event_loop, main, event);
+        }
+    }
+
+    fn window_event_now(&mut self, event_loop: &dyn ActiveEventLoop, window: OsId, event: WindowEvent) {
         if let WindowEvent::PointerButton {
             state: ElementState::Released,
             primary: true,
@@ -858,16 +1012,11 @@ impl ApplicationHandler for App {
             // The app hid the window instead: the loop runs on.
             self.asks(event_loop);
         } else {
+            if self.main.is_none() {
+                self.main = Some(window);
+            }
             self.inner.window_event(event_loop, window, event);
         }
-    }
-
-    fn proxy_wake_up(&mut self, event_loop: &dyn ActiveEventLoop) {
-        self.own_events();
-        self.asks(event_loop);
-        self.inner.proxy_wake_up(event_loop);
-        // The main window's turn may have asked for more.
-        self.asks(event_loop);
     }
 }
 

@@ -274,6 +274,8 @@ fn Window() -> Element {
     use_hook(|| Rc::new(serve_window(&list)));
     // `APP_SHOT`: the window draws itself to a PNG.
     architect_workspace::shot::use_app_shot(&list);
+    // `APP_FRAMES`: the window records its own frames (#839).
+    architect_workspace::frames::use_app_frames(&list);
     // `<app dir>/AGENTS.md`: the agents' guide, from the live list.
     use_hook(|| Rc::new(keep_guide_written(&list)));
     rsx! { LabApp {} }
