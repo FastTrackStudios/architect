@@ -97,6 +97,12 @@ lint:
     cargo fmt --all -- --check
     cargo clippy --workspace --all-targets --all-features
 
+# Before pushing to a ready PR: what main's CI runs after the merge (Linux
+# clippy and feature builds, the web bundle, the tests the change reaches),
+# in a fresh clone of REF on a Linux host (scripts/lint-linux.sh).
+lint-linux REF="HEAD":
+    bash scripts/lint-linux.sh {{REF}}
+
 # Release tags must order the commits the way their numbers do — six
 # repos pin this one by tag, and that is the only question they ask.
 tags:
