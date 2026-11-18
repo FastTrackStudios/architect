@@ -249,6 +249,10 @@ async fn take(live: &LiveDocument, job: &Job) -> Result<Shot, String> {
 /// The document painted at its window's size and scale: RGBA8 pixels.
 fn paint(doc: &mut BaseDocument) -> (Vec<u8>, u32, u32, f64) {
     use anyrender::PaintScene as _;
+    // Painted as the window paints: after resolving what changed since
+    // its last frame (a removed element is still in its parent's paint
+    // list until then, and painting it panics).
+    doc.resolve_at_last_time();
     let (width, height) = doc.viewport().window_size;
     let scale = doc.viewport().scale_f64();
     let (width, height) = (width.max(1), height.max(1));
