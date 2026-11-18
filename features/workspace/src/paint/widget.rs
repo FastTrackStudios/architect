@@ -94,6 +94,11 @@ impl Widget for PaintWidget {
                 self.painter.ctx().input.push(input);
             }
         }
+        // Gone: after the move to where it went, the view hears it left.
+        if let Some(gone) = left_view(event) {
+            let _ = self.painter.pointer(&gone);
+            self.painter.ctx().input.push(gone);
+        }
         if let Some(cursor) = self.painter.take_cursor() {
             self.wake.set_cursor(cursor);
         }
@@ -311,6 +316,19 @@ pub fn view_input(event: &UiEvent) -> Option<ViewInput> {
         UiEvent::Ime(BlitzImeEvent::Enabled | BlitzImeEvent::DeleteSurrounding { .. })
         | UiEvent::AppleStandardKeybinding(_) => return None,
     })
+}
+
+/// [`ViewInput::PointerLeave`] when `event` is a mouse's or a pen's
+/// leaving the view: what a host sends after [`view_input`]'s move to
+/// where it went.
+#[must_use]
+pub const fn left_view(event: &UiEvent) -> Option<ViewInput> {
+    match event {
+        UiEvent::PointerLeave(p) if !matches!(p.id, BlitzPointerId::Finger(_)) => {
+            Some(ViewInput::PointerLeave)
+        }
+        _ => None,
+    }
 }
 
 /// A pointer event at its element-local point: a finger's as a touch in

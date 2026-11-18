@@ -197,11 +197,43 @@ fn qual(name: &str, namespace: Option<&str>) -> QualName {
     )
 }
 
+/// What a remote view's document fetches: a `data:` URI's own bytes, and
+/// nothing else. A view's `<img src="data:image/svg+xml;…">` (Keyflow's
+/// palette glyphs) draws, as it does linked into the app's document; no
+/// `file:` path, `https:` beacon or bundle asset is reachable from one.
+/// Without it the document had no provider and every image stayed blank.
+struct DataOnly;
+
+impl blitz_traits::net::NetProvider for DataOnly {
+    fn fetch(
+        &self,
+        _doc_id: usize,
+        request: blitz_traits::net::Request,
+        handler: Box<dyn blitz_traits::net::NetHandler>,
+    ) {
+        let url = request.url.to_string();
+        if request.url.scheme() != "data" {
+            handler.error(url, "a remote view fetches data: URIs only".to_owned());
+            return;
+        }
+        match data_url::DataUrl::process(&url)
+            .ok()
+            .and_then(|d| d.decode_to_vec().ok())
+        {
+            Some((bytes, _)) => handler.bytes(url, blitz_traits::net::Bytes::from(bytes)),
+            None => handler.error(url, "not a data: URI that decodes".to_owned()),
+        }
+    }
+}
+
 impl RemoteDocument {
     /// An empty view, sending its events to `events`.
     #[must_use]
     pub fn new(events: mpsc::UnboundedSender<ViewEvent>) -> Self {
-        let mut doc = BaseDocument::new(DocumentConfig::default());
+        let mut doc = BaseDocument::new(DocumentConfig {
+            net_provider: Some(Arc::new(DataOnly)),
+            ..DocumentConfig::default()
+        });
         doc.add_user_agent_stylesheet(UserAgentStylesheet::default_sheet());
         let mut m = doc.mutate();
         let html = m.create_element(qual("html", None), Vec::new());
@@ -315,6 +347,12 @@ impl RemoteDocument {
             return (false, false);
         }
         let (x, y) = (p.coords.client_x, p.coords.client_y);
+        let mods = architect_scene::region::Mods::held(
+            p.mods.contains(Modifiers::SHIFT),
+            p.mods.contains(Modifiers::ALT),
+            p.mods.contains(Modifiers::CONTROL),
+            p.mods.contains(Modifiers::META),
+        );
         let holding = self.pointed.filter(|node| {
             self.painted.get(node).is_some_and(|p| {
                 p.lock()
@@ -343,7 +381,11 @@ impl RemoteDocument {
             && let Some(painted) = self.painted.get(&was)
         {
             let mut p = painted.lock().unwrap_or_else(PoisonError::into_inner);
-            outcomes.push(p.pointer(PointerKind::Gone, peniko::kurbo::Point::ZERO));
+            outcomes.push(p.pointer(
+                PointerKind::Gone,
+                peniko::kurbo::Point::ZERO,
+                architect_scene::region::Mods::NONE,
+            ));
         }
         self.pointed = target.map(|(node, _)| node);
         if let Some((node, at)) = target
@@ -352,7 +394,7 @@ impl RemoteDocument {
             let outcome = painted
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
-                .pointer(kind, at);
+                .pointer(kind, at, mods);
             outcomes.push(outcome);
             if kind == PointerKind::Gone {
                 self.pointed = None;
@@ -2204,6 +2246,39 @@ pub fn RemoteView(
     }
 }
 
+/// What process views asked their panes to keep (`set_view_state`), by
+/// pane: `(extension, state)`, taken by the pane's [`RemotePaneView`].
+static VIEW_STATES: std::sync::LazyLock<(
+    Mutex<HashMap<String, (String, String)>>,
+    tokio::sync::watch::Sender<u64>,
+)> = std::sync::LazyLock::new(|| (Mutex::default(), tokio::sync::watch::Sender::new(0)));
+
+/// Extension `extension` asks pane `pane` to keep `state` as where its
+/// view is (`HostRequest::SetViewState`): the pane takes it if it shows
+/// one of that extension's views.
+pub fn offer_view_state(extension: &str, pane: &str, state: &str) {
+    VIEW_STATES
+        .0
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(pane.to_owned(), (extension.to_owned(), state.to_owned()));
+    VIEW_STATES.1.send_modify(|n| *n = n.wrapping_add(1));
+}
+
+/// What `extension` offered pane `pane`, taken.
+fn take_view_state(extension: &str, pane: &str) -> Option<String> {
+    let mut all = VIEW_STATES.0.lock().unwrap_or_else(PoisonError::into_inner);
+    match all.get(pane) {
+        Some((from, _)) if from == extension => all.remove(pane).map(|(_, s)| s),
+        // Another extension's pane: not its to change.
+        Some(_) => {
+            all.remove(pane);
+            None
+        }
+        None => None,
+    }
+}
+
 /// [`RemoteView`] in a workspace pane: told the pane's id and state
 /// (`linked::PANE_CLAIM`), now and whenever the state changes, so a view
 /// opened on a file (an opener's) knows which.
@@ -2222,11 +2297,34 @@ pub fn RemotePaneView(
             .as_ref()
             .map(architect_workspace::PaneHandle::state)
             .unwrap_or_default(),
+        &pane
+            .as_ref()
+            .map(architect_workspace::PaneHandle::view_state)
+            .unwrap_or_default(),
     );
     let mut input = use_signal(|| now.clone());
     if *input.peek() != now {
         input.set(now);
     }
+    // What its view keeps (`set_view_state`): its pane takes it, from
+    // this extension only, and gives it back on every start.
+    let keeper = pane;
+    let owner = extension.clone();
+    use_future(move || {
+        let (pane, owner) = (keeper.clone(), owner.clone());
+        async move {
+            let Some(pane) = pane else { return };
+            let mut changes = VIEW_STATES.1.subscribe();
+            loop {
+                if let Some(state) = take_view_state(&owner, &pane.id.0) {
+                    pane.set_view_state(state);
+                }
+                if changes.changed().await.is_err() {
+                    return;
+                }
+            }
+        }
+    });
     rsx! { RemoteView { processes, extension, view, overlay, engine, input: Some(input) } }
 }
 
@@ -2607,6 +2705,62 @@ pub fn mounted_views(doc: &BaseDocument) -> Vec<NodeId> {
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod image_tests {
+    use std::sync::{Arc, Mutex};
+
+    use blitz_traits::net::{Bytes, NetHandler, NetProvider, Request, Url};
+
+    use super::DataOnly;
+
+    /// What a fetch gave: its bytes, or why not.
+    type Got = Arc<Mutex<Option<Result<Vec<u8>, String>>>>;
+
+    struct Keep(Got);
+
+    impl NetHandler for Keep {
+        fn bytes(self: Box<Self>, _url: String, bytes: Bytes) {
+            *self
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Ok(bytes.to_vec()));
+        }
+        fn error(self: Box<Self>, _url: String, why: String) {
+            *self
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Err(why));
+        }
+    }
+
+    fn fetch(url: &str) -> Option<Result<Vec<u8>, String>> {
+        let got = Got::default();
+        let url = Url::parse(url).unwrap_or_else(|e| panic!("{url}: {e}"));
+        DataOnly.fetch(0, Request::get(url), Box::new(Keep(Arc::clone(&got))));
+        got.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+    }
+
+    /// A view's `<img src="data:…">` (Keyflow's palette glyphs) gets its
+    /// bytes; a path on disk or a site's image is refused.
+    #[test]
+    fn a_views_document_fetches_data_uris_and_nothing_else() {
+        // `<svg/>`, base64.
+        assert_eq!(
+            fetch("data:image/svg+xml;base64,PHN2Zy8+"),
+            Some(Ok(b"<svg/>".to_vec()))
+        );
+        assert_eq!(
+            fetch("data:image/svg+xml,%3Csvg%2F%3E"),
+            Some(Ok(b"<svg/>".to_vec()))
+        );
+        for url in ["file:///etc/passwd", "https://example.com/beacon.png"] {
+            assert!(matches!(fetch(url), Some(Err(_))), "{url} was fetched");
+        }
+    }
 }
 
 #[cfg(test)]

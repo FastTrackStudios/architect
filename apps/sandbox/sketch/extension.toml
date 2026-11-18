@@ -55,3 +55,32 @@ id = "timeline-20k"
 title = "Timeline (20,000 clips)"
 icon = "play"
 kind = "paint"
+
+# Nudges the timeline: how many times it has been nudged. `N` runs it
+# while the timeline has the focus (a key scoped to the view, #844), and
+# the timeline's toolbar has a button for it.
+[[actions]]
+id = "LAB_SKETCH_NUDGE"
+name = "Sketch: nudge"
+description = "Nudges the timeline: {nudged}, how many times so far."
+group = "Sketch"
+effect = "mutating"
+
+[[keys]]
+chord = "N"
+action = "LAB_SKETCH_NUDGE"
+when = "view:timeline"
+
+# Its icon is a glyph drawn in a fixed grey: `tint` draws it in the
+# toolbar's ink, so it follows the theme as the app's icons do.
+[[toolbars]]
+id = "timeline"
+title = "Timeline"
+where = "view:lab.sketch/timeline"
+
+[[toolbars.items]]
+action = "LAB_SKETCH_NUDGE"
+label = "Nudge"
+image = "icons/nudge.svg"
+tint = true
+hide_label = true

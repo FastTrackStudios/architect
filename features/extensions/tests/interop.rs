@@ -1375,3 +1375,78 @@ fn languages_are_registered_while_the_extension_is_on() {
     let why = Manifest::parse(&file).unwrap_err().to_string();
     assert!(why.contains("linked into the app"), "{why}");
 }
+
+thread_local! {
+    /// The view kinds the window listed, at each of its renders.
+    static LISTED: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+fn views_app() -> Element {
+    let host = HOST.with(|h| h.borrow().clone().unwrap());
+    let ui = architect_extensions::interface::use_extension_ui(host, Arc::new(ActionList::new()));
+    let kinds: Vec<String> = ui.views().into_iter().map(|v| v.kind.0).collect();
+    LISTED.with(|l| *l.borrow_mut() = kinds);
+    rsx! {}
+}
+
+/// An extension that adds nothing but a view, loaded after the window is
+/// up (a development copy, #844): its view is a pane kind at once,
+/// whatever else the window does, so `WORKSPACE_OPEN` finds it.
+#[test]
+fn a_view_of_an_extension_loaded_later_is_listed_at_once() {
+    let tmp = tempfile::tempdir().unwrap();
+    let list = ActionList::new();
+    let host = host(&list);
+    HOST.with(|h| *h.borrow_mut() = Some(host.clone()));
+    let mut main = VirtualDom::new(views_app);
+    main.rebuild_in_place();
+    settle(&mut main);
+    assert!(LISTED.with(|l| l.borrow().is_empty()));
+    let dir = tmp.path().join("boards");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("extension.toml"),
+        r#"
+id = "lab.boards"
+name = "Boards"
+version = "0.1.0"
+kind = "luau"
+api = "0.1"
+
+[[views]]
+id = "board"
+title = "Board"
+page = "board.tsx"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("board.tsx"),
+        "export default function Board() { return <div>board</div>; }\n",
+    )
+    .unwrap();
+    host.load(&Package::read(&dir).unwrap(), Origin::Dev)
+        .unwrap();
+    settle(&mut main);
+    assert_eq!(
+        LISTED.with(|l| l.borrow().clone()),
+        ["lab.boards/board"],
+        "the view isn't a pane kind"
+    );
+    // Saved with a second view and nothing else changed (its
+    // contributions the same): reloaded, both are pane kinds.
+    let manifest = std::fs::read_to_string(dir.join("extension.toml")).unwrap();
+    std::fs::write(
+        dir.join("extension.toml"),
+        format!("{manifest}\n[[views]]\nid = \"wall\"\ntitle = \"Wall\"\npage = \"board.tsx\"\n"),
+    )
+    .unwrap();
+    host.load(&Package::read(&dir).unwrap(), Origin::Dev)
+        .unwrap();
+    settle(&mut main);
+    assert_eq!(
+        LISTED.with(|l| l.borrow().clone()),
+        ["lab.boards/board", "lab.boards/wall"],
+        "the reloaded copy's new view isn't a pane kind"
+    );
+}

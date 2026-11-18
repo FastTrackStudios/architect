@@ -40,6 +40,9 @@ const INK: Color = Color::from_rgb8(0x2f, 0x6f, 0xeb);
 const EDGE: Color = Color::from_rgb8(0x8a, 0x8f, 0x98);
 const NODE: Color = Color::from_rgb8(0xe8, 0x6a, 0x3c);
 
+/// How many times the timeline was nudged (`LAB_SKETCH_NUDGE`).
+static NUDGED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// The extension: its views, linked in or in its process.
 pub struct Sketch;
 
@@ -53,7 +56,11 @@ impl Extension for Sketch {
             .view("arrangement", ArrangementView)
             .paint::<Graph>("graph")
             .paint::<Timeline>("timeline")
-            .paint::<LargeTimeline>("timeline-20k");
+            .paint::<LargeTimeline>("timeline-20k")
+            .action("LAB_SKETCH_NUDGE", |_| async {
+                let n = NUDGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                Ok(serde_json::json!({ "nudged": n.saturating_add(1) }))
+            });
     }
 }
 
@@ -382,6 +389,9 @@ pub const KNOB: LayerKey = 4;
 pub const BOX: LayerKey = 5;
 /// Its meter, drawn from the engine's value.
 pub const METER: LayerKey = 6;
+/// The drag box as it looks hovered: sent once, hidden, and shown by the
+/// host while the pointer is on the box (`Region::hover_layer`).
+pub const BOX_HOVER: LayerKey = 7;
 
 /// The fader's region, and the box's.
 pub const FADER: u64 = 1;
@@ -398,6 +408,8 @@ pub const BOX_AT: (f64, f64) = (48.0, 8.0);
 pub const KNOB_COLOR: Color = Color::from_rgb8(0xf2, 0xc1, 0x2e);
 /// The box's.
 pub const BOX_COLOR: Color = Color::from_rgb8(0x3c, 0xb3, 0x71);
+/// The drag box hovered: redrawn in this colour, not a box over it.
+pub const BOX_HOVER_COLOR: Color = Color::from_rgb8(0x6e, 0xe0, 0x9a);
 /// The meter's.
 pub const METER_COLOR: Color = Color::from_rgb8(0x4c, 0xd9, 0x64);
 
@@ -453,6 +465,7 @@ pub struct Timeline {
     track: std::sync::Arc<Vec<RenderCommand>>,
     knob: std::sync::Arc<Vec<RenderCommand>>,
     drag_box: std::sync::Arc<Vec<RenderCommand>>,
+    box_hover: std::sync::Arc<Vec<RenderCommand>>,
     meter: std::sync::Arc<Vec<RenderCommand>>,
     camera: Camera,
     panning: Option<(f64, f64)>,
@@ -488,6 +501,7 @@ impl Timeline {
             ),
             knob: filled(&Rect::new(0.0, -4.0, 24.0, 4.0), KNOB_COLOR),
             drag_box: filled(&Rect::new(0.0, 0.0, 40.0, 24.0), BOX_COLOR),
+            box_hover: filled(&Rect::new(0.0, 0.0, 40.0, 24.0), BOX_HOVER_COLOR),
             // Its bottom at the layer's origin: scaled down toward it.
             meter: filled(&Rect::new(0.0, -TRACK_HEIGHT, 6.0, 0.0), METER_COLOR),
             camera: Camera::default(),
@@ -582,6 +596,7 @@ impl PaintView for Timeline {
         };
         let handle = Region::new(DRAG_BOX, Shape::Rect(Rect::new(0.0, 0.0, 40.0, 24.0)))
             .cursor(Cursor::Move)
+            .hover_layer(BOX_HOVER)
             .press(Color::from_rgba8(0, 0, 0, 60))
             .drag(along(bx.clone(), Axis::X, 400.0))
             .drag(along(by.clone(), Axis::Y, 300.0));
@@ -639,6 +654,11 @@ impl PaintView for Timeline {
                     .regions(vec![handle])
                     .animated(vec![follow(Property::X, bx), follow(Property::Y, by)]),
             ),
+            (BOX_HOVER, {
+                let mut hovered = Layer::new(std::sync::Arc::clone(&self.box_hover));
+                hovered.visible = false;
+                hovered
+            }),
         ])
     }
 }

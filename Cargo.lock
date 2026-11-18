@@ -1410,6 +1410,7 @@ dependencies = [
  "block2 0.6.2",
  "crdt",
  "cursor-icon",
+ "data-url",
  "dioxus",
  "dioxus-html",
  "dioxus-native-dom",
@@ -2112,6 +2113,7 @@ dependencies = [
  "dioxus-native-dom",
  "futures",
  "png 0.17.16",
+ "serde_json",
  "tempfile",
 ]
 

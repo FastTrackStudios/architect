@@ -109,6 +109,15 @@ The extension's own actions, settings (`<id>.…`), data, log, points and window
 - **Spellings.** TSX: `actions.run(id, args)`. Web view: `architect.run`. WIT: `run-action`.
 - **Where the answers come from.** `features/extensions/src/hostapi.rs` `AppContext` supplies org and selection. With no context, both answer `null`.
 
+### A view's place
+
+| op | what | needs |
+|---|---|---|
+| `set_view_state {pane, state}` | keeps where its view in pane `pane` is, given back when the view starts again; only a pane showing one of its own views takes it | nothing |
+| `actions` | the app's actions it may run (its own, and those `capabilities.actions` reaches), as the Action List describes them: what a process view's `ViewCtx::actions` holds (`guest::app_actions`) | nothing |
+
+Call it through `linked::use_view_state()` (`ViewState::set`), which writes the pane directly linked in and sends this from a process: the same code either way.
+
 ### Documents (the documents service)
 
 | op | Luau / TSX `documents.` / web view `documents.` | needs |
@@ -120,9 +129,11 @@ The extension's own actions, settings (`<id>.…`), data, log, points and window
 | `edit_document {path, edits, name?}` | `edit_document` / `edit` / `edit` | `writes` |
 | `rename_document {path, to}`, `move_document {path, folder}` | same / `rename`, `move` / `rename`, `move` | `writes` |
 | `delete_document {path}` | `delete_document` / `delete` / `remove` | `writes` |
+| `undo_document {path}`, `redo_document {path}` | `undo_document`, `redo_document` / (none) / (none) | `writes` |
 | `watch_documents {action \| script, function?}` | `watch_documents` / `watch` / `on("doc.*")` | `reads` |
 
 - **WIT.** The typed imports are `list-documents`, `read-document`, `create-document`, `edit-document`, `rename-document`, `move-document`, `delete-document` and `watch-documents`.
+- **Undo.** `undo_document` takes back the document's last undo step and `redo_document` makes it again: `{step, text}` (the step's name and the text after), or `null` when there is none. A CRDT document (`features/extensions/src/documents/crdt_docs.rs` `CrdtDocuments`) walks its own `History`: every step, the person's and each extension's. A vault note (`features/navigator/src/documents.rs` `VaultDocuments`; a file keeps no undo) walks the edits made through the documents (`architect_documents::Journal`), each taken back by the three-way merge an open note uses, so edits made since stay. `DOC_UNDO {path?}` / `DOC_REDO {path?}` are the same as actions (⌘K, menus, MCP; without `path` the active pane's document), and ⌘Z / ⇧⌘Z run them in every view an opener shows a file in (`features/extensions/src/contrib_actions.rs`). A chart needs no undo stack of its own. Not yet a WIT import.
 - **Edits.** `DocEdit` is `{insert: {at, text}}`, `{delete: {at, len}}`, `{append: {text}}` or `{replace: {text}}`, with positions in characters. One call is one CRDT transaction and one undo step named `name`, made as the extension. `replace` is diffed, so the person's concurrent typing survives. An edit that changes nothing writes nothing and raises no `doc.saved`.
 - **Paths** are relative and `/`-separated, never `..`.
 
@@ -179,7 +190,7 @@ The service is `features/vault/vault-proto/src/query.rs` `VaultQuery` (one metho
 - **The answer.** `features/extensions/src/live.rs` `LiveDoc` `{doc_id, kind, path, writable}`. A path that is no document of a registered kind is `not_found`. A kind the manifest does not declare is refused as `doc_kinds.<kind>`. No `reads` is refused as `reads.documents`. A host without node documents answers `unsupported`.
 - **The session.** `Handle::document` and `guest::document` return a `features/extensions/src/live.rs` `DocLane`. `DocLane::replica()` keeps an in-memory `Replica` in step on a tokio task (`doc()`, `attached().await`, `ended()`). `DocLane::sync(&mut SyncedDoc)` runs one session of the extension's own `crdt::sync::SyncedDoc` for `doc_id` over its own `CrdtDoc`; run it again after it ends and it catches up by version vector. `DocLane::client()` is the raw `crdt::sync::DocSyncClient`.
 - **The wire.** No new socket. A process's `DocSync` lane rides the connection it has to the host (`guest` opens it beside the host service, `features/extensions/src/guest.rs` `doc_sync`); a linked one gets an in-memory lane (`features/extensions/src/live.rs` `serve_in_memory`). The host's `features/extensions/src/live.rs` `ExtensionDocSync` relays each session to the node's registry through `crdt::peer::SelfLane` as `Principal::Extension` for whoever it acts for, so the registry's authorizer and the vault's write guard decide (`features/vault/vault-live/src/write_guard.rs` `account_of` holds an extension to the person it acts for). Only a document `live_document` answered that extension is reached, re-checked against its kinds and `reads` on every attach; anything else is `UnknownDoc`. Without `writes` the host drops its updates: it only follows. A share guest's `guest_capabilities` has no `writes`, so a guest only follows.
-- **The app's part.** `features/extensions/src/hostapi.rs` `Host::set_kind_documents` with a `features/extensions/src/live.rs` `KindDocuments`: `resolve(path)` to `KindDoc {doc_id, kind}`, and `registry()`. `RegistryDocuments::new(registry, resolve)` builds one from a node's `VaultCollab` (`document_of`, `kind_of`, `registry`).
+- **The app's part.** `features/extensions/src/hostapi.rs` `Host::set_kind_documents` with a `features/extensions/src/live.rs` `KindDocuments`: `resolve(path)` to `KindDoc {doc_id, kind}`, and `registry()`. `RegistryDocuments::new(registry, resolve)` builds one from a node's `VaultCollab` (`document_of`, `kind_of`, `registry`). The desktop app gives its window's host the node's (`apps/desktop/src/node/mod.rs` `Running::kind_documents`, through `apps/ui/src/extensions.rs` `on_host`): a path is in the node's one vault, or its first folder names one of several (`vault_path`); its node holds the vaults its configuration names (`ARCHITECT_VAULTS`), none by default.
 - **Tests.** `features/extensions/tests/live_documents.rs`.
 
 ### Files, settings and data

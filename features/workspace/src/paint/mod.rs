@@ -55,8 +55,8 @@ use peniko::{Color, Fill};
 
 #[cfg(feature = "paint-ui")]
 pub use widget::{
-    PaintMount, PaintPane, PaintWake, PaintWidget, WHEEL_LINE, pane_tokens, shell_tokens,
-    view_input,
+    PaintMount, PaintPane, PaintWake, PaintWidget, WHEEL_LINE, left_view, pane_tokens,
+    shell_tokens, view_input,
 };
 
 use crate::ctx::{Geometry, ThemeTokens, ViewCtx, ViewInput};
@@ -420,15 +420,27 @@ impl Painter {
         let at = |x: f32, y: f32| Point::new(f64::from(x), f64::from(y));
         let outcome = match *input {
             ViewInput::PointerMove { x, y, .. } => i.moved(layers, &now, values, at(x, y)),
-            ViewInput::PointerDown { x, y, .. } => i.pressed(layers, &now, values, at(x, y)),
-            ViewInput::PointerUp { x, y, .. } => i.released(layers, &now, values, at(x, y)),
+            ViewInput::PointerDown { x, y, ref mods, .. } => i.pressed_with(
+                layers,
+                &now,
+                values,
+                at(x, y),
+                region::Mods::from_names(mods),
+            ),
+            ViewInput::PointerUp { x, y, ref mods, .. } => i.released_with(
+                layers,
+                &now,
+                values,
+                at(x, y),
+                region::Mods::from_names(mods),
+            ),
             ViewInput::Touch { x, y, phase, .. } => match phase {
                 "start" => i.pressed(layers, &now, values, at(x, y)),
                 "move" => i.moved(layers, &now, values, at(x, y)),
                 "end" => i.released(layers, &now, values, at(x, y)),
                 _ => i.left(),
             },
-            ViewInput::Focus(false) => i.left(),
+            ViewInput::Focus(false) | ViewInput::PointerLeave => i.left(),
             _ => return false,
         };
         if let Some(cursor) = outcome.cursor {

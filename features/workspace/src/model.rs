@@ -489,6 +489,12 @@ pub struct Pane {
     pub view: ViewKind,
     /// The view's own state, opaque here (facet JSON).
     pub state: String,
+    /// Where the view is in what it shows (zoom, scroll, selection, a
+    /// mode), opaque here: kept with the layout, so a view whose program
+    /// restarts, or whose pane moves or pops out, starts where it was.
+    /// Apart from `state`, which says what it shows (an opener's path).
+    #[facet(default)]
+    pub view_state: String,
     /// Cached, to draw a tab without building its view.
     pub title: String,
     pub icon: Option<String>,
@@ -504,6 +510,7 @@ impl Pane {
             id: PaneId::new(id),
             view: ViewKind::new(view),
             state: String::new(),
+            view_state: String::new(),
             title: title.into(),
             icon: None,
             pinned: false,

@@ -316,10 +316,17 @@ Four things are the host's own:
   each playhead change).
 - **Hit regions** (`features/scene/src/region.rs`). A layer may carry
   regions: a shape in its content space, an id, a cursor, a fill drawn
-  over it while hovered or pressed. The host hit-tests them with each
+  over it while hovered or pressed, and a layer shown while it is
+  hovered or pressed (`Region::hover_layer`, `Region::press_layer`): one
+  the view sends once with `visible: false`, its content redrawn as
+  hovered (a notehead in the hover colour, not a box over it), drawn in
+  the region's layer's space with no word to the view (batch version 3;
+  `apps/sandbox/sketch` `Timeline`'s drag box). The host hit-tests them with each
   layer placed as its animations place it now, sets the cursor and draws
   the highlight, and the view hears `RegionEvent::Enter`, `Leave`,
-  `Press` and `Release` by id (`PaintView::region`; a `RemoteScene`'s
+  `Press` and `Release` by id, each just after `Modifiers(id, mods)`
+  when a key is held (`region::Mods`: a Shift-click is a range, a
+  ⌘-click a toggle) (`PaintView::region`; a `RemoteScene`'s
   `onregion`, sent as the element's `input` named `architect-region`).
   A press on a region is the region's: the view does not get that pointer
   event. It still focuses the view, as a press anywhere else in it does:

@@ -403,13 +403,18 @@ fn fader_name() -> Name {
 
 fn fader_layers(content: &Arc<Vec<RenderCommand>>) -> Vec<(LayerKey, Layer)> {
     use architect_scene::region::{Axis, Drag, Region, Shape};
+    let mut hovered = Layer::new(Arc::clone(content));
+    hovered.visible = false;
     vec![
+        (3, hovered),
         (
             1,
             Layer::new(Arc::clone(content)).regions(vec![
                 Region::new(9, Shape::Rect(Rect::new(0.0, 0.0, 20.0, 100.0)))
                     .cursor(Cursor::NsResize)
                     .hover(Color::from_rgba8(255, 255, 255, 30))
+                    // Its content redrawn hovered: layer 3, hidden.
+                    .hover_layer(3)
                     .drag(Drag {
                         value: fader_name(),
                         axis: Axis::Y,

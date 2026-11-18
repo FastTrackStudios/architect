@@ -113,9 +113,38 @@ fn post(update: Update) {
 /// Checked by the host against its manifest, as the manifest's own
 /// tables are.
 pub fn contribute(contribution: &Contribution) {
-    let json = serde_json::to_string(contribution).unwrap_or_default();
+    let mut json = serde_json::to_value(contribution).unwrap_or(Json::Null);
+    // Its files go with it, under a key a host built before them reads
+    // past (`Contribution` takes no `files`).
+    let files = files_cell().get().filter(|f| !f.is_empty());
+    if let (Some(files), Some(map)) = (files, json.as_object_mut()) {
+        map.insert(
+            crate::contrib::FILES_KEY.to_owned(),
+            serde_json::json!(files),
+        );
+    }
+    let json = json.to_string();
     *outbox().last.lock().unwrap_or_else(PoisonError::into_inner) = Some(json.clone());
     post(Update::Contribute { json });
+}
+
+fn files_cell() -> &'static OnceLock<Vec<(String, String)>> {
+    static FILES: OnceLock<Vec<(String, String)>> = OnceLock::new();
+    &FILES
+}
+
+/// Keeps the files a linked extension's code holds, to send to its host.
+///
+/// `Extension::files`: its toolbars' images, read from its package linked
+/// in. They go with what it contributes, so its process copy's host can
+/// read them too. Set once, before it serves.
+pub fn set_files(files: &[(&str, &str)]) {
+    let _ = files_cell().set(
+        files
+            .iter()
+            .map(|(p, t)| ((*p).to_owned(), (*t).to_owned()))
+            .collect(),
+    );
 }
 
 /// Writes one piece of its runtime state (a status item's text: its key
@@ -363,6 +392,96 @@ pub async fn host(
     crate::hostcall::HostAnswer::from_json(&answer).into_result()
 }
 
+/// The app's actions as this process's views see them.
+///
+/// `ViewCtx::actions`, the same as a linked view's: the ones it may run,
+/// listed by the host (`HostRequest::Actions`) and filled in the first
+/// time a view asks, each run through the host (`run`), as the extension.
+/// Shared by every view of the process. Ask for it in a view.
+#[must_use]
+pub fn app_actions() -> architect::action::ActionList {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static LIST: OnceLock<architect::action::ActionList> = OnceLock::new();
+    static FILLING: AtomicBool = AtomicBool::new(false);
+    let list = LIST.get_or_init(architect::action::ActionList::new).clone();
+    if !FILLING.swap(true, Ordering::AcqRel) {
+        let filled = list.clone();
+        dioxus::prelude::spawn(async move {
+            if !fill_actions(&filled).await {
+                // Not connected yet: the next view asks again.
+                FILLING.store(false, Ordering::Release);
+            }
+        });
+    }
+    list
+}
+
+/// Registers what the host lists, each forwarded to it: whether it could.
+async fn fill_actions(list: &architect::action::ActionList) -> bool {
+    use architect::action::{ActionError, ActionInfo, Effect};
+    let Ok(Json::Array(all)) = host(crate::hostcall::HostRequest::Actions).await else {
+        return false;
+    };
+    for a in all {
+        let text = |k: &str| {
+            a.get(k)
+                .and_then(Json::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let schema = |k: &str| a.get(k).and_then(Json::as_str).map(str::to_owned);
+        let id = text("id");
+        if id.is_empty() || list.info(&id).is_some() {
+            continue;
+        }
+        let info = ActionInfo {
+            id: id.clone(),
+            display_name: text("display_name"),
+            description: text("description"),
+            category: text("category"),
+            group: text("group"),
+            shortcut: text("shortcut"),
+            effect: match text("effect").as_str() {
+                "read_only" => Effect::ReadOnly,
+                "destructive" => Effect::Destructive,
+                _ => Effect::Mutating,
+            },
+            params_schema: schema("params_schema"),
+            result_schema: schema("result_schema"),
+            enabled: a.get("enabled").and_then(Json::as_bool).unwrap_or(true),
+            disabled_reason: None,
+            checked: a.get("checked").and_then(Json::as_bool),
+        };
+        let run_id = id.clone();
+        let _ = list.register_forwarded(
+            &info,
+            Arc::new(move |args: &[u8]| {
+                let (id, args) = (
+                    run_id.clone(),
+                    serde_json::from_slice(args).unwrap_or(Json::Null),
+                );
+                let run: architect::action::ActionFuture = Box::pin(async move {
+                    let request = crate::hostcall::HostRequest::Run {
+                        action: id.clone(),
+                        args,
+                        ticket: None,
+                    };
+                    let out = host(request).await.map_err(|e| ActionError::Failed {
+                        id: id.clone(),
+                        message: e.to_string(),
+                    })?;
+                    serde_json::to_vec(&out).map_err(|e| ActionError::Failed {
+                        id,
+                        message: e.to_string(),
+                    })
+                });
+                Ok(run)
+            }),
+        );
+    }
+    true
+}
+
 #[cfg(feature = "doc-sync")]
 fn docs_slot() -> &'static Mutex<Option<crdt::sync::DocSyncClient>> {
     static DOCS: OnceLock<Mutex<Option<crdt::sync::DocSyncClient>>> = OnceLock::new();
@@ -592,7 +711,10 @@ fn render(
         // Events arrive as the wire's data, made into dioxus-html's
         // serialised kind; this process renders nothing else.
         set_event_converter(Box::new(SerializedHtmlEventConverter));
-        let mut vdom = VirtualDom::new(root);
+        // Under a root of its own that gives it what an app gives a
+        // linked view: the theme store, and a document for its head.
+        let mut vdom = VirtualDom::new(GuestRoot);
+        vdom.provide_root_context(ViewRoot(root));
         // An inline embed's input (`linked::use_embed`): empty in a pane,
         // filled by the host's `EMBED_EVENT` when it mounts one.
         let embed = vdom.in_scope(dioxus::prelude::ScopeId::ROOT, || {
@@ -631,6 +753,88 @@ fn render(
             }
         }
     });
+}
+
+/// The view a [`GuestRoot`] draws.
+#[derive(Clone, Copy)]
+struct ViewRoot(fn() -> Element);
+
+/// What every view a process serves is drawn under: what the app gives a
+/// linked view, so the same code works in both.
+///
+/// - The app's theme store (`architect_theme::try_use_theme`,
+///   `use_resolved`), its theme the one the host last sent (`use_theme`).
+/// - A document whose head is the view's own: a `document::Style` is a
+///   `style` element drawn first, which its host applies as it applies any.
+#[allow(non_snake_case)]
+fn GuestRoot() -> Element {
+    use dioxus::prelude::*;
+    let handle = architect_theme::use_theme_store(|| {
+        architect_theme::ThemeStore::new(architect_theme::Registry::builtin())
+    });
+    let mut resolved = handle.resolved();
+    use_future(move || async move {
+        let mut changes = theme_cell().subscribe();
+        loop {
+            let now = changes.borrow_and_update().clone();
+            if let Some(now) = now
+                && *resolved.peek() != now
+            {
+                resolved.set(now);
+            }
+            if changes.changed().await.is_err() {
+                return;
+            }
+        }
+    });
+    let styles = use_signal(Vec::<String>::new);
+    use_context_provider(|| {
+        let head: Rc<dyn dioxus::document::Document> = Rc::new(Head { styles });
+        head
+    });
+    rsx! {
+        for css in styles() {
+            style { "{css}" }
+        }
+        Root {}
+    }
+}
+
+/// The view itself, as a component of its own.
+#[allow(non_snake_case)]
+fn Root() -> Element {
+    (dioxus::prelude::use_context::<ViewRoot>().0)()
+}
+
+/// A process view's document: its head's styles, drawn in it.
+struct Head {
+    styles: dioxus::prelude::Signal<Vec<String>>,
+}
+
+impl dioxus::document::Document for Head {
+    fn eval(&self, js: String) -> dioxus::document::Eval {
+        dioxus::document::NoOpDocument.eval(js)
+    }
+
+    fn create_head_element(
+        &self,
+        name: &str,
+        _attributes: &[(&str, String)],
+        contents: Option<String>,
+    ) {
+        use dioxus::prelude::{ReadableExt as _, WritableExt as _};
+        // A stylesheet by `href` has nothing here to fetch it with.
+        if name != "style" {
+            return;
+        }
+        let Some(css) = contents.filter(|c| !c.trim().is_empty()) else {
+            return;
+        };
+        let mut styles = self.styles;
+        if !styles.peek().contains(&css) {
+            styles.write().push(css);
+        }
+    }
 }
 
 /// Provided at the root of every view a process serves: what

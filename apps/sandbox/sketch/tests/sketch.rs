@@ -691,6 +691,43 @@ fn a_box_follows_the_pointer_anywhere_with_nothing_from_the_view() {
     assert_eq!(bytes(&app.doc.inner.borrow()), once);
 }
 
+/// The drag box hovered is its content redrawn in the hover colour, by
+/// the host, with nothing from the view (#844): a layer sent once,
+/// hidden, shown while the pointer is on the box, in the box's own space.
+#[test]
+fn a_hovered_box_is_redrawn_in_its_hover_colour_with_nothing_from_the_view() {
+    use architect_sandbox_sketch::{BOX_AT, BOX_COLOR, BOX_HOVER_COLOR};
+    let (mut app, _window) = mixer();
+    let pane = (40.0_f32, 20.0_f32);
+    let once = bytes(&app.doc.inner.borrow());
+    assert!(fill_at(&app.window_scene(), BOX_HOVER_COLOR).is_none());
+    let at = (
+        pane.0 + BOX_AT.0 as f32 + 20.0,
+        pane.1 + BOX_AT.1 as f32 + 12.0,
+    );
+    app.send(UiEvent::PointerMove(pointer(at, FREE, Modifiers::empty())));
+    app.pump("the hover", |_| true);
+    let scene = app.window_scene();
+    let (box_at, hover_at) = (
+        fill_at(&scene, BOX_COLOR).unwrap(),
+        fill_at(&scene, BOX_HOVER_COLOR).expect("the hover layer, drawn"),
+    );
+    assert_eq!(box_at, hover_at, "in the box's own space");
+    // Off it: gone again.
+    app.send(UiEvent::PointerMove(pointer(
+        (pane.0 + 300.0, pane.1 + 250.0),
+        FREE,
+        Modifiers::empty(),
+    )));
+    app.pump("the leave", |_| true);
+    assert!(fill_at(&app.window_scene(), BOX_HOVER_COLOR).is_none());
+    assert_eq!(
+        bytes(&app.doc.inner.borrow()),
+        once,
+        "the view sent nothing"
+    );
+}
+
 #[test]
 fn a_seek_wakes_the_window_a_resting_process_view_is_in() {
     use std::sync::atomic::Ordering;

@@ -779,7 +779,21 @@ fn ToolButton(cx: Ctx, item: ToolItem, path: String, joined: bool) -> Element {
                 .and_then(|l| crate::toolbars::Toolbars::embedded_image(&item.image, &l.embedded)),
             beside => host.toolbars().image(&item.image, beside),
         })
-        .flatten();
+        .flatten()
+        // A process copy of a linked extension: the files its code holds,
+        // as it sent them, when its folder has no such file.
+        .or_else(|| {
+            (!item.image.is_empty() && cx.owner != crate::toolbars::PERSON)
+                .then(|| host.contributions().runtime_file(&cx.owner, &item.image))
+                .flatten()
+                .and_then(|text| {
+                    let files = [(item.image.as_str(), text.as_str())];
+                    crate::toolbars::Toolbars::embedded_image(&item.image, &files)
+                })
+        })
+        // In the item's ink, as its icon is: `currentColor`, and with
+        // `tint` every colour it was drawn in.
+        .map(|uri| crate::toolbars::Toolbars::tinted(&uri, &ink, item.tint));
     let iconic = !item.icon.is_empty() || image.is_some();
     let show_label = !(iconic && (item.hide_label || cx.hide_labels || cx.header));
     let (size, glyph) = (cx.size, cx.glyph);

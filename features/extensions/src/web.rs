@@ -503,6 +503,8 @@ impl WebHost {
             | HostRequest::RenameDocument { .. }
             | HostRequest::MoveDocument { .. }
             | HostRequest::DeleteDocument { .. }
+            | HostRequest::UndoDocument { .. }
+            | HostRequest::RedoDocument { .. }
             | HostRequest::WatchDocuments { .. }
             | HostRequest::ReadFile { .. }
             | HostRequest::WriteFile { .. } => Err(HostError::Failed {
@@ -545,6 +547,13 @@ impl WebHost {
                 self.log(level.as_deref().unwrap_or("info"), "log", text);
                 Ok(Json::Null)
             }
+            // A browser's views are its own pages, kept by the page.
+            HostRequest::Actions => Err(HostError::Unsupported {
+                what: "actions: the browser host lists none yet".to_owned(),
+            }),
+            HostRequest::SetViewState { .. } => Err(HostError::Unsupported {
+                what: "set_view_state: the browser host shows no process views".to_owned(),
+            }),
             // Services, points and windows are the native host's
             // (`crate::interop`); the browser host has no other extensions
             // to call or windows to open yet.

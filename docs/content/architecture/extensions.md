@@ -896,7 +896,7 @@ author's edit shows in the running app in the time it takes to build.
 | TypeScript actions | its folder transpiled again as it reloads (a mistake keeps the last good one, at its line); each run loads its module fresh, a running one finishes on the old code |
 | WASM components | rebuilt (`cargo component build`), re-instantiated: seconds, state kept |
 | WASM views' `rsx!` | Dioxus's own hot reload: the extension's `VirtualDom` takes template changes from the dev server, so markup and style edits apply without rebuilding the `.wasm` — instant |
-| Processes | rebuilt and restarted by the supervisor, state handed over; in development the extension can run under `dx serve` with Rust hot-patching (it is its own binary), so most code edits apply without a restart at all |
+| Processes | rebuilt and restarted by the supervisor, state handed over (a view's own place in what it shows: `linked::use_view_state`, kept by its pane, `Pane::view_state`); in development the extension can run under `dx serve` with Rust hot-patching (it is its own binary), so most code edits apply without a restart at all |
 
 **The author's loop:** `architect ext dev <path>` builds the extension,
 installs it into the running app as a development copy (marked as such,
@@ -3746,6 +3746,7 @@ over vox, `EXT_HOST_CALL`.
 | `rename_document {path, to}` | `rename_document(path, to)` / `rename` | its info | `writes` |
 | `move_document {path, folder}` | `move_document(path, folder)` / `move` | its info | `writes` |
 | `delete_document {path}` | `delete_document(path)` / `delete` | nothing | `writes` |
+| `undo_document {path}` / `redo_document {path}` | `undo_document(path)` / `redo_document(path)` | `{step, text}`, or `null` with none | `writes` |
 | `watch_documents {action \| script, function?}` | `watch_documents(hook)` / `watch(hook)` | the hooks' keys | `reads` |
 
 A path is relative and `/`-separated (`notes/Inbox.md`), never `..`; its
