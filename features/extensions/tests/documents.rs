@@ -418,3 +418,90 @@ fn an_extensions_data_is_written_whole_privately_and_never_wiped() {
     );
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "{ not json");
 }
+
+/// `DOC_UNDO` / `DOC_REDO` (#844): a document's own history, for a view
+/// that is not a text editor (a chart). With `path`, that document's;
+/// without, the one shown in the active pane (its state, the path an
+/// opener gave it). A CRDT document's history has every step, the
+/// extension's and the person's alike; each undo raises `doc.saved`.
+#[test]
+fn doc_undo_walks_the_documents_own_history() {
+    use architect::action::{ActionMeta, Effect, RawJson};
+    use architect_extensions::extensions::Extensions;
+    use architect_extensions::install::Installs;
+
+    #[derive(facet::Facet)]
+    struct PaneArgs {
+        pane: String,
+    }
+    const fn meta(id: &'static str) -> ActionMeta {
+        ActionMeta {
+            id,
+            trait_name: "",
+            method_name: "",
+            display_name: id,
+            description: "",
+            category: "",
+            group: "",
+            shortcut: "",
+            toggleable: false,
+            undo: false,
+        }
+    }
+    static LAYOUT: ActionMeta = meta("WORKSPACE_LAYOUT");
+    static PANE_GET: ActionMeta = meta("WORKSPACE_PANE_GET");
+
+    let tmp = tempfile::tempdir().unwrap();
+    let docs = lab_documents();
+    let (list, host) = host(&docs, tmp.path());
+    let ext = Extensions::new(host.clone(), Installs::new(tmp.path().join("installs")));
+    ext.install_contribution_actions().unwrap();
+    // The workspace, as far as `DOC_UNDO` asks it: a chart pane, active.
+    list.register_with(&LAYOUT, Effect::ReadOnly, |_: &ActionCaller, (): ()| {
+        Ok::<_, String>(RawJson::from(
+            json!({ "active": "chart-1", "current_document": "" }).to_string(),
+        ))
+    })
+    .unwrap();
+    list.register_with(
+        &PANE_GET,
+        Effect::ReadOnly,
+        |_: &ActionCaller, a: PaneArgs| {
+            assert_eq!(a.pane, "chart-1");
+            Ok::<_, String>(RawJson::from(
+                json!({ "pane": "chart-1", "state": "notes/Welcome.md" }).to_string(),
+            ))
+        },
+    )
+    .unwrap();
+    run(&list, "LAB_TIDY_WATCH", &Value::Null);
+    let edit = |text: &str, name: &str| {
+        block_on(host.api(TIDY).call(HostRequest::EditDocument {
+            path: "notes/Welcome.md".to_owned(),
+            edits: vec![DocEdit::Append {
+                text: text.to_owned(),
+            }],
+            name: Some(name.to_owned()),
+        }))
+        .unwrap();
+    };
+    edit("A\n", "Note A");
+    edit("B\n", "Note B");
+    let undone = run(&list, "DOC_UNDO", &json!({ "path": "notes/Welcome.md" }));
+    assert_eq!(undone["step"], "Note B");
+    assert_eq!(docs.text("notes/Welcome.md").unwrap(), "# Welcome\nA\n");
+    // No path: the active pane's document.
+    let undone = run(&list, "DOC_UNDO", &json!({}));
+    assert_eq!(undone["step"], "Note A");
+    assert_eq!(docs.text("notes/Welcome.md").unwrap(), "# Welcome\n");
+    assert_eq!(run(&list, "DOC_UNDO", &json!({})), Value::Null);
+    let redone = run(&list, "DOC_REDO", &json!({}));
+    assert_eq!(redone["text"], "# Welcome\nA\n");
+    heard(&list, "doc.saved notes/Welcome.md");
+    // The extension's own host call walks the same history.
+    let undone = block_on(host.api(TIDY).call(HostRequest::UndoDocument {
+        path: "notes/Welcome.md".to_owned(),
+    }))
+    .unwrap();
+    assert_eq!(undone["step"], "Note A");
+}

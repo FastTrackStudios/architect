@@ -155,6 +155,30 @@ impl svc::DocumentStore for AsStore {
     fn metadata(&self, query: &svc::MetaQuery) -> Result<String, svc::DocsError> {
         self.0.metadata(query).map_err(err_of)
     }
+
+    fn undo(&self, path: &str, ext: &str) -> Result<Option<svc::Undone>, svc::DocsError> {
+        self.0
+            .undo(path, &Principal::extension(ext, None))
+            .map(|u| {
+                u.map(|u| svc::Undone {
+                    step: u.step,
+                    text: u.text,
+                })
+            })
+            .map_err(err_of)
+    }
+
+    fn redo(&self, path: &str, ext: &str) -> Result<Option<svc::Undone>, svc::DocsError> {
+        self.0
+            .redo(path, &Principal::extension(ext, None))
+            .map(|u| {
+                u.map(|u| svc::Undone {
+                    step: u.step,
+                    text: u.text,
+                })
+            })
+            .map_err(err_of)
+    }
 }
 
 /// No documents: every call says so.

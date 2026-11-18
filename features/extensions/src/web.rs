@@ -502,6 +502,8 @@ impl WebHost {
             | HostRequest::RenameDocument { .. }
             | HostRequest::MoveDocument { .. }
             | HostRequest::DeleteDocument { .. }
+            | HostRequest::UndoDocument { .. }
+            | HostRequest::RedoDocument { .. }
             | HostRequest::WatchDocuments { .. }
             | HostRequest::ReadFile { .. }
             | HostRequest::WriteFile { .. } => Err(HostError::Failed {

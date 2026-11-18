@@ -651,3 +651,48 @@ fn the_service_reaches_the_vault_through_its_client() {
         assert!(!root.join("notes/x.md").exists());
     });
 }
+
+/// A note's undo for a view that is not its editor (#844: a chart): an
+/// extension's edit is one step, and `undo_document` takes it back while
+/// the person's typing made since stays (the open note's three-way merge);
+/// `redo_document` makes it again.
+#[test]
+fn an_extensions_edit_is_undone_and_the_persons_typing_since_stays() {
+    use architect_extensions::hostcall::{DocEdit as Edit, HostRequest};
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("vault");
+    let source = vault(&root);
+    let app = app(&source, &tmp.path().join("data"));
+    let call = |r: HostRequest| block_on(app.host.api("lab.tidy").call(r)).unwrap();
+    let path = || "notes/Welcome.md".to_owned();
+    assert_eq!(
+        call(HostRequest::UndoDocument { path: path() }),
+        Value::Null
+    );
+    call(HostRequest::EditDocument {
+        path: path(),
+        edits: vec![Edit::Append {
+            text: "- [ ] call Sam\n".to_owned(),
+        }],
+        name: Some("Add a task".to_owned()),
+    });
+    // The person types at the top since.
+    let now = on_disk(&root, "notes/Welcome.md").unwrap();
+    assert!(
+        source
+            .save_if("notes/Welcome.md", &now, &format!("Draft\n{now}"))
+            .unwrap()
+    );
+    let undone = call(HostRequest::UndoDocument { path: path() });
+    assert_eq!(undone["step"], "Add a task");
+    assert_eq!(
+        on_disk(&root, "notes/Welcome.md").as_deref(),
+        Some("Draft\n# Welcome\n")
+    );
+    let redone = call(HostRequest::RedoDocument { path: path() });
+    assert_eq!(redone["text"], "Draft\n# Welcome\n- [ ] call Sam\n");
+    assert_eq!(
+        call(HostRequest::RedoDocument { path: path() }),
+        Value::Null
+    );
+}

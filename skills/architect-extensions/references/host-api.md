@@ -120,9 +120,11 @@ The extension's own actions, settings (`<id>.…`), data, log, points and window
 | `edit_document {path, edits, name?}` | `edit_document` / `edit` / `edit` | `writes` |
 | `rename_document {path, to}`, `move_document {path, folder}` | same / `rename`, `move` / `rename`, `move` | `writes` |
 | `delete_document {path}` | `delete_document` / `delete` / `remove` | `writes` |
+| `undo_document {path}`, `redo_document {path}` | `undo_document`, `redo_document` / (none) / (none) | `writes` |
 | `watch_documents {action \| script, function?}` | `watch_documents` / `watch` / `on("doc.*")` | `reads` |
 
 - **WIT.** The typed imports are `list-documents`, `read-document`, `create-document`, `edit-document`, `rename-document`, `move-document`, `delete-document` and `watch-documents`.
+- **Undo.** `undo_document` takes back the document's last undo step and `redo_document` makes it again: `{step, text}` (the step's name and the text after), or `null` when there is none. A CRDT document (`features/extensions/src/documents/crdt_docs.rs` `CrdtDocuments`) walks its own `History`: every step, the person's and each extension's. A vault note (`features/navigator/src/documents.rs` `VaultDocuments`; a file keeps no undo) walks the edits made through the documents (`architect_documents::Journal`), each taken back by the three-way merge an open note uses, so edits made since stay. `DOC_UNDO {path?}` / `DOC_REDO {path?}` are the same as actions (⌘K, menus, MCP; without `path` the active pane's document), and ⌘Z / ⇧⌘Z run them in every view an opener shows a file in (`features/extensions/src/contrib_actions.rs`). A chart needs no undo stack of its own. Not yet a WIT import.
 - **Edits.** `DocEdit` is `{insert: {at, text}}`, `{delete: {at, len}}`, `{append: {text}}` or `{replace: {text}}`, with positions in characters. One call is one CRDT transaction and one undo step named `name`, made as the extension. `replace` is diffed, so the person's concurrent typing survives. An edit that changes nothing writes nothing and raises no `doc.saved`.
 - **Paths** are relative and `/`-separated, never `..`.
 

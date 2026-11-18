@@ -89,6 +89,14 @@ pub struct Edited {
     pub changed: bool,
 }
 
+/// What an undo or a redo did: the step it took back (or made again), by
+/// its name, and the document's text after.
+#[derive(Clone, Debug, Default, PartialEq, Eq, facet::Facet)]
+pub struct Undone {
+    pub step: String,
+    pub text: String,
+}
+
 /// Why the documents service did not do it.
 #[derive(Clone, Debug, PartialEq, Eq, facet::Facet, thiserror::Error)]
 #[repr(u8)]
@@ -216,6 +224,139 @@ pub trait DocumentStore: Send + Sync {
             "metadata: these documents have none".to_owned(),
         ))
     }
+    /// Takes back document `path`'s last undo step, made as `extension`:
+    /// `None` when it has none. Edits made since by others stay.
+    ///
+    /// # Errors
+    ///
+    /// No document, or these documents keep no undo.
+    fn undo(&self, path: &str, extension: &str) -> Result<Option<Undone>, DocsError> {
+        let _ = (path, extension);
+        Err(DocsError::Unsupported(
+            "undo: these documents keep no undo".to_owned(),
+        ))
+    }
+    /// Makes the step undone last again: `None` when there is none.
+    ///
+    /// # Errors
+    ///
+    /// No document, or these documents keep no undo.
+    fn redo(&self, path: &str, extension: &str) -> Result<Option<Undone>, DocsError> {
+        let _ = (path, extension);
+        Err(DocsError::Unsupported(
+            "redo: these documents keep no undo".to_owned(),
+        ))
+    }
+}
+
+/// The undo of documents that keep none of their own (files on disk).
+///
+/// Each edit made through the service, by name, as its text before and
+/// after, per document. A store takes a step back by merging "after →
+/// before" into what the document is now, so edits made since survive.
+#[derive(Debug, Default)]
+pub struct Journal {
+    docs: Mutex<BTreeMap<String, Steps>>,
+}
+
+#[derive(Debug, Default)]
+struct Steps {
+    undo: Vec<Step>,
+    redo: Vec<Step>,
+}
+
+/// One step of a [`Journal`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Step {
+    pub name: String,
+    pub before: String,
+    pub after: String,
+}
+
+impl Journal {
+    /// How many steps of each document are kept.
+    pub const KEEP: usize = 100;
+
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// An edit of `path` named `name`: a new step, and nothing to redo.
+    pub fn record(&self, path: &str, name: &str, before: &str, after: &str) {
+        if before == after {
+            return;
+        }
+        let step = Step {
+            name: name.to_owned(),
+            before: before.to_owned(),
+            after: after.to_owned(),
+        };
+        let mut docs = lock(&self.docs);
+        let steps = docs.entry(path.to_owned()).or_default();
+        steps.redo.clear();
+        steps.undo.push(step);
+        if steps.undo.len() > Self::KEEP {
+            steps.undo.remove(0);
+        }
+        drop(docs);
+    }
+
+    /// `path`'s last step, to take back ([`Self::undone`] when it was).
+    #[must_use]
+    pub fn take_undo(&self, path: &str) -> Option<Step> {
+        lock(&self.docs).get_mut(path)?.undo.pop()
+    }
+
+    /// `step` was taken back: it may be made again.
+    pub fn undone(&self, path: &str, step: Step) {
+        lock(&self.docs)
+            .entry(path.to_owned())
+            .or_default()
+            .redo
+            .push(step);
+    }
+
+    /// The step undone last, to make again ([`Self::redone`] when it was).
+    #[must_use]
+    pub fn take_redo(&self, path: &str) -> Option<Step> {
+        lock(&self.docs).get_mut(path)?.redo.pop()
+    }
+
+    /// `step` was made again: it may be taken back.
+    pub fn redone(&self, path: &str, step: Step) {
+        lock(&self.docs)
+            .entry(path.to_owned())
+            .or_default()
+            .undo
+            .push(step);
+    }
+
+    /// A step taken but not done (the document changed under it): back
+    /// where it was.
+    pub fn put_back(&self, path: &str, step: Step, undo: bool) {
+        let mut docs = lock(&self.docs);
+        let steps = docs.entry(path.to_owned()).or_default();
+        if undo {
+            steps.undo.push(step);
+        } else {
+            steps.redo.push(step);
+        }
+        drop(docs);
+    }
+
+    /// Document `from` is `to` now: its steps go with it.
+    pub fn renamed(&self, from: &str, to: &str) {
+        let mut docs = lock(&self.docs);
+        if let Some(steps) = docs.remove(from) {
+            docs.insert(to.to_owned(), steps);
+        }
+    }
+
+    /// Document `path` is gone, and its steps.
+    pub fn forget(&self, path: &str) {
+        lock(&self.docs).remove(path);
+    }
 }
 
 /// Each extension's own data: keys to JSON texts.
@@ -282,6 +423,11 @@ pub trait Documents {
     /// The vault's per-note metadata, `VAULT_METADATA`'s answer as JSON
     /// (`reads`): `path` for one note, or a page of `folder`'s.
     fn metadata(&self, extension: String, query: MetaQuery) -> Result<String, DocsError>;
+    /// Takes back a document's last undo step (`writes`): what it took
+    /// back and the text after, `None` when there was none.
+    fn undo(&self, extension: String, path: String) -> Result<Option<Undone>, DocsError>;
+    /// Makes the step undone last again (`writes`).
+    fn redo(&self, extension: String, path: String) -> Result<Option<Undone>, DocsError>;
     /// The extension's own value of `key`, as JSON.
     fn data(&self, extension: String, key: String) -> Result<Option<String>, DocsError>;
     /// Sets (or, `None`, removes) the extension's own `key`.
@@ -383,6 +529,16 @@ impl Documents for DocumentsServer {
         self.docs.metadata(&query)
     }
 
+    fn undo(&self, extension: String, path: String) -> Result<Option<Undone>, DocsError> {
+        self.may(&extension, Access::Write)?;
+        self.docs.undo(checked(&path)?, &extension)
+    }
+
+    fn redo(&self, extension: String, path: String) -> Result<Option<Undone>, DocsError> {
+        self.may(&extension, Access::Write)?;
+        self.docs.redo(checked(&path)?, &extension)
+    }
+
     fn data(&self, extension: String, key: String) -> Result<Option<String>, DocsError> {
         self.may(&extension, Access::Own)?;
         self.data.get(&extension, &key)
@@ -414,6 +570,7 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 #[derive(Clone, Default)]
 pub struct MemoryStore {
     texts: Arc<Mutex<BTreeMap<String, String>>>,
+    journal: Arc<Journal>,
     data: Arc<Mutex<BTreeMap<(String, String), String>>>,
 }
 
@@ -493,13 +650,14 @@ impl DocumentStore for MemoryStore {
         Ok(Doc::of(path))
     }
 
-    fn edit(&self, path: &str, edits: &[Edit], _: &str, _: &str) -> Result<Edited, DocsError> {
+    fn edit(&self, path: &str, edits: &[Edit], step: &str, _: &str) -> Result<Edited, DocsError> {
         let mut texts = lock(&self.texts);
         let text = texts
             .get_mut(path)
             .ok_or_else(|| DocsError::NotFound(format!("document {path}")))?;
         let after = apply(text, edits)?;
         let changed = *text != after;
+        self.journal.record(path, step, text, &after);
         text.clone_from(&after);
         drop(texts);
         Ok(Edited {
@@ -518,14 +676,64 @@ impl DocumentStore for MemoryStore {
             .ok_or_else(|| DocsError::NotFound(format!("document {path}")))?;
         texts.insert(to.to_owned(), text);
         drop(texts);
+        self.journal.renamed(path, to);
         Ok(Doc::of(to))
     }
 
     fn delete(&self, path: &str, _: &str) -> Result<(), DocsError> {
+        self.journal.forget(path);
         lock(&self.texts)
             .remove(path)
             .map(|_| ())
             .ok_or_else(|| DocsError::NotFound(format!("document {path}")))
+    }
+
+    // In memory a step is taken back only while the text is as it left
+    // it: there is no three-way merge here (the vault's has one).
+    fn undo(&self, path: &str, _: &str) -> Result<Option<Undone>, DocsError> {
+        self.step(path, true)
+    }
+
+    fn redo(&self, path: &str, _: &str) -> Result<Option<Undone>, DocsError> {
+        self.step(path, false)
+    }
+}
+
+impl MemoryStore {
+    fn step(&self, path: &str, undo: bool) -> Result<Option<Undone>, DocsError> {
+        let mut texts = lock(&self.texts);
+        let text = texts
+            .get_mut(path)
+            .ok_or_else(|| DocsError::NotFound(format!("document {path}")))?;
+        let taken = if undo {
+            self.journal.take_undo(path)
+        } else {
+            self.journal.take_redo(path)
+        };
+        let Some(step) = taken else { return Ok(None) };
+        let (from, to) = if undo {
+            (&step.after, &step.before)
+        } else {
+            (&step.before, &step.after)
+        };
+        if text != from {
+            self.journal.put_back(path, step, undo);
+            return Err(DocsError::Failed(format!(
+                "{path} changed since that step: not taken back"
+            )));
+        }
+        text.clone_from(to);
+        let done = Undone {
+            step: step.name.clone(),
+            text: to.clone(),
+        };
+        drop(texts);
+        if undo {
+            self.journal.undone(path, step);
+        } else {
+            self.journal.redone(path, step);
+        }
+        Ok(Some(done))
     }
 }
 

@@ -21,6 +21,7 @@
 //! | `EXT_LANGUAGES` | the editor's language registry (#512): the app's languages and every loaded extension's `[[languages]]`, or the one `{id}`, `{fence}` or `{path}` names: its file types, fences, grammar, highlights query, comment token, LSP server command and who registered it (`from`) |
 //! | `EXT_FILE_TYPES` | the file types that are vault notes: `md` and every declared one (`[[file_types]]`, `vault_proto::note_types`): its extension, name, icon, the `type` it reads as and who declared it (`from`) |
 //! | `EXT_CAPTURE_TARGETS` | every capture target loaded extensions add (`[[capture_targets]]`): its chips, tokens, action and owner |
+//! | `DOC_UNDO` / `DOC_REDO` | takes back (or makes again) the last undo step of document `{path?}` (none: the active pane's, else the current document's; its pane's state is the path an opener opened): `{step, text}`, `null` when there is none. ⌘Z and ⇧⌘Z in every view an opener shows a file in |
 //! | `EXT_PALETTE` | the palette slot (#381): which extension's view draws each overlay (`[[palette_views]]`), the keys extensions bind (`[[keys]]`) and the palette's sources (`[[palette_sources]]`) |
 
 use architect::action::{
@@ -241,6 +242,70 @@ pub struct LanguagesArgs {
     pub path: Option<String>,
 }
 
+/// `DOC_UNDO` / `DOC_REDO`'s arguments.
+#[derive(Debug, Default, Facet)]
+pub struct DocStepArgs {
+    /// The document; none: the active pane's (else the current
+    /// document's), by its pane's state.
+    pub path: Option<String>,
+}
+
+pub(crate) static DOC_UNDO: ActionMeta = ActionMeta {
+    id: "DOC_UNDO",
+    trait_name: "Documents",
+    method_name: "undo",
+    display_name: "Undo",
+    description: "Takes back the last undo step of document `path` (a document's path, as `read_document` names it): its own history — a CRDT document's every step, the person's and each extension's; a vault note's edits made through the documents. Edits made since by others stay. Without `path`, the document shown in the active pane (else the current document), as an opener opened it. Answers `{step, text}` (the step's name and the text after), or null when there is nothing to undo.",
+    category: "Edit",
+    group: "Edit",
+    shortcut: "",
+    toggleable: false,
+    undo: false,
+};
+
+pub(crate) static DOC_REDO: ActionMeta = ActionMeta {
+    id: "DOC_REDO",
+    trait_name: "Documents",
+    method_name: "redo",
+    display_name: "Redo",
+    description: "Makes the step of document `path` undone last (`DOC_UNDO`) again; without `path`, the active pane's document. Answers `{step, text}`, or null when there is nothing to redo.",
+    category: "Edit",
+    group: "Edit",
+    shortcut: "",
+    toggleable: false,
+    undo: false,
+};
+
+/// The document a pane-less `DOC_UNDO` acts on: the active pane's state
+/// (else the current document's), the path its opener gave it.
+fn shown_document(list: &architect::action::ActionList) -> Result<String, String> {
+    let layout: Value = list
+        .run_json("WORKSPACE_LAYOUT", b"null")
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .ok_or("no workspace to find the document in: give `path`")?;
+    let pane = ["active", "current_document"]
+        .iter()
+        .filter_map(|k| layout.get(*k).and_then(Value::as_str))
+        .find(|p| !p.is_empty())
+        .ok_or("no pane is active: give `path`")?;
+    let info: Value = list
+        .run_json(
+            "WORKSPACE_PANE_GET",
+            json!({ "pane": pane }).to_string().as_bytes(),
+        )
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .ok_or("the active pane is gone: give `path`")?;
+    let state = info
+        .get("state")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    crate::documents::checked_path(state)
+        .map(str::to_owned)
+        .map_err(|_| format!("pane {pane} shows no document: give `path`"))
+}
+
 /// `EXT_ENABLE` / `EXT_DISABLE`'s arguments.
 #[derive(Debug, Facet)]
 pub struct IdArgs {
@@ -288,6 +353,48 @@ fn invoked(caller: &ActionCaller, source: InvocationSource) -> Invocation {
 }
 
 impl Extensions {
+    /// `DOC_UNDO` and `DOC_REDO`: a document's own undo, for a view that
+    /// is not a text editor (a chart), its menus, ⌘K and MCP.
+    fn install_document_actions(&self) -> Result<(), ActionError> {
+        let list = self.host().list().clone();
+        for (meta, undo) in [(&DOC_UNDO, true), (&DOC_REDO, false)] {
+            let me = self.clone();
+            let shown = list.clone();
+            list.register_with(
+                meta,
+                Effect::Mutating,
+                move |caller: &ActionCaller, a: DocStepArgs| {
+                    let host = me.host();
+                    let docs = host.documents().ok_or("documents: this app gives none")?;
+                    let path = match a.path.filter(|p| !p.is_empty()) {
+                        Some(p) => crate::documents::checked_path(&p)?.to_owned(),
+                        None => shown_document(&shown)?,
+                    };
+                    let by = caller.principal().cloned().unwrap_or_else(|| {
+                        architect::action::Principal::Service {
+                            name: "app".to_owned(),
+                        }
+                    });
+                    let done = if undo {
+                        docs.undo(&path, &by)
+                    } else {
+                        docs.redo(&path, &by)
+                    }
+                    .map_err(|e| e.to_string())?;
+                    let answer = match done {
+                        Some(d) => {
+                            host.raise_doc(&crate::events::DocEvent::Saved { path });
+                            json!({ "step": d.step, "text": d.text })
+                        }
+                        None => Value::Null,
+                    };
+                    Ok::<_, String>(RawJson::from(answer.to_string()))
+                },
+            )?;
+        }
+        Ok(())
+    }
+
     /// Puts the contribution actions (`EXT_CONTRIBUTIONS`, `EXT_OPEN`,
     /// `EXT_VIEW_OPEN`, `EXT_STATE_SET`, `EXT_STATE_CLEAR`, `EXT_EMIT`,
     /// `EXT_ENABLE`, `EXT_DISABLE`, `EXT_EMBEDS`, `EXT_PROJECT_TYPES`,
@@ -300,6 +407,7 @@ impl Extensions {
     #[allow(clippy::too_many_lines)]
     pub fn install_contribution_actions(&self) -> Result<(), ActionError> {
         self.install_interop_actions()?;
+        self.install_document_actions()?;
         self.install_toolbar_actions()?;
         let list = self.host().list().clone();
         let me = self.clone();
