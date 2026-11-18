@@ -479,6 +479,7 @@ async fn fill_actions(list: &architect::action::ActionList) -> bool {
         );
     }
     true
+}
 
 #[cfg(feature = "doc-sync")]
 fn docs_slot() -> &'static Mutex<Option<crdt::sync::DocSyncClient>> {
