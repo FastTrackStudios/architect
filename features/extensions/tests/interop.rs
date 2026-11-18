@@ -627,6 +627,93 @@ fn a_service_it_uses_is_called_when_there_and_missed_when_not() {
     );
 }
 
+/// A second provider of `lab.tempo`, at the same version as `lab.tempo`.
+struct Metro;
+
+impl Extension for Metro {
+    fn manifest(&self) -> &'static str {
+        r#"
+id = "lab.metro"
+name = "Metronome"
+version = "0.1.0"
+kind = "process"
+
+[entry]
+path = "metro"
+
+[provides]
+"lab.tempo" = "1.2.0"
+
+[[actions]]
+id = "LAB_METRO_GET"
+name = "Metronome: get"
+effect = "read_only"
+params = '{"type":"object","properties":{"from":{"type":"string"}}}'
+"#
+    }
+
+    fn build(&self, ext: &mut Builder) {
+        ext.action("LAB_METRO_GET", |_| async move { Ok(json!({"bpm": 90})) });
+    }
+}
+
+#[test]
+fn of_two_providers_the_chosen_one_answers_and_a_tie_is_the_first_by_id() {
+    let tmp = tempfile::tempdir().unwrap();
+    let list = ActionList::new();
+    let ext = Extensions::new(host(&list), Installs::new(tmp.path().join("i")))
+        .with_linked(&Soft)
+        .unwrap()
+        .with_linked(&Tempo)
+        .unwrap()
+        .with_linked(&Metro)
+        .unwrap();
+    let _ = ext.sync();
+    ext.install_contribution_actions().unwrap();
+    // The same version from both: the first by id, not whichever loaded last.
+    assert_eq!(run(&list, "LAB_SOFT_BPM", Value::Null).unwrap()["bpm"], 90);
+    let services = run(&list, "EXT_SERVICES", Value::Null).unwrap();
+    let tempo = services["services"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["service"] == "lab.tempo")
+        .unwrap()
+        .clone();
+    assert_eq!(tempo["providers"].as_array().unwrap().len(), 2);
+    assert_eq!(tempo["in_use"], "lab.metro");
+    // A person chooses the other: every call goes to it.
+    run(
+        &list,
+        "EXT_SERVICE_USE",
+        json!({"service": "lab.tempo", "provider": "lab.tempo"}),
+    )
+    .unwrap();
+    assert_eq!(run(&list, "LAB_SOFT_BPM", Value::Null).unwrap()["bpm"], 120);
+    // Gone, the choice waits and the other answers; back, it is used again.
+    let _ = ext.disable("lab.tempo");
+    assert_eq!(run(&list, "LAB_SOFT_BPM", Value::Null).unwrap()["bpm"], 90);
+    let _ = ext.enable("lab.tempo");
+    assert_eq!(run(&list, "LAB_SOFT_BPM", Value::Null).unwrap()["bpm"], 120);
+    // Null gives the choice back to the host.
+    run(
+        &list,
+        "EXT_SERVICE_USE",
+        json!({"service": "lab.tempo", "provider": null}),
+    )
+    .unwrap();
+    assert_eq!(run(&list, "LAB_SOFT_BPM", Value::Null).unwrap()["bpm"], 90);
+    // An extension that does not provide it is no choice.
+    assert!(
+        run(
+            &list,
+            "EXT_SERVICE_USE",
+            json!({"service": "lab.tempo", "provider": "lab.soft"})
+        )
+        .is_err()
+    );
+}
+
 // ---- project types (#344) -----------------------------------------------
 
 const KINDS: &str = r#"
