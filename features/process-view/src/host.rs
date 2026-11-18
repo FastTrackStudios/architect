@@ -194,6 +194,9 @@ fn zero_copy(device: &wgpu::Device) -> bool {
 }
 
 /// The rendezvous stops taking surfaces from `pid` (its program ended).
+// On Linux there is no rendezvous and the body is empty, which clippy
+// would make `const`; the macOS body can't be.
+#[cfg_attr(target_os = "linux", allow(clippy::missing_const_for_fn))]
 fn forget_pid(pid: Option<u32>) {
     #[cfg(target_os = "macos")]
     if let (Some(pid), Some(r)) = (pid, crate::surface::Rendezvous::get()) {

@@ -123,3 +123,88 @@ fn pixel(image: &(u32, u32, Vec<u8>), x: u32, y: u32) -> [u8; 4] {
         .and_then(|px| px.first_chunk::<4>())
         .expect("a pixel of the image")
 }
+
+thread_local! {
+    static SHOWN: std::cell::RefCell<Option<Signal<bool>>> = const { std::cell::RefCell::new(None) };
+}
+
+#[component]
+fn Toggled() -> Element {
+    let list = use_context::<Arc<ActionList>>();
+    use_app_shot(&list);
+    let shown = use_signal(|| true);
+    SHOWN.with(|s| *s.borrow_mut() = Some(shown));
+    rsx! {
+        div { style: "position: absolute; left: 0; top: 0; width: 100px; height: 100px;",
+            if shown() {
+                div { style: "width: 50px; height: 50px; background: rgb(0, 0, 255);",
+                    span { "a field that goes away" }
+                }
+            }
+        }
+    }
+}
+
+/// A shot taken between a change to the page and the window's next frame
+/// (an element removed, its parent's paint list not yet rebuilt) is of the
+/// page as it now is: the document is resolved before it is painted, as
+/// the window does. It used to paint the stale list and panic on the
+/// removed element (`invalid SlotMap key used`, blitz-paint), taking the
+/// app down with it.
+#[test]
+fn a_shot_between_a_change_and_the_next_frame_paints_the_page_as_it_is() {
+    let list = Arc::new(ActionList::new());
+    let vdom = VirtualDom::new(Toggled).with_root_context(Arc::clone(&list));
+    let mut doc = DioxusDocument::new(
+        vdom,
+        DocumentConfig {
+            viewport: Some(Viewport::new(320, 200, 1.0, ColorScheme::Light)),
+            ..Default::default()
+        },
+    );
+    let live = LiveDocument::new(doc.inner.clone());
+    doc.vdom
+        .in_scope(ScopeId::ROOT, move || provide_context(live));
+    doc.initial_build();
+    doc.inner.borrow_mut().resolve(0.0);
+
+    // The element goes; the change is applied to the document, but no
+    // frame has resolved it.
+    let shown = SHOWN.with(|s| s.borrow().unwrap());
+    doc.vdom.in_scope(ScopeId::ROOT, move || {
+        let mut shown = shown;
+        shown.set(false);
+    });
+    doc.poll(None);
+
+    let path = std::env::temp_dir().join(format!("app-shot-stale-{}.png", std::process::id()));
+    let args = serde_json::json!({ "path": path.display().to_string() }).to_string();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let thread_list = Arc::clone(&list);
+    std::thread::spawn(move || {
+        let out =
+            futures::executor::block_on(thread_list.run_json_async(APP_SHOT, args.as_bytes()));
+        let _ = tx.send(out);
+    });
+    // Pumped without resolving: only the shot itself may resolve.
+    let started = Instant::now();
+    let shot = loop {
+        doc.poll(None);
+        if let Ok(out) = rx.recv_timeout(Duration::from_millis(5)) {
+            break out.unwrap();
+        }
+        assert!(started.elapsed() < Duration::from_secs(60), "no answer");
+    };
+    let shot: serde_json::Value = serde_json::from_slice(&shot).unwrap();
+    assert_eq!(shot["width"].as_u64(), Some(320));
+    // No blue: the removed element is not in the picture.
+    let decoder = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(&path).unwrap()));
+    let mut reader = decoder.read_info().unwrap();
+    let mut pixels = vec![0; reader.output_buffer_size()];
+    reader.next_frame(&mut pixels).unwrap();
+    assert!(
+        !pixels.as_chunks::<4>().0.contains(&[0, 0, 255, 255]),
+        "the removed element is painted"
+    );
+    let _ = std::fs::remove_file(&path);
+}

@@ -105,6 +105,27 @@ Every member depends on the hack under `GATE` (`[target.'cfg(not(any(target_fami
 - A consumer has its own hakari crate (package `workspace-hack`, the same `.config/hakari.toml` settings and gate). It aligns its `[patch]` tags and its locked versions with architect's, or its graph gets a second copy of the crate.
 - Consumers inherit the union's crates: about 55 that architect's own graph didn't have before (Task's fullstack and server crates, `aws-lc-rs`/`aws-lc-sys` from Task's `tokio-rustls`). Dioxus `mobile` on Linux and macOS is the desktop renderer (wry, tao), which architect already built.
 
+### Outside the union: a crate that must not take it
+
+Some consumers must not build the union: a primitive with no UI that other repos depend on (FastTrackStudios/session depends on `crdt` for the document kind, `History` and the sync transport). The gate does not make that possible on its own. A `cfg` decides what is **built**; Cargo **resolves** every target table whatever the cfg, so a crate outside this workspace that depends on `crdt` resolves the whole union (Dioxus, Blitz, winit) and fails to resolve unless it also carries architect's Blitz and vendor `[patch]` tables. `--cfg no_workspace_hack` does not help it.
+
+What the members declare is light: with the hack off, `crdt` resolves about 216 crates and `architect` 77, no UI, and the L0 rows in `boundaries.toml` hold that. So the consumer replaces the hack with an empty crate of the same name and version, in its root `Cargo.toml`:
+
+```toml
+[dependencies]
+crdt = { git = "https://github.com/FastTrackStudios/architect", tag = "vX.Y.Z" }
+
+[patch."https://github.com/FastTrackStudios/architect"]
+# An empty crate: `[package] name = "architect-workspace-hack"`,
+# `version = "0.1.0"`, an empty `src/lib.rs`.
+architect-workspace-hack = { path = "vendor/no-workspace-hack" }
+```
+
+- It changes no rustflags, so the fleet toolchain's kache keys hold.
+- With `crdt/vox` or `architect/vox` (the sync transport, `#[architect::rpc]`), also take architect's `[patch.crates-io]` lines for the wire crates (`vox-phon`, `phon`, `phon-jit`, `facet-core`, `styx-format`), as the consumer that will sit beside it pins them, so one `Cargo.lock` holding both has one copy of each.
+- The patch applies only where that crate is the root. A fleet repo that depends on it (Studio on `session`) keeps the full union, through its own architect dependency.
+- `crdt/vox` is not an L0 row: `architect/platform` (its timers and `spawn`) enables `tokio/rt` on every target, wasm included, and L0 forbids a tokio runtime. It reaches no UI either.
+
 ## Cut a tag
 
 1. Merge to `main` with each PR's change file (`.changes/README`). A lone PR is squash-merged; a stack merges with merge commits titled with each PR's title.
@@ -127,3 +148,4 @@ Every member depends on the hack under `GATE` (`[target.'cfg(not(any(target_fami
 8. Toolchain `rust-toolchain.toml`, `.cargo/config.toml`'s rustflags and the dependency dev profile are kept in lockstep with the consumers (Fleet toolchain above); bump them together.
 9. A consumer that bumps the architect tag without aligning its `[patch]` tags (Blitz, vendor) gets two copies of each patched crate: the hack names architect's source.
 10. `cargo hakari manage-deps` writes a new member's line ungated; until `cargo xtask fleet-deps` gates it, that member's wasm build pulls the native union and fails.
+11. A crate outside the fleet union that depends on a member resolves the whole union whatever `--cfg no_workspace_hack` says (cargo resolves every target table): it patches the hack out (Outside the union, above).

@@ -267,7 +267,7 @@ impl RemoteDocument {
         }
     }
 
-        /// The painted element whose box holds `(x, y)` (its document's CSS
+    /// The painted element whose box holds `(x, y)` (its document's CSS
     /// pixels), and the point in it.
     fn painted_at(&self, x: f32, y: f32) -> Option<(NodeId, peniko::kurbo::Point)> {
         self.painted.keys().copied().find_map(|node| {
@@ -1714,7 +1714,6 @@ fn same_table(
         _ => false,
     }
 }
-
 
 #[allow(clippy::too_many_arguments)]
 async fn follow(
