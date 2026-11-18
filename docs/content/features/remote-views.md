@@ -324,8 +324,9 @@ Four things are the host's own:
   `apps/sandbox/sketch` `Timeline`'s drag box). The host hit-tests them with each
   layer placed as its animations place it now, sets the cursor and draws
   the highlight, and the view hears `RegionEvent::Enter`, `Leave`,
-  `Press` and `Release` by id (a press and a release with the modifiers
-  held, `region::Mods`: a Shift-click is a range, a ⌘-click a toggle) (`PaintView::region`; a `RemoteScene`'s
+  `Press` and `Release` by id, each just after `Modifiers(id, mods)`
+  when a key is held (`region::Mods`: a Shift-click is a range, a
+  ⌘-click a toggle) (`PaintView::region`; a `RemoteScene`'s
   `onregion`, sent as the element's `input` named `architect-region`).
   A press on a region is the region's: the view does not get that pointer
   event. It still focuses the view, as a press anywhere else in it does:

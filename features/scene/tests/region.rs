@@ -149,8 +149,8 @@ fn hover_and_press_are_the_hosts_and_the_view_hears_them_by_id() {
         i.take(),
         [
             RegionEvent::Enter(10),
-            RegionEvent::Press(10, Mods::NONE),
-            RegionEvent::Release(10, Mods::NONE),
+            RegionEvent::Press(10),
+            RegionEvent::Release(10),
             RegionEvent::Leave(10),
         ]
     );
@@ -228,12 +228,12 @@ fn a_drag_writes_the_hosts_value_and_a_layer_bound_to_it_follows() {
     // the release.
     let heard = i.take();
     assert_eq!(heard.first(), Some(&RegionEvent::Enter(7)));
-    assert_eq!(heard[1], RegionEvent::Press(7, Mods::NONE));
+    assert_eq!(heard[1], RegionEvent::Press(7));
     match heard[2] {
         RegionEvent::Value(7, Axis::Y, v) => assert!((v - 0.67).abs() < 1e-9),
         ref other => panic!("{other:?}"),
     }
-    assert_eq!(heard[3], RegionEvent::Release(7, Mods::NONE));
+    assert_eq!(heard[3], RegionEvent::Release(7));
 }
 
 #[test]
@@ -641,13 +641,33 @@ fn a_press_carries_the_modifiers_held() {
     layers.set(1, Layer::new(content()).regions(vec![button(10)]));
     let mut v = Values::new();
     let mut i = Interaction::new();
-    let at = Point::new(5.0, 5.0);
+    let at_point = || Point::new(5.0, 5.0);
     let range = Mods::from_names(&["Shift"]);
-    let _ = i.pressed_with(&layers, &NONE, &mut v, at, range);
-    let _ = i.released_with(&layers, &NONE, &mut v, at, range);
+    let _ = i.pressed_with(&layers, &NONE, &mut v, at_point(), range);
+    let _ = i.released_with(&layers, &NONE, &mut v, at_point(), range);
     let heard = i.take();
-    assert!(heard.contains(&RegionEvent::Press(10, range)), "{heard:?}");
-    assert!(heard.contains(&RegionEvent::Release(10, range)));
+    // Each just before its press and its release.
+    let at = |e: RegionEvent| heard.iter().position(|h| *h == e).unwrap();
+    assert_eq!(
+        at(RegionEvent::Modifiers(10, range)) + 1,
+        at(RegionEvent::Press(10)),
+        "{heard:?}"
+    );
+    assert_eq!(
+        heard
+            .iter()
+            .filter(|h| matches!(h, RegionEvent::Modifiers(..)))
+            .count(),
+        2
+    );
+    // None held: nothing new.
+    let _ = i.pressed(&layers, &NONE, &mut v, at_point());
+    let _ = i.released(&layers, &NONE, &mut v, at_point());
+    assert!(
+        !i.take()
+            .iter()
+            .any(|h| matches!(h, RegionEvent::Modifiers(..)))
+    );
     assert!(range.has("Shift") && !range.has("Mod"));
     assert_eq!(
         Mods::from_names(&["Mod", "Shift"]).names(),
