@@ -43,7 +43,8 @@ use architect_extensions::proto::SOCKET;
 use architect_extensions::remote::RemotePaneView;
 use architect_extensions::{Origin, Package};
 use architect_theme::{Registry, ThemeStore};
-use architect_workspace::paint::{PaintMount, PaintView, PaintWake, Scene};
+use architect_workspace::paint::region::{Region, RegionEvent, Shape};
+use architect_workspace::paint::{Layer, LayerKey, PaintMount, PaintView, PaintWake, Scene};
 use architect_workspace::{Extras, HostData, ViewCtx, ViewInput};
 use blitz_dom::{Document as _, DocumentConfig};
 use blitz_traits::events::{
@@ -59,6 +60,9 @@ const ID: &str = "test.probe";
 /// Where the probe writes its log: a file per run, so the process's
 /// lines come back to the test.
 const OUT: &str = "PAINT_PARITY_OUT";
+
+/// One run at a time: each sets [`OUT`] for itself and its process.
+static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Not a test of its own: the extension, when a test starts this binary
 /// as one.
@@ -90,7 +94,15 @@ struct Recorder {
     wake: Option<PaintWake>,
     seen: Option<u32>,
     size: (f32, f32),
+    /// Draws as layers, with [`REGION`] over [`REGION_RECT`]: what a
+    /// pointer does there is the region's.
+    regions: bool,
 }
+
+/// The region the `regions` probe draws.
+const REGION: u64 = 7;
+/// Where it is, in the view's pixels.
+const REGION_RECT: (f64, f64, f64, f64) = (20.0, 20.0, 140.0, 100.0);
 
 impl Recorder {
     fn new(ctx: &ViewCtx) -> Self {
@@ -117,6 +129,14 @@ impl Recorder {
             wake: ctx.extras.get::<PaintWake>().cloned(),
             seen: None,
             size: (0.0, 0.0),
+            regions: false,
+        }
+    }
+
+    fn with_regions(ctx: &ViewCtx) -> Self {
+        Self {
+            regions: true,
+            ..Self::new(ctx)
         }
     }
 }
@@ -162,6 +182,30 @@ impl PaintView for Recorder {
         false
     }
 
+    fn region(&mut self, _: &ViewCtx, event: &RegionEvent) -> bool {
+        log(&format!("region {event:?}"));
+        false
+    }
+
+    fn layers(&mut self, ctx: &ViewCtx) -> Option<Vec<(LayerKey, Layer)>> {
+        if !self.regions {
+            return None;
+        }
+        let mut scene = Scene::new();
+        self.paint(ctx, &mut scene);
+        let (x0, y0, x1, y1) = REGION_RECT;
+        let region = Region::new(
+            REGION,
+            Shape::Rect(architect_workspace::paint::peniko::kurbo::Rect::new(
+                x0, y0, x1, y1,
+            )),
+        );
+        Some(vec![(
+            1,
+            Layer::new(Arc::new(scene.commands)).regions(vec![region]),
+        )])
+    }
+
     fn paint(&mut self, ctx: &ViewCtx, _: &mut Scene) {
         let count = ctx.data::<Count>().map(|d| d.read(|c| c.0));
         if count != self.seen {
@@ -184,8 +228,18 @@ impl PaintView for Recorder {
 /// extension mounts one (Keyflow's chart beside its palettes).
 #[allow(non_snake_case)]
 fn ProbeView() -> Element {
+    probe(Recorder::new)
+}
+
+/// The probe with a hit region (a chord on a chart).
+#[allow(non_snake_case)]
+fn RegionsView() -> Element {
+    probe(Recorder::with_regions)
+}
+
+fn probe(make: fn(&ViewCtx) -> Recorder) -> Element {
     let mount = use_hook(|| {
-        let mount = PaintMount::new(Recorder::new);
+        let mount = PaintMount::new(make);
         let wake = mount.wake_handle();
         mount.extras(
             Extras::default()
@@ -218,11 +272,15 @@ args = ["guest", "--exact", "--nocapture", "--test-threads=1"]
 [[views]]
 id = "probe"
 title = "Probe"
+
+[[views]]
+id = "regions"
+title = "Regions"
 "#
     }
 
     fn build(&self, ext: &mut Builder) {
-        ext.view("probe", ProbeView);
+        ext.view("probe", ProbeView).view("regions", RegionsView);
     }
 }
 
@@ -238,6 +296,8 @@ struct AppProps {
     /// The process's view, or (`None`) the probe linked in.
     processes: Option<architect_extensions::process::Processes>,
     store: Store,
+    /// The probe's view: `probe` or `regions`.
+    view: &'static str,
 }
 
 #[derive(Clone)]
@@ -264,15 +324,17 @@ fn App(props: AppProps) -> Element {
         w
     });
     let processes = props.processes;
+    let view = props.view;
     let views = use_hook(move || {
         architect_workspace::Views::new().view(architect_workspace::View::new(
             "probe",
             "Probe",
-            move |_| match processes.clone() {
-                Some(processes) => rsx! {
-                    RemotePaneView { processes, extension: ID, view: "probe" }
+            move |_| match (processes.clone(), view) {
+                (Some(processes), _) => rsx! {
+                    RemotePaneView { processes, extension: ID, view }
                 },
-                None => rsx! { ProbeView {} },
+                (None, "regions") => rsx! { RegionsView {} },
+                (None, _) => rsx! { ProbeView {} },
             },
         ))
     });
@@ -334,7 +396,14 @@ impl Run {
 }
 
 fn start(process: bool, dir: &Path) -> Run {
-    let out = dir.join(if process { "process.log" } else { "linked.log" });
+    start_view(process, dir, "probe")
+}
+
+fn start_view(process: bool, dir: &Path, view: &'static str) -> Run {
+    let out = dir.join(format!(
+        "{view}-{}.log",
+        if process { "process" } else { "linked" }
+    ));
     // The process inherits it as it starts; the linked view reads it here.
     unsafe { std::env::set_var(OUT, &out) };
     let store = ThemeStore::new(Registry::builtin());
@@ -346,7 +415,7 @@ fn start(process: bool, dir: &Path) -> Run {
             .with_theme(store.clone());
         let processes = runner.processes();
         let host = Host::new(ActionList::new(), SharedSections::default()).with_runner(runner);
-        let pkg = dir.join("pkg");
+        let pkg = dir.join(format!("pkg-{view}"));
         std::fs::create_dir_all(&pkg).unwrap();
         host.load(&package(&pkg), Origin::Installed).unwrap();
         (Some(processes), Some(host))
@@ -358,6 +427,7 @@ fn start(process: bool, dir: &Path) -> Run {
         AppProps {
             processes,
             store: Store(store),
+            view,
         },
     );
     let mut doc = DioxusDocument::new(
@@ -514,6 +584,9 @@ fn comparable(log: &str) -> Vec<String> {
 
 #[test]
 fn one_paint_view_gets_the_same_ctx_and_input_linked_and_as_a_process() {
+    let _one = SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let dir = tempfile::tempdir().unwrap();
     let mut linked = start(false, dir.path());
     script(&mut linked);
@@ -532,4 +605,51 @@ fn one_paint_view_gets_the_same_ctx_and_input_linked_and_as_a_process() {
         "the linked view had no theme: {a:?}"
     );
     assert_eq!(a, b, "linked and process differ");
+}
+
+/// A first press that lands on a hit region (a chord, a note), with no
+/// click on the view before it: the view takes the keyboard focus, as a
+/// press anywhere else in it does, and the key typed next is the view's.
+/// Its region hears the press; the view hears no pointer press.
+fn press_a_region_then_type(run: &mut Run) {
+    let (ox, oy) = origin(&run.doc);
+    let (x0, y0, _, _) = REGION_RECT;
+    let at = (ox + x0 as f32 + 30.0, oy + y0 as f32 + 20.0);
+    let free = MouseEventButtons::None;
+    let held = MouseEventButtons::Primary;
+    run.send(UiEvent::PointerMove(pointer(at, free, Modifiers::empty())));
+    run.send(UiEvent::PointerDown(pointer(at, held, Modifiers::empty())));
+    run.pump_until("the region's press", |l| l.contains("region Press("));
+    run.send(UiEvent::PointerUp(pointer(at, free, Modifiers::empty())));
+    run.pump_until("the region's release", |l| l.contains("region Release("));
+    run.send(UiEvent::KeyDown(key(
+        "k",
+        KeyState::Pressed,
+        Modifiers::empty(),
+    )));
+    run.pump_until("the key, after a press on a region", |l| {
+        l.contains("\"k\", down: true")
+    });
+}
+
+#[test]
+fn a_press_on_a_region_focuses_the_view_linked_and_as_a_process() {
+    let _one = SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let dir = tempfile::tempdir().unwrap();
+    for process in [false, true] {
+        let mut run = start_view(process, dir.path(), "regions");
+        press_a_region_then_type(&mut run);
+        let log = run.log();
+        let how = if process { "process" } else { "linked" };
+        assert!(
+            log.contains("input Focus(true)"),
+            "{how}: never focused:\n{log}"
+        );
+        assert!(
+            !log.contains("input down"),
+            "{how}: the region's press reached the view as a pointer press:\n{log}"
+        );
+    }
 }

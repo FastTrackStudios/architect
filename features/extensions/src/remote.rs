@@ -760,8 +760,6 @@ impl RemoteDocument {
         self.doc.mutate().set_node_text(self.theme, css);
     }
 
-    /// Its Blitz document, to read.
-    #[must_use]
     /// A press on `node` focuses the nearest element at or above it that
     /// takes the focus, the old one hearing `blur` and the new `focus`, as
     /// Blitz does for a press it sees. A press a hit region takes never
@@ -802,6 +800,8 @@ impl RemoteDocument {
         true
     }
 
+    /// Its Blitz document, to read.
+    #[must_use]
     pub const fn document(&self) -> &BaseDocument {
         &self.doc
     }

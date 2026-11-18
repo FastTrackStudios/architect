@@ -309,7 +309,12 @@ Four things are the host's own:
   `Press` and `Release` by id (`PaintView::region`; a `RemoteScene`'s
   `onregion`, sent as the element's `input` named `architect-region`).
   A press on a region is the region's: the view does not get that pointer
-  event.
+  event. It still focuses the view, as a press anywhere else in it does:
+  the scene's element takes the keyboard focus and the view hears
+  `Focus(true)`, so the key typed after a first click on a chord is the
+  view's (`features/extensions/src/remote.rs` `RemoteDocument`; a linked
+  `PaintPane` is focused by Blitz; tested linked and as a process in
+  `apps/sandbox/sketch/tests/paint_parity.rs`).
 - **Drags.** A region's `Drag` turns the pointer's movement along an axis
   (at most one per axis: a fader one, a box two) into a `host.` value,
   scaled, clamped and stepped. A layer bound to that value follows the
