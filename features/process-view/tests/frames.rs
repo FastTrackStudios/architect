@@ -1,14 +1,15 @@
 //! The `process-view-demo` program serving frames to a host with a
-//! wgpu device of its own and no window: over dma-buf textures (where
-//! the GPU can share them) and over shared memory, each frame's pixels
-//! read back from the host's own device; and the socket closing when the
-//! program is killed.
+//! wgpu device of its own and no window: over textures the GPU shares
+//! (dma-bufs on Linux, `IOSurface`s on macOS) and over shared memory,
+//! each frame's pixels read back from the host's own device; and the
+//! socket closing when the program is killed.
 //!
-//! Needs a Vulkan adapter. Without one (a CI runner with no GPU) each
-//! test says so and passes.
+//! Needs a Vulkan adapter (Linux) or a Metal one (macOS). Without one (a
+//! CI runner with no GPU) each test says so and passes.
 
 // Pixel rows and buffer sizes are small, checked by the test itself.
 #![allow(
+    clippy::panic,
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::indexing_slicing,
@@ -17,13 +18,13 @@
     clippy::arithmetic_side_effects
 )]
 #![cfg(all(
-    target_os = "linux",
+    any(target_os = "linux", target_os = "macos"),
     feature = "guest",
     feature = "host",
     feature = "demo"
 ))]
 
-use std::os::fd::{AsFd as _, OwnedFd};
+use std::os::fd::OwnedFd;
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
@@ -97,7 +98,7 @@ const H: u32 = 200;
 fn device() -> Option<(wgpu::Device, wgpu::Queue, wgpu::Adapter)> {
     pollster::block_on(async {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN,
+            backends: gpu::BACKENDS,
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
         let adapter = instance
@@ -107,7 +108,7 @@ fn device() -> Option<(wgpu::Device, wgpu::Queue, wgpu::Adapter)> {
             })
             .await
             .ok()?;
-        let features = adapter.features() & wgpu::Features::VULKAN_EXTERNAL_MEMORY_DMA_BUF;
+        let features = gpu::sharing_features(&adapter);
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 required_features: features,
@@ -128,6 +129,11 @@ fn start(transport: Option<&str>) -> (Child, Socket) {
     }
     let child = cmd.spawn().unwrap();
     drop(guest);
+    // macOS: its surfaces are taken (as `host::Session` does at spawn).
+    #[cfg(target_os = "macos")]
+    if let Some(r) = architect_process_view::surface::Rendezvous::get() {
+        r.expect(child.id());
+    }
     (child, host)
 }
 
@@ -204,55 +210,109 @@ fn assert_drawn(pixels: &[u8]) {
     assert!(other > 200, "particles and the sweep drawn: {other} pixels");
 }
 
-fn hello(socket: &Socket, adapter: &wgpu::Adapter, dmabuf: bool) {
+fn hello(socket: &Socket, adapter: &wgpu::Adapter, zero_copy: bool) {
     let hello = ToGuest::Hello {
         version: wire::VERSION,
         width: W,
         height: H,
         scale: 1.0,
         adapter: gpu::adapter_info(adapter),
-        dmabuf,
+        zero_copy,
         theme: ThemeTokens::default(),
     };
     socket.send(&hello.encode().unwrap(), &[]).unwrap();
 }
 
-#[test]
-fn frames_arrive_as_dma_bufs_the_host_device_reads_in_place() {
-    let _alone = gpu_alone();
-    // Declared first: dropped last, after the device and its textures.
-    let _watch = Watchdog::new("dma-buf frames", Duration::from_secs(60));
-    step("making a device");
-    let Some((device, queue, adapter)) = device() else {
-        eprintln!("no Vulkan adapter: skipped");
-        return;
-    };
-    if !gpu::can_share(&device) {
-        eprintln!("{}: no dma-buf sharing: skipped", adapter.get_info().name);
-        return;
-    }
-    let (mut child, socket) = start(None);
-    hello(&socket, &adapter, true);
-    let (buffers, fds) = recv(&socket);
+/// The slots' textures of the host's device, from what came beside the
+/// buffers' message: each dma-buf imported in place.
+#[cfg(target_os = "linux")]
+fn import_slots(
+    device: &wgpu::Device,
+    _child: &Child,
+    buffers: &ToHost,
+    fds: Vec<OwnedFd>,
+) -> Vec<wgpu::Texture> {
     let ToHost::Buffers {
-        id,
         transport,
-        width,
-        height,
         slots,
         stride,
         offset,
         modifier,
+        ..
+    } = *buffers
+    else {
+        panic!("buffers first, got {buffers:?}");
+    };
+    assert_eq!(transport, Transport::Dmabuf);
+    assert_eq!(fds.len(), usize::from(slots));
+    fds.into_iter()
+        .map(|fd| gpu::import_dmabuf(device, fd, (W, H), (stride, offset, modifier)).unwrap())
+        .collect()
+}
+
+/// The slots' textures of the host's device: each `IOSurface` the
+/// program sent this process's rendezvous for these buffers, a texture
+/// over the same memory.
+#[cfg(target_os = "macos")]
+fn import_slots(
+    device: &wgpu::Device,
+    child: &Child,
+    buffers: &ToHost,
+    fds: Vec<OwnedFd>,
+) -> Vec<wgpu::Texture> {
+    let ToHost::Buffers {
+        id,
+        transport,
+        slots,
+        stride,
+        ..
+    } = *buffers
+    else {
+        panic!("buffers first, got {buffers:?}");
+    };
+    assert_eq!(transport, Transport::IoSurface);
+    assert!(fds.is_empty(), "surfaces travel on the Mach port");
+    drop(fds);
+    let surfaces = architect_process_view::surface::Rendezvous::get()
+        .unwrap()
+        .take(child.id(), id, Duration::from_secs(5))
+        .expect("the program's surfaces for these buffers");
+    assert_eq!(surfaces.len(), usize::from(slots));
+    assert_eq!(surfaces[0].stride(), stride);
+    surfaces
+        .iter()
+        .map(|s| gpu::import_surface(device, s).unwrap())
+        .collect()
+}
+
+#[test]
+fn frames_arrive_as_textures_the_host_device_reads_in_place() {
+    let _alone = gpu_alone();
+    // Declared first: dropped last, after the device and its textures.
+    let _watch = Watchdog::new("GPU-shared frames", Duration::from_secs(60));
+    step("making a device");
+    let Some((device, queue, adapter)) = device() else {
+        eprintln!("no GPU adapter: skipped");
+        return;
+    };
+    if !gpu::can_share(&device) {
+        eprintln!("{}: no texture sharing: skipped", adapter.get_info().name);
+        return;
+    }
+    let (mut child, socket) = start(None);
+    hello(&socket, &adapter, true);
+    step("waiting for its buffers");
+    let (buffers, fds) = recv(&socket);
+    let ToHost::Buffers {
+        id, width, height, ..
     } = buffers
     else {
         panic!("buffers first, got {buffers:?}");
     };
-    assert_eq!((transport, width, height), (Transport::Dmabuf, W, H));
-    assert_eq!(fds.len(), usize::from(slots));
-    let textures: Vec<_> = fds
-        .into_iter()
-        .map(|fd| gpu::import_dmabuf(&device, fd, (W, H), (stride, offset, modifier)).unwrap())
-        .collect();
+    assert_eq!((width, height), (W, H));
+    step("importing its slots");
+    let textures = import_slots(&device, &child, &buffers, fds);
+    let slots = u8::try_from(textures.len()).unwrap();
     // A frame, then a press; the frame that shows the press says so.
     let (frame, _) = recv(&socket);
     let ToHost::Frame { buffers, slot, .. } = frame else {
@@ -304,7 +364,7 @@ fn frames_arrive_as_dma_bufs_the_host_device_reads_in_place() {
         }
     };
     eprintln!(
-        "dma-buf on {}: input to frame {:?}",
+        "GPU-shared frames on {}: input to frame {:?}",
         adapter.get_info().name,
         sent.elapsed()
     );
@@ -339,7 +399,7 @@ fn frames_arrive_in_shared_memory_where_dma_bufs_cannot() {
     let _watch = Watchdog::new("shared-memory frames", Duration::from_secs(60));
     step("making a device");
     let Some((device, _queue, adapter)) = device() else {
-        eprintln!("no Vulkan adapter: skipped");
+        eprintln!("no GPU adapter: skipped");
         return;
     };
     step("starting the program (shared memory)");
@@ -362,13 +422,14 @@ fn frames_arrive_in_shared_memory_where_dma_bufs_cannot() {
     let ToHost::Frame { slot, .. } = frame else {
         panic!("a frame, got {frame:?}");
     };
-    let file = std::fs::File::from(fds.into_iter().next().unwrap());
+    // At least as long as announced (macOS rounds shared memory up to a
+    // page), read as the app does: mapped.
     let len = (stride * H) as usize * usize::from(slots);
-    assert_eq!(file.metadata().unwrap().len() as usize, len);
-    let mut all = vec![0u8; len];
-    rustix::io::pread(file.as_fd(), &mut all, 0).unwrap();
+    let map = architect_process_view::shm::Shared::map(fds.into_iter().next().unwrap(), len, false)
+        .unwrap();
     let start = (stride * H) as usize * usize::from(slot);
-    assert_drawn(&all[start..start + (stride * H) as usize]);
+    // SAFETY: the program doesn't write a slot it sent until it is released.
+    assert_drawn(unsafe { map.bytes(start, (stride * H) as usize) }.unwrap());
     child.kill().unwrap();
     child.wait().unwrap();
 }

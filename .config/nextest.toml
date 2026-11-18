@@ -17,3 +17,15 @@ slow-timeout = { period = "60s", terminate-after = 8 }
 [[profile.ci.overrides]]
 filter = "package(xtask) & binary(dev_stack)"
 slow-timeout = { period = "60s", terminate-after = 20 }
+
+# The process views' GPU tests take turns across their binaries too
+# (features/process-view/tests: `frames`, `extension_kind`): each makes a
+# GPU device and starts a program that makes another, and two such pairs
+# at once stalled a driver (#838, frames.rs `gpu_alone`, which keeps them
+# apart within one binary).
+[test-groups]
+process-view-gpu = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = "package(architect-process-view) & (binary(frames) | binary(extension_kind))"
+test-group = "process-view-gpu"

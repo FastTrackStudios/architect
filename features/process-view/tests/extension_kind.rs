@@ -7,8 +7,8 @@
 //!
 //! Frames over shared memory, with no window: the session the app's pane
 //! would start (`extension::open`), greeted as a pane's widget greets it.
-//! Needs a Vulkan adapter for the program to draw on; without one (a CI
-//! runner with no GPU) it says so and passes.
+//! Needs a GPU adapter for the program to draw on (Vulkan on Linux, Metal
+//! on macOS); without one (a CI runner with no GPU) it says so and passes.
 
 #![allow(
     clippy::unwrap_used,
@@ -18,7 +18,7 @@
     clippy::arithmetic_side_effects
 )]
 #![cfg(all(
-    target_os = "linux",
+    any(target_os = "linux", target_os = "macos"),
     feature = "guest",
     feature = "host",
     feature = "demo",

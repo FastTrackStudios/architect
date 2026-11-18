@@ -9,11 +9,11 @@ view has `kind = "process"`. It is the showcase's U3 row for runtime extensions 
 - `package/bin/`: the program, built by `just process-view-example` (not checked in).
 
 The app's process-view pane (`architect-process-view`'s `extension` feature, in `architect-desktop
---features process-views` on Linux) starts the program when the pane opens, shows its GPU frames (a shared
-dma-buf texture, or shared memory), forwards the pane's input, size and focus, starts it again when it dies
-(saying why) and when a development copy is rebuilt, and stops it when the pane closes or the extension
-unloads. On macOS, Windows, iOS and the web the extension still loads and its pane says why it cannot run
-there.
+--features process-views` on Linux and macOS) starts the program when the pane opens, shows its GPU frames
+(a shared dma-buf texture on Linux, an IOSurface on macOS, or shared memory), forwards the pane's input,
+size and focus, starts it again when it dies (saying why) and when a development copy is rebuilt, and stops
+it when the pane closes or the extension unloads. On Windows, iOS and the web the extension still loads and
+its pane says why it cannot run there.
 
 Load it as a development copy:
 

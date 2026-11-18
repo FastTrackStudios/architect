@@ -94,7 +94,7 @@ dependencies = [
 [[package]]
 name = "accesskit_xplat"
 version = "0.2.1"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=db5b7ef11e4df19ef317c23f77152ec5e1887101#db5b7ef11e4df19ef317c23f77152ec5e1887101"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -382,7 +382,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 [[package]]
 name = "anyrender"
 version = "0.14.0"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=db5b7ef11e4df19ef317c23f77152ec5e1887101#db5b7ef11e4df19ef317c23f77152ec5e1887101"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
 dependencies = [
  "kurbo 0.13.1",
  "peniko 0.6.1",
@@ -782,6 +782,7 @@ dependencies = [
  "architect-workspace-hack",
  "auth-client",
  "auth-proto",
+ "block2 0.6.2",
  "dioxus",
  "facet",
  "facet-json",
@@ -789,6 +790,10 @@ dependencies = [
  "futures-util",
  "keyring",
  "lucide-dioxus",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
+ "objc2-ui-kit",
+ "reqwest 0.12.28",
  "serde_json",
  "tempfile",
  "thiserror 2.0.20",
@@ -826,6 +831,7 @@ dependencies = [
  "architect-files",
  "architect-guide",
  "architect-input",
+ "architect-media",
  "architect-navigator",
  "architect-navigator-api",
  "architect-navigator-extension",
@@ -872,6 +878,7 @@ dependencies = [
  "url",
  "vault",
  "vault-doc",
+ "vault-proto",
 ]
 
 [[package]]
@@ -895,8 +902,10 @@ dependencies = [
  "futures-timer",
  "serde",
  "serde_json",
+ "tokio",
  "vault",
  "vault-obsidian",
+ "vault-proto",
 ]
 
 [[package]]
@@ -1010,6 +1019,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-cookbook"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-extensions",
+ "architect-workspace-hack",
+ "cooklang",
+ "dioxus",
+ "facet",
+ "futures-timer",
+ "ingredient",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 2.0.20",
+ "tokio",
+ "vox",
+]
+
+[[package]]
 name = "architect-dayplan"
 version = "0.1.0"
 dependencies = [
@@ -1038,6 +1067,7 @@ name = "architect-desktop"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "architect-accounts",
  "architect-app",
  "architect-control",
  "architect-devices",
@@ -1047,6 +1077,7 @@ dependencies = [
  "architect-files",
  "architect-guide",
  "architect-mcp",
+ "architect-media",
  "architect-orgs",
  "architect-permissions",
  "architect-presence",
@@ -1070,6 +1101,7 @@ dependencies = [
  "toml 0.8.2",
  "tracing",
  "uuid",
+ "vault",
  "vault-collab",
  "vault-live",
  "vault-proto",
@@ -1103,9 +1135,11 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-calendar",
+ "architect-cookbook",
  "architect-dayplan",
  "architect-extensions",
  "architect-files-extension",
+ "architect-mealplan",
  "architect-notify",
  "architect-projects",
  "architect-sites",
@@ -1114,8 +1148,20 @@ dependencies = [
  "architect-time-tracker",
  "architect-updates",
  "architect-workspace-hack",
+ "include_dir",
  "serde_json",
  "tracing",
+]
+
+[[package]]
+name = "architect-documents"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-workspace-hack",
+ "facet",
+ "thiserror 2.0.20",
+ "vox",
 ]
 
 [[package]]
@@ -1140,7 +1186,10 @@ version = "0.1.0"
 dependencies = [
  "architect-workspace-hack",
  "base64 0.22.1",
+ "blake2",
+ "ed25519-dalek",
  "flate2",
+ "getrandom 0.3.4",
  "hex",
  "minisign-verify",
  "semver",
@@ -1155,8 +1204,10 @@ dependencies = [
 name = "architect-extensions"
 version = "0.1.0"
 dependencies = [
+ "anyrender",
  "architect",
  "architect-commands",
+ "architect-documents",
  "architect-editor",
  "architect-extension-archive",
  "architect-favourites",
@@ -1164,6 +1215,8 @@ dependencies = [
  "architect-input",
  "architect-navigator-api",
  "architect-orgs",
+ "architect-permissions",
+ "architect-scene",
  "architect-scripting",
  "architect-settings",
  "architect-shell",
@@ -1174,19 +1227,32 @@ dependencies = [
  "base64 0.22.1",
  "blitz-dom",
  "blitz-traits",
+ "block2 0.6.2",
  "crdt",
+ "cursor-icon",
  "dioxus",
  "dioxus-html",
  "dioxus-native-dom",
+ "dispatch2",
  "facet",
  "futures",
  "futures-timer",
  "hex",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
+ "objc2-health-kit",
+ "objc2-photos",
+ "objc2-photos-ui",
+ "objc2-ui-kit",
+ "objc2-uniform-type-identifiers",
+ "objc2-user-notifications",
+ "peniko 0.6.1",
  "regex",
  "reqwest 0.12.28",
  "rfd",
  "roxmltree 0.21.2",
  "semver",
+ "send_wrapper",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -1196,11 +1262,13 @@ dependencies = [
  "tracing",
  "unicode-normalization",
  "url",
+ "vault-proto",
  "vox",
  "vox-core",
  "vox-stream",
  "wasmtime",
  "wasmtime-wasi",
+ "web-time",
 ]
 
 [[package]]
@@ -1310,6 +1378,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-mealplan"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-extensions",
+ "architect-workspace-hack",
+ "chrono",
+ "cooklang",
+ "dioxus",
+ "facet",
+ "futures-timer",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 2.0.20",
+ "tokio",
+ "vox",
+]
+
+[[package]]
+name = "architect-media"
+version = "0.1.0"
+dependencies = [
+ "architect-playhead",
+ "architect-shell",
+ "architect-workspace-hack",
+ "dioxus",
+ "lucide-dioxus",
+ "pulldown-cmark",
+ "serde_json",
+ "serde_yaml",
+ "tracing",
+]
+
+[[package]]
 name = "architect-mobile"
 version = "0.1.0"
 dependencies = [
@@ -1331,7 +1434,10 @@ dependencies = [
 name = "architect-navigator"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "architect-commands",
+ "architect-documents",
+ "architect-extensions",
  "architect-navigator-api",
  "architect-settings",
  "architect-shell",
@@ -1348,6 +1454,7 @@ dependencies = [
  "serde_yaml",
  "unicode-normalization",
  "vault",
+ "vault-doc",
  "vault-proto",
 ]
 
@@ -1536,6 +1643,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-scene"
+version = "0.1.0"
+dependencies = [
+ "anyrender",
+ "architect-workspace-hack",
+ "blake3",
+ "peniko 0.6.1",
+ "thiserror 2.0.20",
+ "web-time",
+]
+
+[[package]]
 name = "architect-scripting"
 version = "0.1.0"
 dependencies = [
@@ -1623,6 +1742,7 @@ dependencies = [
  "architect",
  "architect-extensions",
  "architect-favourites",
+ "architect-media",
  "architect-pages",
  "architect-scripting",
  "architect-settings",
@@ -1834,6 +1954,7 @@ dependencies = [
  "anyrender_vello_cpu",
  "architect",
  "architect-commands",
+ "architect-scene",
  "architect-shell",
  "architect-theme",
  "architect-workspace-hack",
@@ -1843,6 +1964,7 @@ dependencies = [
  "blitz-shell",
  "blitz-traits",
  "crdt",
+ "cursor-icon",
  "dioxus",
  "dioxus-asset-resolver",
  "dioxus-devtools",
@@ -2049,7 +2171,7 @@ dependencies = [
  "ipnet",
  "iroh-base",
  "iroh-metrics",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "keyboard-types 0.8.3",
  "konst",
  "konst_macro_rules",
@@ -2072,6 +2194,7 @@ dependencies = [
  "memchr",
  "memmap2",
  "mime_guess",
+ "minimal-lexical",
  "miniz_oxide 0.8.9",
  "mio",
  "moka",
@@ -2098,13 +2221,18 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-core-image 0.3.2",
+ "objc2-core-location",
  "objc2-core-text",
  "objc2-core-video",
  "objc2-foundation 0.2.2",
  "objc2-foundation 0.3.2",
+ "objc2-io-surface",
+ "objc2-metal 0.3.2",
  "objc2-quartz-core 0.3.2",
  "objc2-security",
  "objc2-ui-kit",
+ "objc2-uniform-type-identifiers",
+ "objc2-user-notifications",
  "once_cell",
  "openssl",
  "openssl-probe",
@@ -2265,9 +2393,12 @@ dependencies = [
  "wayland-sys",
  "web-sys",
  "web-time",
+ "webkit2gtk",
+ "webkit2gtk-sys",
  "winnow 0.5.40",
  "winnow 1.0.4",
  "writeable 0.6.4",
+ "wry",
  "x11rb 0.13.2",
  "x11rb-protocol 0.13.2",
  "xterm-query",
@@ -3128,7 +3259,7 @@ dependencies = [
 [[package]]
 name = "blitz-dom"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=db5b7ef11e4df19ef317c23f77152ec5e1887101#db5b7ef11e4df19ef317c23f77152ec5e1887101"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
 dependencies = [
  "accesskit",
  "anyrender",
@@ -3139,7 +3270,7 @@ dependencies = [
  "color",
  "cssparser 0.38.0",
  "cursor-icon",
- "debug_timer 0.1.3 (git+https://www.github.com/FastTrackStudios/blitz?rev=db5b7ef11e4df19ef317c23f77152ec5e1887101)",
+ "debug_timer 0.1.3 (git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb)",
  "euclid",
  "html-escape",
  "icu_casemap",
@@ -3178,7 +3309,7 @@ dependencies = [
 [[package]]
 name = "blitz-html"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=db5b7ef11e4df19ef317c23f77152ec5e1887101#db5b7ef11e4df19ef317c23f77152ec5e1887101"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
 dependencies = [
  "blitz-dom",
  "blitz-traits",
@@ -3189,7 +3320,7 @@ dependencies = [
 [[package]]
 name = "blitz-net"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=db5b7ef11e4df19ef317c23f77152ec5e1887101#db5b7ef11e4df19ef317c23f77152ec5e1887101"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
 dependencies = [
  "blitz-traits",
  "data-url",
@@ -3201,7 +3332,7 @@ dependencies = [
 [[package]]
 name = "blitz-paint"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=db5b7ef11e4df19ef317c23f77152ec5e1887101#db5b7ef11e4df19ef317c23f77152ec5e1887101"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
 dependencies = [
  "anyrender",
  "anyrender_svg",
@@ -3223,7 +3354,7 @@ dependencies = [
 [[package]]
 name = "blitz-shell"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=db5b7ef11e4df19ef317c23f77152ec5e1887101#db5b7ef11e4df19ef317c23f77152ec5e1887101"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
 dependencies = [
  "accesskit",
  "accesskit_xplat",
@@ -3246,7 +3377,7 @@ dependencies = [
 [[package]]
 name = "blitz-traits"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=db5b7ef11e4df19ef317c23f77152ec5e1887101#db5b7ef11e4df19ef317c23f77152ec5e1887101"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
 dependencies = [
  "atomic_refcell",
  "bitflags 2.13.2",
@@ -3765,6 +3896,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "codesnake"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2205f7f6d3de68ecf4c291c789b3edf07b6569268abd0188819086f71ae42225"
+
+[[package]]
 name = "codespan-reporting"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4050,6 +4187,33 @@ dependencies = [
  "serde_json",
  "time",
  "url",
+]
+
+[[package]]
+name = "cooklang"
+version = "0.18.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa816a0452383c8d2bdab659df49c3ca0c86a0ca85699587bcb878d4ba174ebf"
+dependencies = [
+ "bitflags 2.13.2",
+ "codesnake",
+ "enum-map",
+ "finl_unicode",
+ "indexmap",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_yaml",
+ "smallvec 1.16.4",
+ "strum 0.26.3",
+ "syn 2.0.119",
+ "thiserror 2.0.20",
+ "toml 0.8.2",
+ "tracing",
+ "unicase",
+ "unicode-width",
+ "yansi",
 ]
 
 [[package]]
@@ -4958,7 +5122,7 @@ checksum = "da220af51a1a335e9a930beaaef53d261e41ea9eecfb3d973a3ddae1a7284b9c"
 [[package]]
 name = "debug_timer"
 version = "0.1.3"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=db5b7ef11e4df19ef317c23f77152ec5e1887101#db5b7ef11e4df19ef317c23f77152ec5e1887101"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
 
 [[package]]
 name = "debugid"
@@ -6367,6 +6531,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "enum-map"
+version = "2.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6866f3bfdf8207509a033af1a75a7b08abda06bbaaeae6669323fd5a097df2e9"
+dependencies = [
+ "enum-map-derive",
+ "serde",
+]
+
+[[package]]
+name = "enum-map-derive"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f282cfdfe92516eb26c2af8589c274c7c17681f5ecc03c18255fe741c6aa64eb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "enum_dispatch"
 version = "0.3.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6888,6 +7073,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aedcfb3409746eddb02b9e19ebda1c3394f759a152e48ee875a0844d1b955484"
 
 [[package]]
+name = "finl_unicode"
+version = "1.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09ded33109e99472f809cb7495544506eea45e366725dacf2a383e184f660456"
+
+[[package]]
 name = "fixed-resample"
 version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6897,6 +7088,12 @@ dependencies = [
  "fast-interleave",
  "rubato",
 ]
+
+[[package]]
+name = "fixedbitset"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
 
 [[package]]
 name = "fixedbitset"
@@ -7413,6 +7610,20 @@ dependencies = [
  "libc",
  "pkg-config",
  "system-deps",
+]
+
+[[package]]
+name = "gdkx11"
+version = "0.18.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3caa00e14351bebbc8183b3c36690327eb77c49abc2268dd4bd36b856db3fbfe"
+dependencies = [
+ "gdk",
+ "gdkx11-sys",
+ "gio",
+ "glib",
+ "libc",
+ "x11",
 ]
 
 [[package]]
@@ -8877,6 +9088,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a588916bfdfd92e71cacef98a63d9b1f0d74d6599980d11894290e7ddefffcf7"
 dependencies = [
  "cfb 0.7.3",
+]
+
+[[package]]
+name = "ingredient"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce373fc3e9e47496f7c559744789170890369c8fbbe821e1987dd5101a781860"
+dependencies = [
+ "anyhow",
+ "itertools 0.10.5",
+ "nom 7.1.3",
+ "petgraph 0.6.5",
+ "serde",
+ "tracing",
 ]
 
 [[package]]
@@ -11672,6 +11897,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-av-foundation"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "478ae33fcac9df0a18db8302387c666b8ef08a3e2d62b510ca4fc278a384b6c0"
+dependencies = [
+ "bitflags 2.13.2",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
+]
+
+[[package]]
 name = "objc2-cloud-kit"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11680,6 +11916,28 @@ dependencies = [
  "bitflags 2.13.2",
  "objc2 0.6.5",
  "objc2-foundation 0.3.2",
+]
+
+[[package]]
+name = "objc2-core-audio"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1eebcea8b0dbff5f7c8504f3107c68fc061a3eb44932051c8cf8a68d969c3b2"
+dependencies = [
+ "dispatch2",
+ "objc2 0.6.5",
+ "objc2-core-audio-types",
+ "objc2-core-foundation",
+]
+
+[[package]]
+name = "objc2-core-audio-types"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a89f2ec274a0cf4a32642b2991e8b351a404d290da87bb6a9a9d8632490bd1c"
+dependencies = [
+ "bitflags 2.13.2",
+ "objc2 0.6.5",
 ]
 
 [[package]]
@@ -11764,6 +12022,21 @@ checksum = "ca347214e24bc973fc025fd0d36ebb179ff30536ed1f80252706db19ee452009"
 dependencies = [
  "objc2 0.6.5",
  "objc2-foundation 0.3.2",
+]
+
+[[package]]
+name = "objc2-core-media"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05ec576860167a15dd9fce7fbee7512beb4e31f532159d3482d1f9c6caedf31d"
+dependencies = [
+ "bitflags 2.13.2",
+ "dispatch2",
+ "objc2 0.6.5",
+ "objc2-core-audio",
+ "objc2-core-audio-types",
+ "objc2-core-foundation",
+ "objc2-core-video",
 ]
 
 [[package]]
@@ -11857,12 +12130,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-health-kit"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "041e206d91990fa08bb987e10eaac19c300399cfbf06be6da93345edd323a029"
+dependencies = [
+ "bitflags 2.13.2",
+ "block2 0.6.2",
+ "objc2 0.6.5",
+ "objc2-core-location",
+ "objc2-foundation 0.3.2",
+]
+
+[[package]]
+name = "objc2-image-io"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32b0446e98cf4a784cc7a0177715ff317eeaa8463841c616cfc78aa4f953c4ea"
+dependencies = [
+ "objc2 0.6.5",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+]
+
+[[package]]
 name = "objc2-io-surface"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "180788110936d59bab6bd83b6060ffdfffb3b922ba1396b312ae795e1de9d81d"
 dependencies = [
  "bitflags 2.13.2",
+ "libc",
  "objc2 0.6.5",
  "objc2-core-foundation",
 ]
@@ -11884,6 +12182,39 @@ name = "objc2-metal"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a0125f776a10d00af4152d74616409f0d4a2053a6f57fa5b7d6aa2854ac04794"
+dependencies = [
+ "bitflags 2.13.2",
+ "block2 0.6.2",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
+ "objc2-io-surface",
+]
+
+[[package]]
+name = "objc2-photos"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6ea9a706f18e32cf8a0723e99855af4f135282891e07259301bae9135ae3872"
+dependencies = [
+ "bitflags 2.13.2",
+ "block2 0.6.2",
+ "dispatch2",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-av-foundation",
+ "objc2-core-foundation",
+ "objc2-core-image 0.3.2",
+ "objc2-core-location",
+ "objc2-core-media",
+ "objc2-foundation 0.3.2",
+ "objc2-image-io",
+]
+
+[[package]]
+name = "objc2-photos-ui"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fdddde9dfb986546746e3115021a85c4a83e1c5e9037b3c865a688fe9bf94ebb"
 dependencies = [
  "bitflags 2.13.2",
  "block2 0.6.2",
@@ -11971,7 +12302,18 @@ dependencies = [
  "objc2-core-text",
  "objc2-foundation 0.3.2",
  "objc2-quartz-core 0.3.2",
+ "objc2-uniform-type-identifiers",
  "objc2-user-notifications",
+]
+
+[[package]]
+name = "objc2-uniform-type-identifiers"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7902ac02859fc1f7045f8b598c63f1ae0cc7efeaa06a9bc9f3d9a3c955974fa4"
+dependencies = [
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
 ]
 
 [[package]]
@@ -11980,7 +12322,10 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9df9128cbbfef73cda168416ccf7f837b62737d748333bfe9ab71c245d76613e"
 dependencies = [
+ "bitflags 2.13.2",
+ "block2 0.6.2",
  "objc2 0.6.5",
+ "objc2-core-location",
  "objc2-foundation 0.3.2",
 ]
 
@@ -12976,11 +13321,21 @@ dependencies = [
 
 [[package]]
 name = "petgraph"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4c5cc86750666a3ed20bdaf5ca2a0344f9c67674cae0515bec2da16fbaa47db"
+dependencies = [
+ "fixedbitset 0.4.2",
+ "indexmap",
+]
+
+[[package]]
+name = "petgraph"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3672b37090dbd86368a4145bc067582552b29c27377cad4e0a306c97f9bd7772"
 dependencies = [
- "fixedbitset",
+ "fixedbitset 0.5.7",
  "indexmap",
 ]
 
@@ -12990,7 +13345,7 @@ version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8701b58ea97060d5e5b155d383a69952a60943f0e6dfe30b04c287beb0b27455"
 dependencies = [
- "fixedbitset",
+ "fixedbitset 0.5.7",
  "hashbrown 0.15.5",
  "indexmap",
  "serde",
@@ -16899,7 +17254,7 @@ dependencies = [
 [[package]]
 name = "stylo_taffy"
 version = "0.3.0-beta.4"
-source = "git+https://www.github.com/FastTrackStudios/blitz?rev=db5b7ef11e4df19ef317c23f77152ec5e1887101#db5b7ef11e4df19ef317c23f77152ec5e1887101"
+source = "git+https://www.github.com/FastTrackStudios/blitz?rev=8009ce1572aee1c7f4fbed25856189e5e79da4fb#8009ce1572aee1c7f4fbed25856189e5e79da4fb"
 dependencies = [
  "bitflags 2.13.2",
  "stylo",
@@ -18608,6 +18963,7 @@ dependencies = [
  "vault-live",
  "vault-obsidian",
  "vault-proto",
+ "vault-query",
 ]
 
 [[package]]
@@ -18655,6 +19011,7 @@ dependencies = [
  "chrono",
  "facet",
  "indexmap",
+ "libc",
  "notify",
  "notify-debouncer-mini",
  "rayon",
@@ -18668,6 +19025,7 @@ dependencies = [
  "tracing",
  "uuid",
  "vault-proto",
+ "vault-query",
  "walkdir",
 ]
 
@@ -18681,7 +19039,6 @@ dependencies = [
  "facet",
  "futures",
  "indexmap",
- "libc",
  "notify",
  "notify-debouncer-mini",
  "regex",
@@ -18694,6 +19051,7 @@ dependencies = [
  "uuid",
  "vault-live",
  "vault-proto",
+ "vault-query",
  "walkdir",
 ]
 
@@ -18712,6 +19070,24 @@ dependencies = [
  "uuid",
  "vox",
  "vox-types",
+]
+
+[[package]]
+name = "vault-query"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-workspace-hack",
+ "chrono",
+ "facet",
+ "indexmap",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 2.0.20",
+ "uuid",
+ "vault-proto",
 ]
 
 [[package]]
@@ -21217,6 +21593,7 @@ dependencies = [
  "dom_query",
  "dpi",
  "dunce",
+ "gdkx11",
  "gtk",
  "http",
  "javascriptcore-rs",
@@ -21242,6 +21619,7 @@ dependencies = [
  "windows 0.62.2",
  "windows-core 0.62.2",
  "windows-version",
+ "x11-dl",
 ]
 
 [[package]]

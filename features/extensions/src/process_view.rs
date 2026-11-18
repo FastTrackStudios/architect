@@ -20,7 +20,7 @@
 //! module is what the app asks before it starts one, [`launch`]: the
 //! program's file, checked, and why not when it cannot run.
 //!
-//! - **Platform.** Linux only for now ([`not_here`]): elsewhere the
+//! - **Platform.** Linux and macOS for now ([`not_here`]): elsewhere the
 //!   extension loads and the pane says why, as other platform limits do.
 //! - **Consent.** Running a native program is a capability: the manifest
 //!   asks for it (`capabilities.programs`, `Manifest::check` refuses a
@@ -49,7 +49,7 @@ use crate::Origin;
 use crate::host::Host;
 
 /// The platforms the app draws process views on.
-pub const PLATFORMS: &[&str] = &["linux"];
+pub const PLATFORMS: &[&str] = &["linux", "macos"];
 
 /// Why process views cannot be shown on `platform` (`crate::platform::here`,
 /// `Host::platform`), in a person's words; `None` where they can.
@@ -63,11 +63,11 @@ pub fn not_here(platform: &str) -> Option<String> {
         "web" => {
             "a browser does not start programs: process views run in the desktop app".to_owned()
         }
-        "macos" | "windows" => format!(
-            "process views run on Linux only for now: on {on} the program's frames need an \
-             IOSurface or a shared DXGI texture, designed and not built"
+        "windows" => format!(
+            "process views run on Linux and macOS only for now: on {on} the program's frames \
+             need a shared DXGI texture, designed and not built"
         ),
-        _ => format!("process views run on Linux only for now, not on {on}"),
+        _ => format!("process views run on Linux and macOS only for now, not on {on}"),
     })
 }
 
@@ -280,12 +280,13 @@ mod tests {
     }
 
     #[test]
-    fn linux_draws_them_and_elsewhere_says_why() {
+    fn linux_and_macos_draw_them_and_elsewhere_says_why() {
         assert_eq!(not_here("linux"), None);
-        let mac = not_here("macos").unwrap();
+        assert_eq!(not_here("macos"), None);
+        let windows = not_here("windows").unwrap();
         assert!(
-            mac.contains("Linux only") && mac.contains("IOSurface"),
-            "{mac}"
+            windows.contains("Linux and macOS") && windows.contains("DXGI"),
+            "{windows}"
         );
         assert!(not_here("web").unwrap().contains("browser"));
         assert!(not_here("ios").unwrap().contains("iOS"));

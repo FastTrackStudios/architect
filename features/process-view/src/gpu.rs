@@ -1,16 +1,20 @@
 //! Frames shared on the GPU between two processes.
 //!
 //! Frames on the GPU, shared between two processes' wgpu devices on one
-//! adapter (Linux, Vulkan): the guest allocates a texture whose memory
-//! is exportable as a dma-buf ([`export_texture`]), the host imports
-//! the dma-buf as a texture of its own device ([`import_dmabuf`]). Both
-//! see the same memory: no copy between them.
+//! adapter, so neither copies them to the other:
 //!
-//! The image is `R8G8B8A8_UNORM` in a linear layout (DRM format
-//! modifier 0), the one every driver that exports dma-bufs can import.
-//! wgpu (30) has the import (`wgpu_hal`'s `texture_from_dmabuf_fd`) but
-//! no export, so the export is written here with `ash` on the device
-//! wgpu made.
+//! - **Linux** (Vulkan): the guest allocates a texture whose memory is
+//!   exportable as a dma-buf (`export_texture`), the host imports the
+//!   dma-buf as a texture of its own device (`import_dmabuf`). The image
+//!   is `R8G8B8A8_UNORM` in a linear layout (DRM format modifier 0), the
+//!   one every driver that exports dma-bufs can import. wgpu (30) has the
+//!   import (`wgpu_hal`'s `texture_from_dmabuf_fd`) but no export, so the
+//!   export is written here with `ash` on the device wgpu made.
+//! - **macOS** (Metal): the guest makes an `IOSurface` and a texture of
+//!   its device over it (`export_surface`); the host makes a texture of
+//!   its own device over the same surface (`import_surface`), sent to it
+//!   as a Mach port (`crate::surface`). Every Metal device on the machine
+//!   can, so a pop-out window's device takes the same frames.
 //!
 //! **Synchronisation.** The guest waits for its GPU to finish a frame
 //! before it tells the host the frame is ready, and draws only into
@@ -20,8 +24,10 @@
 //! `sync_file` exported from a `VkSemaphore` (`VK_KHR_external_semaphore_fd`)
 //! would let the host's GPU wait instead: a follow-up.
 
+#[cfg(target_os = "linux")]
 use std::os::fd::{FromRawFd as _, OwnedFd};
 
+#[cfg(target_os = "linux")]
 use ash::vk;
 use wgpu::hal;
 
@@ -32,18 +38,24 @@ use crate::wire::Adapter;
 pub enum GpuError {
     #[error("the device is not a Vulkan one")]
     NotVulkan,
+    #[error("the device is not a Metal one")]
+    NotMetal,
     #[error("the device cannot share dma-bufs (VULKAN_EXTERNAL_MEMORY_DMA_BUF is off)")]
     NoDmabuf,
     #[error("no memory type fits the image")]
     NoMemoryType,
+    #[cfg(target_os = "linux")]
     #[error("Vulkan: {0}")]
     Vulkan(vk::Result),
+    #[error("IOSurface: {0}")]
+    Surface(String),
     #[error("wgpu-hal: {0}")]
     Hal(#[from] hal::DeviceError),
     #[error("a size out of range")]
     Range,
 }
 
+#[cfg(target_os = "linux")]
 impl From<vk::Result> for GpuError {
     fn from(e: vk::Result) -> Self {
         Self::Vulkan(e)
@@ -67,7 +79,28 @@ pub fn adapter_info(adapter: &wgpu::Adapter) -> Adapter {
     }
 }
 
+/// The backends a process view's device is made on: the one each
+/// platform shares textures with.
+#[cfg(target_os = "linux")]
+pub const BACKENDS: wgpu::Backends = wgpu::Backends::VULKAN;
+/// The backends a process view's device is made on: the one each
+/// platform shares textures with.
+#[cfg(target_os = "macos")]
+pub const BACKENDS: wgpu::Backends = wgpu::Backends::METAL;
+
+/// The device features a process view's device asks for, of those its
+/// adapter has: what sharing textures needs (none on Metal).
+#[must_use]
+pub fn sharing_features(adapter: &wgpu::Adapter) -> wgpu::Features {
+    #[cfg(target_os = "linux")]
+    let wanted = wgpu::Features::VULKAN_EXTERNAL_MEMORY_DMA_BUF;
+    #[cfg(target_os = "macos")]
+    let wanted = wgpu::Features::empty();
+    adapter.features() & wanted
+}
+
 /// Whether `device` can import (and export) dma-buf textures.
+#[cfg(target_os = "linux")]
 #[must_use]
 pub fn can_share(device: &wgpu::Device) -> bool {
     device
@@ -98,6 +131,15 @@ const fn descriptor(
     }
 }
 
+/// Whether `device` can make textures over `IOSurface`s: any Metal one.
+#[cfg(target_os = "macos")]
+#[must_use]
+pub fn can_share(device: &wgpu::Device) -> bool {
+    // SAFETY: only asked whether the device is a Metal one.
+    unsafe { device.as_hal::<hal::api::Metal>() }.is_some()
+}
+
+#[cfg(target_os = "linux")]
 fn hal_descriptor(width: u32, height: u32) -> hal::TextureDescriptor<'static> {
     hal::TextureDescriptor {
         label: Some("process view frame"),
@@ -125,6 +167,7 @@ const USAGE: wgpu::TextureUsages = wgpu::TextureUsages::COPY_SRC
     .union(wgpu::TextureUsages::TEXTURE_BINDING);
 
 /// A texture of the guest's device whose memory is a dma-buf.
+#[cfg(target_os = "linux")]
 #[derive(Debug)]
 pub struct Exported {
     pub texture: wgpu::Texture,
@@ -137,6 +180,7 @@ pub struct Exported {
 
 /// A `width` × `height` frame on `device` whose memory the host can
 /// import.
+#[cfg(target_os = "linux")]
 pub fn export_texture(
     device: &wgpu::Device,
     width: u32,
@@ -294,6 +338,7 @@ pub fn export_texture(
 }
 
 /// The first device-local memory type in `bits`, else any in it.
+#[cfg(target_os = "linux")]
 fn memory_type(properties: &vk::PhysicalDeviceMemoryProperties, bits: u32) -> Option<u32> {
     let count = usize::try_from(properties.memory_type_count).ok()?;
     let types = properties.memory_types.get(..count)?;
@@ -317,6 +362,7 @@ fn memory_type(properties: &vk::PhysicalDeviceMemoryProperties, bits: u32) -> Op
 /// The guest's dma-buf `fd` (a frame of `width` × `height`, laid out as
 /// `stride`, `offset` and `modifier` say) as a texture of the host's
 /// `device`. Vulkan takes `fd`, on failure too.
+#[cfg(target_os = "linux")]
 pub fn import_dmabuf(
     device: &wgpu::Device,
     fd: OwnedFd,
@@ -354,4 +400,71 @@ pub fn import_dmabuf(
 #[must_use]
 pub fn upload_texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
     device.create_texture(&descriptor(width, height, USAGE))
+}
+
+/// A texture of the guest's device over an `IOSurface` the host can
+/// make a texture over too.
+#[cfg(target_os = "macos")]
+#[derive(Debug)]
+pub struct Exported {
+    pub texture: wgpu::Texture,
+    /// The surface: sent to the host (`crate::surface::Sender`).
+    pub surface: crate::surface::IoSurface,
+}
+
+/// A `width` × `height` frame on `device` over a new `IOSurface`.
+#[cfg(target_os = "macos")]
+pub fn export_surface(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+) -> Result<Exported, GpuError> {
+    let surface = crate::surface::IoSurface::new(width, height)
+        .map_err(|e| GpuError::Surface(e.to_string()))?;
+    let texture = import_surface(device, &surface)?;
+    Ok(Exported { texture, surface })
+}
+
+/// `surface` (the guest's) as a texture of `device`: the same memory,
+/// no copy.
+#[cfg(target_os = "macos")]
+pub fn import_surface(
+    device: &wgpu::Device,
+    surface: &crate::surface::IoSurface,
+) -> Result<wgpu::Texture, GpuError> {
+    let (width, height) = (surface.width(), surface.height());
+    // SAFETY: the raw device is used only while `hal_device` lives, to
+    // make one texture that is handed to wgpu.
+    let hal_device = unsafe { device.as_hal::<hal::api::Metal>() }.ok_or(GpuError::NotMetal)?;
+    let raw = surface
+        .metal_texture(hal_device.raw_device())
+        .ok_or_else(|| GpuError::Surface("Metal made no texture over it".into()))?;
+    // SAFETY: `raw` is a 2D, one-level, one-layer RGBA8Unorm texture of
+    // this device, `width` × `height`, as the descriptor below says. The
+    // surface lives as long as the texture (Metal retains it).
+    let hal_texture = unsafe {
+        hal::metal::Device::texture_from_raw(
+            raw,
+            FORMAT,
+            objc2_metal::MTLTextureType::Type2D,
+            1,
+            1,
+            hal::CopyExtent {
+                width,
+                height,
+                depth: 1,
+            },
+            None,
+        )
+    };
+    drop(hal_device);
+    // SAFETY: made on this device, respecting the descriptor; its
+    // contents are the surface's.
+    Ok(unsafe {
+        device.create_texture_from_hal::<hal::api::Metal>(
+            hal_texture,
+            &descriptor(width, height, USAGE),
+            wgpu::TextureUses::UNINITIALIZED,
+        )
+    })
 }
