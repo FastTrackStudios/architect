@@ -23,6 +23,7 @@ use std::sync::Arc;
 use anyrender::PaintScene;
 
 use crate::anim::{self, Animation, Readings, Values};
+use crate::region::{self, Lit, Region};
 use anyrender::recording::RenderCommand;
 use peniko::kurbo::{Affine, Rect};
 use peniko::{Fill, Mix};
@@ -48,6 +49,9 @@ pub struct Layer {
     /// How it moves without its view ([`crate::anim`]): at most one per
     /// property.
     pub animations: Option<Arc<[Animation]>>,
+    /// What a pointer does over it, handled by its host
+    /// ([`crate::region`]).
+    pub regions: Option<Arc<[Region]>>,
 }
 
 impl Layer {
@@ -62,7 +66,22 @@ impl Layer {
             z: 0,
             visible: true,
             animations: None,
+            regions: None,
         }
+    }
+
+    /// With `regions` a pointer finds, hovers, presses and drags.
+    #[must_use]
+    pub fn regions(mut self, regions: impl Into<Arc<[Region]>>) -> Self {
+        let regions = regions.into();
+        self.regions = (!regions.is_empty()).then_some(regions);
+        self
+    }
+
+    /// How many regions it has.
+    #[must_use]
+    pub fn region_count(&self) -> usize {
+        self.regions.as_ref().map_or(0, |r| r.len())
     }
 
     /// Moving as `animations` say, evaluated by its host each frame.
@@ -114,6 +133,8 @@ pub struct Layers {
     revision: u64,
     /// Animations over every layer.
     animations: usize,
+    /// Regions over every layer.
+    regions: usize,
 }
 
 impl Layers {
@@ -150,12 +171,20 @@ impl Layers {
         self.animations
     }
 
+    /// How many regions its layers have, over all of them.
+    #[must_use]
+    pub const fn region_count(&self) -> usize {
+        self.regions
+    }
+
     /// Puts `layer` at `key`, in place of what was there.
     pub fn set(&mut self, key: Key, layer: Layer) {
         let reorder = self.held.get(&key).is_none_or(|old| old.z != layer.z);
         self.animations = self.animations.saturating_add(layer.animation_count());
+        self.regions = self.regions.saturating_add(layer.region_count());
         if let Some(old) = self.held.insert(key, layer) {
             self.animations = self.animations.saturating_sub(old.animation_count());
+            self.regions = self.regions.saturating_sub(old.region_count());
         }
         if reorder {
             self.reorder();
@@ -168,12 +197,16 @@ impl Layers {
         let Some(layer) = self.held.get_mut(&key) else {
             return false;
         };
-        let (z, before) = (layer.z, layer.animation_count());
+        let (z, before, had) = (layer.z, layer.animation_count(), layer.region_count());
         change(layer);
         self.animations = self
             .animations
             .saturating_sub(before)
             .saturating_add(layer.animation_count());
+        self.regions = self
+            .regions
+            .saturating_sub(had)
+            .saturating_add(layer.region_count());
         if layer.z != z {
             self.reorder();
         }
@@ -186,6 +219,7 @@ impl Layers {
         let had = self.held.remove(&key);
         if let Some(old) = &had {
             self.animations = self.animations.saturating_sub(old.animation_count());
+            self.regions = self.regions.saturating_sub(old.region_count());
             self.reorder();
             self.changed();
         }
@@ -198,6 +232,7 @@ impl Layers {
             self.held.clear();
             self.order.clear();
             self.animations = 0;
+            self.regions = 0;
             self.changed();
         }
     }
@@ -214,7 +249,7 @@ impl Layers {
     }
 
     /// The layers in paint order, the first at the back.
-    pub fn in_order(&self) -> impl Iterator<Item = (Key, &Layer)> {
+    pub fn in_order(&self) -> impl DoubleEndedIterator<Item = (Key, &Layer)> {
         self.order
             .iter()
             .filter_map(|key| self.held.get(key).map(|layer| (*key, layer)))
@@ -232,8 +267,6 @@ impl Layers {
     /// Draws every layer into `scene` as [`Self::compose`] does, each
     /// placed by its animations at these clocks and values
     /// ([`anim::place`]).
-    // kurbo's transforms compose with `*`: no overflow to guard.
-    #[allow(clippy::arithmetic_side_effects)]
     pub fn compose_at(
         &self,
         scene: &mut impl PaintScene,
@@ -241,7 +274,23 @@ impl Layers {
         readings: &Readings,
         values: &Values,
     ) {
-        for (_, layer) in self.in_order() {
+        self.compose_lit(scene, root, readings, values, None);
+    }
+
+    /// Draws every layer as [`Self::compose_at`] does, and over the
+    /// region `lit` names its hover or press highlight
+    /// ([`crate::region`]).
+    // kurbo's transforms compose with `*`: no overflow to guard.
+    #[allow(clippy::arithmetic_side_effects)]
+    pub fn compose_lit(
+        &self,
+        scene: &mut impl PaintScene,
+        root: Affine,
+        readings: &Readings,
+        values: &Values,
+        lit: Option<Lit>,
+    ) {
+        for (key, layer) in self.in_order() {
             let placed = anim::place(layer, readings, values);
             if !placed.visible || placed.opacity <= 0.0 {
                 continue;
@@ -269,6 +318,14 @@ impl Layers {
                 );
             }
             replay(scene, &layer.commands, root * placed.transform);
+            if let Some(lit) = lit.filter(|l| l.hit.key == key)
+                && let Some(r) = layer
+                    .regions
+                    .as_deref()
+                    .and_then(|rs| rs.iter().find(|r| r.id == lit.hit.id))
+            {
+                region::draw_lit(scene, r, root * placed.transform, lit.pressed);
+            }
             if faded {
                 scene.pop_layer();
             }
@@ -320,6 +377,11 @@ impl FromIterator<(Key, Layer)> for Layers {
             .held
             .values()
             .map(Layer::animation_count)
+            .fold(0, usize::saturating_add);
+        out.regions = out
+            .held
+            .values()
+            .map(Layer::region_count)
             .fold(0, usize::saturating_add);
         out.reorder();
         out

@@ -78,6 +78,61 @@ pub fn layers_batch(value: &str) -> Result<Vec<u8>, String> {
 /// size: a form value, `{"width": …, "height": …, "scale": …}`.
 pub const RESIZE_EVENT: &str = "architect-resize";
 
+/// The event a host sends a scene's element when a pointer did something
+/// to one of its layers' hit regions (`architect_scene::region`).
+///
+/// A form value, `{"region": id, "kind": "enter" | "leave" | "press" |
+/// "release" | "value", "axis": "x" | "y", "value": …}`. It arrives as the element's
+/// `input`, as a [`RESIZE_EVENT`] does; a drag's values come at most once
+/// a frame.
+pub const REGION_EVENT: &str = "architect-region";
+
+/// `event` as a [`REGION_EVENT`]'s form value.
+#[must_use]
+pub fn region_value(event: &architect_scene::region::RegionEvent) -> String {
+    use architect_scene::region::{Axis, RegionEvent as E};
+    let (kind, along) = match *event {
+        E::Enter(_) => ("enter", None),
+        E::Leave(_) => ("leave", None),
+        E::Press(_) => ("press", None),
+        E::Release(_) => ("release", None),
+        E::Value(_, axis, v) => ("value", Some((axis, v))),
+    };
+    let axis = along.map(|(a, _)| if a == Axis::X { "x" } else { "y" });
+    // An id as a string: JSON's numbers lose a u64's last digits.
+    serde_json::json!({
+        "region": event.id().to_string(),
+        "kind": kind,
+        "axis": axis,
+        "value": along.map(|(_, v)| v),
+    })
+    .to_string()
+}
+
+/// The region event a [`REGION_EVENT`]'s form value says, if it is one.
+#[must_use]
+pub fn region_of_value(value: &str) -> Option<architect_scene::region::RegionEvent> {
+    use architect_scene::region::{Axis, RegionEvent as E};
+    let v: serde_json::Value = serde_json::from_str(value).ok()?;
+    let id: u64 = v.get("region")?.as_str()?.parse().ok()?;
+    Some(match v.get("kind")?.as_str()? {
+        "enter" => E::Enter(id),
+        "leave" => E::Leave(id),
+        "press" => E::Press(id),
+        "release" => E::Release(id),
+        "value" => E::Value(
+            id,
+            match v.get("axis")?.as_str()? {
+                "x" => Axis::X,
+                "y" => Axis::Y,
+                _ => return None,
+            },
+            v.get("value")?.as_f64()?,
+        ),
+        _ => return None,
+    })
+}
+
 /// How many scenes each side keeps by hash.
 pub const CACHED: usize = 64;
 
@@ -643,15 +698,45 @@ impl Painted {
         match &self.layers {
             Some(layers) => {
                 let now = self.clocks.read();
+                let lit = self.interaction.lit();
                 layers
                     .layers()
-                    .compose_at(scene, at * self.transform, &now, layers.values());
+                    .compose_lit(scene, at * self.transform, &now, layers.values(), lit);
                 self.drawn = now;
+                self.drawn_lit = lit;
+                self.drawn_values = layers.values().revision();
                 if let Some(alarm) = &self.alarm {
                     let _ = alarm.drawn(layers.layers().next(&now));
                 }
             }
             None => architect_scene::layers::replay(scene, &self.commands, at * self.transform),
+        }
+    }
+
+    /// A pointer event at `at` (the element's CSS pixels) for its
+    /// layers' regions: what it did ([`architect_scene::region::Outcome`]).
+    // kurbo's transforms compose with `*`: no overflow to guard.
+    #[allow(clippy::arithmetic_side_effects)]
+    pub(crate) fn pointer(
+        &mut self,
+        kind: PointerKind,
+        at: peniko::kurbo::Point,
+    ) -> architect_scene::region::Outcome {
+        let Some(receiver) = self.layers.as_mut() else {
+            return architect_scene::region::Outcome::default();
+        };
+        if self.transform.determinant().abs() < 1e-12 {
+            return architect_scene::region::Outcome::default();
+        }
+        let at = self.transform.inverse() * at;
+        let now = self.clocks.read();
+        let (layers, values) = receiver.parts_mut();
+        let i = &mut self.interaction;
+        match kind {
+            PointerKind::Move => i.moved(layers, &now, values, at),
+            PointerKind::Down => i.pressed(layers, &now, values, at),
+            PointerKind::Up => i.released(layers, &now, values, at),
+            PointerKind::Gone => i.left(),
         }
     }
 
@@ -666,11 +751,28 @@ impl Painted {
     /// a batch came, a layer moves, or a clock one reads was moved.
     pub(crate) fn stale(&self) -> bool {
         self.dirty
+            || self.interaction.pending()
+            || self.interaction.lit() != self.drawn_lit
+            || self
+                .layers
+                .as_ref()
+                .is_some_and(|l| l.values().revision() != self.drawn_values)
             || self
                 .layers
                 .as_ref()
                 .is_some_and(|l| l.layers().stale(&self.drawn, &self.clocks.read()))
     }
+}
+
+/// What a pointer did, for a scene's regions.
+#[cfg(feature = "remote")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PointerKind {
+    Move,
+    Down,
+    Up,
+    /// It left the element, or its press was lost.
+    Gone,
 }
 
 /// An element's scene as its widget and its document share it: updated
@@ -689,6 +791,11 @@ pub(crate) struct Painted {
     pub(crate) drawn: architect_scene::Readings,
     /// Wakes its window at its layers' next step and when a clock jumps.
     pub(crate) alarm: Option<Arc<architect_scene::wake::Alarm>>,
+    /// The pointer over its layers' regions.
+    pub(crate) interaction: architect_scene::region::Interaction,
+    /// What it highlighted, and its values' revision, when last drawn.
+    pub(crate) drawn_lit: Option<architect_scene::region::Lit>,
+    pub(crate) drawn_values: u64,
     pub(crate) transform: Affine,
     pub(crate) element: u64,
     pub(crate) dirty: bool,
@@ -871,6 +978,15 @@ impl blitz_dom::Widget for SceneWidget {
                 p.draw(&mut scene, Affine::scale(scale));
                 scene.pop_layer();
             }
+            // What its regions heard reaches the view once a frame.
+            for event in p.interaction.take() {
+                let _ = self.events.unbounded_send(crate::wire::ViewEvent {
+                    element: p.element,
+                    name: REGION_EVENT.to_owned(),
+                    bubbles: false,
+                    data: crate::wire::EventData::Form(region_value(&event)),
+                });
+            }
             (scene, p.element)
         };
         if self.size != Some((width, height)) {
@@ -987,6 +1103,10 @@ mod guest {
         pub style: String,
         #[props(default)]
         pub onresize: Option<EventHandler<super::guest::SceneSize>>,
+        /// What a pointer did to one of its layers' hit regions, as its
+        /// host saw it (`architect_scene::region`).
+        #[props(default)]
+        pub onregion: Option<EventHandler<architect_scene::region::RegionEvent>>,
         #[props(default)]
         pub onpointerdown: Option<EventHandler<PointerEvent>>,
         #[props(default)]
@@ -1044,6 +1164,7 @@ mod guest {
         let transform = super::transform_attr(props.transform);
         let RemoteSceneProps {
             onresize,
+            onregion,
             onpointerdown,
             onpointermove,
             onpointerup,
@@ -1064,6 +1185,8 @@ mod guest {
                 oninput: move |e: FormEvent| {
                     if let (Some(size), Some(on)) = (size_of(&e), onresize) {
                         on.call(size);
+                    } else if let (Some(event), Some(on)) = (super::region_of_value(&e.value()), onregion) {
+                        on.call(event);
                     }
                 },
                 onpointerdown: move |e| if let Some(h) = onpointerdown { h.call(e) },
@@ -1229,6 +1352,23 @@ where
             }
         }
     };
+    let regioned = {
+        let live = Rc::clone(&live);
+        move |event: architect_scene::region::RegionEvent| {
+            let changed = {
+                let mut l = live.borrow_mut();
+                let l = &mut *l;
+                let changed = l.view.region(&l.ctx, &event);
+                if changed {
+                    l.record();
+                }
+                changed
+            };
+            if changed {
+                redraw();
+            }
+        }
+    };
     let (mut down, mut moved, mut up, mut cancel, mut wheel, mut key) = (
         on.clone(),
         on.clone(),
@@ -1242,6 +1382,7 @@ where
             content: Rc::new(Vec::new()),
             layers: shown,
             values,
+            onregion: regioned,
             onresize: move |size: SceneSize| {
                 #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
                 let geometry = Geometry {

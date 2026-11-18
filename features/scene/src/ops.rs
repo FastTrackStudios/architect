@@ -29,6 +29,7 @@ use crate::anim::{self, Access, Name, Space, Values};
 use crate::bytes::{Reader, Writer};
 use crate::fragment::{Encoder, decode};
 use crate::layers::{Key, Layer, Layers};
+use crate::region;
 use crate::resource::{Resource, Resources};
 use crate::{Error, Id};
 
@@ -67,6 +68,8 @@ const CLEAR: u8 = 7;
 const ANIMATE: u8 = 8;
 /// A named value the view writes ([`Space::View`]).
 const VALUE: u8 = 9;
+/// A layer's hit regions, in place of those it had (none: it has none).
+const REGIONS: u8 = 10;
 
 /// What the host was last told of a layer.
 struct Sent {
@@ -159,6 +162,17 @@ impl Sender {
                 .get(key)
                 .filter(|_| placed.is_some())
                 .map(|sent| &sent.layer.animations);
+            let regions_as = self
+                .sent
+                .get(key)
+                .filter(|_| placed.is_some())
+                .map(|sent| &sent.layer.regions);
+            if regions_as.is_some_and(|was| *was != layer.regions) {
+                later = true;
+                w.u8(REGIONS);
+                w.u64(*key);
+                region::write(&mut w, layer.regions.as_deref().unwrap_or_default());
+            }
             if animated_as.is_some_and(|was| *was != layer.animations) {
                 later = true;
                 w.u8(ANIMATE);
@@ -186,7 +200,14 @@ impl Sender {
                     }
                     w.i32(layer.z);
                     w.bool(layer.visible);
-                    // A layer comes still: it moves once told how.
+                    // A layer comes still: it moves once told how, and
+                    // has regions once told them.
+                    if let Some(regions) = &layer.regions {
+                        later = true;
+                        w.u8(REGIONS);
+                        w.u64(*key);
+                        region::write(&mut w, regions);
+                    }
                     if let Some(animations) = &layer.animations {
                         later = true;
                         w.u8(ANIMATE);
@@ -301,6 +322,12 @@ impl Receiver {
         &mut self.values
     }
 
+    /// Its layers to read and its values to write at once: what a host's
+    /// pointer needs to drag a region ([`crate::region::Interaction`]).
+    pub const fn parts_mut(&mut self) -> (&Layers, &mut Values) {
+        (&self.layers, &mut self.values)
+    }
+
     /// The pane's layers.
     #[must_use]
     pub const fn layers(&self) -> &Layers {
@@ -412,6 +439,28 @@ impl Receiver {
                 // view's mistake, not a reason to fail it.
                 self.layers.update(key, |layer| {
                     layer.animations = (!animations.is_empty()).then(|| Arc::from(animations));
+                });
+            }
+            REGIONS => {
+                let key = r.u64()?;
+                let regions = region::read(r)?;
+                let had = self.layers.get(key).map_or(0, Layer::region_count);
+                let total = self
+                    .layers
+                    .region_count()
+                    .saturating_sub(had)
+                    .saturating_add(regions.len());
+                if total > region::MAX_REGIONS {
+                    return Err(Error::TooManyRegions(region::MAX_REGIONS));
+                }
+                if self.layers.get(key).is_none() {
+                    // As a move: a view's mistake, not a reason to fail it.
+                    return Ok(());
+                }
+                let old = self.layers.get(key).and_then(|l| l.regions.clone());
+                region::seed(old.as_deref(), &regions, &mut self.values)?;
+                self.layers.update(key, |layer| {
+                    layer.regions = (!regions.is_empty()).then(|| Arc::from(regions));
                 });
             }
             VALUE => {

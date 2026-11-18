@@ -24,9 +24,10 @@ use std::rc::Rc;
 
 use architect_extensions::linked::{Builder, Extension};
 use architect_extensions::scene::{Affine, RemoteScene, RenderCommand};
-use architect_workspace::paint::anim::{Animation, Clock, Input, Linear, Property};
+use architect_workspace::paint::anim::{Animation, Clock, Input, Linear, Name, Property};
 use architect_workspace::paint::peniko::kurbo::{BezPath, Circle, Line, Point, Rect, Stroke};
 use architect_workspace::paint::peniko::{Color, Fill};
+use architect_workspace::paint::region::{Axis, Cursor, Drag, Region, RegionEvent, Shape};
 use architect_workspace::paint::{Layer, LayerKey, PaintScene as _, PaintView, Scene};
 use architect_workspace::{ViewCtx, ViewInput};
 use dioxus::html::input_data::MouseButton;
@@ -374,6 +375,55 @@ pub const TIMELINE_WIDTH: f64 = 40.0 * 64.0;
 /// The timeline's clips layer, and its playhead's.
 pub const CLIPS: LayerKey = 1;
 pub const PLAYHEAD: LayerKey = 2;
+/// Its mixer strip: the fader's track, its knob, and a box to drag.
+pub const TRACK: LayerKey = 3;
+pub const KNOB: LayerKey = 4;
+pub const BOX: LayerKey = 5;
+
+/// The fader's region, and the box's.
+pub const FADER: u64 = 1;
+pub const DRAG_BOX: u64 = 2;
+
+/// Where the fader's track is in the pane, and how tall: its value runs
+/// from 0 at the bottom to 1 at the top.
+pub const TRACK_AT: (f64, f64) = (8.0, 8.0);
+pub const TRACK_HEIGHT: f64 = 120.0;
+/// Where the box starts.
+pub const BOX_AT: (f64, f64) = (48.0, 8.0);
+
+/// The knob's colour: what a test finds it by.
+pub const KNOB_COLOR: Color = Color::from_rgb8(0xf2, 0xc1, 0x2e);
+/// The box's.
+pub const BOX_COLOR: Color = Color::from_rgb8(0x3c, 0xb3, 0x71);
+
+/// The values the host keeps for them: the pointer writes these.
+#[must_use]
+pub fn fader_value() -> Option<Name> {
+    Name::new("host.timeline.fader").ok()
+}
+
+#[must_use]
+pub fn box_values() -> Option<(Name, Name)> {
+    Some((
+        Name::new("host.timeline.box.x").ok()?,
+        Name::new("host.timeline.box.y").ok()?,
+    ))
+}
+
+/// What the view keeps of its fader once it is let go: its own value.
+#[must_use]
+pub fn level_value() -> Option<Name> {
+    Name::new("view.timeline.level").ok()
+}
+
+fn filled(
+    shape: &impl architect_workspace::paint::peniko::kurbo::Shape,
+    color: Color,
+) -> std::sync::Arc<Vec<RenderCommand>> {
+    let mut scene = Scene::new();
+    scene.fill(Fill::NonZero, Affine::IDENTITY, color, None, shape);
+    std::sync::Arc::new(scene.commands)
+}
 
 /// An arrangement's clips with a playhead moving over them: a paint view
 /// that keeps what it draws.
@@ -388,8 +438,14 @@ pub const PLAYHEAD: LayerKey = 2;
 pub struct Timeline {
     clips: std::sync::Arc<Vec<RenderCommand>>,
     playhead: std::sync::Arc<Vec<RenderCommand>>,
+    track: std::sync::Arc<Vec<RenderCommand>>,
+    knob: std::sync::Arc<Vec<RenderCommand>>,
+    drag_box: std::sync::Arc<Vec<RenderCommand>>,
     camera: Camera,
     panning: Option<(f64, f64)>,
+    /// The fader's level as the view last heard it, and once let go.
+    heard: f64,
+    level: Option<f64>,
 }
 
 impl Default for Timeline {
@@ -405,8 +461,16 @@ impl Default for Timeline {
         Self {
             clips: std::sync::Arc::new(arrangement_scene(50, 40)),
             playhead: std::sync::Arc::new(line.commands),
+            track: filled(
+                &Rect::new(0.0, 0.0, 24.0, TRACK_HEIGHT),
+                Color::from_rgb8(0x2a, 0x2d, 0x33),
+            ),
+            knob: filled(&Rect::new(0.0, -4.0, 24.0, 4.0), KNOB_COLOR),
+            drag_box: filled(&Rect::new(0.0, 0.0, 40.0, 24.0), BOX_COLOR),
             camera: Camera::default(),
             panning: None,
+            heard: 0.75,
+            level: None,
         }
     }
 }
@@ -443,8 +507,61 @@ impl PaintView for Timeline {
 
     fn paint(&mut self, _: &ViewCtx, _: &mut Scene) {}
 
+    // The fader and the box are the host's to move; the view hears where
+    // they went, and keeps the fader's level once it is let go.
+    fn region(&mut self, _: &ViewCtx, event: &RegionEvent) -> bool {
+        match *event {
+            RegionEvent::Value(FADER, _, v) => {
+                self.heard = v;
+                false
+            }
+            RegionEvent::Release(FADER) => {
+                self.level = Some(self.heard);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn values(&mut self, _: &ViewCtx) -> Vec<(Name, f64)> {
+        self.level
+            .zip(level_value())
+            .map(|(level, name)| vec![(name, level)])
+            .unwrap_or_default()
+    }
+
     fn layers(&mut self, _: &ViewCtx) -> Option<Vec<(LayerKey, Layer)>> {
         let view = self.camera.transform();
+        let strip = Affine::translate(TRACK_AT);
+        let fader = Region::new(FADER, Shape::Rect(Rect::new(0.0, 0.0, 24.0, TRACK_HEIGHT)))
+            .cursor(Cursor::NsResize)
+            .hover(Color::from_rgba8(255, 255, 255, 24))
+            .drag(Drag {
+                value: fader_value()?,
+                axis: Axis::Y,
+                scale: -1.0 / TRACK_HEIGHT,
+                min: 0.0,
+                max: 1.0,
+                step: None,
+                initial: 0.75,
+            });
+        let (bx, by) = box_values()?;
+        let along = |value: Name, axis, max| Drag {
+            value,
+            axis,
+            scale: 1.0,
+            min: 0.0,
+            max,
+            step: None,
+            initial: 0.0,
+        };
+        let handle = Region::new(DRAG_BOX, Shape::Rect(Rect::new(0.0, 0.0, 40.0, 24.0)))
+            .cursor(Cursor::Move)
+            .press(Color::from_rgba8(0, 0, 0, 60))
+            .drag(along(bx.clone(), Axis::X, 400.0))
+            .drag(along(by.clone(), Axis::Y, 300.0));
+        let follow =
+            |property, name| Animation::linear(property, Input::Value(name), Linear::new(1.0, 0.0));
         Some(vec![
             (
                 CLIPS,
@@ -456,6 +573,32 @@ impl PaintView for Timeline {
                     .at(view)
                     .animated(vec![playhead_motion()])
                     .z(1),
+            ),
+            (
+                TRACK,
+                Layer::new(std::sync::Arc::clone(&self.track))
+                    .at(strip)
+                    .z(2)
+                    .regions(vec![fader]),
+            ),
+            (
+                KNOB,
+                Layer::new(std::sync::Arc::clone(&self.knob))
+                    .at(strip)
+                    .z(3)
+                    .animated(vec![Animation::linear(
+                        Property::Y,
+                        Input::Value(fader_value()?),
+                        Linear::new(-TRACK_HEIGHT, TRACK_HEIGHT),
+                    )]),
+            ),
+            (
+                BOX,
+                Layer::new(std::sync::Arc::clone(&self.drag_box))
+                    .at(Affine::translate(BOX_AT))
+                    .z(4)
+                    .regions(vec![handle])
+                    .animated(vec![follow(Property::X, bx), follow(Property::Y, by)]),
             ),
         ])
     }

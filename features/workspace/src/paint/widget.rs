@@ -84,7 +84,13 @@ impl Widget for PaintWidget {
     fn handle_event(&mut self, event: &UiEvent) {
         self.sync_theme();
         if let Some(input) = view_input(event) {
-            self.painter.ctx().input.push(input);
+            // Its regions' first: a press or a drag on one is the host's.
+            if !self.painter.pointer(&input) {
+                self.painter.ctx().input.push(input);
+            }
+        }
+        if let Some(cursor) = self.painter.take_cursor() {
+            self.wake.set_cursor(cursor);
         }
         self.painter.pump();
     }
@@ -167,6 +173,23 @@ impl PaintWake {
     pub fn wake(&self) {
         self.0.dirty.store(true, Ordering::Release);
         self.redraw();
+    }
+
+    /// Shows `cursor` over the pane, as a hit region asks.
+    pub fn set_cursor(&self, cursor: super::Cursor) {
+        let window = self
+            .0
+            .window
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if let Some(window) = window {
+            let icon = cursor
+                .css()
+                .parse::<cursor_icon::CursorIcon>()
+                .unwrap_or_default();
+            window.set_cursor(Some(icon));
+        }
     }
 
     /// Wake its window to draw the pane's layers again, without asking its
@@ -714,7 +737,8 @@ mod tests {
             assert!(began.elapsed() < Duration::from_secs(5), "never woken");
             std::thread::sleep(Duration::from_millis(1));
         }
-        assert!(began.elapsed() >= Duration::from_millis(40));
+        // (When it is woken is the timer's, tested in architect-scene:
+        // another test's clock move may wake it sooner here.)
     }
 
     thread_local! {

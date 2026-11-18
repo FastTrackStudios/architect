@@ -2096,6 +2096,7 @@ dependencies = [
  "blitz-dom",
  "blitz-paint",
  "blitz-traits",
+ "cursor-icon",
  "dioxus",
  "dioxus-native-dom",
  "futures",

@@ -640,5 +640,20 @@ fn an_alarm_wakes_its_host_at_the_next_step_and_not_every_frame() {
         assert!(began.elapsed() < Duration::from_secs(5), "never woken");
         std::thread::sleep(Duration::from_millis(1));
     }
+    // The timer itself, with a waker no clock move reaches: not before.
+    let timed = Arc::new(AtomicUsize::new(0));
+    let count = Arc::clone(&timed);
+    let waker: architect_scene::wake::Waker = Arc::new(move || {
+        count.fetch_add(1, Ordering::Relaxed);
+    });
+    let began = Instant::now();
+    assert!(architect_scene::wake::after(
+        Duration::from_millis(30),
+        &waker
+    ));
+    while timed.load(Ordering::Relaxed) == 0 {
+        assert!(began.elapsed() < Duration::from_secs(5), "never woken");
+        std::thread::sleep(Duration::from_millis(1));
+    }
     assert!(began.elapsed() >= Duration::from_millis(30));
 }

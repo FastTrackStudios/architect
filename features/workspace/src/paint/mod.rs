@@ -47,6 +47,7 @@ pub use architect_scene::Layer;
 pub use architect_scene::anim::{self, Clocks, Readings};
 use architect_scene::anim::{Access, Name, Space, Values};
 pub use architect_scene::layers::Key as LayerKey;
+pub use architect_scene::region::{self, Cursor, RegionEvent};
 pub use architect_scene::wake;
 pub use peniko;
 use peniko::kurbo::{Affine, Point, Rect};
@@ -91,6 +92,17 @@ pub trait PaintView: 'static {
     fn values(&mut self, ctx: &ViewCtx) -> Vec<(Name, f64)> {
         let _ = ctx;
         Vec::new()
+    }
+
+    /// What a pointer did to one of its layers' regions
+    /// ([`region::RegionEvent`]): enter, leave, press, release, or a
+    /// drag's value (at most once a frame). Whether what it draws
+    /// changed (it is asked for its layers again). Its host handles the
+    /// hover, the cursor, the highlight and the drag itself; a press on a
+    /// region is the region's, not a [`ViewInput`].
+    fn region(&mut self, ctx: &ViewCtx, event: &RegionEvent) -> bool {
+        let _ = (ctx, event);
+        false
     }
 
     /// What is under `at` (logical pixels): the id of what it drew there.
@@ -278,6 +290,8 @@ pub struct Painter {
     /// Why its view failed: it is drawn as nothing and asked nothing
     /// again, as a view in a process that sent what its host refused.
     failed: Option<architect_scene::Error>,
+    /// A cursor its regions asked for since the host last looked.
+    cursor: Option<Cursor>,
 }
 
 /// A view's layers and values as its painter keeps them.
@@ -287,6 +301,12 @@ struct Held {
     values: Values,
     /// The clocks it was last drawn at.
     drawn: Readings,
+    /// Its values' revision when it was last drawn.
+    drawn_values: u64,
+    /// What it highlighted when last drawn.
+    drawn_lit: Option<region::Lit>,
+    /// The pointer over its regions.
+    interaction: region::Interaction,
 }
 
 impl Held {
@@ -313,6 +333,18 @@ impl Held {
         }
         if animations > anim::MAX_ANIMATIONS {
             return Err(Error::TooManyAnimations(anim::MAX_ANIMATIONS));
+        }
+        let mut regions = 0_usize;
+        for (key, layer) in &layers {
+            if let Some(r) = layer.regions.as_deref() {
+                region::check(r)?;
+                regions = regions.saturating_add(r.len());
+                let old = self.layers.get(*key).and_then(|l| l.regions.as_deref());
+                region::seed(old, r, &mut self.values)?;
+            }
+        }
+        if regions > region::MAX_REGIONS {
+            return Err(Error::TooManyRegions(region::MAX_REGIONS));
         }
         for (name, value) in values {
             self.values.write(Space::View, &name, value)?;
@@ -351,7 +383,44 @@ impl Painter {
             held: None,
             access: Access::default(),
             failed: None,
+            cursor: None,
         }
+    }
+
+    /// A pointer event, handled by its layers' regions first: whether it
+    /// was theirs (a press on a region, a drag), and so not the view's.
+    /// Hover and drags are drawn without asking the view; what happened
+    /// reaches it at the next frame ([`PaintView::region`]).
+    pub fn pointer(&mut self, input: &ViewInput) -> bool {
+        let Some(held) = self.held.as_mut().filter(|_| self.failed.is_none()) else {
+            return false;
+        };
+        let now = self.clocks.read();
+        let (layers, values, i) = (&held.layers, &mut held.values, &mut held.interaction);
+        let at = |x: f32, y: f32| Point::new(f64::from(x), f64::from(y));
+        let outcome = match *input {
+            ViewInput::PointerMove { x, y, .. } => i.moved(layers, &now, values, at(x, y)),
+            ViewInput::PointerDown { x, y, .. } => i.pressed(layers, &now, values, at(x, y)),
+            ViewInput::PointerUp { x, y, .. } => i.released(layers, &now, values, at(x, y)),
+            ViewInput::Touch { x, y, phase, .. } => match phase {
+                "start" => i.pressed(layers, &now, values, at(x, y)),
+                "move" => i.moved(layers, &now, values, at(x, y)),
+                "end" => i.released(layers, &now, values, at(x, y)),
+                _ => i.left(),
+            },
+            ViewInput::Focus(false) => i.left(),
+            _ => return false,
+        };
+        if let Some(cursor) = outcome.cursor {
+            self.cursor = Some(cursor);
+        }
+        outcome.consumed
+    }
+
+    /// The cursor its regions asked for since last asked, if it changed
+    /// ([`Cursor::Default`]: the pane's own).
+    pub const fn take_cursor(&mut self) -> Option<Cursor> {
+        self.cursor.take()
     }
 
     /// Its view may read what `access` lets it (the engine's values when
@@ -440,7 +509,13 @@ impl Painter {
         if self.failed.is_some() {
             return false;
         }
-        self.dirty
+        let pointed = self.held.as_ref().is_some_and(|h| {
+            h.interaction.pending()
+                || h.interaction.lit() != h.drawn_lit
+                || h.values.revision() != h.drawn_values
+        });
+        pointed
+            || self.dirty
             || !self.ctx.input.is_empty()
             || self.view.animating(&self.ctx)
             || self
@@ -494,6 +569,13 @@ impl Painter {
             self.dirty = false;
             return scene;
         }
+        // What its regions heard reaches the view first: what it answers
+        // may change what it draws.
+        if let Some(held) = self.held.as_mut() {
+            for event in held.interaction.take() {
+                self.dirty |= self.view.region(&self.ctx, &event);
+            }
+        }
         let asked = if self.asks(resized) {
             Some(self.view.layers(&self.ctx))
         } else {
@@ -522,9 +604,12 @@ impl Painter {
             // Composed from where each layer's content is kept, at the
             // clocks now.
             let now = self.clocks.read();
+            let lit = held.interaction.lit();
             held.layers
-                .compose_at(&mut scene, Affine::scale(scale), &now, &held.values);
+                .compose_lit(&mut scene, Affine::scale(scale), &now, &held.values, lit);
             held.drawn = now;
+            held.drawn_values = held.values.revision();
+            held.drawn_lit = lit;
         } else {
             self.view.paint(&self.ctx, &mut scene);
             if (scale - 1.0).abs() > f64::EPSILON {
