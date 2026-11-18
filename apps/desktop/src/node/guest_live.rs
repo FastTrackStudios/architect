@@ -69,12 +69,10 @@ impl GuestGrants {
     /// Link `code`'s guest follows `doc_id` until the grant is dropped.
     fn grant(&self, code: &str, doc_id: Uuid) -> Grant {
         let key = (code.to_owned(), doc_id);
-        *self
-            .0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .entry(key.clone())
-            .or_default() += 1;
+        let mut held = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let n = held.entry(key.clone()).or_default();
+        *n = n.saturating_add(1);
+        drop(held);
         Grant {
             grants: self.clone(),
             key,

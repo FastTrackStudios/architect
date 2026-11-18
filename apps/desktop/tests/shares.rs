@@ -4975,7 +4975,7 @@ async fn a_share_links_guest_follows_its_live_document_read_only() {
     // Revoked: its session ends, and a new one is refused.
     let links: ShareLinksClient = w.lane(&w.grace).await;
     links.revoke(code.clone()).await.unwrap();
-    let ended = tokio::time::timeout(node::guest_live_recheck() * 3, following).await;
+    let ended = tokio::time::timeout(node::guest_live_recheck().saturating_mul(3), following).await;
     assert!(ended.is_ok(), "the guest's session outlived its link");
     pool().evict(&Endpoint::url(&live));
     let again = pool().client::<DocSyncClient>(&Endpoint::url(&live)).await;
