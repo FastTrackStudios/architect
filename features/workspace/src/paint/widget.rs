@@ -31,8 +31,10 @@ use crate::kinds::{KindId, Placement, ViewHost};
 use peniko::Fill;
 use peniko::kurbo::{Affine, Rect};
 
-/// Logical pixels a wheel's line is.
-const LINE: f64 = 20.0;
+/// Logical pixels a wheel's line is: a view is given pixels, whichever
+/// its host was told (a process's host converts the same way).
+pub const WHEEL_LINE: f64 = 20.0;
+const LINE: f64 = WHEEL_LINE;
 
 /// A [`Painter`] as a Blitz custom widget.
 pub struct PaintWidget {
@@ -209,7 +211,16 @@ impl PaintWake {
         }
     }
 
-    fn attach(&self, window: Option<Arc<dyn ShellProvider>>) {
+    /// Whether a wake is waiting, which it clears: a host that draws the
+    /// view itself (a process's) asks before each frame.
+    #[must_use]
+    pub fn take(&self) -> bool {
+        self.0.dirty.swap(false, Ordering::AcqRel)
+    }
+
+    /// Where its wakes go: `window`'s redraw, now and from any thread. A
+    /// wake that came before it is passed on at once.
+    pub fn attach(&self, window: Option<Arc<dyn ShellProvider>>) {
         *self.0.window.lock().unwrap_or_else(PoisonError::into_inner) = window;
         if self.0.dirty.load(Ordering::Acquire) {
             self.wake();
@@ -261,12 +272,16 @@ pub fn view_input(event: &UiEvent) -> Option<ViewInput> {
             BlitzPointerId::Mouse | BlitzPointerId::Pen => return None,
         },
         UiEvent::Wheel(w) => {
+            // Signed as the web's (positive scrolls down), as a browser's
+            // pane and a process's host give it: Blitz carries winit's.
             let (dx, dy) = match w.delta {
-                BlitzWheelDelta::Lines(x, y) => (x * LINE, y * LINE),
-                BlitzWheelDelta::Pixels(x, y) => (x, y),
+                BlitzWheelDelta::Lines(x, y) => (-x * LINE, -y * LINE),
+                BlitzWheelDelta::Pixels(x, y) => (-x, -y),
             };
-            // The pointer's point, as the pointer events give it.
-            let (x, y) = (w.coords.client_x, w.coords.client_y);
+            // The pointer's point in the view. Blitz moves a pointer
+            // event's client point into a widget's space but not a
+            // wheel's: its `element` point is the one in the view's.
+            let (x, y) = (w.element.x, w.element.y);
             ViewInput::Wheel {
                 dx: narrow(dx),
                 dy: narrow(dy),
@@ -454,6 +469,31 @@ impl PaintMount {
     #[must_use]
     pub fn wake_handle(&self) -> PaintWake {
         self.wake.clone()
+    }
+
+    /// Its view, made for `ctx`: what a host that is not a [`PaintPane`]
+    /// (a process's) mounts, once per pane.
+    #[must_use]
+    pub fn make_view(&self, ctx: &ViewCtx) -> Box<dyn PaintView> {
+        (self.make)(ctx)
+    }
+
+    /// The host's typed data and handles it was given.
+    #[must_use]
+    pub fn host_extras(&self) -> Extras {
+        self.extras.clone()
+    }
+
+    /// Where its frame times go.
+    #[must_use]
+    pub fn frame_stats(&self) -> FrameStats {
+        self.stats.clone()
+    }
+
+    /// How long a frame may take.
+    #[must_use]
+    pub const fn frame_budget(&self) -> Duration {
+        self.budget
     }
 }
 

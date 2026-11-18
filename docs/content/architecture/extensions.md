@@ -85,7 +85,7 @@ weight = 67
 > `Extension`). The window side is `features/extensions/src/interface.rs`
 > `use_extension_ui`. The sandbox's Board is one (`apps/sandbox/board`). See
 > "Contributions" and "One trait, three ways to run it" below. Not yet:
-> WASM, a process view told its pane's state, hooks on a phone.
+> WASM, hooks on a phone.
 >
 > The rest of this page is proposed (2026-10-31). Decided: one crate, `architect-extensions`, with four kinds — data,
 > WebAssembly components, Luau scripts, and processes over vox — and a

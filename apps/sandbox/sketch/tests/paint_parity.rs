@@ -1,0 +1,535 @@
+//! One `PaintView`, unchanged, linked in and as a process (#840): the same
+//! `ViewCtx` and the same input.
+//!
+//! The probe view is mounted the way an extension mounts one in its own
+//! Dioxus view, `architect_extensions::linked::PaintPane`: linked, that is
+//! the workspace's `PaintPane`; in the process, `scene::RemotePaint`. Both
+//! runs put it in a workspace pane of the same size, with the same theme
+//! store, and send the window the same events. The view writes what it
+//! was given (its pane, kind, theme, extras, geometry, every input, and a
+//! frame after a `PaintWake` from another thread) to a log, and the two
+//! logs must be the same.
+//!
+//! The process is this test binary started again (`guest`).
+#![cfg(unix)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::missing_panics_doc,
+    clippy::arithmetic_side_effects,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::as_conversions,
+    clippy::print_stdout,
+    clippy::significant_drop_tightening,
+    // Dioxus components take their props by value.
+    clippy::needless_pass_by_value,
+    clippy::option_if_let_else
+)]
+
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use architect::action::ActionList;
+use architect_extensions::guest::Guest;
+use architect_extensions::host::{Host, SharedSections};
+use architect_extensions::linked::{Builder, Extension, PaintPane};
+use architect_extensions::process::{ProcessRunner, Restart};
+use architect_extensions::proto::SOCKET;
+use architect_extensions::remote::RemotePaneView;
+use architect_extensions::{Origin, Package};
+use architect_theme::{Registry, ThemeStore};
+use architect_workspace::paint::{PaintMount, PaintView, PaintWake, Scene};
+use architect_workspace::{Extras, HostData, ViewCtx, ViewInput};
+use blitz_dom::{Document as _, DocumentConfig};
+use blitz_traits::events::{
+    BlitzImeEvent, BlitzKeyEvent, BlitzPointerEvent, BlitzPointerId, BlitzWheelDelta,
+    BlitzWheelEvent, Code, Key, KeyState, Location, Modifiers, MouseEventButton, MouseEventButtons,
+    Point, PointerCoords, PointerDetails, UiEvent,
+};
+use blitz_traits::shell::{ColorScheme, Viewport};
+use dioxus::prelude::*;
+use dioxus_native_dom::DioxusDocument;
+
+const ID: &str = "test.probe";
+/// Where the probe writes its log: a file per run, so the process's
+/// lines come back to the test.
+const OUT: &str = "PAINT_PARITY_OUT";
+
+/// Not a test of its own: the extension, when a test starts this binary
+/// as one.
+#[test]
+fn guest() {
+    if std::env::var_os(SOCKET).is_none() {
+        return;
+    }
+    Guest::extension(&Probe).serve().unwrap();
+}
+
+fn log(line: &str) {
+    let Some(path) = std::env::var_os(OUT) else {
+        return;
+    };
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .unwrap();
+    writeln!(file, "{line}").unwrap();
+}
+
+/// What the probe's host shares with it: a number another thread bumps.
+struct Count(u32);
+
+/// A view that writes down what it is given.
+struct Recorder {
+    wake: Option<PaintWake>,
+    seen: Option<u32>,
+    size: (f32, f32),
+}
+
+impl Recorder {
+    fn new(ctx: &ViewCtx) -> Self {
+        let theme: Vec<String> = ctx
+            .theme
+            .0
+            .iter()
+            .map(|(name, value)| format!("{name}={value}"))
+            .collect();
+        log(&format!(
+            "ctx pane={} kind={:?} host={:?} placement={:?} caller={:?} doc={} data={} wake={} tokens={} theme=[{}]",
+            ctx.pane.0,
+            ctx.kind,
+            ctx.host,
+            ctx.placement,
+            ctx.caller,
+            ctx.doc.is_some(),
+            ctx.data::<Count>().is_some(),
+            ctx.extras.get::<PaintWake>().is_some(),
+            ctx.theme.0.len(),
+            theme.join(";"),
+        ));
+        Self {
+            wake: ctx.extras.get::<PaintWake>().cloned(),
+            seen: None,
+            size: (0.0, 0.0),
+        }
+    }
+}
+
+/// An input as the log says it: its numbers to a tenth of a pixel.
+fn said(input: &ViewInput) -> String {
+    let r = |v: f32| (v * 10.0).round() / 10.0;
+    match input {
+        ViewInput::PointerDown { x, y, button, mods } => {
+            format!("down {} {} {button:?} {mods:?}", r(*x), r(*y))
+        }
+        ViewInput::PointerMove { x, y, mods } => format!("move {} {} {mods:?}", r(*x), r(*y)),
+        ViewInput::PointerUp { x, y, button, mods } => {
+            format!("up {} {} {button:?} {mods:?}", r(*x), r(*y))
+        }
+        ViewInput::Wheel { dx, dy, x, y, mods } => format!(
+            "wheel {} {} at {} {} {mods:?}",
+            r(*dx),
+            r(*dy),
+            r(*x),
+            r(*y)
+        ),
+        other => format!("{other:?}"),
+    }
+}
+
+impl PaintView for Recorder {
+    fn input(&mut self, ctx: &ViewCtx, event: &ViewInput) -> bool {
+        log(&format!("input {}", said(event)));
+        // `p` has another thread change the host's data and wake the
+        // pane: the frame after it sees the new number.
+        if let ViewInput::Key {
+            key, down: true, ..
+        } = event
+            && key == "p"
+            && let (Some(wake), Some(data)) = (self.wake.clone(), ctx.data::<Count>())
+        {
+            std::thread::spawn(move || {
+                data.update(|c| c.0 += 1);
+                wake.wake();
+            });
+        }
+        false
+    }
+
+    fn paint(&mut self, ctx: &ViewCtx, _: &mut Scene) {
+        let count = ctx.data::<Count>().map(|d| d.read(|c| c.0));
+        if count != self.seen {
+            self.seen = count;
+            log(&format!("frame count={count:?}"));
+        }
+        let size = (ctx.geometry.width, ctx.geometry.height);
+        if size.0 > 0.0 && size != self.size {
+            self.size = size;
+            log(&format!(
+                "size {}x{}",
+                ctx.geometry.width.round(),
+                ctx.geometry.height.round()
+            ));
+        }
+    }
+}
+
+/// The probe's view: its `PaintView` in its own Dioxus view, as an
+/// extension mounts one (Keyflow's chart beside its palettes).
+#[allow(non_snake_case)]
+fn ProbeView() -> Element {
+    let mount = use_hook(|| {
+        let mount = PaintMount::new(Recorder::new);
+        let wake = mount.wake_handle();
+        mount.extras(
+            Extras::default()
+                .with_data(HostData::new(Count(1)))
+                .with(wake),
+        )
+    });
+    rsx! {
+        div { style: "width: 100%; height: 100%;",
+            PaintPane { mount }
+        }
+    }
+}
+
+struct Probe;
+
+impl Extension for Probe {
+    fn manifest(&self) -> &'static str {
+        r#"
+id = "test.probe"
+name = "Probe"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+
+[entry]
+path = "guest"
+args = ["guest", "--exact", "--nocapture", "--test-threads=1"]
+
+[[views]]
+id = "probe"
+title = "Probe"
+"#
+    }
+
+    fn build(&self, ext: &mut Builder) {
+        ext.view("probe", ProbeView);
+    }
+}
+
+fn package(dir: &Path) -> Package {
+    let exe = std::env::current_exe().unwrap();
+    std::os::unix::fs::symlink(exe, dir.join("guest")).unwrap();
+    std::fs::write(dir.join("extension.toml"), Probe.manifest()).unwrap();
+    Package::read(dir).unwrap()
+}
+
+#[derive(Props, Clone, PartialEq)]
+struct AppProps {
+    /// The process's view, or (`None`) the probe linked in.
+    processes: Option<architect_extensions::process::Processes>,
+    store: Store,
+}
+
+#[derive(Clone)]
+struct Store(ThemeStore);
+
+impl PartialEq for Store {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+/// One workspace pane, the probe's view in it: linked, or its process's.
+#[allow(non_snake_case)]
+fn App(props: AppProps) -> Element {
+    let store = props.store.0.clone();
+    architect_theme::use_theme_store(move || store);
+    let workspace = use_signal(|| {
+        let mut w = architect_workspace::Workspace::new();
+        w.open(
+            architect_workspace::Pane::new("probe-pane", "probe", "Probe"),
+            architect_workspace::Target::Tab,
+        )
+        .unwrap();
+        w
+    });
+    let processes = props.processes;
+    let views = use_hook(move || {
+        architect_workspace::Views::new().view(architect_workspace::View::new(
+            "probe",
+            "Probe",
+            move |_| match processes.clone() {
+                Some(processes) => rsx! {
+                    RemotePaneView { processes, extension: ID, view: "probe" }
+                },
+                None => rsx! { ProbeView {} },
+            },
+        ))
+    });
+    rsx! {
+        div { style: "width: 600px; height: 400px;",
+            architect_workspace::WorkspaceView { workspace, views }
+        }
+    }
+}
+
+/// A run: the document, and what keeps its host alive.
+struct Run {
+    doc: DioxusDocument,
+    out: PathBuf,
+    _host: Option<Host>,
+}
+
+impl Run {
+    fn pump_until(&mut self, what: &str, until: impl Fn(&str) -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let waker = futures::task::noop_waker();
+        loop {
+            for _ in 0..16 {
+                if !self.doc.poll(Some(std::task::Context::from_waker(&waker))) {
+                    break;
+                }
+            }
+            self.doc.inner.borrow_mut().resolve(0.0);
+            // Painted, as a window would: a paint view draws a frame.
+            let mut scene = Scene::new();
+            blitz_paint::paint_scene(
+                &mut scene,
+                &mut self.doc.inner.borrow_mut(),
+                1.0,
+                800,
+                600,
+                0,
+                0,
+            );
+            let log = std::fs::read_to_string(&self.out).unwrap_or_default();
+            if until(&log) {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for {what}; the log:\n{log}"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    fn log(&self) -> String {
+        std::fs::read_to_string(&self.out).unwrap_or_default()
+    }
+
+    fn send(&mut self, event: UiEvent) {
+        self.doc.handle_ui_event(event);
+    }
+}
+
+fn start(process: bool, dir: &Path) -> Run {
+    let out = dir.join(if process { "process.log" } else { "linked.log" });
+    // The process inherits it as it starts; the linked view reads it here.
+    unsafe { std::env::set_var(OUT, &out) };
+    let store = ThemeStore::new(Registry::builtin());
+    let (processes, host) = if process {
+        let runner = ProcessRunner::new()
+            .unwrap()
+            .with_socket_dir(dir)
+            .with_restart(Restart::never())
+            .with_theme(store.clone());
+        let processes = runner.processes();
+        let host = Host::new(ActionList::new(), SharedSections::default()).with_runner(runner);
+        let pkg = dir.join("pkg");
+        std::fs::create_dir_all(&pkg).unwrap();
+        host.load(&package(&pkg), Origin::Installed).unwrap();
+        (Some(processes), Some(host))
+    } else {
+        (None, None)
+    };
+    let vdom = VirtualDom::new_with_props(
+        App,
+        AppProps {
+            processes,
+            store: Store(store),
+        },
+    );
+    let mut doc = DioxusDocument::new(
+        vdom,
+        DocumentConfig {
+            viewport: Some(Viewport::new(800, 600, 1.0, ColorScheme::Light)),
+            ..Default::default()
+        },
+    );
+    doc.initial_build();
+    let mut run = Run {
+        doc,
+        out,
+        _host: host,
+    };
+    run.pump_until("the view at its size", |l| l.contains("size "));
+    run
+}
+
+/// Where the paint view's box is in the window: the paint widget's
+/// `object` linked, the remote view's element in a process.
+fn origin(doc: &DioxusDocument) -> (f32, f32) {
+    let d = doc.inner.borrow();
+    let node = architect_extensions::remote::mounted_views(&d)
+        .first()
+        .copied()
+        .or_else(|| d.query_selector("object").unwrap())
+        .expect("the view's box");
+    let at = d.get_node(node).unwrap().absolute_position(0.0, 0.0);
+    (at.x, at.y)
+}
+
+fn pointer((x, y): (f32, f32), buttons: MouseEventButtons, mods: Modifiers) -> BlitzPointerEvent {
+    BlitzPointerEvent {
+        id: BlitzPointerId::Mouse,
+        is_primary: true,
+        coords: PointerCoords {
+            page_x: x,
+            page_y: y,
+            screen_x: x,
+            screen_y: y,
+            client_x: x,
+            client_y: y,
+        },
+        button: MouseEventButton::Main,
+        buttons,
+        mods,
+        details: PointerDetails::default(),
+        element: Point { x: 0.0, y: 0.0 },
+        active_pointers: Arc::default(),
+    }
+}
+
+fn key(text: &str, state: KeyState, modifiers: Modifiers) -> BlitzKeyEvent {
+    BlitzKeyEvent {
+        key: Key::Character(text.into()),
+        code: Code::KeyP,
+        modifiers,
+        location: Location::Standard,
+        is_auto_repeating: false,
+        is_composing: false,
+        state,
+        text: Some(text.into()),
+    }
+}
+
+/// The same events, at the same place in the view, each answered.
+fn script(run: &mut Run) {
+    let (ox, oy) = origin(&run.doc);
+    let at = |x: f32, y: f32| (ox + x, oy + y);
+    let free = MouseEventButtons::None;
+    let held = MouseEventButtons::Primary;
+    let steps: Vec<(UiEvent, &str)> = vec![
+        (
+            UiEvent::PointerMove(pointer(at(50.0, 40.0), free, Modifiers::empty())),
+            "input move 50 40",
+        ),
+        (
+            UiEvent::PointerDown(pointer(at(60.0, 45.0), held, Modifiers::SHIFT)),
+            "input down 60 45",
+        ),
+        (
+            UiEvent::PointerMove(pointer(at(90.0, 70.0), held, Modifiers::SHIFT)),
+            "input move 90 70",
+        ),
+        (
+            UiEvent::PointerUp(pointer(at(90.0, 70.0), free, Modifiers::SHIFT)),
+            "input up 90 70",
+        ),
+        (
+            UiEvent::Wheel(BlitzWheelEvent {
+                delta: BlitzWheelDelta::Lines(0.0, 2.0),
+                coords: pointer(at(100.0, 80.0), free, Modifiers::CONTROL).coords,
+                buttons: free,
+                mods: Modifiers::CONTROL,
+                element: Point { x: 0.0, y: 0.0 },
+            }),
+            "input wheel",
+        ),
+        (
+            UiEvent::Wheel(BlitzWheelEvent {
+                delta: BlitzWheelDelta::Pixels(3.0, -12.5),
+                coords: pointer(at(100.0, 80.0), free, Modifiers::empty()).coords,
+                buttons: free,
+                mods: Modifiers::empty(),
+                element: Point { x: 0.0, y: 0.0 },
+            }),
+            "input wheel -3 12.5",
+        ),
+        (
+            UiEvent::KeyDown(key("q", KeyState::Pressed, Modifiers::CONTROL)),
+            "\"q\", down: true",
+        ),
+        (
+            UiEvent::KeyUp(key("q", KeyState::Released, Modifiers::CONTROL)),
+            "\"q\", down: false",
+        ),
+        (
+            UiEvent::Ime(BlitzImeEvent::Preedit("か".into(), None)),
+            "preedit: \"か\"",
+        ),
+        (
+            UiEvent::Ime(BlitzImeEvent::Commit("かな".into())),
+            "commit: Some(\"かな\")",
+        ),
+        (
+            UiEvent::KeyDown(key("p", KeyState::Pressed, Modifiers::empty())),
+            "\"p\", down: true",
+        ),
+    ];
+    for (event, expect) in steps {
+        run.send(event);
+        run.pump_until(expect, |l| l.contains(expect));
+    }
+    // `p`'s wake, from another thread: a frame with the new number.
+    run.pump_until("the woken frame", |l| l.contains("frame count=Some(2)"));
+}
+
+/// The log without what differs by design: nothing yet.
+fn comparable(log: &str) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for line in log.lines() {
+        // A frame at the same size is drawn as often as each host draws.
+        if lines.last().is_some_and(|l| l == line) {
+            continue;
+        }
+        lines.push(line.to_owned());
+    }
+    lines
+        .into_iter()
+        .filter(|l| !l.starts_with("size ") || l.contains('x'))
+        .collect()
+}
+
+#[test]
+fn one_paint_view_gets_the_same_ctx_and_input_linked_and_as_a_process() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut linked = start(false, dir.path());
+    script(&mut linked);
+    let linked_log = linked.log();
+    drop(linked);
+
+    let mut process = start(true, dir.path());
+    script(&mut process);
+    let process_log = process.log();
+
+    println!("linked:\n{linked_log}\nprocess:\n{process_log}");
+    let (a, b) = (comparable(&linked_log), comparable(&process_log));
+    assert!(
+        a.iter()
+            .any(|l| l.starts_with("ctx ") && l.contains("tokens=") && !l.contains("tokens=0")),
+        "the linked view had no theme: {a:?}"
+    );
+    assert_eq!(a, b, "linked and process differ");
+}

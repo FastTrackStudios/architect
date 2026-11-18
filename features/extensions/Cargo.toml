@@ -91,7 +91,13 @@ scenes = ["dep:anyrender", "dep:peniko", "dep:architect-scene", "dep:base64"]
 # `paint-ui` it is a Blitz widget in the pane (`architect_workspace::paint`);
 # served by `guest` it is a `scene::RemoteScene`.
 paint = ["scenes", "architect-workspace/paint"]
-paint-ui = ["paint", "linked", "architect-workspace/paint-ui"]
+paint-ui = ["paint", "linked", "paint-pane", "architect-workspace/paint-ui"]
+# A view's pane, linked in or as a process (`linked::use_pane_state`).
+pane = ["linked-core", "architect-workspace/ui"]
+# `linked::PaintPane`: a `PaintView` mounted in an extension's own view,
+# `architect_workspace::PaintPane` linked in and `scene::RemotePaint` in
+# its process copy (with `guest`).
+paint-pane = ["pane", "paint", "architect-workspace/paint-ui", "dep:blitz-traits"]
 ui = [
     "host",
     # The clipboard on iOS: the general pasteboard (src/hostui.rs).
@@ -106,6 +112,7 @@ ui = [
     "architect-shell/ui",
     "architect-workspace/ui",
     "architect-commands/ui",
+    "pane",
 ]
 # The extensions page (`page`): search, install with consent, update, pin,
 # grants and logs, in architect-ui's components and the app's theme.

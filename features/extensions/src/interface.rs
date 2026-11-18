@@ -1249,7 +1249,7 @@ pub fn ExtensionView(
         };
         return rsx! {
             div { style: "{remote}",
-                crate::remote::RemoteView { processes, extension, view, overlay, engine }
+                crate::remote::RemotePaneView { processes, extension, view, overlay, engine }
             }
         };
     }

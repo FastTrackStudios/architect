@@ -1131,6 +1131,9 @@ impl Document for RemoteDocument {
     }
 
     fn handle_ui_event(&mut self, event: UiEvent) {
+        // A wheel's points in the view's first: its hit regions and its
+        // handlers both read them there.
+        let event = localised_wheel(event);
         // Its scenes' hit regions first: a press or a drag on one is the
         // host's, and the view hears what its regions heard instead.
         let (consumed, cursor) = self.regions_event(&event);
@@ -1166,6 +1169,27 @@ impl Document for RemoteDocument {
         if pointer {
             self.region_cursor(cursor);
         }
+    }
+}
+
+/// A wheel's points in the view's document: Blitz moves a pointer
+/// event's client and page points into a sub-document's space but not a
+/// wheel's, whose `element` point (the host's, in the view's box) is
+/// where it is in the view.
+fn localised_wheel(event: UiEvent) -> UiEvent {
+    match event {
+        UiEvent::Wheel(mut w) => {
+            let (dx, dy) = (
+                w.coords.client_x - w.element.x,
+                w.coords.client_y - w.element.y,
+            );
+            w.coords.client_x -= dx;
+            w.coords.client_y -= dy;
+            w.coords.page_x -= dx;
+            w.coords.page_y -= dy;
+            UiEvent::Wheel(w)
+        }
+        other => other,
     }
 }
 
@@ -1817,6 +1841,9 @@ async fn follow(
             let from = asked.borrow_mut().pop_front();
             let applying = Instant::now();
             let _ = answer.unbounded_send(());
+            // An event is always answered (wire 5), with no edits when the
+            // view did not change: that answer is timed, not drawn.
+            let changes = !matches!(&frame, Frame::Edits { edits } if edits.is_empty());
             // Its scenes decoded off the UI thread first.
             let (frame, decoded) = decode_scenes(frame).await;
             let applied = with_doc(&node, |doc, at| {
@@ -1835,8 +1862,13 @@ async fn follow(
                 // look, `PLACE_EVERY`).
                 let held = remote(doc, at).map(|r| r.embedded());
                 // A frame no input asked for (a save, live data, a worker's
-                // news) still shows: the window is asked to draw again.
-                doc.shell_provider.request_redraw();
+                // news) still shows: the window is asked to draw again. An
+                // empty one changes nothing on screen; a frame for it would
+                // take the next present's place, and the frame that does
+                // change it waits a refresh behind (#840).
+                if changes {
+                    doc.shell_provider.request_redraw();
+                }
                 (applied, held)
             })
             .await;
@@ -2007,12 +2039,17 @@ async fn next_frame(
 /// `overlay`: the extension was granted `overlay` (`capabilities.ui`) and
 /// may draw over the whole app. `engine`: it was granted `engine`, and
 /// its scenes read the values its engine writes lock-free.
+///
+/// `input`, when given, reaches the view as its `linked::use_embed` does
+/// an embed's, now and on every change: a pane's is its state
+/// (`linked::PANE_CLAIM`, read with `linked::use_pane_state`).
 #[component]
 pub fn RemoteView(
     processes: Processes,
     extension: String,
     view: String,
     #[props(default)] overlay: bool,
+    #[props(default)] input: Option<Signal<crate::contrib::EmbedInput>>,
     #[props(default)] engine: bool,
 ) -> Element {
     // Keyed by what it shows (a one-item list: a key on a lone node does
@@ -2022,9 +2059,35 @@ pub fn RemoteView(
     let key = format!("{extension}/{view}");
     rsx! {
         for key in [key] {
-            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: None, max_height: None, overlay, engine }
+            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input, max_height: None, overlay, engine }
         }
     }
+}
+
+/// [`RemoteView`] in a workspace pane: told the pane's id and state
+/// (`linked::PANE_CLAIM`), now and whenever the state changes, so a view
+/// opened on a file (an opener's) knows which.
+#[component]
+pub fn RemotePaneView(
+    processes: Processes,
+    extension: String,
+    view: String,
+    #[props(default)] overlay: bool,
+    #[props(default)] engine: bool,
+) -> Element {
+    let pane = architect_workspace::try_use_pane();
+    let now = crate::linked::pane_input(
+        pane.as_ref().map(|p| p.id.0.as_str()).unwrap_or_default(),
+        &pane
+            .as_ref()
+            .map(architect_workspace::PaneHandle::state)
+            .unwrap_or_default(),
+    );
+    let mut input = use_signal(|| now.clone());
+    if *input.peek() != now {
+        input.set(now);
+    }
+    rsx! { RemoteView { processes, extension, view, overlay, engine, input: Some(input) } }
 }
 
 /// A process extension's view `view` inline in a host's document, as an

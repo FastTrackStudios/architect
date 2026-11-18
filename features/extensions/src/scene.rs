@@ -696,8 +696,13 @@ impl Painted {
     #[allow(clippy::arithmetic_side_effects)]
     pub(crate) fn draw(&mut self, scene: &mut Scene, at: Affine) {
         match &self.layers {
-            Some(layers) => {
+            Some(_) => {
                 let now = self.clocks.read();
+                // A flicked value coasts on: the host's, as a drag is.
+                if let Some(receiver) = self.layers.as_mut() {
+                    self.interaction.coast(&now, receiver.parts_mut().1);
+                }
+                let Some(layers) = &self.layers else { return };
                 let lit = self.interaction.lit();
                 layers
                     .layers()
@@ -745,6 +750,7 @@ impl Painted {
     pub(crate) fn moving(&self) -> bool {
         self.layers.as_ref().is_some_and(|l| {
             l.layers().moving(&self.clocks.read())
+                || self.interaction.coasting()
                 || (l.values().engine().is_some() && l.values().revision() != self.drawn_values)
         })
     }
@@ -1123,6 +1129,22 @@ mod guest {
         pub onwheel: Option<EventHandler<WheelEvent>>,
         #[props(default)]
         pub onkeydown: Option<EventHandler<KeyboardEvent>>,
+        #[props(default)]
+        pub onkeyup: Option<EventHandler<KeyboardEvent>>,
+        /// The pointer left the element (no button held: a held one's
+        /// moves keep coming).
+        #[props(default)]
+        pub onpointerleave: Option<EventHandler<PointerEvent>>,
+        #[props(default)]
+        pub onfocus: Option<EventHandler<FocusEvent>>,
+        #[props(default)]
+        pub onblur: Option<EventHandler<FocusEvent>>,
+        /// An input method's text as it is composed.
+        #[props(default)]
+        pub oncompositionupdate: Option<EventHandler<CompositionEvent>>,
+        /// An input method's text, committed.
+        #[props(default)]
+        pub oncompositionend: Option<EventHandler<CompositionEvent>>,
     }
 
     /// An element painted with `content` at `transform`.
@@ -1173,6 +1195,12 @@ mod guest {
             onpointercancel,
             onwheel,
             onkeydown,
+            onkeyup,
+            onpointerleave,
+            onfocus,
+            onblur,
+            oncompositionupdate,
+            oncompositionend,
             style,
             ..
         } = props;
@@ -1197,6 +1225,12 @@ mod guest {
                 onpointercancel: move |e| if let Some(h) = onpointercancel { h.call(e) },
                 onwheel: move |e| if let Some(h) = onwheel { h.call(e) },
                 onkeydown: move |e| if let Some(h) = onkeydown { h.call(e) },
+                onkeyup: move |e| if let Some(h) = onkeyup { h.call(e) },
+                onpointerleave: move |e| if let Some(h) = onpointerleave { h.call(e) },
+                onfocus: move |e| if let Some(h) = onfocus { h.call(e) },
+                onblur: move |e| if let Some(h) = onblur { h.call(e) },
+                oncompositionupdate: move |e| if let Some(h) = oncompositionupdate { h.call(e) },
+                oncompositionend: move |e| if let Some(h) = oncompositionend { h.call(e) },
             }
         }
     }
@@ -1207,56 +1241,81 @@ pub use guest::{
     RemoteScene, RemoteSceneProps, SceneSize, Shown, ShownValues, scene_attr, size_of,
 };
 
-/// A linked extension's paint view in its process copy (#591, #175).
-///
-/// The `PaintView` runs in the process; each frame it records is sent as
-/// a [`RemoteScene`]'s content, and the element's input comes back to it
-/// as `ViewInput`s. It is the same view either way.
-#[cfg(all(feature = "guest", feature = "paint"))]
+/// A linked extension's paint view in its process copy (#591, #175):
+/// `V` made for the pane, as `linked::Builder::paint` makes it linked in,
+/// its `PaintWake` in its extras.
+#[cfg(all(feature = "guest", feature = "paint-pane"))]
 pub fn remote_paint_root<V>() -> dioxus::prelude::Element
 where
     V: architect_workspace::paint::PaintView + Default,
 {
-    use std::cell::RefCell;
-    use std::rc::Rc;
-    use std::time::{Duration, Instant};
-
-    use architect_workspace::paint::PaintView;
-    use architect_workspace::{
-        Button, FrameClock, Geometry, KindId, PaneId, Placement, ViewCtx, ViewHost, ViewInput,
-    };
     use dioxus::prelude::*;
+    let mount = use_hook(|| {
+        let mount = architect_workspace::paint::PaintMount::new(|_| V::default());
+        let wake = mount.wake_handle();
+        mount.extras(architect_workspace::Extras::default().with(wake))
+    });
+    rsx! { RemotePaint { mount } }
+}
 
-    struct Live<V> {
-        view: V,
-        ctx: ViewCtx,
-        /// What it shows: one layer of the frame it last recorded.
-        shown: Shown,
+#[cfg(all(feature = "guest", feature = "paint", not(feature = "paint-pane")))]
+compile_error!(
+    "a process's paint views need `architect-extensions/paint-pane`: the same `PaintMount` linked in and in the process"
+);
+
+/// What a process's paint view keeps between frames.
+#[cfg(all(feature = "guest", feature = "paint-pane"))]
+mod remote_paint {
+    use std::rc::Rc;
+    use std::sync::Arc;
+
+    use architect_workspace::paint::{FrameStats, PaintView, Scene};
+    use architect_workspace::{ViewCtx, ViewInput};
+
+    use super::{Shown, ShownValues};
+
+    pub(super) struct Live {
+        pub(super) view: Box<dyn PaintView>,
+        pub(super) ctx: ViewCtx,
+        /// What it shows: its layers, or one layer of the scene it painted.
+        pub(super) shown: Shown,
         /// The values its layers read, as it last said them.
-        values: ShownValues,
+        pub(super) values: ShownValues,
+        pub(super) stats: FrameStats,
     }
 
-    impl<V: PaintView> Live<V> {
-        fn record(&mut self) {
-            // Its own layers, or the one scene it paints.
+    impl Live {
+        /// Asks the view for this frame: its time goes into its stats, as
+        /// a linked painter's does.
+        pub(super) fn record(&mut self) {
+            let began = self.ctx.clock.now();
             let layers = self.view.layers(&self.ctx).unwrap_or_else(|| {
                 let mut scene = Scene::new();
                 self.view.paint(&self.ctx, &mut scene);
-                vec![(
-                    0,
-                    architect_scene::Layer::new(std::sync::Arc::new(scene.commands)),
-                )]
+                vec![(0, architect_scene::Layer::new(Arc::new(scene.commands)))]
             });
             self.shown = Shown(Rc::new(layers));
             let values = self.view.values(&self.ctx);
             if *self.values.0 != values {
                 self.values = ShownValues(Rc::new(values));
             }
+            self.stats
+                .record(self.ctx.clock.now().saturating_sub(began));
         }
 
         /// `input` given to the view: whether it drew again.
-        fn input(&mut self, input: &ViewInput) -> bool {
+        pub(super) fn input(&mut self, input: &ViewInput) -> bool {
             let changed = self.view.input(&self.ctx, input);
+            if changed {
+                self.record();
+            }
+            changed
+        }
+
+        /// What one of its hit regions heard (the host handled the press
+        /// or the drag, `architect_scene::region`): whether it drew again.
+        pub(super) fn region(&mut self, event: &architect_scene::region::RegionEvent) -> bool {
+            let changed = self.view.region(&self.ctx, event);
             if changed {
                 self.record();
             }
@@ -1264,174 +1323,309 @@ where
         }
     }
 
-    #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
-    const fn at(p: dioxus::html::geometry::ElementPoint) -> (f32, f32) {
-        (p.x as f32, p.y as f32)
-    }
+    /// A view's wakes, as its host's redraw: the component drawn again
+    /// on the view's own thread, from whichever thread woke it.
+    pub(super) struct Redraw(pub(super) Arc<dyn Fn() + Send + Sync>);
 
-    /// The held modifiers by [`ViewInput::Key`]'s names (`"Mod"` is ⌘ on
-    /// a Mac, Ctrl elsewhere).
-    fn held(m: Modifiers) -> Vec<&'static str> {
-        let command = if cfg!(target_os = "macos") {
-            Modifiers::META
-        } else {
-            Modifiers::CONTROL
-        };
-        [
-            (command, "Mod"),
-            (Modifiers::SHIFT, "Shift"),
-            (Modifiers::ALT, "Alt"),
-            (Modifiers::CONTROL, "Ctrl"),
-        ]
-        .into_iter()
-        .filter(|(k, _)| m.contains(*k))
-        .map(|(_, name)| name)
-        .collect()
-    }
-
-    fn button(e: &PointerEvent) -> Button {
-        match e.trigger_button() {
-            Some(dioxus::html::input_data::MouseButton::Secondary) => Button::Secondary,
-            Some(dioxus::html::input_data::MouseButton::Auxiliary) => Button::Middle,
-            _ => Button::Primary,
-        }
-    }
-
-    let live = use_hook(|| {
-        let began = Instant::now();
-        let clock = FrameClock::new(Duration::from_micros(16_667), move || began.elapsed());
-        let ctx = ViewCtx::new(
-            PaneId::new("remote"),
-            KindId::paint(),
-            (ViewHost::Blitz, Placement::Pane),
-            (
-                architect::action::ActionList::new(),
-                architect::action::ActionCaller::app(),
-            ),
-            clock,
-        );
-        let mut live = Live {
-            view: V::default(),
-            ctx,
-            shown: Shown(Rc::new(Vec::new())),
-            values: ShownValues(Rc::new(Vec::new())),
-        };
-        live.record();
-        Rc::new(RefCell::new(live))
-    });
-    let mut drawn = use_signal(|| 0_u64);
-    let mut redraw = move || drawn.with_mut(|d| *d = d.wrapping_add(1));
-    // A view that says it is moving is asked every frame. Layers that
-    // move by their animations need not: the host runs them.
-    {
-        let live = Rc::clone(&live);
-        use_future(move || {
-            let live = Rc::clone(&live);
-            async move {
-                loop {
-                    futures_timer_delay(Duration::from_micros(16_667)).await;
-                    let mut l = live.borrow_mut();
-                    if l.view.animating(&l.ctx) {
-                        l.record();
-                        drop(l);
-                        redraw();
-                    }
-                }
-            }
-        });
-    }
-    let _ = drawn();
-    let (shown, values) = {
-        let l = live.borrow();
-        (l.shown.clone(), l.values.clone())
-    };
-    let sized = Rc::clone(&live);
-    let on = {
-        let live = Rc::clone(&live);
-        move |input: ViewInput| {
-            if live.borrow_mut().input(&input) {
-                redraw();
-            }
-        }
-    };
-    let regioned = {
-        let live = Rc::clone(&live);
-        move |event: architect_scene::region::RegionEvent| {
-            let changed = {
-                let mut l = live.borrow_mut();
-                let l = &mut *l;
-                let changed = l.view.region(&l.ctx, &event);
-                if changed {
-                    l.record();
-                }
-                changed
-            };
-            if changed {
-                redraw();
-            }
-        }
-    };
-    let (mut down, mut moved, mut up, mut cancel, mut wheel, mut key) = (
-        on.clone(),
-        on.clone(),
-        on.clone(),
-        on.clone(),
-        on.clone(),
-        on,
-    );
-    rsx! {
-        RemoteScene {
-            content: Rc::new(Vec::new()),
-            layers: shown,
-            values,
-            onregion: regioned,
-            onresize: move |size: SceneSize| {
-                #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
-                let geometry = Geometry {
-                    width: size.width as f32,
-                    height: size.height as f32,
-                    scale: size.scale as f32,
-                };
-                let mut l = sized.borrow_mut();
-                if l.ctx.geometry != geometry {
-                    l.ctx.geometry = geometry;
-                    l.record();
-                    drop(l);
-                    redraw();
-                }
-            },
-            onpointerdown: move |e: PointerEvent| {
-                let (x, y) = at(e.element_coordinates());
-                down(ViewInput::PointerDown { x, y, button: button(&e), mods: held(e.modifiers()) });
-            },
-            onpointermove: move |e: PointerEvent| {
-                let (x, y) = at(e.element_coordinates());
-                moved(ViewInput::PointerMove { x, y, mods: held(e.modifiers()) });
-            },
-            onpointerup: move |e: PointerEvent| {
-                let (x, y) = at(e.element_coordinates());
-                up(ViewInput::PointerUp { x, y, button: button(&e), mods: held(e.modifiers()) });
-            },
-            // A press it won't see the end of: the view hears a release.
-            onpointercancel: move |e: PointerEvent| {
-                let (x, y) = at(e.element_coordinates());
-                cancel(ViewInput::PointerUp { x, y, button: button(&e), mods: held(e.modifiers()) });
-            },
-            onwheel: move |e: WheelEvent| {
-                let (x, y) = at(e.element_coordinates());
-                let d = e.delta().strip_units();
-                #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
-                wheel(ViewInput::Wheel { dx: d.x as f32, dy: d.y as f32, x, y, mods: held(e.modifiers()) });
-            },
-            onkeydown: move |e: KeyboardEvent| {
-                key(ViewInput::Key { key: e.key().to_string(), down: true, modifiers: Vec::new() });
-            },
+    impl blitz_traits::shell::ShellProvider for Redraw {
+        fn request_redraw(&self) {
+            (self.0)();
         }
     }
 }
 
+#[cfg(all(feature = "guest", feature = "paint-pane"))]
+mod remote_paint_ui {
+    use dioxus::prelude::*;
+
+    /// A [`PaintView`](architect_workspace::paint::PaintView) in a process,
+    /// drawn by its host: what `linked::PaintPane` is in a process copy.
+    ///
+    /// The view is made from `mount` and given the same [`ViewCtx`] a linked
+    /// `PaintPane` gives it: the pane's id, the host's theme as tokens (kept
+    /// current), `mount`'s extras with its `PaintWake` (a wake from any
+    /// thread asks it for a frame), and every input kind with its modifiers
+    /// (pointer, wheel in logical pixels, touch, keys down and up, focus,
+    /// composed text). What it records crosses as layers ([`RemoteScene`]):
+    /// a fragment once, then what changed. Its frames' times go into
+    /// `mount`'s stats, as linked.
+    ///
+    /// [`ViewCtx`]: architect_workspace::ViewCtx
+    #[component]
+    pub fn RemotePaint(mount: architect_workspace::paint::PaintMount) -> Element {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        use super::remote_paint::{Live, Redraw};
+        use super::{RemoteScene, SceneSize, Shown, ShownValues, futures_timer_delay};
+        use architect_workspace::{
+            Button, FrameClock, Geometry, KindId, PaneId, Placement, ThemeTokens, ViewCtx,
+            ViewHost, ViewInput,
+        };
+        use dioxus::html::geometry::WheelDelta;
+        use dioxus::prelude::*;
+
+        #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+        const fn at(p: dioxus::html::geometry::ElementPoint) -> (f32, f32) {
+            (p.x as f32, p.y as f32)
+        }
+
+        /// The held modifiers by [`ViewInput::Key`]'s names (`"Mod"` is ⌘ on
+        /// a Mac, Ctrl elsewhere), as a linked pane names them.
+        fn held(m: Modifiers) -> Vec<&'static str> {
+            let command = if cfg!(target_os = "macos") {
+                Modifiers::META
+            } else {
+                Modifiers::CONTROL
+            };
+            [
+                (command, "Mod"),
+                (Modifiers::SHIFT, "Shift"),
+                (Modifiers::ALT, "Alt"),
+                (Modifiers::CONTROL, "Ctrl"),
+            ]
+            .into_iter()
+            .filter(|(k, _)| m.contains(*k))
+            .map(|(_, name)| name)
+            .collect()
+        }
+
+        fn button(e: &PointerEvent) -> Button {
+            match e.trigger_button() {
+                Some(dioxus::html::input_data::MouseButton::Secondary) => Button::Secondary,
+                Some(dioxus::html::input_data::MouseButton::Auxiliary) => Button::Middle,
+                _ => Button::Primary,
+            }
+        }
+
+        /// A finger's pointer as the touch a linked pane gives (its host
+        /// numbers fingers from 10), or the mouse's or pen's input.
+        fn pointer(
+            e: &PointerEvent,
+            phase: &'static str,
+            mouse: impl FnOnce(f32, f32) -> ViewInput,
+        ) -> ViewInput {
+            let (x, y) = at(e.element_coordinates());
+            if e.pointer_type() == "touch" {
+                let id = u64::try_from(e.pointer_id().saturating_sub(10)).unwrap_or(0);
+                return ViewInput::Touch { id, x, y, phase };
+            }
+            mouse(x, y)
+        }
+
+        /// The theme's tokens as a linked pane reads them from the app's
+        /// store: the host's resolved theme, every token.
+        fn tokens(theme: Option<&architect_theme::Resolved>) -> ThemeTokens {
+            theme.map(ThemeTokens::from).unwrap_or_default()
+        }
+
+        let theme = tokens(crate::guest::use_theme().as_ref());
+        let pane = crate::linked::use_pane_state().map(|(id, _)| id);
+        let mut drawn = use_signal(|| 0_u64);
+        // The view is made at its pane's first size, as a linked pane
+        // makes it as it mounts: by then its host has told it its pane
+        // (`use_pane_state`, which comes after its first render).
+        let live: Rc<RefCell<Option<Live>>> = use_hook(|| Rc::new(RefCell::new(None)));
+        let make = {
+            let mount = mount.clone();
+            move |theme: ThemeTokens, pane: Option<String>| {
+                // The view's thread's own clock, its animations' wall time.
+                let clock =
+                    FrameClock::new(mount.frame_budget(), architect_scene::anim::wall_elapsed);
+                let pane = pane
+                    .filter(|p| !p.is_empty())
+                    .unwrap_or_else(|| "remote".to_owned());
+                let ctx = ViewCtx::new(
+                    PaneId::new(pane),
+                    KindId::paint(),
+                    (ViewHost::Blitz, Placement::Pane),
+                    (
+                        architect::action::ActionList::new(),
+                        architect::action::ActionCaller::app(),
+                    ),
+                    clock,
+                )
+                .with_theme(theme)
+                .with_extras(mount.host_extras());
+                let view = mount.make_view(&ctx);
+                // A wake, from any thread: this component draws again and
+                // asks the view (below).
+                let update = dioxus::core::schedule_update();
+                mount
+                    .wake_handle()
+                    .attach(Some(Arc::new(Redraw(Arc::new(move || update())))));
+                Live {
+                    view,
+                    ctx,
+                    shown: Shown(Rc::new(Vec::new())),
+                    values: ShownValues(Rc::new(Vec::new())),
+                    stats: mount.frame_stats(),
+                }
+            }
+        };
+        let mut redraw = move || drawn.with_mut(|d| *d = d.wrapping_add(1));
+        if let Some(l) = live.borrow_mut().as_mut() {
+            // A wake, or a new theme: a frame from the view now.
+            let themed = l.ctx.theme != theme;
+            if themed {
+                l.ctx.theme = theme.clone();
+            }
+            if let Some(id) = pane.as_ref().filter(|p| !p.is_empty())
+                && l.ctx.pane.0 != *id
+            {
+                l.ctx.pane = PaneId::new(id.clone());
+            }
+            if mount.wake_handle().take() || themed {
+                l.record();
+            }
+        }
+        // A view that says it is moving is asked every frame. Layers that
+        // move by their animations need not: the host runs them.
+        {
+            let live = Rc::clone(&live);
+            use_future(move || {
+                let live = Rc::clone(&live);
+                async move {
+                    loop {
+                        futures_timer_delay(Duration::from_micros(16_667)).await;
+                        let mut slot = live.borrow_mut();
+                        let Some(l) = slot.as_mut() else { continue };
+                        if l.view.animating(&l.ctx) {
+                            l.record();
+                            drop(slot);
+                            redraw();
+                        }
+                    }
+                }
+            });
+        }
+        let _ = drawn();
+        let (shown, values) = live.borrow().as_ref().map_or_else(
+            || (Shown(Rc::new(Vec::new())), ShownValues(Rc::new(Vec::new()))),
+            |l| (l.shown.clone(), l.values.clone()),
+        );
+        let sized = Rc::clone(&live);
+        let (sized_theme, sized_pane) = (theme, pane);
+        let on = {
+            let live = Rc::clone(&live);
+            move |input: ViewInput| {
+                let changed = live.borrow_mut().as_mut().is_some_and(|l| l.input(&input));
+                if changed {
+                    redraw();
+                }
+            }
+        };
+        // What its hit regions heard, before (and instead of) its input.
+        let regioned = {
+            let live = Rc::clone(&live);
+            move |event: architect_scene::region::RegionEvent| {
+                let changed = live.borrow_mut().as_mut().is_some_and(|l| l.region(&event));
+                if changed {
+                    redraw();
+                }
+            }
+        };
+        let (mut down, mut moved, mut up, mut cancel, mut leave, mut wheel) = (
+            on.clone(),
+            on.clone(),
+            on.clone(),
+            on.clone(),
+            on.clone(),
+            on.clone(),
+        );
+        let (mut key_down, mut key_up, mut focus, mut blur, mut composing, mut committed) = (
+            on.clone(),
+            on.clone(),
+            on.clone(),
+            on.clone(),
+            on.clone(),
+            on,
+        );
+        // In a box of its own, positioned: the scene's element fills its
+        // nearest positioned parent, and a linked `PaintPane` fills the
+        // box it is mounted in, not the view around it.
+        rsx! {
+            div { style: "position: relative; display: block; width: 100%; height: 100%; overflow: hidden;",
+            RemoteScene {
+                content: Rc::new(Vec::new()),
+                layers: shown,
+                values,
+                onregion: regioned,
+                onresize: move |size: SceneSize| {
+                    #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+                    let geometry = Geometry {
+                        width: size.width as f32,
+                        height: size.height as f32,
+                        scale: size.scale as f32,
+                    };
+                    let mut slot = sized.borrow_mut();
+                    let l = slot.get_or_insert_with(|| make(sized_theme.clone(), sized_pane.clone()));
+                    if l.ctx.geometry != geometry || l.shown.0.is_empty() {
+                        l.ctx.geometry = geometry;
+                        l.record();
+                        drop(slot);
+                        redraw();
+                    }
+                },
+                onpointerdown: move |e: PointerEvent| {
+                    down(pointer(&e, "start", |x, y| ViewInput::PointerDown { x, y, button: button(&e), mods: held(e.modifiers()) }));
+                },
+                onpointermove: move |e: PointerEvent| {
+                    moved(pointer(&e, "move", |x, y| ViewInput::PointerMove { x, y, mods: held(e.modifiers()) }));
+                },
+                onpointerup: move |e: PointerEvent| {
+                    up(pointer(&e, "end", |x, y| ViewInput::PointerUp { x, y, button: button(&e), mods: held(e.modifiers()) }));
+                },
+                // A press it won't see the end of: the view hears a release
+                // (a finger's, as a linked pane's, a cancelled touch).
+                onpointercancel: move |e: PointerEvent| {
+                    cancel(pointer(&e, "cancel", |x, y| ViewInput::PointerUp { x, y, button: button(&e), mods: held(e.modifiers()) }));
+                },
+                // Gone, as a linked pane says it: where it went, so nothing
+                // is under it.
+                onpointerleave: move |e: PointerEvent| {
+                    leave(pointer(&e, "cancel", |x, y| ViewInput::PointerMove { x, y, mods: held(e.modifiers()) }));
+                },
+                onwheel: move |e: WheelEvent| {
+                    let (x, y) = at(e.element_coordinates());
+                    // Logical pixels, as a linked pane gives them: a line is
+                    // `WHEEL_LINE` of them (a page crosses as lines).
+                    let line = architect_workspace::paint::WHEEL_LINE;
+                    let (dx, dy) = match e.delta() {
+                        WheelDelta::Pixels(d) => (d.x, d.y),
+                        WheelDelta::Lines(d) => (d.x * line, d.y * line),
+                        WheelDelta::Pages(d) => (d.x * line, d.y * line),
+                    };
+                    #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+                    wheel(ViewInput::Wheel { dx: dx as f32, dy: dy as f32, x, y, mods: held(e.modifiers()) });
+                },
+                onkeydown: move |e: KeyboardEvent| {
+                    key_down(ViewInput::Key { key: e.key().to_string(), down: true, modifiers: held(e.modifiers()) });
+                },
+                onkeyup: move |e: KeyboardEvent| {
+                    key_up(ViewInput::Key { key: e.key().to_string(), down: false, modifiers: held(e.modifiers()) });
+                },
+                onfocus: move |_| focus(ViewInput::Focus(true)),
+                onblur: move |_| blur(ViewInput::Focus(false)),
+                oncompositionupdate: move |e: CompositionEvent| {
+                    composing(ViewInput::Ime { preedit: e.data().data(), commit: None });
+                },
+                oncompositionend: move |e: CompositionEvent| {
+                    committed(ViewInput::Ime { preedit: String::new(), commit: Some(e.data().data()) });
+                },
+            }
+            }
+        }
+    }
+}
+
+#[cfg(all(feature = "guest", feature = "paint-pane"))]
+pub use remote_paint_ui::{RemotePaint, RemotePaintProps};
+
 /// Waits `d` on the view's own runtime (the guest's tokio).
-#[cfg(all(feature = "guest", feature = "paint"))]
+#[cfg(all(feature = "guest", feature = "paint-pane"))]
 async fn futures_timer_delay(d: std::time::Duration) {
     tokio::time::sleep(d).await;
 }

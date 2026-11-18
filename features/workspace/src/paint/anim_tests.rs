@@ -414,6 +414,7 @@ fn fader_layers(content: &Arc<Vec<RenderCommand>>) -> Vec<(LayerKey, Layer)> {
                         max: 1.0,
                         step: None,
                         initial: 0.5,
+                        coast: None,
                     }),
             ]),
         ),
@@ -564,4 +565,94 @@ fn a_linked_regions_cursor_is_the_hosts_to_show() {
     assert_eq!(painter.take_cursor(), None, "unchanged");
     let _ = painter.pointer(&at(300.0));
     assert_eq!(painter.take_cursor(), Some(Cursor::Default));
+}
+
+#[test]
+fn a_flicked_list_coasts_on_the_host_without_its_view() {
+    use architect_scene::region::{Axis, Drag, Region, Shape};
+    let content = Song::new(Arc::default()).content;
+    let scroll = Name::new("host.list").unwrap();
+    let layers = vec![
+        (
+            1,
+            Layer::new(Arc::clone(&content)).regions(vec![
+                Region::new(3, Shape::Rect(Rect::new(0.0, 0.0, 100.0, 300.0))).drag(Drag {
+                    value: scroll.clone(),
+                    axis: Axis::Y,
+                    scale: -1.0,
+                    min: 0.0,
+                    max: 5000.0,
+                    step: None,
+                    initial: 0.0,
+                    coast: Some(0.4),
+                }),
+            ]),
+        ),
+        // The list's rows, scrolled by the value.
+        (
+            2,
+            Layer::new(Arc::clone(&content))
+                .z(1)
+                .animated(vec![Animation::linear(
+                    Property::Y,
+                    Input::Value(scroll.clone()),
+                    Linear::new(-1.0, 0.0),
+                )]),
+        ),
+    ];
+    let hands = Hands::default();
+    let asked = Arc::new(AtomicUsize::new(0));
+    let mut painter = Painter::new(
+        ctx(),
+        Returns {
+            layers,
+            values: vec![],
+            asked: Arc::clone(&asked),
+        },
+    )
+    .with_clocks(hands.clocks());
+    let _ = painter.frame(AT);
+    let at = |y: f32| (10.0_f32, y);
+    // Pressed, flicked up 60 px in 30 ms, let go.
+    hands.set(0.0, None);
+    let (x, y) = at(250.0);
+    assert!(painter.pointer(&ViewInput::PointerDown {
+        x,
+        y,
+        button: crate::ctx::Button::Primary,
+        mods: vec![],
+    }));
+    for n in 1..=3_u8 {
+        hands.set(f64::from(n) * 0.01, None);
+        let (x, y) = at(f32::from(n).mul_add(-20.0, 250.0));
+        let _ = painter.pointer(&ViewInput::PointerMove { x, y, mods: vec![] });
+    }
+    let (x, y) = at(190.0);
+    let _ = painter.pointer(&ViewInput::PointerUp {
+        x,
+        y,
+        button: crate::ctx::Button::Primary,
+        mods: vec![],
+    });
+    let _ = painter.frame(AT);
+    let let_go = painter.values().unwrap().get(&scroll).unwrap();
+    // It coasts on, every frame, the view asked nothing.
+    let mut was = let_go;
+    for frame in 1..=120_u8 {
+        hands.set(0.03 + f64::from(frame) / 240.0, None);
+        assert!(
+            painter.animating(),
+            "frame {frame}: it rests while it coasts"
+        );
+        let _ = painter.frame(AT);
+        let now = painter.values().unwrap().get(&scroll).unwrap();
+        assert!(now >= was, "frame {frame}");
+        was = now;
+    }
+    assert!(was > let_go + 500.0, "it coasted from {let_go} to {was}");
+    assert_eq!(asked.load(Ordering::Relaxed), 1);
+    // Long after: still, and resting.
+    hands.set(30.0, None);
+    let _ = painter.frame(AT);
+    assert!(!painter.animating());
 }

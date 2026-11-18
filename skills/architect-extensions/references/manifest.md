@@ -704,7 +704,7 @@ all lists default empty. Semantics are in the capabilities reference.
 | `folders` | string list | |
 | `reads` | string list | `org`, `selection`, `documents`, `editor`, `files` |
 | `writes` | string list | `documents`, `editor` |
-| `ui` | string list | `notify`, `clipboard`, `pickers`, `prompts`, `menus`, `badges`, `overlay` |
+| `ui` | string list | `notify`, `clipboard`, `pickers`, `prompts`, `menus`, `badges`, `overlay`, `engine` (its views' layers read the engine's live values, `features/scene/src/engine.rs`; declined, a binding to one reads nothing) |
 | `events` | string list | an app event name, `<prefix>.*` or `*` |
 | `ports` | string list | `midi:<name>`, `osc:<host>:<port>`, `osc:listen:<port>`, `osc:*` |
 | `languages` | string list | `servers` |

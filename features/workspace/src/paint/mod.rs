@@ -55,7 +55,8 @@ use peniko::{Color, Fill};
 
 #[cfg(feature = "paint-ui")]
 pub use widget::{
-    PaintMount, PaintPane, PaintWake, PaintWidget, pane_tokens, shell_tokens, view_input,
+    PaintMount, PaintPane, PaintWake, PaintWidget, WHEEL_LINE, pane_tokens, shell_tokens,
+    view_input,
 };
 
 use crate::ctx::{Geometry, ThemeTokens, ViewCtx, ViewInput};
@@ -545,6 +546,7 @@ impl Painter {
         self.view.animating(&self.ctx)
             || self.held.as_ref().is_some_and(|h| {
                 h.layers.moving(&self.clocks.read())
+                    || h.interaction.coasting()
                     || (h.values.engine().is_some() && h.values.revision() != h.drawn_values)
             })
     }
@@ -620,6 +622,8 @@ impl Painter {
             // Composed from where each layer's content is kept, at the
             // clocks now.
             let now = self.clocks.read();
+            // A flicked value coasts on: the host's, as a drag is.
+            held.interaction.coast(&now, &mut held.values);
             let lit = held.interaction.lit();
             held.layers
                 .compose_lit(&mut scene, Affine::scale(scale), &now, &held.values, lit);

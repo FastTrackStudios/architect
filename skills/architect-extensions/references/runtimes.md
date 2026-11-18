@@ -290,6 +290,8 @@ Build it with `cargo build --target wasm32-wasip2` inside `devenv --profile wasi
 - Its `main` is `Guest::new()…serve()`, or `Guest::extension(&MyLinked).serve()` for a linked extension's process copy (`features/extensions/src/guest.rs` `Guest`).
 - Each view is a `VirtualDom` on its own thread in the process. Its edits are drawn by `features/extensions/src/remote.rs` `RemoteView`.
 - Use it for isolation, other languages and separate lifetimes, not for build speed.
+- A linked extension's view code runs unchanged in its process copy when it uses the both-ways pieces: `linked::use_pane_state` (its pane's id and state; `architect_workspace::use_pane` panics in a process) and `linked::PaintPane` (feature `paint-pane`) for a `PaintView` among its own elements (`docs/content/architecture/embedded-views.md`, "One `PaintView`, unchanged"). `guest::in_process` says which side it is on.
+- A program named by `[entry] path` is a file in the package: a development copy's build puts it there (Keyflow's `app-from` recipe does). Files `Extension::files` hands a linked copy (toolbar `image`s) must also be in the package for a process copy's host to read them.
 
 **Manifest.** `kind = "process"` and `[entry] path = "<program>"` (plus `args`). Its hello must cover every declared action and view.
 
@@ -299,6 +301,12 @@ Build it with `cargo build --target wasm32-wasip2` inside `devenv --profile wasi
 - Stay inside the frame budget for free. A view has 33 ms (socket round trip included), and opening one costs about 25 ms to its first frame.
 - Show more than `MAX_VIEWS` (256) views at once.
 - Be called per sample or per frame. Each call costs tens of µs.
+
+**What moves every frame is the host's.** A paint view (`linked::Builder::paint`) that returns layers (`PaintView::layers`) sends them once (`architect-scene`, `features/scene/src/ops.rs`), and the host draws them every frame without it:
+- Motion on a clock: a layer's `X`, `Y`, `ScaleX`, `ScaleY`, `Opacity` or `Visible` from `Clock::Wall` or `Clock::Playhead` (`features/scene/src/anim.rs` `Animation`, `Linear`, `Steps`). A playhead line, a scrolling arrangement, a lyric line. Don't return `animating` true for these: the view would be asked every frame.
+- Hit regions and drags (`features/scene/src/region.rs` `Region`, `Drag`): hover, cursor, highlight and a fader or drag box following the pointer, all on the host; the view hears `RegionEvent`s by id (`PaintView::region`), a drag's value at most once a frame.
+- Named values a layer is bound to (`PaintView::values`, `view.` names); the engine's lock-free `engine.` values with `capabilities.ui = ["engine"]` (`features/scene/src/engine.rs`).
+- A malformed animation, region or value fails the view, linked in or not. The example: `apps/sandbox/sketch` `Timeline`.
 
 **Example** (`examples/extension/counter`):
 

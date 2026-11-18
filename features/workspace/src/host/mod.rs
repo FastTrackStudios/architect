@@ -678,6 +678,20 @@ pub fn use_pane() -> PaneHandle {
     }
 }
 
+/// [`use_pane`] where there may be no pane: `None` outside a [`View`]'s
+/// render (a process extension's view, which is told its pane's state by
+/// its host instead).
+#[must_use]
+pub fn try_use_pane() -> Option<PaneHandle> {
+    let this = try_use_context::<ThisPane>()?;
+    let host = try_use_context::<Host>()?;
+    Some(PaneHandle {
+        id: this.0(),
+        host,
+        preview: try_use_context::<Previewing>().is_some(),
+    })
+}
+
 /// Pane `id`'s handle, from anywhere in the workspace (its header, a
 /// toolbar in it): what [`use_pane`] gives inside its view.
 #[must_use]
