@@ -242,7 +242,9 @@ async function firefox(dark = false) {
   let id = 0;
   const waiting = new Map();
   ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && waiting.has(m.id)) { const w = waiting.get(m.id); waiting.delete(m.id); m.type === 'error' ? w.no(new Error(`${m.error}: ${m.message}`)) : w.ok(m.result); } };
-  const send = (method, params = {}) => new Promise((ok, no) => { const i = ++id; waiting.set(i, { ok, no }); ws.send(JSON.stringify({ id: i, method, params })); });
+  const send = (method, params = {}) => new Promise((ok, no) => { const i = ++id; const t = setTimeout(() => { waiting.delete(i); no(new Error(`${method}: no answer from Firefox in 60 s`)); }, 60000); waiting.set(i, { ok: (v) => { clearTimeout(t); ok(v); }, no: (e) => { clearTimeout(t); no(e); } }); ws.send(JSON.stringify({ id: i, method, params })); });
+  // Firefox gone (crashed, killed): every command waiting fails, never hangs the run.
+  ws.onclose = () => { for (const [i, w] of waiting) { waiting.delete(i); w.no(new Error('Firefox closed the session')); } };
   await send('session.new', { capabilities: {} });
   const context = (await send('browsingContext.create', { type: 'tab' })).context;
   await send('browsingContext.setViewport', { context, viewport: { width: 1280, height: 900 } });
