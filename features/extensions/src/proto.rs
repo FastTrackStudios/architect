@@ -62,4 +62,11 @@ pub trait ProcessExtension {
     /// the host listens (wire 4 on).
     #[subscribe]
     fn updates(&self, since: u64) -> Update;
+    /// Mounts a view whose scene batches may cross as bytes
+    /// ([`Frame::Batches`](crate::wire::Frame::Batches)): [`Self::view`]
+    /// for a host at [`BYTES_WIRE`](crate::wire::BYTES_WIRE). Only to a
+    /// process that said that wire or later (last, so the methods before
+    /// it keep their places).
+    #[subscribe]
+    fn scene_view(&self, open: Open) -> Frame;
 }

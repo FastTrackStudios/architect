@@ -856,6 +856,9 @@ impl ExtensionApi {
     /// `live_document`: the document of a kind the vault file `path` is,
     /// when its kind is one the extension declares (`[[doc_kinds]]`),
     /// remembered so its sessions may reach it (`crate::live`).
+    // Without `doc-sync` it answers that there are none, and reads nothing
+    // of itself.
+    #[allow(clippy::unused_self)]
     fn live_document(
         &self,
         host: &Host,

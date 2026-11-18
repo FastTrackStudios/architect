@@ -164,6 +164,9 @@ pub struct RemoteDocument {
     painted: HashMap<NodeId, Arc<Mutex<crate::scene::Painted>>>,
     /// How many bytes of scenes and transforms it sent (for a benchmark).
     scene_bytes: u64,
+    /// The frame's layers batches as bytes, by number, until the edit that
+    /// names each takes it (`crate::wire::BYTES_WIRE`).
+    batches: std::collections::HashMap<u64, Vec<u8>>,
     /// What its layers' animations read (`architect_scene::anim`): the
     /// app's clocks unless told.
     clocks: architect_scene::Clocks,
@@ -242,6 +245,7 @@ impl RemoteDocument {
             resizes: Arc::default(),
             painted: HashMap::new(),
             scene_bytes: 0,
+            batches: std::collections::HashMap::new(),
             clocks: architect_scene::Clocks::app(),
             alarm: None,
             pointed: None,
@@ -616,10 +620,17 @@ impl RemoteDocument {
         let Some(value) = value.filter(|v| !v.is_empty()) else {
             return Ok(());
         };
+        let batch = match crate::scene::layers_named(value) {
+            // Its bytes came beside the edits: moved, not decoded.
+            Some(n) => self
+                .batches
+                .remove(&n)
+                .ok_or_else(|| format!("layers batch {n} that its frame did not carry"))?,
+            None => crate::scene::layers_batch(value)?,
+        };
         self.scene_bytes = self
             .scene_bytes
-            .saturating_add(u64::try_from(value.len()).unwrap_or(u64::MAX));
-        let batch = crate::scene::layers_batch(value)?;
+            .saturating_add(u64::try_from(batch.len()).unwrap_or(u64::MAX));
         let engine = self.engine.clone();
         if !self.painted.contains_key(&node) {
             // The widget, as a scene's.
@@ -636,7 +647,9 @@ impl RemoteDocument {
                 receiver.grant(engine.clone());
                 receiver
             })
-            .apply(&batch)
+            // Given whole: a large font or image is drawn from the batch's
+            // own bytes, not a copy of them.
+            .apply_owned(batch)
             .map_err(|e| format!("its layers: {e}"));
         p.dirty = true;
         drop(p);
@@ -842,6 +855,14 @@ impl RemoteDocument {
     pub fn apply(&mut self, frame: Frame) -> Result<(), String> {
         let edits = match frame {
             Frame::Edits { edits } => edits,
+            Frame::Batches { edits, batches } => {
+                for batch in batches {
+                    if self.batches.insert(batch.n, batch.bytes).is_some() {
+                        return Err(format!("layers batch {} twice in a frame", batch.n));
+                    }
+                }
+                edits
+            }
             Frame::Failed(why) => return Err(why),
         };
         if edits.len() > MAX_EDITS {
@@ -849,6 +870,14 @@ impl RemoteDocument {
         }
         for edit in edits {
             self.edit(edit)?;
+        }
+        // Every batch is named by an edit of its frame, where it applies.
+        if !self.batches.is_empty() {
+            let mut left: Vec<u64> = self.batches.drain().map(|(n, _)| n).collect();
+            left.sort_unstable();
+            return Err(format!(
+                "layers batches {left:?} that no edit of their frame named"
+            ));
         }
         Ok(())
     }
@@ -2067,7 +2096,7 @@ async fn follow(
 async fn decode_scenes(
     frame: Frame,
 ) -> (Frame, Vec<(u64, Result<crate::scene::Commands, String>)>) {
-    let has = matches!(&frame, Frame::Edits { edits } if edits.iter().any(|e| matches!(
+    let has = matches!(&frame, Frame::Edits { edits } | Frame::Batches { edits, .. } if edits.iter().any(|e| matches!(
         e,
         Edit::SetAttribute { name, value: Value::Text(v), .. }
             if name == crate::scene::SCENE_ATTR && v.contains('\n')
@@ -2080,7 +2109,9 @@ async fn decode_scenes(
         .name("scene decode".to_owned())
         .spawn(move || {
             let decoded = match &frame {
-                Frame::Edits { edits } => crate::scene::predecode(edits),
+                Frame::Edits { edits } | Frame::Batches { edits, .. } => {
+                    crate::scene::predecode(edits)
+                }
                 Frame::Failed(_) => Vec::new(),
             };
             let _ = to.send((frame, decoded));

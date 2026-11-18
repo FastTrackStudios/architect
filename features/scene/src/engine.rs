@@ -207,6 +207,9 @@ impl EngineWriter {
 
 type Waker = Arc<dyn Fn() + Send + Sync>;
 
+// Read by the poller thread, which a browser has none of: there a table is
+// watched by nothing and these are kept only to be dropped.
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
 struct Watched {
     table: Weak<EngineTable>,
     waker: Weak<dyn Fn() + Send + Sync>,
