@@ -340,6 +340,16 @@ impl Guest {
         if let Ok(client) = connection.open_lane::<crdt::sync::DocSyncClient>().await {
             *docs_slot().lock().unwrap_or_else(PoisonError::into_inner) = Some(client);
         }
+        // Their presence (a host from before it serves none).
+        #[cfg(feature = "doc-sync")]
+        if let Ok(client) = connection
+            .open_lane::<crdt::sync::DocPresenceClient>()
+            .await
+        {
+            *presence_slot()
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Some(client);
+        }
         connection.closed().await;
         host_slot()
             .lock()
@@ -483,6 +493,31 @@ async fn fill_actions(list: &architect::action::ActionList) -> bool {
 }
 
 #[cfg(feature = "doc-sync")]
+fn presence_slot() -> &'static Mutex<Option<crdt::sync::DocPresenceClient>> {
+    static PRESENCE: OnceLock<Mutex<Option<crdt::sync::DocPresenceClient>>> = OnceLock::new();
+    PRESENCE.get_or_init(|| Mutex::new(None))
+}
+
+/// The `DocPresence` lane to the host, on this process's connection.
+///
+/// A live document's presence and the clock its peers share, relayed by
+/// the host to wherever the document's presence is hosted (session#192).
+///
+/// # Errors
+///
+/// Not connected, or a host that serves no presence.
+#[cfg(feature = "doc-sync")]
+pub fn doc_presence() -> Result<crdt::sync::DocPresenceClient, crate::hostcall::HostError> {
+    presence_slot()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+        .ok_or_else(|| crate::hostcall::HostError::Failed {
+            message: "no presence lane: not connected, or the host serves none".to_owned(),
+        })
+}
+
+#[cfg(feature = "doc-sync")]
 fn docs_slot() -> &'static Mutex<Option<crdt::sync::DocSyncClient>> {
     static DOCS: OnceLock<Mutex<Option<crdt::sync::DocSyncClient>>> = OnceLock::new();
     DOCS.get_or_init(|| Mutex::new(None))
@@ -521,6 +556,32 @@ pub async fn document(path: &str) -> Result<crate::live::DocLane, crate::hostcal
     })
     .await?;
     crate::live::DocLane::from_answer(answer, doc_sync()?)
+}
+
+/// Live document `doc_id`'s presence (one [`document`] answered).
+///
+/// A peer joined through the host, which relays it to wherever the document's
+/// presence is hosted (this app's node, or the node its leader named,
+/// through the org: session#192), with that host's clock estimated in
+/// [`crdt::sync::PresencePeer::clock`]. Its driver runs on a task of its
+/// own while the process runs.
+///
+/// # Errors
+///
+/// Not connected, or a host that serves no presence.
+#[cfg(feature = "doc-sync")]
+pub fn presence(
+    doc_id: uuid::Uuid,
+) -> Result<crdt::sync::PresencePeer, crate::hostcall::HostError> {
+    let client = doc_presence()?;
+    let (peer, mut driver) = crdt::sync::PresencePeer::new(doc_id, 30_000);
+    tokio::spawn(async move {
+        loop {
+            let _ = driver.run(&client).await;
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+    });
+    Ok(peer)
 }
 
 /// The views open now, by pane: where their events go.

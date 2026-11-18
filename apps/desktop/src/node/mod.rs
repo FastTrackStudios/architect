@@ -164,7 +164,45 @@ pub struct Running {
     _self_lane: Arc<SelfLane>,
 }
 
+/// How a node's extensions reach the presence another node hosts.
+///
+/// Dialled over this node's iroh endpoint by the host's endpoint id alone,
+/// as any of the org's devices dials another (session#192).
+#[derive(Clone)]
+pub struct NodePresenceLink(iroh::Endpoint);
+
+impl architect_extensions::live::PresenceLink for NodePresenceLink {
+    fn me(&self) -> String {
+        self.0.id().to_string()
+    }
+
+    fn dial(
+        &self,
+        host: String,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<crdt::sync::DocPresenceClient, String>> + Send>>
+    {
+        let endpoint = self.0.clone();
+        Box::pin(async move {
+            let id: iroh::EndpointId = host.parse().map_err(|e| format!("{host}: {e}"))?;
+            let link = iroh_link::connect(&endpoint, id)
+                .await
+                .map_err(|e| e.to_string())?;
+            vox::initiator_on(link)
+                .establish::<crdt::sync::DocPresenceClient>()
+                .await
+                .map_err(|e| format!("{e:?}"))
+        })
+    }
+}
+
 impl Running {
+    /// How its extensions reach a presence another node hosts
+    /// ([`NodePresenceLink`]).
+    #[must_use]
+    pub fn presence_link(&self) -> NodePresenceLink {
+        NodePresenceLink(self.endpoint.clone())
+    }
+
     /// Its endpoint id, as the account's address book keys it.
     #[must_use]
     pub fn endpoint_id(&self) -> String {

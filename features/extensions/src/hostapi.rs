@@ -233,6 +233,9 @@ pub(crate) struct Services {
     /// live documents.
     #[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
     kind_docs: Mutex<Option<Arc<dyn crate::live::KindDocuments>>>,
+    /// How the node reaches another node's presence (session#192).
+    #[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
+    presence_link: Mutex<Option<Arc<dyn crate::live::PresenceLink>>>,
     /// The live documents each extension was answered (`live_document`):
     /// by extension, each document's kind. Only these it may sync.
     #[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
@@ -321,6 +324,8 @@ impl Default for Services {
             #[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
             kind_docs: Mutex::new(None),
             #[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
+            presence_link: Mutex::new(None),
+            #[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
             live: Mutex::new(BTreeMap::new()),
         }
     }
@@ -346,6 +351,8 @@ pub(crate) struct LiveSession {
     pub(crate) principal: Principal,
     /// Whether its updates go up (`writes = ["documents"]`).
     pub(crate) writable: bool,
+    /// How the node reaches another node's presence, when the app gave it.
+    pub(crate) presence: Option<Arc<dyn crate::live::PresenceLink>>,
 }
 
 const fn reach(effect: architect::action::Effect) -> Reach {
@@ -494,6 +501,21 @@ impl Host {
     #[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
     pub fn set_kind_documents(&self, documents: Arc<dyn crate::live::KindDocuments>) {
         *lock(&self.services().kind_docs) = Some(documents);
+    }
+
+    /// How the app's node reaches the presence of a document another node
+    /// hosts, and its own endpoint id (session#192): what an extension's
+    /// presence sessions are relayed through.
+    #[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
+    pub fn set_presence_link(&self, link: Arc<dyn crate::live::PresenceLink>) {
+        *lock(&self.services().presence_link) = Some(link);
+    }
+
+    /// [`Self::set_presence_link`]'s link, when the app gave one.
+    #[cfg(all(feature = "doc-sync", not(target_family = "wasm")))]
+    #[must_use]
+    pub fn presence_link(&self) -> Option<Arc<dyn crate::live::PresenceLink>> {
+        lock(&self.services().presence_link).clone()
     }
 
     /// The node's documents of a kind, when the app gave them.
@@ -902,6 +924,7 @@ impl ExtensionApi {
                 kind: found.kind,
                 path: path.to_owned(),
                 writable: may.may_write(crate::capabilities::DOCUMENTS),
+                node: host.presence_link().map(|link| link.me()),
             };
             serde_json::to_value(answer).map_err(|e| HostError::Failed {
                 message: e.to_string(),
@@ -971,6 +994,7 @@ impl ExtensionApi {
             registry: docs.registry(),
             principal: self.principal(),
             writable: may.may_write(crate::capabilities::DOCUMENTS),
+            presence: host.presence_link(),
         })
     }
 

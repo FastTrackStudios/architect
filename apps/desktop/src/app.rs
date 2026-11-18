@@ -484,8 +484,13 @@ fn start_node(dist: &'static Distribution) {
                         // The window's extensions edit the node's copy of a
                         // vault document of their kind, not its file.
                         let documents = Arc::new(running.kind_documents());
+                        // And the presence of a document another node
+                        // hosts, through the org (session#192).
+                        let presence: Arc<dyn architect_extensions::live::PresenceLink> =
+                            Arc::new(running.presence_link());
                         architect_app::on_extension_host(move |host| {
                             host.set_kind_documents(documents);
+                            host.set_presence_link(presence);
                         });
                         // Until the process ends, with the app.
                         std::future::pending::<()>().await;

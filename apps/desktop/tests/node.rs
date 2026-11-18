@@ -2157,3 +2157,126 @@ async fn a_note_deleted_on_disk_leaves_every_other_note_live() {
     assert!(!file.exists(), "the deleted note's file came back");
     host.stop().await;
 }
+
+/// A presence peer on `doc_id` of `registry`, in-process, calling as the
+/// node itself: the leader on the node that hosts the presence.
+async fn own_presence(registry: crdt::DocRegistry, doc_id: uuid::Uuid) -> crdt::sync::PresencePeer {
+    use architect::permissions_gate::{PermissionsGate, StaticPrincipal, UnlistedPolicy};
+    let router = architect::LayerRouter::new().with(
+        crdt::sync::doc_presence_service_descriptor(),
+        crdt::sync::DocPresenceDispatcher::new(registry),
+    );
+    let me = architect_permissions::Principal::Service {
+        name: "doc-peer".to_owned(),
+    };
+    let gated = PermissionsGate::new(
+        std::sync::Arc::new(architect_permissions::AllowAll),
+        std::sync::Arc::new(StaticPrincipal(me)),
+    )
+    .unlisted(UnlistedPolicy::Allow)
+    .wrap(router);
+    let (client_link, server_link) = vox::memory_link_pair(64);
+    tokio::spawn(async move {
+        if let Ok(connection) = vox::acceptor_on(server_link)
+            .on_lane(architect::layer::handler_acceptor(gated))
+            .establish_connection()
+            .await
+        {
+            let _hold = connection;
+            std::future::pending::<()>().await;
+        }
+    });
+    let client: crdt::sync::DocPresenceClient =
+        vox::initiator_on(client_link).establish().await.unwrap();
+    let (peer, mut driver) = crdt::sync::PresencePeer::new(doc_id, 30_000);
+    tokio::spawn(async move {
+        let _ = driver.run(&client).await;
+    });
+    peer
+}
+
+/// The transport through the org (session#192): the always-on node hosts
+/// the song's presence; the laptop's node reaches it by the always-on
+/// node's endpoint id alone (`Running::presence_link`, what its
+/// extensions' presence is relayed through), is admitted as one of the
+/// account's devices, hears the leader and estimates the host's clock.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_node_follows_the_presence_another_node_of_the_account_hosts() {
+    use architect_extensions::live::{KindDocuments as _, PresenceLink as _};
+
+    let origin = issuer().await;
+    let tmp = tempfile::tempdir().unwrap();
+
+    let always_dir = tmp.path().join("always-on");
+    std::fs::create_dir_all(always_dir.join("data/vaults/notes/Songs")).unwrap();
+    let kind = install_sessions(&always_dir);
+    let made = always_dir.join("data/vaults/notes/Songs/take.session");
+    let doc_id = {
+        let file = crdt::DocFile::create(crdt::file::DiskStorage::open(&made).unwrap(), &kind)
+            .await
+            .unwrap();
+        let mut main = file.open_branch(crdt::file::MAIN).await.unwrap();
+        main.transact("Type", |doc| {
+            doc.get_text("body")
+                .insert(0, "Made on the always-on node.")
+                .unwrap();
+        })
+        .await
+        .unwrap();
+        file.id().await.unwrap()
+    };
+    let always = config(
+        "always-on",
+        &always_dir,
+        &origin,
+        session(&origin, &always_dir).await,
+    );
+    let always = node::start(always).await.unwrap();
+
+    let laptop_dir = tmp.path().join("laptop");
+    install_sessions(&laptop_dir);
+    let mut laptop = config(
+        "laptop",
+        &laptop_dir,
+        &origin,
+        session(&origin, &laptop_dir).await,
+    );
+    laptop.peers = vec![always.dial().unwrap()];
+    let laptop = node::start(laptop).await.unwrap();
+    let (a, l) = (always.endpoint_id(), laptop.endpoint_id());
+    until("each node lets the other in", || {
+        always.state.admits(&l) && laptop.state.admits(&a)
+    })
+    .await;
+
+    // The leader's node holds the song as a document of its kind once its
+    // path is named (the engine opens it by path, `guest::document`):
+    // only then does its registry admit a session on it.
+    let named = always
+        .kind_documents()
+        .resolve("Songs/take.session")
+        .map(|d| d.doc_id);
+    assert_eq!(named.ok(), Some(doc_id));
+    let lead = own_presence(always.kind_documents().registry(), doc_id).await;
+    lead.set("lead/play", "playing at 12");
+    let host = always.endpoint.id().to_string();
+    let client = laptop
+        .presence_link()
+        .dial(host)
+        .await
+        .expect("dialled by id");
+    let (follow, mut driver) = crdt::sync::PresencePeer::new(doc_id, 30_000);
+    tokio::spawn(async move {
+        let _ = driver.run(&client).await;
+    });
+    let clock = follow.clock().clone();
+    until("the laptop hears the always-on node's leader", || {
+        follow.states().get("lead/play") == Some(&crdt::loro::LoroValue::from("playing at 12"))
+            && clock.offset_ms().is_some()
+    })
+    .await;
+    assert!(clock.round_trip_ms().unwrap() < 50.0);
+
+    laptop.stop().await;
+    always.stop().await;
+}

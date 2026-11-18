@@ -409,6 +409,78 @@ impl Drop for SelfLane {
     }
 }
 
+/// `DocPresence` for [`SelfPresenceLane`]'s gate.
+const SELF_PRESENCE_PERMITS: ServicePermits = ServicePermits {
+    service: "DocPresence",
+    methods: &[
+        MethodPermit::new("presence", "read", "docs/**"),
+        MethodPermit::new("now", "read", "docs/**"),
+    ],
+};
+
+/// This node's own registry's presence as a client of itself, as `who`.
+///
+/// [`SelfLane`]'s sibling: what a relay to the node's presence (an
+/// extension's, `architect_extensions::live`) calls through, so the
+/// registry's authorizer sees the principal it acts for.
+pub struct SelfPresenceLane {
+    client: crate::sync::DocPresenceClient,
+    server: tokio::task::JoinHandle<()>,
+}
+
+impl SelfPresenceLane {
+    /// Open the lane over `registry`, as `who`.
+    ///
+    /// # Errors
+    ///
+    /// The in-memory lane could not be made.
+    pub async fn open(registry: DocRegistry, who: Principal) -> Result<Self, String> {
+        let router = LayerRouter::new().with(
+            crate::sync::doc_presence_service_descriptor(),
+            crate::sync::DocPresenceDispatcher::new(registry),
+        );
+        let gated = PermissionsGate::new(Arc::new(AllowAll), Arc::new(StaticPrincipal(who)))
+            .permit(
+                crate::sync::doc_presence_service_descriptor(),
+                &SELF_PRESENCE_PERMITS,
+            )
+            .wrap(router);
+        let (client_link, server_link) = vox::memory_link_pair(16);
+        let server = tokio::spawn(async move {
+            if let Ok(connection) = vox::acceptor_on(server_link)
+                .on_lane(handler_acceptor(gated))
+                .establish_connection()
+                .await
+            {
+                let _hold = connection;
+                std::future::pending::<()>().await;
+            }
+        });
+        match vox::initiator_on(client_link)
+            .establish::<crate::sync::DocPresenceClient>()
+            .await
+        {
+            Ok(client) => Ok(Self { client, server }),
+            Err(e) => {
+                server.abort();
+                Err(format!("self presence lane: {e:?}"))
+            }
+        }
+    }
+
+    /// The client half.
+    #[must_use]
+    pub const fn client(&self) -> &crate::sync::DocPresenceClient {
+        &self.client
+    }
+}
+
+impl Drop for SelfPresenceLane {
+    fn drop(&mut self) {
+        self.server.abort();
+    }
+}
+
 impl SyncLane for SelfLane {
     async fn sync(
         &self,
