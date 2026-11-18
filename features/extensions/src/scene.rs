@@ -788,7 +788,7 @@ impl Painted {
                     let _ = alarm.drawn(layers.layers().next(&now));
                 }
             }
-            None => architect_scene::layers::replay(scene, &self.commands, at * self.transform),
+            None => scene.append_shared(&self.commands, at * self.transform),
         }
     }
 

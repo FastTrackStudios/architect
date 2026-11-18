@@ -140,7 +140,7 @@ fn a_lyric_line_is_drawn_between_its_times() {
         &at(0.0, 13.0, false),
         &Values::new(),
     );
-    assert_eq!(scene.commands.len(), 1);
+    assert_eq!(scene.flattened().len(), 1);
     let mut scene = Scene::new();
     layers.compose_at(
         &mut scene,
@@ -148,7 +148,7 @@ fn a_lyric_line_is_drawn_between_its_times() {
         &at(0.0, 16.0, false),
         &Values::new(),
     );
-    assert!(scene.commands.is_empty());
+    assert!(scene.flattened().is_empty());
 }
 
 #[test]
@@ -223,7 +223,7 @@ fn composed(r: &Receiver, readings: &Readings) -> Vec<f64> {
     r.layers()
         .compose_at(&mut scene, Affine::IDENTITY, readings, r.values());
     scene
-        .commands
+        .flattened()
         .iter()
         .filter_map(|c| match c {
             RenderCommand::Fill(f) => Some(f.transform.as_coeffs()[4]),
