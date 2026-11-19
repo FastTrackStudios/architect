@@ -112,6 +112,9 @@ mod tests {
             revoked_at: None,
             created_at: 1,
             created_by: "u".into(),
+            name: Some("Band".into()),
+            paused_at: None,
+            opened_at: None,
             domain: None,
             audiences: vec![ShareAudience {
                 name: "violin".into(),
