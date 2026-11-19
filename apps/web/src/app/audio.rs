@@ -83,6 +83,9 @@ enum Via {
     Element,
     /// The app's decoder (`super::decoded`): Ogg Vorbis, on every browser.
     Decoded,
+    /// The distribution's engine (`crate::provided`): it plays the item,
+    /// and neither the element nor the decoder holds anything.
+    Engine,
 }
 
 /// The app's player, as a clock: the audio element, or the app's own
@@ -105,10 +108,45 @@ struct AudioClock {
 
 impl Clock for AudioClock {
     fn kind(&self) -> &'static str {
-        "media"
+        if self.via == Via::Engine {
+            "engine"
+        } else {
+            "media"
+        }
     }
 
     fn load(&mut self, media: Option<&str>) {
+        // The engine first: when it carries the item it is the clock, and
+        // the app's own player steps aside (one thing heard).
+        let engine = crate::provided::engine();
+        let carried = media
+            .filter(|m| architect_playhead::model::vault_path(m))
+            .filter(|m| engine.as_ref().is_some_and(|e| e.borrow().carries(m)));
+        if let (Some(engine), Some(media)) = (&engine, carried) {
+            let key = format!("engine:{media}");
+            if self.via != Via::Engine || self.src.as_deref() != Some(key.as_str()) {
+                self.decoded.load(None);
+                let _ = self.el.pause();
+                self.el.remove_attribute("src").ok();
+                self.el.load();
+                self.via = Via::Engine;
+                self.src = Some(key);
+                self.refused.set(false);
+                crate::provided::told_engine();
+                engine.borrow_mut().load(Some(media));
+                self.mark();
+            }
+            return;
+        }
+        if self.via == Via::Engine {
+            // The item is no longer the engine's: it stops, and the
+            // element starts from nothing.
+            if let Some(engine) = &engine {
+                engine.borrow_mut().load(None);
+            }
+            self.via = Via::Element;
+            self.src = None;
+        }
         let url = media.and_then(media_url);
         self.refused.set(false);
         if url == self.src {
@@ -129,6 +167,9 @@ impl Clock for AudioClock {
                 self.el.remove_attribute("src").ok();
                 self.decoded.load(Some(u));
             }
+            // Set just above to one of the two: the engine's items
+            // returned before this.
+            (Some(_), Via::Engine) => {}
             (None, _) => {
                 self.decoded.load(None);
                 let _ = self.el.pause();
@@ -142,6 +183,13 @@ impl Clock for AudioClock {
 
     fn play(&mut self) {
         self.wanted = true;
+        if self.via == Via::Engine {
+            if let Some(engine) = crate::provided::engine() {
+                crate::provided::told_engine();
+                engine.borrow_mut().play();
+            }
+            return;
+        }
         if self.via == Via::Decoded {
             if self.src.is_some() {
                 self.decoded.play();
@@ -159,6 +207,13 @@ impl Clock for AudioClock {
 
     fn pause(&mut self) {
         self.wanted = false;
+        if self.via == Via::Engine {
+            if let Some(engine) = crate::provided::engine() {
+                crate::provided::told_engine();
+                engine.borrow_mut().pause();
+            }
+            return;
+        }
         self.decoded.pause();
         let _ = self.el.pause();
     }
@@ -168,6 +223,12 @@ impl Clock for AudioClock {
             match self.via {
                 Via::Decoded => self.decoded.seek(t),
                 Via::Element => self.el.set_current_time(t),
+                Via::Engine => {
+                    if let Some(engine) = crate::provided::engine() {
+                        crate::provided::told_engine();
+                        engine.borrow_mut().seek(t);
+                    }
+                }
             }
         }
     }
@@ -182,6 +243,9 @@ impl Clock for AudioClock {
         }
         if self.via == Via::Decoded {
             return Some(self.decoded.read());
+        }
+        if self.via == Via::Engine {
+            return crate::provided::engine().and_then(|e| e.borrow().read());
         }
         let d = self.el.duration();
         Some(Reading {
@@ -223,7 +287,9 @@ impl AudioClock {
         let clock = match self.via {
             Via::Decoded => "decoded",
             Via::Element => "element",
+            Via::Engine => "engine",
         };
+        crate::provided::set_engine_is_clock(self.via == Via::Engine);
         let _ = self.el.set_attribute("data-clock", clock);
         let _ = self
             .el
@@ -441,6 +507,18 @@ pub fn start() {
             follower: Follower::default(),
             shown: None,
         });
+    });
+    // The engine's answer changed (it opened, a song arrived): the item
+    // is loaded again from where the deck is, by whichever now plays it.
+    crate::provided::on_engine_changed(|| {
+        PLAYER.with(|p| {
+            if let Ok(mut p) = p.try_borrow_mut()
+                && let Some(p) = p.as_mut()
+            {
+                p.follower = Follower::default();
+            }
+        });
+        sync();
     });
     architect_playhead::with(|d| d.audible = true);
     // Every change, at once: inside the press that made it.
