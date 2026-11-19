@@ -39,7 +39,7 @@ pub fn use_app_accounts(list: &Arc<ActionList>, files: bool) -> Option<AccountsU
         return None;
     }
     let list = list.clone();
-    Some(use_accounts(Some(list), || {
+    let ui = use_accounts(Some(list), || {
         // The keychain in a release build; a file in a development build or
         // a test, which the keychain would keep asking the person about.
         let dir = app_dir_or_temp();
@@ -50,7 +50,43 @@ pub fn use_app_accounts(list: &Arc<ActionList>, files: bool) -> Option<AccountsU
             Issuer::new(architect_accounts::issuer_from_env()),
             CLIENT_ID,
         )
-    }))
+    });
+    // A development window with no active account signs in by itself, once.
+    use_hook(move || sign_in_at_start(&ui.accounts()));
+    Some(ui)
+}
+
+/// What a development window signs in as at start (the email and the
+/// password), read when the window's accounts open; set by the binary
+/// (`architect_desktop`'s `dev::sign_in_from_env`, which decides whether
+/// this window may). Never set: nothing happens.
+static DEV_SIGN_IN: std::sync::OnceLock<fn() -> Option<(String, String)>> =
+    std::sync::OnceLock::new();
+
+/// Names what reads the development window's own sign-in (the dev stack's
+/// demo account; `apps/desktop/src/dev.rs` `sign_in_from_env`). Called once,
+/// before the window opens; a second call is ignored.
+pub fn set_dev_sign_in(read: fn() -> Option<(String, String)>) {
+    let _ = DEV_SIGN_IN.set(read);
+}
+
+/// Signs the window in with the development sign-in, when one is set and
+/// no account is active: the issuer's password sign-in, as the sheet's
+/// form does it, in the background. A failure is said once and shown on
+/// the sheet; the window carries on signed out.
+fn sign_in_at_start(accounts: &Accounts) {
+    if accounts.active().is_some() {
+        return;
+    }
+    let Some((email, password)) = DEV_SIGN_IN.get().and_then(|read| read()) else {
+        return;
+    };
+    let accounts = accounts.clone();
+    spawn(async move {
+        if let Err(why) = accounts.sign_in_password(&email, &password).await {
+            tracing::warn!(dev.sign_in = "failed", %why, "the development window's sign-in failed; signed out");
+        }
+    });
 }
 
 /// Extensions' node actions (`runs = "node"`, #583), run on the current

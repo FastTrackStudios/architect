@@ -96,7 +96,8 @@ crate it uses is rebuilt in seconds and the page reloads.
   `apps/web/app/index.html` shows after the `web` process starts again.
 - **Signing in** works as `ada@local.test`: the local issuer registers
   the client `architect` with this origin's `/auth/callback`, the scopes
-  the app asks for and this origin for CORS (`auth_env`).
+  the app asks for and this origin for CORS (`auth_env`). On the demo
+  seed it is done for you: see "Signed in already" below.
 - **The node's paths** (`/node`, `/org`, `/vox`, `/s`, `/_ext`) are sent
   to the app's node by dx's dev server (`apps/web/Dioxus.toml`
   `[[web.proxy]]`), WebSockets too, as production's reverse proxy does:
@@ -106,6 +107,52 @@ crate it uses is rebuilt in seconds and the page reloads.
 - **The release bundle is not built this way**: `scripts/web-bundle.sh`
   builds the library with the `web` profile and its own wasm-bindgen
   (`just web`), as before.
+
+### Signed in already
+
+On the demo seed the stack comes up signed in as the demo seed's
+`ada@local.test`, with no form typed and no button pressed: the web app
+opened signed out (not on a share link) and the desktop window with no
+active account each sign in by themselves. A mirror's accounts are real
+people's, so on a mirror nothing signs in by itself and the forms show.
+
+- **The web app.** Its `config.json` says `"auto_sign_in": true`
+  (`apps/web/src/lib.rs` `Config`, written by `cargo xtask dev run web`),
+  so, signed out on `/app/`, it starts the usual OIDC + PKCE sign-in at
+  once, and the issuer, run with `AUTH_DEV_AUTO_SIGN_IN=ada@local.test`,
+  signs that account in at `/oauth2/authorize` instead of showing its form
+  and sends the browser straight back with a code
+  (`apps/auth-server/src/oauth.rs` `dev_auto_sign_in`). Once a page load
+  and once a tab: a sign-in that comes back signed out within two minutes
+  is said on the page, not tried again (`apps/web/src/lib.rs`
+  `auto_sign_in`), and after Sign out the tab waits for the Sign in
+  button. A client that asks for the form (`prompt=login`) gets it.
+- **The window.** The stack starts it with `ARCHITECT_DEV_SIGN_IN` (the
+  account), `ARCHITECT_DEV_PASSWORD_FILE` (a 0600 file of the stack's
+  state, `<state>/app/dev-password`, holding the development password:
+  never the password itself in the environment, never through an action)
+  and `ARCHITECT_DEV_INSTANCE=dev-stack`; with no active account it signs
+  in with the password, as its sheet's form does
+  (`apps/desktop/src/dev.rs` `sign_in_from_env`,
+  `apps/ui/src/accounts.rs` `set_dev_sign_in`).
+
+What keeps it off anything but the stack:
+
+| Where | Refused unless |
+| --- | --- |
+| The stack's guard (`xtask/src/dev/guard.rs` `AUTO_SIGN_IN`) | the account is a demo one (`@local.test`) and the issuer beside it (`AUTH_BASE_URL` and `AUTH_BIND_ADDR`, `ARCHITECT_AUTH_ISSUER`) is loopback: never production, never merely a private address |
+| The auth server, at boot (`apps/auth-server/src/dev.rs` `auto_sign_in`) | a debug build (a release refuses it, whatever its environment), bound to loopback, its public origin loopback, a demo account, and its database the stack's own state: a SQLite file `<state>/auth/auth.db` with the `<state>/fill.json` `cargo xtask dev run auth` writes before it starts it. A refusal stops the server with one warning |
+| The window (`apps/desktop/src/dev.rs` `sign_in_from_env`) | a debug build, a development instance (`ARCHITECT_DEV_INSTANCE` set, as `ARCHITECT_DEV` sets it too), a demo account and a loopback `ARCHITECT_AUTH_ISSUER`. A refusal is one warning; the window starts signed out |
+| The web app | its `config.json` asks; a deployment's leaves `auto_sign_in` out, and the issuer behind it would show its form anyway |
+
+The auth server records each try on its request's span as
+`auth.dev_auto_sign_in` (`signed_in`, `failed`, `two_factor`,
+`prompted`).
+
+**Another stack's window** (Studio's) reads the window's variables from
+`cargo xtask dev env app` and passes them to its own window; the file
+exists once `cargo xtask dev run auth` has started. Its web app's
+`config.json` needs `"auto_sign_in": true` beside its `issuer`.
 
 The desktop app the stack opens is an instance of its own: an app run on
 a folder of its own (`ARCHITECT_CONFIG_DIR`) claims its one instance
@@ -272,7 +319,9 @@ The one-off auth servers share the stack's code: `just auth-dev`,
 `cargo xtask dev auth` (one function writes the auth server's environment
 for all of them), on port 8080 with the published development secret.
 `cargo xtask dev env app` prints what the stack gives a process (no
-secret is in it: secrets are files).
+secret is in it: secrets are files), the window's own sign-in variables
+(`ARCHITECT_DEV_SIGN_IN`, `ARCHITECT_DEV_PASSWORD_FILE`,
+`ARCHITECT_DEV_INSTANCE`) included.
 
 The stack's test, `xtask/tests/dev_stack.rs`, starts the same
 `cargo xtask dev run` commands in a temporary folder on free ports, with

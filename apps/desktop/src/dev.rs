@@ -38,7 +38,9 @@
 //! (folders, `:`-separated), `ARCHITECT_DEV_OPEN`, `ARCHITECT_DEV_LAYOUT`,
 //! `ARCHITECT_DEV_COLLAPSE` (`left,right`), `ARCHITECT_DEV_VAULT`,
 //! `ARCHITECT_DEV_SEED`, `ARCHITECT_DEV_FRESH=1`,
-//! `ARCHITECT_DEV_RUN` (`[["ACTION", {args}], …]`). `dev` is that
+//! `ARCHITECT_DEV_RUN` (`[["ACTION", {args}], …]`); the window's own sign-in
+//! at start, `ARCHITECT_DEV_SIGN_IN` + `ARCHITECT_DEV_PASSWORD_FILE`
+//! ([`sign_in_from_env`]). `dev` is that
 //! variable set for a window it starts, which it waits for.
 
 use std::io::Write as _;
@@ -59,6 +61,15 @@ pub const DEV_ENV: &str = "ARCHITECT_DEV";
 const ONLY_ENV: &str = "ARCHITECT_DEV_ONLY";
 const EXTENSIONS_ENV: &str = "ARCHITECT_DEV_EXTENSIONS";
 const OPEN_ENV: &str = "ARCHITECT_DEV_OPEN";
+
+/// The development window's own sign-in: its account and its password file.
+///
+/// The account it signs in as by itself at start, with no active account
+/// (`ARCHITECT_DEV_SIGN_IN=<email>`, a demo one: `…@local.test`), and the
+/// file holding its password (`ARCHITECT_DEV_PASSWORD_FILE`): read by
+/// [`sign_in_from_env`] only.
+pub const SIGN_IN_ENV: &str = "ARCHITECT_DEV_SIGN_IN";
+pub const PASSWORD_FILE_ENV: &str = "ARCHITECT_DEV_PASSWORD_FILE";
 
 /// How long `--open` waits for a development copy's opener to claim the
 /// file (its program started and said what it opens).
@@ -840,6 +851,102 @@ pub fn from_env(dist: &Distribution) {
         });
 }
 
+/// The development window's own sign-in, when its environment asks and may.
+///
+/// The demo account [`SIGN_IN_ENV`] names, with the password
+/// read from the file [`PASSWORD_FILE_ENV`] names (the dev stack writes
+/// it, 0600, under its state). Never a password in the environment or an
+/// action: the window signs in with `Accounts::sign_in_password`, as its
+/// sheet's form does.
+///
+/// Only in a debug build (a release never reads them), only in a
+/// development instance (`ARCHITECT_DEV_INSTANCE` set: by [`from_env`]
+/// for `ARCHITECT_DEV`, by the stack for its window), only a demo account
+/// (`…@local.test`) and only when the window's issuer
+/// (`ARCHITECT_AUTH_ISSUER`) is this machine. Anything else is refused with
+/// one warning, and the window starts signed out.
+#[must_use]
+pub fn sign_in_from_env() -> Option<(String, String)> {
+    let var = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
+    let email = var(SIGN_IN_ENV)?;
+    let asked = DevSignIn {
+        release: !cfg!(debug_assertions),
+        instance: var(INSTANCE_ENV).is_some(),
+        email: email.trim(),
+        issuer: &architect_accounts::issuer_from_env(),
+        password_file: var(PASSWORD_FILE_ENV).map(PathBuf::from),
+    };
+    match asked.allowed() {
+        Ok(file) => match std::fs::read_to_string(&file) {
+            Ok(password) if !password.trim().is_empty() => Some((
+                email.trim().to_owned(),
+                password.trim_end_matches(['\n', '\r']).to_owned(),
+            )),
+            _ => {
+                tracing::warn!(dev.sign_in = "refused", file = %file.display(), "{SIGN_IN_ENV}: its password file does not read; signed out");
+                None
+            }
+        },
+        Err(why) => {
+            tracing::warn!(dev.sign_in = "refused", %why, "{SIGN_IN_ENV} refused; signed out");
+            None
+        }
+    }
+}
+
+/// What a development window's own sign-in was asked, to decide on.
+struct DevSignIn<'a> {
+    release: bool,
+    instance: bool,
+    email: &'a str,
+    issuer: &'a str,
+    password_file: Option<PathBuf>,
+}
+
+impl DevSignIn<'_> {
+    /// The password file to read, or why the sign-in is refused.
+    fn allowed(self) -> Result<PathBuf, String> {
+        if self.release {
+            return Err("a release build never signs in by itself".to_owned());
+        }
+        if !self.instance {
+            return Err(format!("not a development instance ({INSTANCE_ENV} unset)"));
+        }
+        let demo = self
+            .email
+            .rsplit_once('@')
+            .is_some_and(|(n, d)| !n.is_empty() && d.eq_ignore_ascii_case("local.test"));
+        if !demo {
+            return Err(format!(
+                "`{}` is not a demo account (…@local.test)",
+                self.email
+            ));
+        }
+        if !is_loopback_url(self.issuer) {
+            return Err(format!("the issuer `{}` is not this machine", self.issuer));
+        }
+        self.password_file
+            .ok_or_else(|| format!("{PASSWORD_FILE_ENV} is unset"))
+    }
+}
+
+/// Whether `url`'s host is this machine (`localhost`, a loopback address).
+fn is_loopback_url(url: &str) -> bool {
+    let Some((_, rest)) = url.split_once("://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let authority = authority.rsplit_once('@').map_or(authority, |(_, a)| a);
+    let host = authority.strip_prefix('[').map_or_else(
+        || authority.rsplit_once(':').map_or(authority, |(h, _)| h),
+        |v6| v6.split_once(']').map_or(v6, |(h, _)| h),
+    );
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
 /// What the instance is asked for once it answers: its development
 /// copies, the extensions left on, its layout, what it opens, what runs.
 fn apply(inst: &Instance, ask: &Ask) -> Result<(), String> {
@@ -1136,6 +1243,67 @@ mod tests {
 
     fn args(s: &str) -> Vec<String> {
         s.split_whitespace().map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn a_development_window_signs_in_only_as_a_demo_account_at_a_loopback_issuer() {
+        let file = || Some(PathBuf::from("/state/app/dev-password"));
+        let ask = |release, instance, email, issuer| DevSignIn {
+            release,
+            instance,
+            email,
+            issuer,
+            password_file: file(),
+        };
+        assert_eq!(
+            ask(false, true, "ada@local.test", "http://127.0.0.1:7411").allowed(),
+            Ok(PathBuf::from("/state/app/dev-password"))
+        );
+        assert!(
+            ask(false, true, "ada@local.test", "http://[::1]:7411/")
+                .allowed()
+                .is_ok()
+        );
+        assert!(
+            ask(false, true, "ada@local.test", "http://localhost:7411")
+                .allowed()
+                .is_ok()
+        );
+        // A release, a window that is no dev instance, a real account, an
+        // issuer elsewhere: refused.
+        assert!(
+            ask(true, true, "ada@local.test", "http://127.0.0.1:7411")
+                .allowed()
+                .is_err()
+        );
+        assert!(
+            ask(false, false, "ada@local.test", "http://127.0.0.1:7411")
+                .allowed()
+                .is_err()
+        );
+        assert!(
+            ask(false, true, "cody@example.com", "http://127.0.0.1:7411")
+                .allowed()
+                .is_err()
+        );
+        for issuer in [
+            "https://auth.fasttrackstudio.app",
+            "http://192.168.1.4:7411",
+            "http://127.0.0.1.evil.com:7411",
+            "127.0.0.1:7411",
+        ] {
+            assert!(
+                ask(false, true, "ada@local.test", issuer)
+                    .allowed()
+                    .is_err(),
+                "{issuer}"
+            );
+        }
+        let no_file = DevSignIn {
+            password_file: None,
+            ..ask(false, true, "ada@local.test", "http://127.0.0.1:7411")
+        };
+        assert!(no_file.allowed().is_err());
     }
 
     #[test]
