@@ -51,6 +51,7 @@ pub mod copies;
 #[cfg(all(feature = "drive", unix))]
 pub mod drive;
 mod error;
+pub mod hold;
 mod id;
 mod model;
 mod path;
@@ -68,6 +69,7 @@ pub use access::{Access, Capability, Effective, Grant, resolve, role_capabilitie
 #[cfg(feature = "vox")]
 pub use client::{ClientError, FRAME, FilesClient, Resolved, Save, content_of};
 pub use error::FilesFault;
+pub use hold::HoldRule;
 pub use id::{ContentId, GrantId, LabelId, RootId, UploadId, VersionId};
 pub use model::{
     ByteRange, Entry, EntryKind, Expect, FilesEvent, OnConflict, Outcome, ReadDone, ReadRequest,

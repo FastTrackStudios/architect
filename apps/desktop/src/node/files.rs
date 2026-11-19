@@ -177,6 +177,7 @@ pub(super) fn engine(
         site: config.files_site.clone().unwrap_or_default(),
         verify_window: Duration::from_secs(config.files_verify_secs.max(1)),
         scrub_budget: config.files_scrub_mib.saturating_mul(1 << 20),
+        hold: config.hold_rule(),
         ..EngineConfig::new(&config.name, data, files_dir.to_owned(), config.files_hold)
     };
     let engine = Engine::new(
@@ -307,12 +308,18 @@ pub(super) async fn backend(config: &Config) -> Result<Option<S3Store>, String> 
 
 /// Copy every hash a manifest names into the bucket, from this node;
 /// with [`Placement::Primary`], then keep the local store to its budget.
+///
+/// Only the files the node's holding rule keeps and `rule` keeps too
+/// (#904, [`Config::bucket_rule`](super::Config::bucket_rule)): a
+/// storage server sharing the bucket sends its small files there and
+/// keeps the multitracks to itself.
 pub(super) async fn replicate_forever(
     engine: Engine,
     s3: S3Store,
     placement: Placement,
     cache_bytes: u64,
     every: Duration,
+    rule: architect_files::HoldRule,
 ) {
     let mut there: Option<std::collections::HashSet<Sha256>> = None;
     loop {
@@ -323,7 +330,7 @@ pub(super) async fn replicate_forever(
             }
         }
         if let Some(there) = there.as_mut() {
-            for hash in engine.named() {
+            for hash in engine.named_keeping(&rule).await {
                 if there.contains(&hash) {
                     continue;
                 }

@@ -102,7 +102,7 @@ use tokio::sync::{Notify, watch};
 use vault_live::Backend;
 use vault_proto::{IfMatch, VaultSync as _};
 
-use super::org::{IssuerLane, NodeOrg};
+use super::org::{IssuerLane, NodeOrg, VaultOrgs};
 use super::share_layers::{LayerRules, same_file, within};
 use super::share_shell;
 
@@ -260,7 +260,8 @@ struct Inner {
     backend: Backend,
     /// `<data>/shares`: each share's pages under its code.
     out: PathBuf,
-    org: Option<NodeOrg>,
+    /// Whose each vault is: a share's members are its vault's org's.
+    orgs: VaultOrgs,
     issuer: Option<IssuerLane>,
     issuer_origin: Option<String>,
     table: RwLock<HashMap<String, Held>>,
@@ -302,7 +303,7 @@ impl Shares {
     pub fn new(
         backend: Backend,
         data: &Path,
-        org: Option<NodeOrg>,
+        orgs: VaultOrgs,
         issuer: Option<&str>,
         blocks: architect_sites::Blocks,
         layers: LayerRules,
@@ -310,7 +311,7 @@ impl Shares {
         Self(Arc::new(Inner {
             backend,
             out: data.join("shares"),
-            org,
+            orgs,
             issuer: issuer.map(IssuerLane::new),
             issuer_origin: issuer.map(|i| i.trim_end_matches('/').to_owned()),
             table: RwLock::new(HashMap::new()),
@@ -1224,18 +1225,21 @@ impl Shares {
 
     /// Who holds issuer session `token`, resolved by the issuer (cached
     /// a minute): the bearer or the `architect_session` cookie of a
-    /// page's request, a guest's `token`. None: nobody signed in.
-    async fn viewer_of(&self, token: Option<String>) -> Viewer {
+    /// page's request, a guest's `token`. None: nobody signed in. A
+    /// member is one of `org`, the org the link's vault is.
+    async fn viewer_of(&self, token: Option<String>, org: Option<NodeOrg>) -> Viewer {
         let Some(token) = token.filter(|t| !t.trim().is_empty()) else {
             return Viewer::Anonymous;
         };
+        // Kept per org: a member of one is not thereby one of another.
+        let seen_as = format!("{}\n{token}", org.as_ref().map_or("", |o| o.id.0.as_str()));
         {
             let seen = self
                 .0
                 .viewers
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
-            if let Some((who, at)) = seen.get(&token) {
+            if let Some((who, at)) = seen.get(&seen_as) {
                 if at.elapsed() < VIEWER_TTL {
                     return who.clone();
                 }
@@ -1266,7 +1270,7 @@ impl Shares {
                 return Viewer::Anonymous;
             }
         };
-        let member = match &self.0.org {
+        let member = match &org {
             Some(org) => {
                 issuer
                     .within(async {
@@ -1305,7 +1309,7 @@ impl Shares {
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         seen.retain(|_, (_, at)| at.elapsed() < VIEWER_TTL);
-        seen.insert(token, (who.clone(), Instant::now()));
+        seen.insert(seen_as, (who.clone(), Instant::now()));
         who
     }
 }
@@ -1359,34 +1363,70 @@ fn caller() -> Result<String, ShareFault> {
     }
 }
 
+impl SharesLane {
+    /// Share `code`, when the lane this call came in on serves its vault:
+    /// on a node of several orgs another org's share is not found.
+    fn mine(&self, code: &str) -> Result<(), ShareFault> {
+        match self.0.get(code) {
+            Some(share) if self.0.0.orgs.serves(&share.vault) => Ok(()),
+            _ => Err(ShareFault::NotFound(code.to_owned())),
+        }
+    }
+}
+
 impl ShareLinks for SharesLane {
-    async fn create(&self, new: NewShare) -> Result<Share, ShareFault> {
+    async fn create(&self, mut new: NewShare) -> Result<Share, ShareFault> {
         let by = caller()?;
+        let orgs = &self.0.0.orgs;
+        // No vault named: the lane's org's only one.
+        if new.vault.trim().is_empty() {
+            let vaults = self.0.0.backend.vault_ids();
+            let mut mine = vaults.iter().filter(|v| orgs.serves(v));
+            if let (Some(only), None) = (mine.next(), mine.next()) {
+                new.vault.clone_from(only);
+            }
+        }
+        if !new.vault.trim().is_empty() && !orgs.serves(&new.vault) {
+            return Err(ShareFault::Invalid(format!(
+                "this node holds no vault `{}`",
+                new.vault
+            )));
+        }
         self.0.create(new, &by).await
     }
 
     async fn shares(&self) -> Result<Vec<Share>, ShareFault> {
         caller()?;
-        Ok(self.0.list())
+        let orgs = &self.0.0.orgs;
+        Ok(self
+            .0
+            .list()
+            .into_iter()
+            .filter(|share| orgs.serves(&share.vault))
+            .collect())
     }
 
     async fn update(&self, code: String, change: ShareChange) -> Result<Share, ShareFault> {
         caller()?;
+        self.mine(&code)?;
         self.0.update(&code, change).await
     }
 
     async fn revoke(&self, code: String) -> Result<Share, ShareFault> {
         caller()?;
+        self.mine(&code)?;
         self.0.revoke(&code).await
     }
 
     async fn add_audience(&self, code: String, new: NewAudience) -> Result<Share, ShareFault> {
         caller()?;
+        self.mine(&code)?;
         self.0.add_audience(&code, new).await
     }
 
     async fn remove_audience(&self, code: String, name: String) -> Result<Share, ShareFault> {
         caller()?;
+        self.mine(&code)?;
         self.0.remove_audience(&code, &name).await
     }
 
@@ -1397,6 +1437,7 @@ impl ShareLinks for SharesLane {
         listen: Option<Listen>,
     ) -> Result<Share, ShareFault> {
         caller()?;
+        self.mine(&code)?;
         self.0.audience_listen(&code, &name, listen).await
     }
 
@@ -1431,9 +1472,7 @@ impl ShareLinks for SharesLane {
 
     async fn comments(&self, code: String) -> Result<Vec<ShareComment>, ShareFault> {
         caller()?;
-        if self.0.get(&code).is_none() {
-            return Err(ShareFault::NotFound(code));
-        }
+        self.mine(&code)?;
         Ok(self.0.comments(&code))
     }
 }
@@ -1797,6 +1836,12 @@ async fn answer(shares: Shares, request: Request) -> Result<Response, Box<Reques
         return Ok(serve(&shares, share, None, &rest, "/", request).await);
     }
     let path = request.uri().path().to_owned();
+    // A link as a path of the node's own origin, `/<link>` (#538): a
+    // live link's code there goes to the link. Only a code this node
+    // holds, so nothing else at the root (a Site, the web app) is taken.
+    if let Some(to) = root_link(&shares, &path, request.uri().query()) {
+        return Ok(Redirect::permanent(&to).into_response());
+    }
     let Some(below) = path
         .strip_prefix(LINKS)
         .filter(|r| r.is_empty() || r.starts_with('/'))
@@ -1827,6 +1872,18 @@ async fn answer(shares: Shares, request: Request) -> Result<Response, Box<Reques
     let mount = link_path(first);
     let rest = format!("/{}", parts.next().unwrap_or_default());
     Ok(serve(&shares, share, audience, &rest, &mount, request).await)
+}
+
+/// Where `/<code>` or `/<code>/<rest>` goes when `<code>` is a link of
+/// this node's: `/s/<code>/<rest>`, its query kept.
+fn root_link(shares: &Shares, path: &str, query: Option<&str>) -> Option<String> {
+    let below = path.strip_prefix('/')?;
+    let (code, rest) = below.split_once('/').unwrap_or((below, ""));
+    if !is_code(code) || shares.link(code).is_none() {
+        return None;
+    }
+    let query = query.map(|q| format!("?{q}")).unwrap_or_default();
+    Some(format!("{}{rest}{query}", link_path(code)))
 }
 
 /// `work` on the blocking pool (it reads a vault).
@@ -2129,7 +2186,8 @@ impl Shares {
             return Err(Closed::Gone);
         }
         let viewer = if share.audience.signed_in() {
-            self.viewer_of(token).await
+            self.viewer_of(token, self.0.orgs.of(&share.vault).cloned())
+                .await
         } else {
             Viewer::Anonymous
         };
@@ -3687,7 +3745,7 @@ mod tests {
         let shares = Shares::new(
             backend,
             tmp.path(),
-            None,
+            VaultOrgs::default(),
             Some(&issuer),
             architect_sites::Blocks::default(),
             LayerRules::default(),
@@ -3719,7 +3777,7 @@ mod tests {
             HeaderValue::from_str(&format!("{SIGNIN_COOKIE}={nonce}")).unwrap(),
         );
         let (viewer, started, polled) = tokio::join!(
-            tokio::time::timeout(bound, shares.viewer_of(bearer(&signed_in))),
+            tokio::time::timeout(bound, shares.viewer_of(bearer(&signed_in), None)),
             tokio::time::timeout(bound, start_signin(&shares, "/s/x/".into(), false)),
             tokio::time::timeout(bound, wait_signin(&shares, &waiting, false)),
         );

@@ -2157,3 +2157,292 @@ async fn a_note_deleted_on_disk_leaves_every_other_note_live() {
     assert!(!file.exists(), "the deleted note's file came back");
     host.stop().await;
 }
+
+/// The org lane of `slug` at `node`, with `token` as the bearer.
+async fn web_of<C: vox::FromVoxLane>(node: &Running, slug: &str, token: &str) -> C {
+    let at = architect::connect::Endpoint::url(format!("ws://{}/org/{slug}/vox", node.http))
+        .with_bearer(Some(token.to_owned()));
+    architect::connect::Pool::new().client(&at).await.unwrap()
+}
+
+/// #538 stage 3: one process, signed in as a person of two orgs, serves
+/// both on one origin. Each org's lane lists, reads, indexes, opens and
+/// shares that org's vault only; a member of one reaches nothing of the
+/// other; a link is a path of the origin (`/<link>`).
+#[tokio::test(flavor = "multi_thread")]
+async fn one_process_serves_two_orgs_each_on_its_own_lane() {
+    use architect_desktop::node::service::index_sync::VaultIndexSyncClient;
+    use architect_desktop::node::service::notes::NotesClient;
+    use architect_spaces::{Audience, Listen, NewShare, ShareAccess, ShareLinksClient, ShareScope};
+    use crdt::sync::{DocSyncClient, SyncedDoc};
+
+    let origin = issuer().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("host");
+    for org in ["acme", "indie"] {
+        std::fs::create_dir_all(dir.join(format!("data/vaults/{org}"))).unwrap();
+        std::fs::write(
+            dir.join(format!("data/vaults/{org}/setlist.md")),
+            format!("# {org}'s setlist\n"),
+        )
+        .unwrap();
+    }
+    // Grace is in both orgs: her session hosts every org it is in.
+    let mut host = config(
+        "multi-host",
+        &dir,
+        &origin,
+        session_of(&origin, &dir, "grace@local.test").await,
+    );
+    host.vaults = [
+        ("acme".to_owned(), PathBuf::from("vaults/acme")),
+        ("indie".to_owned(), PathBuf::from("vaults/indie")),
+    ]
+    .into();
+    host.host_orgs = vec!["*".to_owned()];
+    let host = node::start(host).await.unwrap();
+    let mut hosted = status(&host).await.hosted;
+    hosted.sort();
+    assert_eq!(hosted, ["acme", "indie"]);
+
+    let token = |email: &'static str| {
+        let (origin, dir) = (origin.clone(), tmp.path().join(email));
+        async move {
+            session_of(&origin, &dir, email).await;
+            token_in(&dir)
+        }
+    };
+    let (grace, alan, ada) = (
+        token("grace@local.test").await,
+        token("alan@local.test").await,
+        token("ada@local.test").await,
+    );
+
+    // Alan is in indie alone: its vault, and nothing of acme's.
+    let notes: NotesClient = web_of(&host, "indie", &alan).await;
+    let listed = notes.list().await.unwrap();
+    assert!(listed.iter().all(|n| n.vault == "indie"), "{listed:?}");
+    assert_eq!(listed.len(), 1, "{listed:?}");
+    assert!(
+        notes
+            .read("indie".to_owned(), "setlist.md".to_owned())
+            .await
+            .unwrap()
+            .contains("indie's")
+    );
+    assert!(
+        notes
+            .read("acme".to_owned(), "setlist.md".to_owned())
+            .await
+            .is_err(),
+        "another org's vault is not found on this lane"
+    );
+    assert!(
+        notes
+            .create("acme".to_owned(), "x.md".to_owned(), "x".to_owned())
+            .await
+            .is_err()
+    );
+    let index: VaultIndexSyncClient = web_of(&host, "indie", &alan).await;
+    assert!(index.snapshot("indie".to_owned()).await.is_ok());
+    assert!(index.snapshot("acme".to_owned()).await.is_err());
+    // Not a member of acme: its lane refuses him.
+    let other: NotesClient = web_of(&host, "acme", &alan).await;
+    assert!(other.list().await.is_err());
+    // Nor does his own lane open acme's note live.
+    // (Whether the note's text reaches a replica: a refused session
+    // brings nothing.)
+    let opens = |sync: DocSyncClient, vault: &'static str| async move {
+        let replica = crdt::CrdtDoc::ephemeral();
+        let mut synced = SyncedDoc::new(
+            vault_proto::collab_doc_id(vault, "setlist.md"),
+            replica.clone(),
+        );
+        let session = tokio::spawn(async move { synced.run(&sync).await });
+        let mut arrived = false;
+        for _ in 0..60 {
+            arrived = replica
+                .loro()
+                .get_text(vault_proto::COLLAB_BODY_CONTAINER)
+                .to_string()
+                .contains("setlist");
+            if arrived {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        session.abort();
+        arrived
+    };
+    assert!(opens(web_of(&host, "indie", &alan).await, "indie").await);
+    assert!(!opens(web_of(&host, "indie", &alan).await, "acme").await);
+
+    // Ada is in acme alone: the mirror image.
+    let notes: NotesClient = web_of(&host, "acme", &ada).await;
+    let listed = notes.list().await.unwrap();
+    assert!(
+        listed.len() == 1 && listed.iter().all(|n| n.vault == "acme"),
+        "{listed:?}"
+    );
+    let other: NotesClient = web_of(&host, "indie", &ada).await;
+    assert!(other.list().await.is_err());
+
+    // A share made on acme's lane is acme's: with no vault named it is
+    // the org's only one, and indie's lane neither lists nor revokes it.
+    let acme: ShareLinksClient = web_of(&host, "acme", &grace).await;
+    let share = acme
+        .create(NewShare {
+            vault: String::new(),
+            scope: ShareScope::Vault,
+            title: None,
+            audience: Audience::Link,
+            access: ShareAccess::Read,
+            expires_at: None,
+            domain: None,
+            listen: Listen::default(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(share.vault, "acme");
+    let indie: ShareLinksClient = web_of(&host, "indie", &grace).await;
+    assert!(indie.shares().await.unwrap().is_empty());
+    assert!(indie.revoke(share.code.clone()).await.is_err());
+    assert!(
+        indie
+            .create(NewShare {
+                vault: "acme".to_owned(),
+                scope: ShareScope::Vault,
+                title: None,
+                audience: Audience::Link,
+                access: ShareAccess::Read,
+                expires_at: None,
+                domain: None,
+                listen: Listen::default(),
+            })
+            .await
+            .is_err(),
+        "another org's vault is not shared from this lane"
+    );
+    assert_eq!(acme.shares().await.unwrap().len(), 1);
+
+    // The link as a path of the origin: `/<link>` goes to the link, and
+    // only a code this node holds does.
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let at = |path: String| format!("http://{}{path}", host.http);
+    let short = client
+        .get(at(format!("/{}", share.code)))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(short.status(), reqwest::StatusCode::PERMANENT_REDIRECT);
+    assert_eq!(
+        short.headers()["location"].to_str().unwrap(),
+        format!("/s/{}/", share.code)
+    );
+    let deeper = client
+        .get(at(format!("/{}/_files.json?by=note", share.code)))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        deeper.headers()["location"].to_str().unwrap(),
+        format!("/s/{}/_files.json?by=note", share.code)
+    );
+    let unknown = client
+        .get(at("/abcdefghjkmnpqrs".to_owned()))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unknown.status(), reqwest::StatusCode::NOT_FOUND);
+
+    host.stop().await;
+}
+
+/// A machine with no browser is registered on its person's account with
+/// a code they approve elsewhere (`serve register`), then runs as a
+/// storage server: on the account, let in by its other devices, listed
+/// with them as `storage`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_machine_registers_on_the_account_with_a_code_and_is_listed_as_storage() {
+    use architect_desktop::node::register;
+
+    let origin = issuer().await;
+    let tmp = tempfile::tempdir().unwrap();
+
+    // The machine asks; its person sees a link and a code.
+    let (shown_tx, shown) = tokio::sync::oneshot::channel();
+    let signing = tokio::spawn({
+        let origin = origin.clone();
+        async move {
+            register::sign_in(&origin, "starcommand", move |prompt| {
+                let _ = shown_tx.send(prompt.clone());
+            })
+            .await
+        }
+    });
+    let prompt = shown.await.unwrap();
+    assert!(prompt.url.starts_with(&origin), "{}", prompt.url);
+    assert!(prompt.url.contains(&prompt.code), "{}", prompt.url);
+
+    // Ada, signed in on her laptop, approves it there.
+    let ada = Issuer::new(&origin)
+        .sign_in_password("ada@local.test", auth_server::dev::DEV_PASSWORD)
+        .await
+        .unwrap();
+    let approved = reqwest::Client::new()
+        .post(format!("{origin}/auth/device/approve"))
+        .header(
+            "cookie",
+            format!("architect-auth.session={}", ada.session.token),
+        )
+        .form(&[("user_code", prompt.code.as_str())])
+        .send()
+        .await
+        .unwrap();
+    assert!(approved.status().is_success(), "{}", approved.status());
+    let token = tokio::time::timeout(Duration::from_secs(30), signing)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_ne!(token, ada.session.token, "a session of its own");
+
+    // Its session where the node reads it, and the node on the account.
+    let storage_dir = tmp.path().join("starcommand");
+    let session_file = storage_dir.join("secrets/session");
+    register::write_session(&session_file, &token).unwrap();
+    let mut storage = config("starcommand", &storage_dir, &origin, session_file);
+    storage.platform = "storage".to_owned();
+    let storage = node::start(storage).await.unwrap();
+
+    let vps_dir = tmp.path().join("vps");
+    let vps = node::start(config(
+        "vps",
+        &vps_dir,
+        &origin,
+        session(&origin, &vps_dir).await,
+    ))
+    .await
+    .unwrap();
+    let endpoint = storage.endpoint_id();
+    until("the account's node lets the storage server in", || {
+        vps.state.admits(&endpoint)
+    })
+    .await;
+    assert!(status(&storage).await.signed_in);
+
+    // Listed with the account's devices, as a storage server.
+    let devices = Issuer::new(&origin).devices(&ada.session).await.unwrap();
+    let listed = devices.iter().find(|d| d.name == "starcommand");
+    assert_eq!(
+        listed.map(|d| d.platform.as_str()),
+        Some("storage"),
+        "{devices:?}"
+    );
+
+    storage.stop().await;
+    vps.stop().await;
+}
