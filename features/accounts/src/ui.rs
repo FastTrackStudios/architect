@@ -726,6 +726,24 @@ fn SharePage() -> Element {
     let mut listen = use_signal(|| architect_spaces::Listen::default().label().to_owned());
     let mut problem = use_signal(|| None::<String>);
     let seen = accounts.shares_seen();
+    // The links this thing has already (one an audience): what the sheet
+    // is opened for is nearly always to find one and send it again.
+    let root = draft.scope.root();
+    let mine: Vec<architect_spaces::Share> = match &seen {
+        Some(Ok(list)) => list
+            .iter()
+            .filter(|s| {
+                s.revoked_at.is_none()
+                    && s.scope.root() == root
+                    && (draft.vault.is_empty() || s.vault == draft.vault)
+            })
+            .cloned()
+            .collect(),
+        _ => Vec::new(),
+    };
+    let has_links = !mine.is_empty();
+    let mut making = use_signal(|| false);
+    let show_form = making() || !has_links;
     let made_url = made.as_ref().and_then(|s| accounts.share_url(s));
     let (ask, make, done) = (accounts.clone(), accounts.clone(), accounts);
     let draft_make = draft;
@@ -734,10 +752,26 @@ fn SharePage() -> Element {
         div { style: "font-size: 13px; color: {t.ink_2};",
             "The node that hosts the org serves these notes, and only these, on a link of their own. Links to other notes show as plain text."
         }
-        if known.is_none() {
+        if has_links {
+            div { "data-share-existing": "{mine.len()}", style: "display: flex; flex-direction: column; gap: 6px;",
+                div { style: "font-size: 14px; font-weight: 600;", if mine.len() == 1 { "Its link" } else { "Its links" } }
+                for share in mine.iter().cloned() {
+                    ShareRowView { key: "mine-{share.code}", share }
+                }
+            }
+            if !making() {
+                div { style: "display: flex;",
+                    button { id: "share-new", style: button_style(&t, false), onclick: move |_| making.set(true),
+                        "New link for other people"
+                    }
+                }
+            }
+        }
+        if show_form && known.is_none() {
             input { id: "share-host", placeholder: "Host node (https://…)", value: "{host}", style: "{field}",
                 oninput: move |e: FormEvent| host.set(e.value()) }
         }
+        if show_form {
         label { style: "display: flex; flex-direction: column; gap: 4px; font-size: 13px;", "Who can open it"
             Chips { id: "share-audience", options: vec![("link", "Anyone with the link"), ("public", "Public"), ("org", "Org members"), ("invited", "Invited people")].into_iter().map(|(v, l): (&str, &str)| (v.to_owned(), l.to_owned())).collect(), now: audience(), onpick: move |v: String| audience.set(v) }
         }
@@ -789,7 +823,7 @@ fn SharePage() -> Element {
                     }
                 });
             },
-            "Create link"
+            if has_links { "Create that link" } else { "Create link" }
         }
         if let Some(url) = made_url {
             div { "data-share-made": "{url}", style: "display: flex; flex-direction: column; gap: 4px;",
@@ -797,9 +831,10 @@ fn SharePage() -> Element {
                 input { id: "share-url", readonly: true, value: "{url}", style: "{field}" }
             }
         }
+        }
         div { style: "display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid {t.rule};",
             div { style: "display: flex; align-items: center; gap: 8px; padding-top: 8px;",
-                div { style: "flex: 1 1 0; font-size: 14px; font-weight: 600;", "Share links" }
+                div { style: "flex: 1 1 0; font-size: 14px; font-weight: 600;", "Every link of this org" }
                 button { style: button_style(&t, false),
                     onclick: move |_| {
                         let (a, h) = (ask.clone(), host.peek().clone());
@@ -860,7 +895,21 @@ fn ShareRowView(share: architect_spaces::Share) -> Element {
         architect_spaces::ShareState::Revoked => "revoked",
     };
     let live = state == "live";
-    let dim = if live { "1" } else { "0.55" };
+    let paused = state == "paused";
+    let dim = if live || paused { "1" } else { "0.55" };
+    let name = share.name.clone().unwrap_or_default();
+    let (name_code, pause_code) = (share.code.clone(), share.code.clone());
+    // Revoking is asked twice: it is the one thing that ends a link.
+    let mut revoking = use_signal(|| false);
+    let opened = share.opened_at.map(|at| {
+        let ago = (now_secs() - at).max(0);
+        match ago {
+            0..=89 => "opened just now".to_owned(),
+            90..=5_399 => format!("opened {} min ago", ago / 60),
+            5_400..=129_599 => format!("opened {} h ago", ago / 3_600),
+            _ => format!("opened {} days ago", ago / 86_400),
+        }
+    });
     let title = share
         .title
         .clone()
@@ -878,20 +927,60 @@ fn ShareRowView(share: architect_spaces::Share) -> Element {
             div { style: "display: flex; align-items: center; gap: 10px;",
                 Share2 { size: 16, color: t.ink_2.to_string() }
                 div { style: "flex: 1 1 0; min-width: 0; display: flex; flex-direction: column;",
-                    div { style: "font-size: 13px;", "{title}" }
-                    div { style: "font-size: 12px; color: {t.ink_3};", "{audience} · {access} · plays {plays} · {state}" }
+                    div { style: "font-size: 13px;",
+                        if name.is_empty() { "{title}" } else { "{name}: {title}" }
+                    }
+                    div { style: "font-size: 12px; color: {t.ink_3};",
+                        "{audience}, {access}, plays {plays}, {state}"
+                        if let Some(opened) = &opened { ", {opened}" }
+                    }
                 }
-                if live {
-                    button { style: button_style(&t, false), "aria-label": "Revoke {title}",
+                if live || paused {
+                    button { style: button_style(&t, false), "data-share-pause": "{share.code}",
+                        "aria-label": if paused { "Resume {title}" } else { "Pause {title}" },
                         onclick: move |_| {
-                            let (a, c) = (ui.accounts(), code.clone());
-                            spawn(async move { let _ = a.share_revoke(None, &c).await; });
+                            let (a, c) = (ui.accounts(), pause_code.clone());
+                            spawn(async move { let _ = a.share_update(None, &c, architect_spaces::ShareChange::Paused(!paused)).await; });
                         },
-                        "Revoke"
+                        if paused { "Resume" } else { "Pause" }
+                    }
+                    if !revoking() {
+                        button { style: button_style(&t, false), "aria-label": "Revoke {title}",
+                            onclick: move |_| revoking.set(true),
+                            "Revoke"
+                        }
                     }
                 }
             }
-            if live {
+            if revoking() {
+                div { role: "alertdialog", "data-share-revoking": "{share.code}",
+                    style: "display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid {t.danger}; border-radius: 8px;",
+                    div { style: "font-size: 13px;",
+                        "Revoking ends this link for everyone who has it. It cannot be brought back; a new link has a new address. To close it for now, pause it."
+                    }
+                    div { style: "display: flex; gap: 8px; justify-content: flex-end;",
+                        button { style: button_style(&t, false), onclick: move |_| revoking.set(false), "Keep the link" }
+                        button { style: button_style(&t, true), "data-share-revoke": "{share.code}",
+                            onclick: move |_| {
+                                let (a, c) = (ui.accounts(), code.clone());
+                                revoking.set(false);
+                                spawn(async move { let _ = a.share_revoke(None, &c).await; });
+                            },
+                            "End the link"
+                        }
+                    }
+                }
+            }
+            if live || paused {
+                input { "data-share-name": "{share.code}", placeholder: "A name to find it by (Band, Client preview)", value: "{name}", style: "{field} font-size: 12px;",
+                    "aria-label": "This link's name",
+                    onchange: move |e: FormEvent| {
+                        let (a, c, n) = (ui.accounts(), name_code.clone(), e.value());
+                        spawn(async move { let _ = a.share_update(None, &c, architect_spaces::ShareChange::Name(Some(n))).await; });
+                    },
+                }
+            }
+            if live || paused {
                 input { readonly: true, value: "{url}", style: "{field} font-size: 12px;" }
                 Chips { id: "share-listen-{share.code}", options: listen_options(), now: share.listen.label().to_owned(),
                     onpick: move |v: String| {
