@@ -448,7 +448,8 @@ pub fn NowPlayingBar(#[props(default)] art: Option<Callback<String, Option<Strin
         }
     };
     // A card: on its gutters, its own corners and shadow, over the page.
-    let (gutter, foot) = if phone { (12, 8) } else { (16, 12) };
+    // On a phone it sits just over the bottom tabs: their own top padding is the gap.
+    let (gutter, foot) = if phone { (12, 2) } else { (16, 12) };
     // Shown or not, the detail stays laid out (the line keeps its width to
     // seek by): closed, it takes no height and is out of sight and out of
     // the keyboard's way (`visibility: hidden`).
