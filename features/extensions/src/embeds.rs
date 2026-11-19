@@ -153,6 +153,39 @@ impl Embeds {
         })
     }
 
+    /// The note types the app's own linked extensions draw, each with the
+    /// view that draws it and what its extension declares it reads: every
+    /// `[[embeds]]` of a compiled-in extension (`Origin::Builtin`, not
+    /// overridden by another copy of its id) that claims a note type with
+    /// one of its linked views, in the order they loaded.
+    ///
+    /// What an app whose views are compiled in (a distribution's web app)
+    /// chooses a note's view from, before any separately loaded one.
+    #[cfg(feature = "linked")]
+    #[must_use]
+    pub fn linked_note_views(&self) -> Vec<LinkedNoteView> {
+        self.host
+            .contributions()
+            .embeds()
+            .into_iter()
+            .filter(|by| !by.item.claims.note_type.is_empty())
+            .filter_map(|by| {
+                let view = by.item.view.clone()?;
+                self.host.linked_view(&by.owner, &view)?;
+                let loaded = self.host.get(&by.owner)?;
+                Some(LinkedNoteView {
+                    reads: self
+                        .host
+                        .capabilities_of(&loaded.manifest, loaded.origin)
+                        .reads,
+                    extension: by.owner,
+                    view,
+                    note_types: by.item.claims.note_type,
+                })
+            })
+            .collect()
+    }
+
     /// Every claim a loaded extension makes, with its owner and embed:
     /// what an editor's fence registry is filled from.
     #[must_use]
@@ -194,6 +227,108 @@ impl Host {
     #[must_use]
     pub fn embeds(&self) -> Embeds {
         Embeds::new(self.clone())
+    }
+
+    /// The `[[favourites]]` its linked extensions declare (compiled in,
+    /// running as built-ins), each with who declared it and what its
+    /// capabilities let it run: what an app reads in its own process,
+    /// where a node's listing (`/_ext/favourites.json`) is read otherwise.
+    #[cfg(feature = "linked")]
+    #[must_use]
+    pub fn linked_favourites(&self) -> Vec<architect_favourites::Listed> {
+        let linked = self.linked();
+        self.loaded()
+            .into_iter()
+            .filter(|l| {
+                l.origin == Origin::Builtin && linked.iter().any(|(id, _)| *id == l.manifest.id)
+            })
+            .flat_map(|l| {
+                let by = l.manifest.declarer();
+                l.manifest
+                    .favourites
+                    .into_iter()
+                    .map(move |favourites| architect_favourites::Listed {
+                        by: by.clone(),
+                        favourites,
+                    })
+            })
+            .collect()
+    }
+
+    /// Its linked extensions' views, each extension with the ids of the
+    /// views its code draws (`(id, views)`): what a favourite's `{view}`
+    /// of that extension may open in the app's own document.
+    #[cfg(feature = "linked")]
+    #[must_use]
+    pub fn linked_view_ids(&self) -> Vec<(String, Vec<String>)> {
+        self.linked()
+            .into_iter()
+            .filter(|(id, _)| self.get(id).is_some_and(|l| l.origin == Origin::Builtin))
+            .map(|(id, built)| (id, built.view_ids()))
+            .collect()
+    }
+}
+
+/// A note type's view of a linked extension
+/// ([`Embeds::linked_note_views`]).
+#[cfg(feature = "linked")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkedNoteView {
+    /// The extension.
+    pub extension: String,
+    /// Its view that draws the note.
+    pub view: String,
+    /// The note types the view claims, as declared.
+    pub note_types: Vec<String>,
+    /// What its extension may read (`[capabilities] reads`): the app
+    /// hands its view a note's text only with `documents`, a note's files
+    /// only with `files` too.
+    pub reads: Vec<String>,
+}
+
+/// Which views draw a guest's content (a share link's note, #629): the
+/// embedding app's choice, in context above [`GuestEmbedView`].
+///
+/// A guest's content is never drawn with a person's reach. A page embed
+/// runs on a host that reaches nothing (`architect_pages::host::AppHost::guest`),
+/// so it always may. A linked view runs in the app's process and asks the
+/// app's host; a process view asks over its own connection. On a desk the
+/// app's host is the person's own session, with their vaults, so neither
+/// draws a guest's content there: that is the default, and what an app
+/// that provides no policy gets.
+///
+/// An app whose host is a guest's ([`Host::for_guest`]: no vault, no
+/// session, every vault request refused) may let its own linked
+/// extensions draw ([`Self::own_linked`]). Those views are compiled into
+/// the app: they are the app itself, as much as the page around them is,
+/// and there is nothing of a person's in the process for them to reach.
+/// What they are handed is still the link's permission: the app gives
+/// them the guest's note, never more than the link's node gave it.
+/// A process view never draws a guest's content.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GuestEmbedPolicy {
+    linked: bool,
+}
+
+impl GuestEmbedPolicy {
+    /// Pages only: what an app that says nothing gets (a desk).
+    #[must_use]
+    pub const fn pages_only() -> Self {
+        Self { linked: false }
+    }
+
+    /// The app's own linked extensions too, on a guest's host.
+    #[must_use]
+    pub const fn own_linked() -> Self {
+        Self { linked: true }
+    }
+
+    /// Whether a linked view may draw a guest's content on `host`: the
+    /// app said so, and `host` runs for a guest. Both, so an app that
+    /// holds a person's session never draws one by a policy set in error.
+    #[must_use]
+    pub fn draws_linked(self, host: &Host) -> bool {
+        self.linked && host.is_guest()
     }
 }
 
@@ -261,12 +396,14 @@ mod view {
     }
 
     /// A guest's content (a share link's note, #629) that `claim` claims:
-    /// as [`EmbedView`], but never drawn with the person's reach. Only a
-    /// page embed draws it, on a host with no action, no host-service
-    /// call and no vault (`architect_pages::host::AppHost::guest`); a
-    /// linked or process view, which runs with the person's own session,
-    /// does not, and `fallback` shows. A component of its own, not a
-    /// prop, so no caller can forget to say so.
+    /// as [`EmbedView`], but never drawn with the person's reach. A page
+    /// embed draws it, on a host with no action, no host-service call and
+    /// no vault (`architect_pages::host::AppHost::guest`). A linked view
+    /// draws it only where the app's [`GuestEmbedPolicy`](super::GuestEmbedPolicy)
+    /// (in context) lets its own linked extensions and its host is a
+    /// guest's; a process view never does. Otherwise `fallback` shows. A
+    /// component of its own, not a prop, so no caller can forget to say
+    /// so.
     #[component]
     pub fn GuestEmbedView(
         claim: Claim,
@@ -311,12 +448,20 @@ mod view {
         draw(&host, spec, input, plain)
     }
 
-    /// `spec` drawn for a guest's content, given `input`: only by a page
-    /// (its own or its view's), on a host that reaches nothing of the
-    /// person's (`architect_pages::host::AppHost::guest`); else `plain`.
-    /// A linked view runs in the app's process with the person's session,
-    /// a process view with its own connection's: neither can be kept from
-    /// the person's vaults, so neither draws a guest's content.
+    /// `spec` drawn for a guest's content, given `input`: by a page (its
+    /// own or its view's), on a host that reaches nothing of the person's
+    /// (`architect_pages::host::AppHost::guest`); by the app's own linked
+    /// view where the app's policy and its host allow it
+    /// (`GuestEmbedPolicy::draws_linked`); else `plain`.
+    ///
+    /// The policy is the embedding app's, not this function's, because
+    /// only the app knows what its process holds. A linked view runs in
+    /// the app's process and a process view over its own connection: on a
+    /// desk both hold the person's session and cannot be kept from their
+    /// vaults, so by default neither draws a guest's content. An app
+    /// built for guests (no vault, no session, a host that refuses every
+    /// vault request) holds nothing to keep a view from, and its linked
+    /// views are the app itself.
     fn draw_guest(
         host: &crate::host::Host,
         spec: EmbedSpec,
@@ -326,10 +471,26 @@ mod view {
         if host.get(&spec.extension).is_none() {
             return plain();
         }
+        let key = format!("{}/{}", spec.extension, spec.embed.id);
+        #[cfg(feature = "linked")]
+        if spec.page.is_none()
+            && try_consume_context::<super::GuestEmbedPolicy>()
+                .unwrap_or_default()
+                .draws_linked(host)
+            && let Some(view) = spec.embed.view.as_deref()
+            && let Some(root) = host.linked_view(&spec.extension, view)
+        {
+            let max = spec.max_height;
+            return rsx! {
+                div { class: "embed", "data-embed": "{key}", "data-guest": "true",
+                    style: "{BOX} max-height: {max}px; overflow-y: auto;",
+                    LinkedEmbed { key: "{key}", root, input }
+                }
+            };
+        }
         let Some(pages) = try_consume_context::<EmbedPages>() else {
             return plain();
         };
-        let key = format!("{}/{}", spec.extension, spec.embed.id);
         let ask = EmbedAsk {
             // Unused for a guest: nothing passes.
             gate: std::sync::Arc::new(|_| Err("a guest's content runs nothing".to_owned())),

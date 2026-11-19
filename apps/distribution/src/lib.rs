@@ -178,6 +178,8 @@ pub struct Distribution {
     dev_installs: bool,
     /// Folders of packages it ships beside its binary: [`Self::shipped`].
     shipped: Vec<String>,
+    /// The linked view that is its signed-in home: [`Self::home`].
+    home: Option<(String, String)>,
 }
 
 impl std::fmt::Debug for Distribution {
@@ -252,6 +254,7 @@ impl Distribution {
             #[cfg(not(target_family = "wasm"))]
             islands: Vec::new(),
             shipped: Vec::new(),
+            home: None,
             listed_favourites: Vec::new(),
             adopts: None,
             registries: vec![store()],
@@ -706,6 +709,33 @@ impl Distribution {
             .collect()
     }
 
+    /// Names view `view` of its compiled-in extension `extension` as the
+    /// app's home: what a signed-in member sees before a note is open,
+    /// filling the page (the web app's `apps/web/src/app/home.rs`).
+    ///
+    /// The view is one the extension's code draws
+    /// (`architect_extensions::linked::Builder::view`). It reads what the
+    /// app hands a home with `architect_extensions::linked::use_embed`:
+    /// its `props` are `{home: {person, orgs: [{slug, rows}], recent}}`.
+    /// It is set here, not in a manifest, because an app has one home and
+    /// which view it is belongs to whoever builds the app: an extension
+    /// that is installed later cannot take it. A home that names a view
+    /// no compiled-in extension draws is no home.
+    #[must_use]
+    pub fn home(mut self, extension: impl Into<String>, view: impl Into<String>) -> Self {
+        self.home = Some((extension.into(), view.into()));
+        self
+    }
+
+    /// The linked view named as its home ([`Self::home`]): the
+    /// extension's id and the view's.
+    #[must_use]
+    pub fn home_view(&self) -> Option<(&str, &str)> {
+        self.home
+            .as_ref()
+            .map(|(extension, view)| (extension.as_str(), view.as_str()))
+    }
+
     /// The `[[favourites]]` of `manifest`, an extension manifest that is
     /// not one of its compiled-in extensions': its island's
     /// ([`island`](Self::island)), whose views those tabs open. Listed with
@@ -1002,6 +1032,19 @@ mod tests {
     use std::path::Path;
 
     use super::instance_id;
+
+    #[test]
+    fn a_distribution_names_its_home_view_or_has_none() {
+        let plain = super::Distribution::new("Plain");
+        assert_eq!(plain.home_view(), None);
+        let studio = plain.home("studio.library", "home");
+        assert_eq!(studio.home_view(), Some(("studio.library", "home")));
+        // Renamed, it keeps its home.
+        assert_eq!(
+            studio.named("Studio").home_view(),
+            Some(("studio.library", "home"))
+        );
+    }
 
     #[test]
     fn a_copy_on_a_folder_of_its_own_is_an_instance_of_its_own() {

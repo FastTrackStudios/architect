@@ -191,6 +191,8 @@ pub(crate) struct Services {
     documents: Mutex<Option<Arc<dyn Documents>>>,
     /// The vault's query service, when the app keeps a vault index.
     vault_query: Mutex<Option<HeldQuery>>,
+    /// Whether the host runs for a share link's guest (`Host::for_guest`).
+    guest: std::sync::atomic::AtomicBool,
     /// The app's editors, for the editor calls (`crate::editor`).
     editors: Mutex<Option<Arc<dyn crate::editor::Editors>>>,
     values: Mutex<Arc<dyn SettingValues>>,
@@ -300,6 +302,7 @@ impl Default for Services {
             app: Mutex::new(None),
             documents: Mutex::new(None),
             vault_query: Mutex::new(None),
+            guest: std::sync::atomic::AtomicBool::new(false),
             editors: Mutex::new(None),
             values: Mutex::new(Arc::new(MemoryValues::default())),
             data_root: Mutex::new(None),
@@ -533,6 +536,33 @@ impl Host {
             VaultScope::Person => Some(held_query(queries)),
             VaultScope::Guest => None,
         };
+    }
+
+    /// A host that runs for a share link's guest (#629): from now on it
+    /// answers no host-service call that reaches a vault, kept data, a
+    /// file, the device or an app action, whatever an extension's
+    /// capabilities say (`crate::hostcall::guest_check`), and a path an
+    /// extension asks to open goes to the app's own opener alone
+    /// (`Host::set_path_opener`), which opens only what the link lists.
+    ///
+    /// The app that shows a link builds its host this way and gives it no
+    /// documents and no vault. It is what lets the app's own linked views
+    /// draw a guest's content (`crate::embeds::GuestEmbedPolicy`): they
+    /// run in the app's process, and this host is the one they ask.
+    #[must_use]
+    pub fn for_guest(self) -> Self {
+        self.services()
+            .guest
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self
+    }
+
+    /// Whether it runs for a share link's guest ([`Self::for_guest`]).
+    #[must_use]
+    pub fn is_guest(&self) -> bool {
+        self.services()
+            .guest
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// The vault's query service's client, when the app gave one.
@@ -1148,6 +1178,13 @@ impl ExtensionApi {
         if !matches!(request, HostRequest::Run { .. }) {
             Self::checked(manifest, &may, &request)?;
         }
+        // A share link's guest: nothing of a vault, whatever it may reach.
+        if host.is_guest() {
+            Self::decide(
+                crate::hostcall::GUEST,
+                crate::hostcall::guest_check(manifest, &request),
+            )?;
+        }
         // Health data is the app's own compiled-in extensions' alone (the
         // Health bundle, #371): an installed or a development copy is
         // refused even with the entry in its manifest.
@@ -1184,6 +1221,11 @@ impl ExtensionApi {
                 .app_context()
                 .and_then(|c| c.selection())
                 .unwrap_or(Value::Null)),
+            // For a guest, the app's own opener alone: no extension's
+            // opener is handed a path of the link.
+            HostRequest::Open { path } if host.is_guest() => host
+                .open_with_app(&path)
+                .map_err(|message| HostError::Failed { message }),
             HostRequest::Open { path } => host
                 .open(
                     Opening::Path(path),
