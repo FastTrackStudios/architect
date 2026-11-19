@@ -394,10 +394,10 @@ async function openSong(b, origin) {
   await until(() => click('Songs'), 10000, 'the Songs folder');
   await sleep(300);
   await until(() => click('Amazing Grace'), 10000, 'the song note');
-  await until(() => b.eval(`!!document.querySelector('[data-testid=note-embed]')`), 15000, 'the claimed view');
+  await until(() => b.eval(`!!document.querySelector('[data-ext-view-of]')`), 15000, 'the claimed view');
 }
 
-const timeOf = async (b) => Number(await b.eval(`document.querySelector('[data-testid=note-embed]').dataset.time`));
+const timeOf = async (b) => Number(await b.eval(`document.querySelector('[data-ext-view-of]').dataset.time`));
 
 async function frameOf(b, view) {
   for (const c of await b.frames()) {
@@ -478,7 +478,7 @@ test('a frame takes nothing of the app and its asks are only rate-limited intent
     await sleep(500);
     const time = await timeOf(w.b);
     assert.ok(time >= 0 && time <= 10, `the playhead stayed in the item: ${time}`);
-    assert.equal(await w.b.eval(`document.querySelector('[data-testid=note-embed]').dataset.queue`), '1');
+    assert.equal(await w.b.eval(`document.querySelector('[data-ext-view-of]').dataset.queue`), '1');
   } finally { await w.close(); }
 });
 
@@ -494,14 +494,15 @@ test('a frame that floods its port is booted once and its height held', { skip }
     const m = await mark(w.b, 'transport');
     assert.equal(m.state, 'ready');
     assert.equal(m.refused, 'too many requests');
-    // At the note's head: held at a share of the window, scrolling inside
-    // (`ext_host::head_height`), however tall it says it is.
-    const cap = Math.max(240, (await w.b.eval('innerHeight')) * 0.6);
-    const held = await until(async () => {
-      const h = parseFloat((await mark(w.b, 'transport')).height);
-      return Math.abs(h - cap) < 1 && h;
-    }, 5000, 'the frame to be held at the cap');
-    assert.ok(Math.abs(held - cap) < 1, `${held} px, the cap ${cap}`);
+    // A note its view draws is the view, the height of the page: the
+    // frame takes its box's height (`100%`), scrolling inside, whatever
+    // height it says it is (the flood says 100 and 99999 by turns), and
+    // is never taller than the window.
+    await sleep(500);
+    assert.equal((await mark(w.b, 'transport')).height, '100%');
+    const drawn = await w.b.eval(`document.querySelector('[data-ext-view-of] iframe').getBoundingClientRect().height`);
+    const most = await w.b.eval('innerHeight');
+    assert.ok(drawn > 0 && drawn <= most, `${drawn} px in a window of ${most}`);
   } finally { await w.close(); }
 });
 
@@ -563,7 +564,7 @@ async function openNote(b, origin, path, name, fresh = true) {
   await until(() => b.eval(`document.querySelector('[data-note]')?.dataset.note?.endsWith(${JSON.stringify(`${name}.md`)})`), 10000, `${name} open`);
 }
 
-const embed = async (b) => JSON.parse(await b.eval(`JSON.stringify((() => { const e = document.querySelector('[data-testid=note-embed]'); return e && { view: e.dataset.view, queue: Number(e.dataset.queue), current: e.dataset.current, island: e.querySelector('[data-testid=ext-frame]')?.dataset.extIsland }; })())`));
+const embed = async (b) => JSON.parse(await b.eval(`JSON.stringify((() => { const e = document.querySelector('[data-ext-view-of]'); return e && { view: e.dataset.view, queue: Number(e.dataset.queue), current: e.dataset.current, island: e.querySelector('[data-testid=ext-frame]')?.dataset.extIsland }; })())`));
 
 test('a note\'s type picks its island from the listing; the view gets the note through the gate, and only asks it may', { skip }, async () => {
   const n = await node(null, null, [
@@ -594,7 +595,7 @@ test('a note\'s type picks its island from the listing; the view gets the note t
     const full = await until(async () => { const x = await embed(b); return x.queue === 500 && x; }, 20000, 'the 500-item queue');
     // At the note's head it is at most a share of the window, and scrolls
     // inside its own box (#657, #660): the note is not pushed away.
-    const tall = JSON.parse(await b.eval(`JSON.stringify([document.querySelector('[data-testid=note-embed] iframe').getBoundingClientRect().height, innerHeight])`));
+    const tall = JSON.parse(await b.eval(`JSON.stringify([document.querySelector('[data-ext-view-of] iframe').getBoundingClientRect().height, innerHeight])`));
     assert.ok(tall[0] <= Math.max(240, tall[1] * 0.6) + 1, `a frame ${tall[0]} px tall in a window ${tall[1]} px`);
     assert.match(full.current, /^Setlists\/Merry\.md#\d+$/);
     const refused = JSON.parse(await b.eval('JSON.stringify(window.__refused)'));
@@ -805,7 +806,7 @@ test('a far time is refused, ^ is always there, and a frame keeps its document\'
     if (process.env.SHOTS) {
       mkdirSync(process.env.SHOTS, { recursive: true });
       await until(async () => (await bar(b))?.title === 'Amazing Grace', 10000, 'the bar');
-      const frameInView = `(() => { const e = document.querySelector('[data-testid=note-embed]'); if (e) e.scrollIntoView({ block: 'center' }); return !!e; })()`;
+      const frameInView = `(() => { const e = document.querySelector('[data-ext-view-of]'); if (e) e.scrollIntoView({ block: 'center' }); return !!e; })()`;
       await b.eval(frameInView);
       await sleep(600);
       await b.shot(join(process.env.SHOTS, 'm3-desk-dark-on-light-system.png'));
@@ -909,12 +910,12 @@ test('the demo setlist: each song\'s cover reaches its frame as data and the car
     const p = await until(async () => { const q = await propsOf(b, 'transport'); return q && q.tracks === 5 && q; }, 15000, 'the five songs queued');
     assert.equal(p.queueArt, 5, 'every queued song handed its cover');
     // The island claims the setlist's type: it draws, not the core list
-    // (#668). Its view draws the list, so the list's own rows leave the
-    // property table as they do for the core list (the view is still
-    // handed every property).
+    // (#668). A note its type's view draws is that view alone: no property
+    // table and no second heading under it (the view is still handed
+    // every property).
     assert.equal(await b.eval(`!!document.querySelector('[data-testid=media-list]')`), false, 'no core list under a claim');
     const table = await b.eval(`[...document.querySelectorAll('[data-testid=note-properties] dt')].map((d) => d.textContent).join(',')`);
-    assert.ok(!/\b(sets|songs)\b/.test(table) && table.includes('title'), table);
+    assert.equal(table, '', 'no property table under a view that is the page');
     await ask(b, 'transport', 'PLAYHEAD_ITEM', { id: 'Libraries/Christmas/Silent Night/Silent Night.md', play: true });
     const s = await until(async () => { const s = await bar(b); return s && s.title === 'Silent Night' && s; }, 10000, 'the card on Silent Night');
     assert.match(s.subtitle, /for KING & COUNTRY/);

@@ -346,7 +346,7 @@ test('the slots follow the open note\'s type at 390 px, and a tab opens its view
     await openNote(b, 'Songs', 'Amazing Grace');
     const declared = { tabs: ['Song', 'Lyrics', 'Chords', 'Songs'], current: 'song:song', primary: 'Find' };
     await until(async () => same(await slots(b), declared), 15000, 'the declared slots');
-    await until(() => b.eval(`!!document.querySelector('[data-testid=note-embed][data-view=progress] [data-testid=ext-frame][data-ext-state=ready]')`), 20000, 'the claimed view at the note\'s head');
+    await until(() => b.eval(`!!document.querySelector('[data-ext-view-of][data-view=progress] [data-testid=ext-frame][data-ext-state=ready]')`), 20000, 'the claimed view at the note\'s head');
     await b.shot('phone-declared');
 
     // Lyrics: the island's lyrics view in a frame of its own, handed the
@@ -410,7 +410,7 @@ test('the slots follow the open note\'s type at 390 px, and a tab opens its view
     await until(() => click(b, 'Songs'), 10000, 'the Songs folder on a desk');
     await sleep(300);
     await until(() => click(b, 'Amazing Grace'), 10000, 'the song note on a desk');
-    await until(() => b.eval(`!!document.querySelector('[data-testid=note-embed]')`), 15000, 'the song note on a desk');
+    await until(() => b.eval(`!!document.querySelector('[data-ext-view-of]')`), 15000, 'the song note on a desk');
     // The sidebar's tabs are the declared set, the note's tab current.
     await until(async () => { const s = await slots(b); return s.tabs.includes('Lyrics') && s.current === 'song:song'; }, 15000, 'the declared set on a desk, Song current');
     await sleep(1500);
