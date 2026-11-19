@@ -121,6 +121,11 @@ thread_local! {
 }
 
 /// The node's islands this app believes (none without a node).
+/// The islands the node lists (cached for the page's life).
+pub async fn islands() -> Rc<Vec<Island>> {
+    listing().await
+}
+
 async fn listing() -> Rc<Vec<Island>> {
     if let Some(l) = LISTING.with(|l| l.borrow().clone()) {
         return l;

@@ -64,7 +64,9 @@ use architect::action::ActionList;
 use architect_commands::{Command, Overlay, PaletteView};
 use architect_shell::{self as shell, AppShell, icon};
 use dioxus::prelude::*;
-use lucide_dioxus::{Command as CommandIcon, Files, LogIn, LogOut, Search, Settings2, SquarePen};
+use lucide_dioxus::{
+    Command as CommandIcon, Files, LogIn, LogOut, Pause, Play, Search, Settings2, SquarePen,
+};
 
 /// Which app the page is.
 #[derive(Clone)]
@@ -219,6 +221,7 @@ fn WebApp() -> Element {
     // web app's own.
     let slots = favourites::use_web_favourites(workspace, &web_vault.source, &commands);
     let set = slots.set.clone();
+    let current = slots.current;
     // What the viewer may do here, and so which of the shell's controls
     // are drawn (`crate::permits`): a link's guest has no vault and writes
     // nothing. A permission on the same shell, never another one.
@@ -239,7 +242,37 @@ fn WebApp() -> Element {
         .primary
         .clone()
         .filter(|a| a.label != "New note" || permits.allows(crate::permits::Needs::Write));
-    let current = slots.current;
+    // A link's own tabs: the favourites its root note's type declares
+    // (`guest::BAR`), and its round button, which plays and pauses.
+    let playing = architect_playhead::ui::use_playhead();
+    let link_bar = guest.then(|| guest::BAR()).filter(|b| !b.tabs.is_empty());
+    let (tabs, current, separate) = match &link_bar {
+        Some(bar) => (
+            bar.tabs
+                .iter()
+                .map(|t| shell::Tab::named(t.id, t.label, t.glyph))
+                .collect(),
+            bar.current,
+            bar.primary.as_ref().and_then(|p| {
+                let architect_favourites::Target::Action(action) = &p.target else {
+                    return None;
+                };
+                let action = action.clone();
+                action.starts_with("PLAYHEAD_").then(|| {
+                    let on = playing().active.is_some_and(|a| a.playing);
+                    let (label, icon) = match (&p.on, on) {
+                        (Some(face), true) => (face.label.clone(), icon!(Pause)),
+                        _ => (p.label.clone(), icon!(Play)),
+                    };
+                    shell::Action::new(label, icon, move |()| {
+                        architect_playhead::ui::press(&action, &serde_json::json!({}));
+                    })
+                })
+            }),
+        ),
+        None => (tabs, current, separate),
+    };
+    let on_link_bar = link_bar.is_some();
     let foot = vec![shell::Action::new(
         "Settings",
         icon!(Settings2),
@@ -359,7 +392,9 @@ fn WebApp() -> Element {
                         tabs,
                         current,
                         on_tab: move |id: &'static str| {
-                            if !set.press(id) {
+                            if on_link_bar {
+                                guest::press_tab(id);
+                            } else if !set.press(id) {
                                 favourites::own_tab(id, workspace, &commands);
                             }
                         },
@@ -370,7 +405,13 @@ fn WebApp() -> Element {
                         status,
                         // A phone's navigator: the shell's left side (the
                         // workspace's left dock is the shell's on a desk).
-                        left: (phone && permits.allows(crate::permits::Needs::Vault)).then(|| rsx! { vault::FilesView {} }),
+                        // A guest's: the link itself (who it is for, its
+                        // notes, its files).
+                        left: if guest {
+                            Some(rsx! { guest::GuestSide {} })
+                        } else {
+                            phone.then(|| rsx! { vault::FilesView {} })
+                        },
                         actions: {
                             use crate::permits::Needs;
                             [
@@ -382,7 +423,9 @@ fn WebApp() -> Element {
                             ]
                         }
                         .into_iter()
-                        .filter(|(needs, _)| permits.allows(*needs))
+                        // The row is for working on notes: a viewer who
+                        // writes none has none of it.
+                        .filter(|(needs, _)| permits.allows(crate::permits::Needs::Write) && permits.allows(*needs))
                         .map(|(_, action)| action)
                         .chain(demo.then(|| shell::BarAction::new("WEB_SIGN_IN", "Sign in", icon!(LogIn))))
                         .collect::<Vec<_>>(),
