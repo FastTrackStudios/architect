@@ -124,6 +124,8 @@ impl Embeds {
                 embed_type: vec!["base_view".to_owned()],
                 ..Default::default()
             },
+            reads: Vec::new(),
+            properties: Vec::new(),
             max_height: None,
         };
         self.spec(by.owner, embed, Claim::EmbedType("base_view".to_owned()))

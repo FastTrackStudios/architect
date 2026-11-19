@@ -504,6 +504,16 @@ pub struct EmbedDecl {
     /// sub-document.
     pub page: Option<String>,
     pub claims: EmbedClaims,
+    /// What its view reads of the note it is drawn on (`reads =
+    /// ["documents"]`): a node's web face hands it the note only when it
+    /// names `documents` here and its extension declares it too
+    /// (`[capabilities] reads`; `architect_sites::SiteIsland::embed_note`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub reads: Vec<String>,
+    /// The note's frontmatter keys it declares for the types it claims:
+    /// all of them a share link's guest's view is given.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub properties: Vec<String>,
     /// The most it grows to, points; past it the embed scrolls.
     pub max_height: Option<u32>,
 }

@@ -420,6 +420,54 @@ impl Parts {
         }
     }
 
+    /// With the web packages `config` names
+    /// ([`Config::web_package_dirs`]): each folder's island, favourites
+    /// and share layers (`architect_sites::package::load`), after the
+    /// distribution's own. A package whose id an island already has is
+    /// left out, the first one kept; a folder that is refused is left out.
+    /// Either is said once, and the node starts without it.
+    #[must_use]
+    pub fn with_web_packages(mut self, config: &Config) -> Self {
+        for dir in config.web_package_dirs() {
+            let folder = dir.display().to_string();
+            let package = match architect_sites::package::load(&dir) {
+                Ok(package) => package,
+                Err(error) => {
+                    tracing::warn!(
+                        web_package.folder = %folder,
+                        web_package.outcome = "refused",
+                        web_package.reason = %error,
+                        "a web package is refused; not serving it"
+                    );
+                    continue;
+                }
+            };
+            let id = package.island.id().to_owned();
+            if self.islands.iter().any(|i| i.id() == id) {
+                tracing::warn!(
+                    web_package.folder = %folder,
+                    web_package.id = %id,
+                    web_package.outcome = "skipped",
+                    web_package.reason = "an island of this id is already served",
+                    "a web package's id is taken; not serving it"
+                );
+                continue;
+            }
+            tracing::info!(
+                web_package.folder = %folder,
+                web_package.id = %id,
+                web_package.outcome = "loaded",
+                web_package.favourites = package.favourites.len(),
+                web_package.share_layers = package.share_layers.len(),
+                "a web package is served as an island"
+            );
+            self.islands.push(package.island);
+            self.favourites.extend(package.favourites);
+            self.layers.extend(package.share_layers);
+        }
+        self
+    }
+
     /// The same, on the account as `account`.
     #[must_use]
     pub fn with_account(mut self, account: AccountSource) -> Self {
@@ -468,10 +516,15 @@ impl std::fmt::Debug for AccountSource {
 /// The node `config` describes, with `parts`: [`start`] and its
 /// siblings, the window's node and `serve` all start through here.
 ///
+/// The web packages `config` names are loaded here
+/// ([`Parts::with_web_packages`]), so every way of starting a node
+/// serves them.
+///
 /// # Errors
 ///
 /// [`StartError`]: the data dir, the iroh endpoint or the HTTP listener.
 pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartError> {
+    // The web packages its configuration names, after what it was given.
     let Parts {
         blocks: given,
         layers,
@@ -481,7 +534,7 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
         doc_kinds,
         kinds,
         loaded_kinds,
-    } = parts;
+    } = parts.with_web_packages(&config);
     let data = &config.data_dir;
     // An installed extension draws over a compiled-in one claiming the
     // same fence, as its development copy does in the app.

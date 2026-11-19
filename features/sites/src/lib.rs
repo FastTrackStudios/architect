@@ -52,6 +52,7 @@ pub mod listing;
 pub mod lyrics;
 mod markdown;
 pub mod media;
+pub mod package;
 #[cfg(feature = "pages")]
 mod page_blocks;
 pub mod plain;
@@ -76,6 +77,7 @@ pub use installed::{Installed, InstalledBlocks, InstalledLayers, Package};
 pub use island::SiteIsland;
 pub use lyrics::LyricsBlocks;
 pub use markdown::Heading;
+pub use package::{PackageError, WebPackage};
 #[cfg(feature = "pages")]
 pub use page_blocks::PageBlocks;
 pub use sanitize::{BLOCK_BOX_STYLE, sanitize, sanitize_block};

@@ -22,6 +22,7 @@
 //! | `ARCHITECT_VAULTS` | `[vaults]` | none | `id=path,…`: the vaults it holds (a relative path is under the data dir) |
 //! | `ARCHITECT_SITES` | `[sites]` | none | `/mount=vault,…`: vaults published as Sites |
 //! | `ARCHITECT_EXTENSIONS` | `extensions` | `<data dir>/extensions` | installed extensions, a package folder each (`<id>/extension.toml`): the fences they claim are drawn on share links and Sites (a relative path is under the data dir) |
+//! | `ARCHITECT_WEB_PACKAGES` | `web_packages` | none | `folder,…`: web packages it serves as islands, each an extension's built web folder (`architect-ext build-web`'s: `architect.json`, `architect.lock.json`, its `web-*` files), so a distribution ships client files and no server build. Each is checked against its own lock and read from its manifest alone (`architect_sites::package::load`: its `[site]` views, `[[embeds]]`, `[[favourites]]`, `[[share_layers]]`), after the build's own islands; one whose id the build already has, or that does not match its lock, is left out with a warning and the node starts without it (a relative path is under the data dir) |
 //! | `ARCHITECT_EXTENSION_SECRETS` | `extension_secrets` | none | its extensions' node secrets, set by its operator: a folder with a file each, `<ext id>/<secret id>` (as sops-nix writes them); none: an org admin sets them on the org lane (`NodeActions::set_secret`), kept in `<data dir>/extension-secrets.json`. The node runs installed extensions' node actions (`runs = "node"`, #583) on its org lane with them |
 //! | `ARCHITECT_ISSUER` | `issuer` | none | the account server (`https://auth.fasttrackstudio.app`) |
 //! | `ARCHITECT_SESSION_FILE` | `session_file` | none | a file holding the account's session token (in the window, with neither this nor `issuer` set: the app's signed-in account) |
@@ -109,6 +110,7 @@ pub struct Config {
     pub sites: BTreeMap<String, String>,
     pub extensions: Option<PathBuf>,
     pub extension_secrets: Option<PathBuf>,
+    pub web_packages: Vec<PathBuf>,
     pub issuer: Option<String>,
     pub session_file: Option<PathBuf>,
     pub org: Option<String>,
@@ -265,6 +267,7 @@ impl Default for Config {
             sites: BTreeMap::new(),
             extensions: None,
             extension_secrets: None,
+            web_packages: Vec::new(),
             issuer: None,
             session_file: None,
             org: None,
@@ -488,6 +491,9 @@ impl Config {
         }
         if let Some(v) = get("ARCHITECT_SITES") {
             self.sites = pairs("ARCHITECT_SITES", &v)?.into_iter().collect();
+        }
+        if let Some(v) = get("ARCHITECT_WEB_PACKAGES") {
+            self.web_packages = list(&v).into_iter().map(PathBuf::from).collect();
         }
         if let Some(v) = get("ARCHITECT_ISSUER") {
             self.issuer = Some(v);
@@ -787,6 +793,16 @@ impl Config {
         )
     }
 
+    /// The web package folders it serves as islands
+    /// ([`Self::web_packages`]), each under the data dir when relative.
+    #[must_use]
+    pub fn web_package_dirs(&self) -> Vec<PathBuf> {
+        self.web_packages
+            .iter()
+            .map(|path| self.vault_root(path))
+            .collect()
+    }
+
     /// Where vault `path` lives: under the data dir when relative.
     #[must_use]
     pub fn vault_root(&self, path: &Path) -> PathBuf {
@@ -1060,6 +1076,28 @@ mod tests {
         assert!(config.hosted().has("whichever"));
         assert_eq!(config.vault_org(), None);
         assert!(!Config::default().hosted().any());
+    }
+
+    #[test]
+    fn web_packages_are_a_list_of_folders_from_the_file_or_the_environment() {
+        let env = |var: &str| {
+            (var == "ARCHITECT_WEB_PACKAGES").then(|| "/opt/studio/web, islands/band,".to_owned())
+        };
+        let config = Config::load(None, env).unwrap_or_default();
+        assert_eq!(
+            config.web_packages,
+            [PathBuf::from("/opt/studio/web"), PathBuf::from("islands/band")]
+        );
+        assert_eq!(
+            config.web_package_dirs(),
+            [
+                PathBuf::from("/opt/studio/web"),
+                config.data_dir.join("islands/band")
+            ]
+        );
+        let file: Config = toml::from_str("web_packages = [\"/opt/studio/web\"]").unwrap_or_default();
+        assert_eq!(file.web_packages, [PathBuf::from("/opt/studio/web")]);
+        assert!(Config::default().web_packages.is_empty());
     }
 
     #[test]

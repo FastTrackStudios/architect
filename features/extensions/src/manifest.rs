@@ -625,6 +625,83 @@ pub struct SourceDecl {
     pub bin: String,
 }
 
+/// `[site]`: which of its `[[views]]` a node's web face draws where, and
+/// the stylesheet of its built web folder, so a node serves its web
+/// package from the manifest alone (`architect_sites::package`).
+///
+/// ```toml
+/// [site]
+/// progress = "progress"      # at the top of a share's now-playing view
+/// transport = "transport"    # under the page's chart
+/// lyrics = "lyrics"          # in the now-playing view's lyrics
+/// home = "home"              # the web app's home
+/// pages = ["arrangement", "mixer"]   # views that fill a page
+/// stylesheet = "island.css"  # a file of its web folder
+/// ```
+///
+/// Every key is optional; each view named is one of its `[[views]]`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SiteDecl {
+    /// Its view at the top of a share's now-playing view.
+    pub progress: Option<String>,
+    /// Its view under the page's chart.
+    pub transport: Option<String>,
+    /// Its view in the now-playing view's lyrics.
+    pub lyrics: Option<String>,
+    /// Its view as the web app's home.
+    pub home: Option<String>,
+    /// Its views that fill a page (a favourite's tab opens one).
+    pub pages: Vec<String>,
+    /// Its views' stylesheet: a file of its built web folder.
+    pub stylesheet: Option<String>,
+}
+
+impl SiteDecl {
+    /// Every view it names, each with the key that names it.
+    #[must_use]
+    pub fn views(&self) -> Vec<(&'static str, &str)> {
+        [
+            ("progress", &self.progress),
+            ("transport", &self.transport),
+            ("lyrics", &self.lyrics),
+            ("home", &self.home),
+        ]
+        .into_iter()
+        .filter_map(|(key, view)| view.as_deref().map(|v| (key, v)))
+        .chain(self.pages.iter().map(|v| ("pages", v.as_str())))
+        .collect()
+    }
+}
+
+/// A JSON value as the TOML it was read from (`architect.json`'s
+/// `manifest`): a `null` member is left out, as TOML has none.
+fn toml_of(json: &serde_json::Value) -> Result<toml::Value, String> {
+    use serde_json::Value as Json;
+    Ok(match json {
+        Json::Null => return Err("null is not a TOML value".to_owned()),
+        Json::Bool(b) => toml::Value::Boolean(*b),
+        Json::Number(n) => match (n.as_i64(), n.as_f64()) {
+            (Some(i), _) => toml::Value::Integer(i),
+            (None, Some(f)) => toml::Value::Float(f),
+            (None, None) => return Err(format!("{n} is not a TOML number")),
+        },
+        Json::String(s) => toml::Value::String(s.clone()),
+        Json::Array(list) => {
+            toml::Value::Array(list.iter().map(toml_of).collect::<Result<_, _>>()?)
+        }
+        Json::Object(map) => {
+            let mut table = toml::Table::new();
+            for (key, value) in map {
+                if !value.is_null() {
+                    table.insert(key.clone(), toml_of(value)?);
+                }
+            }
+            toml::Value::Table(table)
+        }
+    })
+}
+
 /// `[[favourites]]` as written, read one declaration at a time: those that
 /// read and keep their rules, and why each other one was left out (`#<n>`
 /// when it has no readable `note_type`).
@@ -760,6 +837,10 @@ pub struct Manifest {
     /// ([`crate::share_layers::ShareLayersDecl`]).
     #[serde(default)]
     pub share_layers: Vec<crate::share_layers::ShareLayersDecl>,
+    /// `[site]`: its views' places on a node's web face and its web
+    /// folder's stylesheet ([`SiteDecl`]).
+    #[serde(default)]
+    pub site: Option<SiteDecl>,
     /// `[[favourites]]`: the tabs and the primary action a shell shows
     /// while a note of its types is open (a share link's phone shell,
     /// the app's bottom bar): [`architect_favourites::TypeFavourites`].
@@ -1042,6 +1123,7 @@ impl Manifest {
             background: _,
             secrets: _,
             share_layers: _,
+            site: _,
             favourites: _,
             favourites_raw: _,
             favourites_dropped: _,
@@ -1083,6 +1165,7 @@ impl Manifest {
             background: None,
             secrets: self.node_secrets().into_iter().cloned().collect(),
             share_layers: Vec::new(),
+            site: None,
             favourites: Vec::new(),
             favourites_raw: None,
             favourites_dropped: Vec::new(),
@@ -1145,15 +1228,35 @@ impl Manifest {
     ///
     /// It is not a manifest, or breaks a rule [`Self::check`] keeps.
     pub fn parse(text: &str) -> Result<Self, ManifestError> {
-        let mut manifest: Self =
-            toml::from_str(text).map_err(|e| ManifestError::Parse(e.to_string()))?;
+        toml::from_str::<Self>(text)
+            .map_err(|e| ManifestError::Parse(e.to_string()))?
+            .read()
+    }
+
+    /// Reads and checks a manifest given as JSON: `extension.toml` as
+    /// `architect-ext build-web` writes it into its folder's
+    /// `architect.json` (`manifest`). The same rules as [`Self::parse`].
+    ///
+    /// # Errors
+    ///
+    /// It is not a manifest, or breaks a rule [`Self::check`] keeps.
+    pub fn from_json(json: &serde_json::Value) -> Result<Self, ManifestError> {
+        toml_of(json)
+            .and_then(|value| value.try_into::<Self>().map_err(|e| e.to_string()))
+            .map_err(ManifestError::Parse)?
+            .read()
+    }
+
+    /// The manifest as deserialized, its `[[favourites]]` read and its
+    /// rules checked.
+    fn read(mut self) -> Result<Self, ManifestError> {
         // A declaration of the wrong shape, or that breaks a rule, is
         // dropped and said, never fatal.
-        let (favourites, dropped) = favourites_of(manifest.favourites_raw.take());
-        manifest.favourites = favourites;
-        manifest.favourites_dropped = dropped;
-        manifest.check()?;
-        Ok(manifest)
+        let (favourites, dropped) = favourites_of(self.favourites_raw.take());
+        self.favourites = favourites;
+        self.favourites_dropped = dropped;
+        self.check()?;
+        Ok(self)
     }
 
     /// The prefix every action it adds starts with: its id upper-cased,
@@ -1485,6 +1588,7 @@ impl Manifest {
             field: b.field,
             why: b.why,
         })?;
+        self.check_site()?;
         let keys = format!("{}.", self.id);
         for section in &self.sections {
             if !seen.insert(section.id.as_str()) {
@@ -1504,6 +1608,33 @@ impl Manifest {
                 }
                 setting(s)?;
             }
+        }
+        Ok(())
+    }
+
+    /// `[site]`: each view it names is one of its `[[views]]`, a page is
+    /// named once, and its stylesheet is a file inside its folder.
+    fn check_site(&self) -> Result<(), ManifestError> {
+        let Some(site) = &self.site else {
+            return Ok(());
+        };
+        let refused = |key: &str, why: String| {
+            ManifestError::Contribution(Refused {
+                what: format!("site.{key}"),
+                why,
+            })
+        };
+        for (key, view) in site.views() {
+            if !self.views.iter().any(|v| v.id == view) {
+                return Err(refused(key, format!("it has no view {view:?} ([[views]])")));
+            }
+        }
+        let mut pages = std::collections::BTreeSet::new();
+        if let Some(twice) = site.pages.iter().find(|p| !pages.insert(p.as_str())) {
+            return Err(refused("pages", format!("{twice:?} is named twice")));
+        }
+        if let Some(sheet) = &site.stylesheet {
+            inside(sheet)?;
         }
         Ok(())
     }
@@ -2739,5 +2870,119 @@ mod process_view_tests {
         assert_eq!(with_settings("{{setting:x.b}}", v), None);
         assert_eq!(with_settings("{{setting:x.a}}", v).as_deref(), Some("7"));
         assert_eq!(with_settings("--plain", v).as_deref(), Some("--plain"));
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+mod site_tests {
+    use super::{Manifest, ManifestError};
+
+    const ISLAND: &str = r#"
+id = "demo.band"
+name = "Band"
+version = "1.2.0"
+kind = "wasm"
+
+[capabilities]
+reads = ["documents", "files"]
+
+[[views]]
+id = "progress"
+title = "Progress"
+
+[[views]]
+id = "home"
+title = "Home"
+
+[[views]]
+id = "mixer"
+title = "Mixer"
+
+[[views]]
+id = "list"
+title = "Setlist"
+
+[[embeds]]
+id = "setlist"
+title = "Setlist"
+view = "list"
+claims = { note_type = ["setlist"] }
+reads = ["documents"]
+properties = ["date"]
+
+[site]
+progress = "progress"
+home = "home"
+pages = ["mixer"]
+stylesheet = "island.css"
+"#;
+
+    /// `[site]` names its views' places and its stylesheet; an embed says
+    /// what it reads of its note; a view that is not one of its
+    /// `[[views]]`, a page named twice, a stylesheet outside its folder
+    /// and an unknown key are refused.
+    #[test]
+    fn a_site_table_names_views_the_manifest_has() {
+        let m = Manifest::parse(ISLAND).unwrap();
+        let site = m.site.clone().unwrap();
+        assert_eq!(site.progress.as_deref(), Some("progress"));
+        assert_eq!(site.transport, None);
+        assert_eq!(site.home.as_deref(), Some("home"));
+        assert_eq!(site.pages, ["mixer"]);
+        assert_eq!(site.stylesheet.as_deref(), Some("island.css"));
+        assert_eq!(
+            site.views(),
+            [("progress", "progress"), ("home", "home"), ("pages", "mixer")]
+        );
+        let embed = &m.contributes.embeds[0];
+        assert_eq!(embed.reads, ["documents"]);
+        assert_eq!(embed.properties, ["date"]);
+        let (head, _) = ISLAND.split_once("[site]").unwrap();
+        assert_eq!(Manifest::parse(head).unwrap().site, None);
+
+        for (from, to, why) in [
+            ("home = \"home\"", "home = \"nope\"", "site.home"),
+            ("pages = [\"mixer\"]", "pages = [\"gone\"]", "site.pages"),
+            (
+                "pages = [\"mixer\"]",
+                "pages = [\"mixer\", \"mixer\"]",
+                "named twice",
+            ),
+            (
+                "stylesheet = \"island.css\"",
+                "stylesheet = \"../island.css\"",
+                "outside the package",
+            ),
+            ("pages = [\"mixer\"]", "page = [\"mixer\"]", "unknown field"),
+        ] {
+            assert!(ISLAND.contains(from), "{from}");
+            let e = Manifest::parse(&ISLAND.replace(from, to))
+                .unwrap_err()
+                .to_string();
+            assert!(e.contains(why), "{to}: {e}");
+        }
+    }
+
+    /// A manifest as `architect.json` carries it reads the same as its
+    /// TOML, under the same rules.
+    #[test]
+    fn a_manifest_reads_from_json_as_from_toml() {
+        let toml: toml::Value = toml::from_str(ISLAND).unwrap();
+        let mut json = serde_json::to_value(&toml).unwrap();
+        assert_eq!(
+            Manifest::from_json(&json).unwrap(),
+            Manifest::parse(ISLAND).unwrap()
+        );
+        // A null member is one TOML never had.
+        json["description"] = serde_json::Value::Null;
+        assert!(Manifest::from_json(&json).is_ok());
+        json["site"]["home"] = "nope".into();
+        let e = Manifest::from_json(&json).unwrap_err().to_string();
+        assert!(e.contains("site.home"), "{e}");
+        assert!(matches!(
+            Manifest::from_json(&serde_json::json!([1])),
+            Err(ManifestError::Parse(_))
+        ));
     }
 }
