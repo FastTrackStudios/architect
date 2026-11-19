@@ -27,11 +27,14 @@
 //! | `ARCHITECT_SESSION_FILE` | `session_file` | none | a file holding the account's session token (in the window, with neither this nor `issuer` set: the app's signed-in account) |
 //! | `ARCHITECT_ORG` | `org` | none | the org (slug) it offers the account when the account shares none yet |
 //! | `ARCHITECT_HOST_ORG` | `host_org` | none | an issuer org (slug) of the session's: the node serves its enrolment lane, `/org/{slug}/vox`, and its vaults are that org's |
+//! | `ARCHITECT_HOST_ORGS` | `host_orgs` | none | several issuer orgs (slugs) of the session's, `a,b`, or `*` for every org the session is in: one process serves them all, each on its own lane `/org/{slug}/vox` on the one origin (#538). A vault is the org's whose slug is its id, or the one `vault_orgs` names |
+//! | `ARCHITECT_VAULT_ORGS` | `[vault_orgs]` | none | `vault=org,…`: the org (slug) a vault is, when its id is not the org's slug. With one org and none named, every vault is that org's |
 //! | `ARCHITECT_LANE_RECHECK_SECS` | `lane_recheck_secs` | `30` | on the org lane, how long a person's bearer is trusted before the issuer is asked again, and how often an open note's live session checks it still is: signed out, expired or removed from the org, the session ends within about twice this |
 //! | `ARCHITECT_LANE_ISSUER_GRACE_SECS` | `lane_issuer_grace_secs` | `300` | on the org lane, how long an open note's live session is kept while the issuer cannot be reached, counted from the issuer's last answer for its bearer; then it ends (a refusal ends it at once, and new calls are refused while the issuer is unreachable) |
 //! | `ARCHITECT_LANE_ORIGINS` | `lane_origins` | none | `https://app.example,…`: browser origins besides the node's own that may open its org lane (a WebSocket upgrade from any other `Origin` is refused; one with no `Origin`, a native client's, is let through to the bearer check) |
 //! | `ARCHITECT_ENROL_AT` | `enrol_at` | none | another node's HTTP origin: this node enrols itself in `enrol_org` there, once |
 //! | `ARCHITECT_ENROL_ORG` | `enrol_org` | none | the issuer org (slug) to enrol in there; its vaults are that org's |
+//! | `ARCHITECT_ENROL_ORGS` | `enrol_orgs` | none | several orgs (slugs) to enrol in at `enrol_at`, `a,b`: a storage server of more than one org on a node that hosts them all |
 //! | `ARCHITECT_ENROL_ROLE` | `enrol_role` | `member` | the role it asks for: at most the session's own in the org |
 //! | `ARCHITECT_WEB_APP` | `web_app` | none | whether the web app is served beside the node, on its origin: `beside` (a proxy serves the same release's web bundle at `/app/`, as the chart's web front end does), or the folder of that bundle (checked at start for `app/index.html` and `app/start.js`). A share link's page (`/s/<code>/`) is the web app's page, which loads it from there; none: it says the link opens in the web app, which this server does not serve (#646) |
 //! | `ARCHITECT_APPLE_APP_IDS` | `apple_app_ids` | none | `<team id>.<bundle id>,…` (`28C2G63DA7.app.fasttrackstudio.architect`): the iOS apps that open this node's share links (`/s/*`) as universal links, named in `/.well-known/apple-app-site-association`; none: that file is not served (#629) |
@@ -43,6 +46,10 @@
 //! | `ARCHITECT_LIVE_MAX` | `live_max` | `256` | how many notes it keeps live with each peer (a `DocSync` bridge each); `0` sweeps only |
 //! | `ARCHITECT_FILES_DIR` | `files_dir` | none | projects and asset libraries (`<org>/Projects/<p>`, `<org>/Assets/<kind>`): the tree held in place, or where pins go (`architect_files::sync`) |
 //! | `ARCHITECT_FILES_HOLD` | `files_hold` | `false` | hold every root found in `files_dir` (the always-on node); otherwise only pinned ones have a working copy |
+//! | `ARCHITECT_VAULT_FILES` | `vault_files` | `false` | sync each vault's attachments (its recordings, PDFs, covers: every file that is not a note) with the other nodes that hold the vault, as a root's files: bytes from a peer or the bucket, under the holding rule below. Runs the files engine (with `files_dir` unset, its pins go under the data dir). The root is `<org>/Vaults/<vault>`: on a node that neither hosts nor enrols in the vault's org, name it in `vault_orgs` |
+//! | `ARCHITECT_FILES_HOLD_PATHS` | `files_hold_paths` | none | `glob,…` (root-relative; `*`, `?`, `**`): with any set, only the files one of them matches are fetched, held and copied to the bucket here (#904). The rest stay listed, their bytes on the holders that keep them (a storage server) |
+//! | `ARCHITECT_FILES_SKIP_PATHS` | `files_skip_paths` | none | `glob,…`: files never fetched or held here, whatever `files_hold_paths` says (`**/Media/**,**/Audio Files/**`: a project's multitracks) |
+//! | `ARCHITECT_FILES_HOLD_MAX` | `files_hold_max` | none | never fetch or hold a single file over this ([`Size`] in bytes: `256Mi`) |
 //! | `ARCHITECT_DRIVE` | `drive` | none | mount every root this device knows here, as a real folder (FUSE; `~/Architect` when the agent is installed, `architect-desktop agent install`); empty is off |
 //! | `ARCHITECT_FILES_SECS` | `files_secs` | `2` | how often each root is scanned and brought to its heads |
 //! | `ARCHITECT_BLOB_S3_BUCKET` | `blob_s3_bucket` | none | the files' bytes in an S3 bucket too (Garage, MinIO, R2, AWS, Ceph RGW): turns the backend on |
@@ -51,6 +58,8 @@
 //! | `ARCHITECT_BLOB_S3_PREFIX` | `blob_s3_prefix` | `architect` | keys go under it: `<prefix>/sha256/<hh>/<hex>` |
 //! | `ARCHITECT_BLOB_S3_ACCESS_KEY_ID` | `blob_s3_access_key_id` | none | the bucket's access key id |
 //! | `ARCHITECT_BLOB_S3_SECRET_FILE` | `blob_s3_secret_file` | none | a file holding its secret key (or `ARCHITECT_BLOB_S3_SECRET_ACCESS_KEY`, read at start and never kept in the config) |
+//! | `ARCHITECT_BLOB_S3_MAX` | `blob_s3_max` | none | never copy a single file over this to the bucket ([`Size`] in bytes): on a storage server that shares the bucket, the small files go to it and the large ones stay on the server |
+//! | `ARCHITECT_BLOB_S3_SKIP_PATHS` | `blob_s3_skip_paths` | none | `glob,…`: files never copied to the bucket (still held here) |
 //! | `ARCHITECT_BLOB_PLACEMENT` | `blob_placement` | `replicate` | `replicate`: every byte here and in the bucket; `primary`: the bucket holds them, this node keeps a cache |
 //! | `ARCHITECT_BLOB_CACHE_MB` | `blob_cache_mb` | `10240` | with `primary`, how much of the store is kept here (working copies are never evicted) |
 //! | `ARCHITECT_S3_BIND` | `s3_bind` | none | the roots over S3 (`127.0.0.1:9000`): a bucket per org, keys from `serve s3-key issue` (needs `files_dir`) |
@@ -104,6 +113,9 @@ pub struct Config {
     pub session_file: Option<PathBuf>,
     pub org: Option<String>,
     pub host_org: Option<String>,
+    pub host_orgs: Vec<String>,
+    pub vault_orgs: BTreeMap<String, String>,
+    pub enrol_orgs: Vec<String>,
     pub enrol_at: Option<String>,
     pub enrol_org: Option<String>,
     pub enrol_role: String,
@@ -120,6 +132,10 @@ pub struct Config {
     pub lane_origins: Vec<String>,
     pub files_dir: Option<PathBuf>,
     pub files_hold: bool,
+    pub vault_files: bool,
+    pub files_hold_paths: Vec<String>,
+    pub files_skip_paths: Vec<String>,
+    pub files_hold_max: Option<Size>,
     pub files_secs: u64,
     pub drive: Option<PathBuf>,
     pub s3_bind: Option<String>,
@@ -129,6 +145,8 @@ pub struct Config {
     pub blob_s3_prefix: String,
     pub blob_s3_access_key_id: Option<String>,
     pub blob_s3_secret_file: Option<PathBuf>,
+    pub blob_s3_max: Option<Size>,
+    pub blob_s3_skip_paths: Vec<String>,
     pub blob_placement: Placement,
     pub blob_cache_mb: u64,
     pub files_site: Option<String>,
@@ -251,6 +269,9 @@ impl Default for Config {
             session_file: None,
             org: None,
             host_org: None,
+            host_orgs: Vec::new(),
+            vault_orgs: BTreeMap::new(),
+            enrol_orgs: Vec::new(),
             enrol_at: None,
             enrol_org: None,
             enrol_role: "member".to_owned(),
@@ -267,6 +288,10 @@ impl Default for Config {
             lane_origins: Vec::new(),
             files_dir: None,
             files_hold: false,
+            vault_files: false,
+            files_hold_paths: Vec::new(),
+            files_skip_paths: Vec::new(),
+            files_hold_max: None,
             files_secs: 2,
             drive: None,
             s3_bind: None,
@@ -276,6 +301,8 @@ impl Default for Config {
             blob_s3_prefix: "architect".to_owned(),
             blob_s3_access_key_id: None,
             blob_s3_secret_file: None,
+            blob_s3_max: None,
+            blob_s3_skip_paths: Vec::new(),
             blob_placement: Placement::Replicate,
             blob_cache_mb: 10_240,
             files_site: None,
@@ -403,6 +430,17 @@ impl Config {
                 why: "0 keeps no replaced version, so no replacement can happen; leave it unset to keep them all".to_owned(),
             });
         }
+        for (var, size) in [
+            ("ARCHITECT_FILES_HOLD_MAX", self.files_hold_max),
+            ("ARCHITECT_BLOB_S3_MAX", self.blob_s3_max),
+        ] {
+            if matches!(size, Some(Size::Percent(_))) {
+                return Err(ConfigError::Env {
+                    var,
+                    why: "a file's size in bytes (`256Mi`), not a share of a filesystem".to_owned(),
+                });
+            }
+        }
         if matches!(self.files_keep_free, Some(Size::Percent(100))) {
             return Err(ConfigError::Env {
                 var: "ARCHITECT_FILES_KEEP_FREE",
@@ -462,6 +500,15 @@ impl Config {
         }
         if let Some(v) = get("ARCHITECT_HOST_ORG") {
             self.host_org = Some(v);
+        }
+        if let Some(v) = get("ARCHITECT_HOST_ORGS") {
+            self.host_orgs = list(&v);
+        }
+        if let Some(v) = get("ARCHITECT_VAULT_ORGS") {
+            self.vault_orgs = pairs("ARCHITECT_VAULT_ORGS", &v)?.into_iter().collect();
+        }
+        if let Some(v) = get("ARCHITECT_ENROL_ORGS") {
+            self.enrol_orgs = list(&v);
         }
         if let Some(v) = get("ARCHITECT_ENROL_AT") {
             self.enrol_at = Some(v);
@@ -542,6 +589,18 @@ impl Config {
         if let Some(v) = get("ARCHITECT_FILES_HOLD") {
             self.files_hold = matches!(v.trim(), "1" | "true" | "yes");
         }
+        if let Some(v) = get("ARCHITECT_VAULT_FILES") {
+            self.vault_files = matches!(v.trim(), "1" | "true" | "yes");
+        }
+        if let Some(v) = get("ARCHITECT_FILES_HOLD_PATHS") {
+            self.files_hold_paths = list(&v);
+        }
+        if let Some(v) = get("ARCHITECT_FILES_SKIP_PATHS") {
+            self.files_skip_paths = list(&v);
+        }
+        if let Some(v) = get("ARCHITECT_BLOB_S3_SKIP_PATHS") {
+            self.blob_s3_skip_paths = list(&v);
+        }
         if let Some(v) = get("ARCHITECT_DRIVE") {
             self.drive = (!v.trim().is_empty()).then(|| PathBuf::from(v.trim()));
         }
@@ -603,6 +662,8 @@ impl Config {
             ("ARCHITECT_FILES_STORE_MAX", &mut self.files_store_max),
             ("ARCHITECT_FILES_KEEP_FREE", &mut self.files_keep_free),
             ("ARCHITECT_FILES_HISTORY_MAX", &mut self.files_history_max),
+            ("ARCHITECT_FILES_HOLD_MAX", &mut self.files_hold_max),
+            ("ARCHITECT_BLOB_S3_MAX", &mut self.blob_s3_max),
         ] {
             if let Some(v) = get(var).filter(|v| !v.trim().is_empty()) {
                 *field = Some(v.parse().map_err(|why| ConfigError::Env { var, why })?);
@@ -618,10 +679,103 @@ impl Config {
     }
 
     /// The issuer org (slug) the node's vaults are: the one it hosts,
-    /// else the one it enrols in.
+    /// else the one it enrols in. With several ([`Self::hosted`],
+    /// [`Self::enrolling`]) the first; which vault is whose is
+    /// [`Self::org_of_vault`].
     #[must_use]
     pub fn vault_org(&self) -> Option<&str> {
-        self.host_org.as_deref().or(self.enrol_org.as_deref())
+        self.host_org
+            .as_deref()
+            .or_else(|| {
+                self.host_orgs
+                    .iter()
+                    .map(String::as_str)
+                    .find(|o| *o != ALL_ORGS)
+            })
+            .or(self.enrol_org.as_deref())
+            .or_else(|| self.enrol_orgs.first().map(String::as_str))
+    }
+
+    /// The org folder vault `vault`'s attachments are filed under
+    /// (`<org>/Vaults/<vault>`, [`Self::vault_files`]): the same on every
+    /// node that holds the vault. The org [`Self::org_of_vault`] says
+    /// (of `orgs`, the ones this node is in), else the one
+    /// [`Self::vault_orgs`] names, else the vault's own id.
+    #[must_use]
+    pub fn vault_files_org<'a>(&'a self, vault: &'a str, orgs: &'a [String]) -> &'a str {
+        self.org_of_vault(vault, orgs)
+            .or_else(|| self.vault_orgs.get(vault).map(String::as_str))
+            .unwrap_or(vault)
+    }
+
+    /// Where the files engine keeps its pins: [`Self::files_dir`], else
+    /// (with [`Self::vault_files`] alone) a folder under the data dir.
+    /// `None`: the node runs no files engine.
+    #[must_use]
+    pub fn files_root(&self) -> Option<PathBuf> {
+        self.files_dir.clone().or_else(|| {
+            self.vault_files
+                .then(|| self.data_dir.join("files").join("roots"))
+        })
+    }
+
+    /// Which files of its roots it fetches and holds (#904):
+    /// [`Self::files_hold_paths`], [`Self::files_skip_paths`],
+    /// [`Self::files_hold_max`]. With none set, everything.
+    #[must_use]
+    pub fn hold_rule(&self) -> architect_files::HoldRule {
+        architect_files::HoldRule {
+            paths: self.files_hold_paths.clone(),
+            skip: self.files_skip_paths.clone(),
+            max: self.files_hold_max.and_then(|size| size.of(None)),
+        }
+    }
+
+    /// Which of the files it holds it copies to its bucket:
+    /// [`Self::blob_s3_max`], [`Self::blob_s3_skip_paths`], within
+    /// [`Self::hold_rule`].
+    #[must_use]
+    pub fn bucket_rule(&self) -> architect_files::HoldRule {
+        architect_files::HoldRule {
+            paths: Vec::new(),
+            skip: self.blob_s3_skip_paths.clone(),
+            max: self.blob_s3_max.and_then(|size| size.of(None)),
+        }
+    }
+
+    /// The orgs it hosts: [`Self::host_org`] and [`Self::host_orgs`].
+    #[must_use]
+    pub fn hosted(&self) -> Hosted {
+        if self.host_orgs.iter().any(|o| o == ALL_ORGS) {
+            return Hosted::All;
+        }
+        Hosted::Named(distinct(
+            self.host_org.iter().chain(&self.host_orgs).cloned(),
+        ))
+    }
+
+    /// The orgs it enrols itself in at [`Self::enrol_at`]:
+    /// [`Self::enrol_org`] and [`Self::enrol_orgs`].
+    #[must_use]
+    pub fn enrolling(&self) -> Vec<String> {
+        distinct(self.enrol_org.iter().chain(&self.enrol_orgs).cloned())
+    }
+
+    /// The org (slug), of `orgs` (the ones this node is in), that vault
+    /// `vault` is: the one [`Self::vault_orgs`] names, else the one whose
+    /// slug is the vault's id, else the only one.
+    #[must_use]
+    pub fn org_of_vault<'a>(&'a self, vault: &str, orgs: &'a [String]) -> Option<&'a str> {
+        if let Some(named) = self.vault_orgs.get(vault) {
+            return orgs.iter().map(String::as_str).find(|o| *o == named);
+        }
+        if let Some(same) = orgs.iter().find(|o| o.as_str() == vault) {
+            return Some(same);
+        }
+        match orgs {
+            [only] => Some(only),
+            _ => None,
+        }
     }
 
     /// Where the extensions it draws blocks with are installed.
@@ -642,6 +796,45 @@ impl Config {
             self.data_dir.join(path)
         }
     }
+}
+
+/// [`Config::host_orgs`]' entry for every org the session is in.
+pub const ALL_ORGS: &str = "*";
+
+/// Which orgs a node hosts ([`Config::hosted`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Hosted {
+    /// Every org its session is in, asked of the issuer at start.
+    All,
+    /// These (slugs); none: it hosts no org.
+    Named(Vec<String>),
+}
+
+impl Hosted {
+    /// Whether it hosts `slug`.
+    #[must_use]
+    pub fn has(&self, slug: &str) -> bool {
+        match self {
+            Self::All => true,
+            Self::Named(orgs) => orgs.iter().any(|o| o == slug),
+        }
+    }
+
+    /// Whether it hosts any org.
+    #[must_use]
+    pub const fn any(&self) -> bool {
+        !matches!(self, Self::Named(orgs) if orgs.is_empty())
+    }
+}
+
+fn distinct(items: impl Iterator<Item = String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for item in items {
+        if !item.trim().is_empty() && !out.contains(&item) {
+            out.push(item);
+        }
+    }
+    out
 }
 
 fn list(v: &str) -> Vec<String> {
@@ -798,6 +991,75 @@ mod tests {
             let bad = |v: &str| (v == var).then(|| value.to_owned());
             assert!(Config::load(None, bad).is_err(), "{var}={value}");
         }
+    }
+
+    /// #904: the hosted node's rule, and a storage server's for the
+    /// bucket it shares.
+    #[test]
+    fn a_holding_rule_and_a_bucket_rule_come_from_the_environment() {
+        let env = |var: &str| match var {
+            "ARCHITECT_FILES_SKIP_PATHS" => Some("**/Media/**, **/Audio Files/**".to_owned()),
+            "ARCHITECT_FILES_HOLD_MAX" => Some("256Mi".to_owned()),
+            "ARCHITECT_BLOB_S3_MAX" => Some("64Mi".to_owned()),
+            _ => None,
+        };
+        let config = Config::load(None, env).unwrap_or_default();
+        let hold = config.hold_rule();
+        assert!(hold.keeps("songs/joy/chart.kf", 4_000));
+        assert!(!hold.keeps("songs/joy/Audio Files/kick.wav", 4_000));
+        assert!(!hold.keeps("songs/joy/film.mov", (256 << 20) + 1));
+        let bucket = config.bucket_rule();
+        assert!(bucket.keeps("songs/joy/reference.mp3", 64 << 20));
+        assert!(!bucket.keeps("songs/joy/reference.wav", (64 << 20) + 1));
+        assert!(Config::default().hold_rule().is_all());
+        assert!(Config::default().bucket_rule().is_all());
+        let share = |var: &str| (var == "ARCHITECT_FILES_HOLD_MAX").then(|| "10%".to_owned());
+        assert!(Config::load(None, share).is_err(), "a size, not a share");
+    }
+
+    #[test]
+    fn one_node_hosts_several_orgs_and_knows_whose_each_vault_is() {
+        let env = |var: &str| match var {
+            "ARCHITECT_HOST_ORG" => Some("fasttrackstudio".to_owned()),
+            "ARCHITECT_HOST_ORGS" => Some("fasttrackaudio, tombrooksmusic".to_owned()),
+            "ARCHITECT_VAULT_ORGS" => Some("notes=fasttrackstudio".to_owned()),
+            _ => None,
+        };
+        let config = Config::load(None, env).unwrap_or_default();
+        let orgs: Vec<String> = ["fasttrackstudio", "fasttrackaudio", "tombrooksmusic"]
+            .map(str::to_owned)
+            .into();
+        assert_eq!(config.hosted(), Hosted::Named(orgs.clone()));
+        assert_eq!(config.vault_org(), Some("fasttrackstudio"));
+        // By its id, by the map, and none when neither says.
+        assert_eq!(
+            config.org_of_vault("tombrooksmusic", &orgs),
+            Some("tombrooksmusic")
+        );
+        assert_eq!(config.org_of_vault("notes", &orgs), Some("fasttrackstudio"));
+        assert_eq!(config.org_of_vault("scratch", &orgs), None);
+        // Where a vault's attachments are filed: its org's folder, the
+        // one named for it, else its own id (the same on every node).
+        assert_eq!(
+            config.vault_files_org("tombrooksmusic", &orgs),
+            "tombrooksmusic"
+        );
+        assert_eq!(config.vault_files_org("notes", &[]), "fasttrackstudio");
+        assert_eq!(config.vault_files_org("scratch", &orgs), "scratch");
+        assert_eq!(config.files_root(), None);
+        // One org: every vault is its, as before.
+        let one = ["acme".to_owned()];
+        assert_eq!(
+            Config::default().org_of_vault("anything", &one),
+            Some("acme")
+        );
+
+        let all = |var: &str| (var == "ARCHITECT_HOST_ORGS").then(|| "*".to_owned());
+        let config = Config::load(None, all).unwrap_or_default();
+        assert_eq!(config.hosted(), Hosted::All);
+        assert!(config.hosted().has("whichever"));
+        assert_eq!(config.vault_org(), None);
+        assert!(!Config::default().hosted().any());
     }
 
     #[test]

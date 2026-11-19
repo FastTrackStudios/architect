@@ -73,6 +73,7 @@ pub const fn guest_live_recheck() -> std::time::Duration {
 pub mod kinds;
 mod live;
 pub mod org;
+pub mod register;
 mod s3;
 pub mod service;
 pub mod share_layers;
@@ -508,7 +509,7 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
     // ── Projects and asset libraries: manifests in the same registry ──
     let files_registry: Arc<std::sync::OnceLock<crdt::DocRegistry>> = Arc::default();
     let files = config
-        .files_dir
+        .files_root()
         .as_ref()
         .map(|dir| files::engine(&config, dir, files_registry.clone()))
         .transpose()
@@ -554,34 +555,96 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
         .issuer
         .clone()
         .or_else(|| signed.as_ref().map(|(issuer, _)| issuer.clone()));
-    let node_org = match (config.vault_org(), &signed) {
-        (Some(slug), Some((issuer, token))) => node_org(data, issuer, token, slug).await,
-        (Some(slug), _) => org::remembered(data, slug),
-        _ => None,
+    // The orgs it is in: the ones it hosts, the ones it enrols in.
+    let hosted = config.hosted();
+    let orgs = node_orgs(data, signed.as_ref(), &hosted, &config.enrolling()).await;
+    let vault_orgs = {
+        let slugs: Vec<String> = orgs.iter().map(|o| o.slug.clone()).collect();
+        let mut by_vault = std::collections::HashMap::new();
+        for id in config.vaults.keys() {
+            let org = config
+                .org_of_vault(id, &slugs)
+                .and_then(|slug| orgs.iter().find(|o| o.slug == slug));
+            match org {
+                Some(org) => {
+                    by_vault.insert(id.clone(), org.clone());
+                }
+                None if !orgs.is_empty() => {
+                    tracing::warn!(vault = %id, "a vault of none of this node's orgs: served on no org lane (name its org in vault_orgs)");
+                }
+                None => {}
+            }
+        }
+        org::VaultOrgs::new(orgs.clone(), by_vault)
     };
-    let lane = match (&node_org, &issuer) {
-        (Some(org), Some(issuer)) => Some(
-            org::OrgLane::new(org.clone(), &admission, issuer)
-                .with_recheck(Duration::from_secs(config.lane_recheck_secs.max(1)))
-                .with_issuer_grace(Duration::from_secs(config.lane_issuer_grace_secs))
-                .with_origins(config.lane_origins.clone()),
-        ),
-        _ => None,
+    // Each vault's attachments, a root held where the vault is.
+    if let (true, Some(engine)) = (config.vault_files, &files) {
+        let slugs: Vec<String> = orgs.iter().map(|o| o.slug.clone()).collect();
+        for (id, root) in &roots {
+            files::hold_vault(
+                engine,
+                config.vault_files_org(id, &slugs),
+                id,
+                root,
+                &collab,
+            );
+        }
+    }
+    let lanes: Vec<org::OrgLane> = issuer.as_ref().map_or_else(Vec::new, |issuer| {
+        orgs.iter()
+            .map(|org| {
+                org::OrgLane::new(org.clone(), &admission, issuer)
+                    .with_recheck(Duration::from_secs(config.lane_recheck_secs.max(1)))
+                    .with_issuer_grace(Duration::from_secs(config.lane_issuer_grace_secs))
+                    .with_origins(config.lane_origins.clone())
+            })
+            .collect()
+    });
+    let catalog = VaultCatalog::new(backend.clone())
+        .with_files(files.clone())
+        .with_documents(collab.clone(), extension_kinds);
+    // Whose a document is, on a node of several orgs: its vault's, or
+    // the org a root's manifest or a ledger is filed under.
+    let several = lanes.len() > 1;
+    let doc_org: Arc<dyn Fn(uuid::Uuid) -> Option<architect_orgs::OrgId> + Send + Sync> = {
+        let (catalog, vault_orgs) = (catalog.clone(), vault_orgs.clone());
+        Arc::new(move |doc_id| {
+            let name = catalog.name_of(doc_id)?;
+            vault_orgs.of_name(&name).map(|org| org.id.clone())
+        })
     };
     let mut access = NodeAccess::new(admission.clone(), Shares::new());
-    if let Some(lane) = &lane {
+    for lane in &lanes {
         let engine: Arc<dyn architect_permissions::PermissionEngine> = lane.engine.clone();
-        access = access.org_docs(lane.org.id.0.clone(), engine);
+        access = if several {
+            let (doc_org, org) = (doc_org.clone(), lane.org.id.clone());
+            access.org_docs_of(
+                lane.org.id.0.clone(),
+                engine,
+                Arc::new(move |doc_id| doc_org(doc_id).as_ref() == Some(&org)),
+            )
+        } else {
+            access.org_docs(lane.org.id.0.clone(), engine)
+        };
     }
     // Who may open a document: the node's links and devices, itself, the
     // org's members; and a vault share link's guest, read-only, for a
     // document its link serves while its session lasts (#847).
     let opens: Arc<dyn Fn(Option<&Principal>, uuid::Uuid) -> bool + Send + Sync> = {
-        let (access, lane) = (access.clone(), lane.clone());
+        let (access, lanes, doc_org) = (access.clone(), lanes.clone(), doc_org.clone());
         Arc::new(move |who, doc_id| {
             access.admits(who, doc_id)
                 || matches!(who, Some(Principal::Service { name }) if name == SELF)
-                || matches!((who, &lane), (Some(who), Some(lane)) if lane.opens(who, doc_id))
+                || who.is_some_and(|who| {
+                    // A member opens their own org's documents only.
+                    let mut home = None;
+                    lanes.iter().any(|lane| {
+                        lane.opens(who, doc_id)
+                            && (!several
+                                || home.get_or_insert_with(|| doc_org(doc_id)).as_ref()
+                                    == Some(&lane.org.id))
+                    })
+                })
         })
     };
     let guest_grants = guest_live::GuestGrants::default();
@@ -595,9 +658,6 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
         // A share guest never writes: only the rule above without it.
         .with_write_authorizer(move |who, doc_id| opens(who, doc_id));
     let _ = files_registry.set(registry.clone());
-    let catalog = VaultCatalog::new(backend.clone())
-        .with_files(files.clone())
-        .with_documents(collab.clone(), extension_kinds);
     let endpoint = bind_iroh(&config).await?;
     let endpoint_id = architect_devices::endpoint_key(&endpoint.id().to_string());
     let mut tasks = Vec::new();
@@ -641,7 +701,12 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
         admission: admission.clone(),
         account: Arc::new(Mutex::new(service::AccountView::default())),
         files: files.clone(),
-        hosts: config.host_org.clone(),
+        hosted: lanes
+            .iter()
+            .map(|lane| lane.org.slug.clone())
+            .filter(|slug| hosted.has(slug))
+            .collect(),
+        orgs: vault_orgs.clone(),
         indexed: service::Indexed::default(),
     };
 
@@ -670,12 +735,18 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
         tracing::info!("no issuer or session: the node is on no account, and lets nobody in");
     }
 
-    // ── Enrolling itself in an org another node hosts ────────────────
-    if let (Some(at), Some(lane), Some(account)) = (&config.enrol_at, &lane, &account) {
-        let marker = org::enrolled_marker(data);
-        if marker.exists() {
-            tracing::debug!("enrolled before: not enrolling again");
-        } else {
+    // ── Enrolling itself in the orgs another node hosts ──────────────
+    if let (Some(at), Some(account)) = (&config.enrol_at, &account) {
+        for (i, slug) in config.enrolling().iter().enumerate() {
+            let Some(lane) = lanes.iter().find(|lane| &lane.org.slug == slug) else {
+                tracing::warn!(org = %slug, "not enrolling: the session is in no such org");
+                continue;
+            };
+            let marker = org::enrolled_marker_for(data, slug, i == 0);
+            if marker.exists() {
+                tracing::debug!(org = %slug, "enrolled before: not enrolling again");
+                continue;
+            }
             let enrol = org::EnrolAt {
                 at: at.clone(),
                 org: lane.org.clone(),
@@ -725,6 +796,7 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
                 config.blob_placement,
                 config.blob_cache_mb.saturating_mul(1 << 20),
                 every,
+                config.bucket_rule(),
             )));
         }
         tasks.push(tokio::spawn(engine.clone().run(every)));
@@ -761,7 +833,7 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
     let shares = shares::Shares::new(
         backend.clone(),
         data,
-        node_org.clone(),
+        vault_orgs.clone(),
         issuer.as_deref(),
         blocks.clone(),
         share_layers,
@@ -842,26 +914,45 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
         s3_addr = Some(addr);
         tasks.push(task);
     }
-    if let (Some(lane), Some(_)) = (&lane, &config.host_org) {
+    let hosting: Vec<&org::OrgLane> = lanes
+        .iter()
+        .filter(|lane| hosted.has(&lane.org.slug))
+        .collect();
+    if !hosting.is_empty() {
         // The notes, and their index for a browser's queries (it runs them
         // itself, over its copy).
-        // Each note in the index only for whom the lane's rules let read it.
-        let (reads, key) = (lane.clone(), lane.clone());
+        // Each note in the index only for whom its vault's org's rules
+        // let read it.
+        let lane_of = {
+            let (lanes, vault_orgs) = (lanes.clone(), vault_orgs.clone());
+            move |vault: &str| {
+                let org = vault_orgs.of(vault)?;
+                lanes.iter().find(|lane| lane.org.id == org.id).cloned()
+            }
+        };
+        let (reads, key) = (lane_of.clone(), lane_of);
         state.indexed.set_access(service::Access {
-            reads: Arc::new(move |who, vault, path| reads.reads(who, vault, path)),
-            key: Arc::new(move |who| key.read_key(who)),
+            reads: Arc::new(move |who, vault, path| {
+                reads(vault).is_some_and(|lane| lane.reads(who, vault, path))
+            }),
+            key: Arc::new(move |who, vault| key(vault).map_or(0, |lane| lane.read_key(who))),
         });
         let notes = architect::layers![
             service::notes::NotesService,
             service::index_sync::VaultIndexSyncService
         ]
         .provide(state.clone());
-        host = lane
-            .clone()
-            .with_vaults(registry.clone(), catalog.clone(), notes)
-            .with_shares(shares.clone())
-            .with_node_actions(node_actions(&config))
-            .mount(host);
+        let node_actions = node_actions(&config);
+        let served: Vec<org::OrgLane> = hosting
+            .into_iter()
+            .map(|lane| {
+                lane.clone()
+                    .with_vaults(registry.clone(), catalog.clone(), notes.clone())
+                    .with_shares(shares.clone())
+                    .with_node_actions(node_actions.clone())
+            })
+            .collect();
+        host = org::mount(served, host);
     }
     // A share link's guests (#629): `POST /s/<code>/_guest/<method>`,
     // which the gate passes through, each call checked as the link's
@@ -1023,11 +1114,22 @@ pub fn main(
                     }
                 };
             }
+            Some("register") => {
+                let rest: Vec<String> = args.map(|a| a.to_string_lossy().into_owned()).collect();
+                return match Config::load(file.as_deref(), |var| std::env::var(var).ok()) {
+                    Ok(config) => register::command(&config, &rest),
+                    Err(error) => {
+                        let _ = writeln!(std::io::stderr(), "architect-desktop serve: {error}");
+                        ExitCode::from(78)
+                    }
+                };
+            }
             Some("--help" | "-h") => {
                 let _ = writeln!(
                     std::io::stdout(),
-                    "architect-desktop serve [--config <file>] [s3-key <issue|list|revoke> …]\n\n\
+                    "architect-desktop serve [--config <file>] [register …] [s3-key <issue|list|revoke> …]\n\n\
                      The Architect app's node with no window (a server).\n\
+                     `register` signs this machine in to your account with a code.\n\
                      Configured by the file and ARCHITECT_* variables; see\n\
                      docs/content/guide/deploy.md."
                 );
@@ -1133,20 +1235,49 @@ async fn bind_iroh(config: &Config) -> Result<iroh::Endpoint, StartError> {
         .map_err(|e| StartError::Iroh(e.to_string()))
 }
 
-/// The node's org: asked of the issuer and kept, else as kept.
-async fn node_org(data: &Path, issuer: &str, token: &str, slug: &str) -> Option<org::NodeOrg> {
-    match tokio::time::timeout(Duration::from_secs(15), org::resolve(issuer, token, slug)).await {
+/// The node's orgs: the ones it hosts and the ones it enrols in, asked
+/// of the issuer and kept, else as kept.
+async fn node_orgs(
+    data: &Path,
+    signed: Option<&(String, String)>,
+    hosted: &config::Hosted,
+    enrolling: &[String],
+) -> Vec<org::NodeOrg> {
+    if !hosted.any() && enrolling.is_empty() {
+        return Vec::new();
+    }
+    let wanted = |orgs: Vec<org::NodeOrg>| -> Vec<org::NodeOrg> {
+        match hosted {
+            config::Hosted::All => orgs,
+            config::Hosted::Named(named) => named
+                .iter()
+                .chain(enrolling.iter().filter(|slug| !named.contains(slug)))
+                .filter_map(|slug| {
+                    let found = orgs.iter().find(|o| &o.slug == slug).cloned();
+                    if found.is_none() {
+                        tracing::warn!(%slug, "the org is not the session's, and none is kept: no org lane");
+                    }
+                    found
+                })
+                .collect(),
+        }
+    };
+    let Some((issuer, token)) = signed else {
+        return wanted(org::remembered_all(data));
+    };
+    match tokio::time::timeout(Duration::from_secs(15), org::resolve_all(issuer, token)).await {
         Ok(Ok(found)) => {
-            org::remember(data, &found);
-            Some(found)
+            let orgs = wanted(found);
+            org::remember_all(data, &orgs);
+            orgs
         }
         Ok(Err(why)) => {
-            tracing::warn!(%slug, %why, "the org is not the session's: no org lane");
-            org::remembered(data, slug)
+            tracing::warn!(%why, "the issuer did not say the session's orgs: using the ones kept");
+            wanted(org::remembered_all(data))
         }
         Err(_) => {
-            tracing::warn!(%slug, "the issuer did not answer for the org: using the one kept");
-            org::remembered(data, slug)
+            tracing::warn!("the issuer did not answer for the orgs: using the ones kept");
+            wanted(org::remembered_all(data))
         }
     }
 }

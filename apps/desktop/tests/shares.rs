@@ -450,18 +450,27 @@ async fn a_folder_share_serves_the_folder_live_and_a_revoke_takes_it_down() {
 
     // The folder, rooted at the link: its home note and its other note.
     let home = page_with(&w.url(&link), None, "The album").await;
-    // Links are under `/s/` only (#431): the code at the root is not a
-    // share, `/s/<code>` without its slash is sent to the link, and an
-    // unknown code under `/s/` is 404 from the share layer.
-    let (status, _, body) = get(&w.url(&format!("/{}/", share.code)), None).await;
-    assert!(
-        !body.contains("The album") && !is_app_page(&body),
-        "{status}: {body}"
-    );
-    let bare = reqwest::Client::builder()
+    // A link is served under `/s/` (#431). Its code at the root is sent
+    // there (#538: a link is a path of the origin), only when it is a
+    // code this node holds; `/s/<code>` without its slash is sent to the
+    // link, and an unknown code under `/s/` is 404 from the share layer.
+    let unfollowed = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
-        .unwrap()
+        .unwrap();
+    let root = unfollowed
+        .get(w.url(&format!("/{}/", share.code)))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(root.status(), StatusCode::PERMANENT_REDIRECT);
+    assert_eq!(root.headers()["location"], link.as_str());
+    let (status, _, body) = get(&w.url("/abcdefghjkmnpqrs/"), None).await;
+    assert!(
+        status == StatusCode::NOT_FOUND && !is_app_page(&body),
+        "a code this node does not hold is no link: {status}: {body}"
+    );
+    let bare = unfollowed
         .get(w.url(&format!("/s/{}", share.code)))
         .send()
         .await

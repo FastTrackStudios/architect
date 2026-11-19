@@ -26,7 +26,10 @@
 //!   opens is the org's engine's call ([`OrgLane::opens`]): a viewer reads,
 //!   a member writes.
 //!
-//! The node's vaults are the org's: one org per node.
+//! One process serves many orgs (#538): a lane each, all at
+//! `/org/{slug}/vox` on the one origin ([`mount`]). Which vault is whose
+//! is [`VaultOrgs`]; a lane serves, lists and opens only its own org's
+//! vaults, shares and documents.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -123,6 +126,96 @@ const SYNC_PERMITS: ServicePermits = ServicePermits {
 pub struct NodeOrg {
     pub id: OrgId,
     pub slug: String,
+}
+
+/// Whose each vault is, on a node of one org or of many.
+///
+/// Built once at start from the configuration
+/// ([`super::Config::org_of_vault`]) and the orgs the issuer resolved. A
+/// vault of no org is served on no org lane (the account's own devices
+/// still sync it).
+#[derive(Debug, Clone, Default)]
+pub struct VaultOrgs {
+    by_vault: Arc<HashMap<String, NodeOrg>>,
+    orgs: Arc<[NodeOrg]>,
+}
+
+impl VaultOrgs {
+    /// `orgs` (the ones this node is in), and each vault's.
+    #[must_use]
+    pub fn new(orgs: Vec<NodeOrg>, by_vault: HashMap<String, NodeOrg>) -> Self {
+        Self {
+            by_vault: Arc::new(by_vault),
+            orgs: Arc::from(orgs),
+        }
+    }
+
+    /// The orgs this node is in.
+    #[must_use]
+    pub fn orgs(&self) -> &[NodeOrg] {
+        &self.orgs
+    }
+
+    /// The org vault `vault` is.
+    #[must_use]
+    pub fn of(&self, vault: &str) -> Option<&NodeOrg> {
+        self.by_vault.get(vault)
+    }
+
+    /// Whether vault `vault` is org `org`'s.
+    #[must_use]
+    pub fn holds(&self, org: &OrgId, vault: &str) -> bool {
+        self.of(vault).is_some_and(|o| &o.id == org)
+    }
+
+    /// Whether a call on the lane it came in on may see vault `vault`: on
+    /// an org lane, only that org's; off one (the node's own work, `/mcp`
+    /// behind its bearer), any.
+    #[must_use]
+    pub fn serves(&self, vault: &str) -> bool {
+        architect_orgs::server::current_org().is_none_or(|org| self.holds(&org, vault))
+    }
+
+    /// The org a document named `name` on the peer lane is: a vault's
+    /// note or document (`<vault>/<path>`), a root's manifest
+    /// (`files/<org>/…`) or a ledger (`ledger/<org>/…`), whose org is its
+    /// folder, the org's slug.
+    #[must_use]
+    pub fn of_name(&self, name: &str) -> Option<&NodeOrg> {
+        let (first, rest) = name.split_once('/')?;
+        if matches!(first, "files" | "ledger") {
+            let slug = rest.split('/').next()?;
+            if let Some(org) = self.orgs.iter().find(|o| o.slug == slug) {
+                return Some(org);
+            }
+        }
+        self.of(first)
+    }
+}
+
+/// Serve `lanes` at `/org/{slug}/vox` on `host`, each under its org's
+/// slug; any other slug is not found.
+#[must_use]
+pub fn mount(lanes: Vec<OrgLane>, host: EngineHost) -> EngineHost {
+    let lanes: Arc<[OrgLane]> = Arc::from(lanes);
+    host.vox_at_permissioned("/org/{slug}/vox", move |head: RequestHead| {
+        let lanes = Arc::clone(&lanes);
+        async move {
+            let slug = head.param("slug").unwrap_or_default();
+            let Some(lane) = lanes.iter().find(|l| l.org.slug == slug) else {
+                return Err(StatusCode::NOT_FOUND);
+            };
+            if !origin_allowed(&head.headers, &lane.origins) {
+                return Err(StatusCode::FORBIDDEN);
+            }
+            Ok(PermissionsGate::wrap_shared_with_bearer(
+                Arc::clone(&lane.gate),
+                lane.connection_router(),
+                head.bearer().map(str::to_owned),
+            )
+            .scoped(lane.org.id.clone()))
+        }
+    })
 }
 
 /// The org's enrolment lane and the engine both lanes ask.
@@ -338,27 +431,10 @@ impl OrgLane {
     }
 
     /// Serve the lane at `/org/{slug}/vox` on `host`; any other slug is
-    /// not found.
+    /// not found. Several lanes on one host: [`mount`].
     #[must_use]
     pub fn mount(&self, host: EngineHost) -> EngineHost {
-        let lane = self.clone();
-        host.vox_at_permissioned("/org/{slug}/vox", move |head: RequestHead| {
-            let lane = lane.clone();
-            async move {
-                if head.param("slug") != Some(lane.org.slug.as_str()) {
-                    return Err(StatusCode::NOT_FOUND);
-                }
-                if !origin_allowed(&head.headers, &lane.origins) {
-                    return Err(StatusCode::FORBIDDEN);
-                }
-                Ok(PermissionsGate::wrap_shared_with_bearer(
-                    Arc::clone(&lane.gate),
-                    lane.connection_router(),
-                    head.bearer().map(str::to_owned),
-                )
-                .scoped(lane.org.id.clone()))
-            }
-        })
+        mount(vec![self.clone()], host)
     }
 }
 
@@ -840,6 +916,61 @@ pub async fn resolve(issuer: &str, token: &str, slug: &str) -> Result<NodeOrg, S
         .ok_or_else(|| format!("the session is in no org `{slug}`"))
 }
 
+/// Every org the session `token` is in, as the issuer names them.
+///
+/// # Errors
+///
+/// The issuer did not answer.
+pub async fn resolve_all(issuer: &str, token: &str) -> Result<Vec<NodeOrg>, String> {
+    let lane = IssuerLane::new(issuer);
+    let client = lane
+        .client::<auth_proto::OrganizationServiceClient>()
+        .await?;
+    let orgs = IdentityServer(client).orgs(token).await?;
+    Ok(orgs
+        .into_iter()
+        .map(|o| NodeOrg {
+            id: o.id,
+            slug: o.slug,
+        })
+        .collect())
+}
+
+/// Every org a node resolved, kept in its data dir (`orgs`, a
+/// `slug=id` line each; a node of one org kept `org`).
+#[must_use]
+pub fn remembered_all(data: &Path) -> Vec<NodeOrg> {
+    let mut out: Vec<NodeOrg> = Vec::new();
+    for file in [data.join("orgs"), org_file(data)] {
+        let Ok(text) = std::fs::read_to_string(file) else {
+            continue;
+        };
+        for line in text.lines() {
+            if let Some((slug, id)) = line.trim().split_once('=')
+                && !out.iter().any(|o| o.slug == slug)
+            {
+                out.push(NodeOrg {
+                    id: OrgId::new(id),
+                    slug: slug.to_owned(),
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Keep `orgs` for [`remembered_all`].
+pub fn remember_all(data: &Path, orgs: &[NodeOrg]) {
+    let text = orgs.iter().fold(String::new(), |mut text, o| {
+        use std::fmt::Write as _;
+        let _ = writeln!(text, "{}={}", o.slug, o.id.0);
+        text
+    });
+    if let Err(error) = std::fs::write(data.join("orgs"), text) {
+        tracing::warn!(%error, "the orgs are not kept: the next start asks the issuer");
+    }
+}
+
 /// The org a node resolved once, kept in its data dir so it starts with
 /// the issuer down.
 #[must_use]
@@ -928,4 +1059,16 @@ pub async fn enrol_once(
 #[must_use]
 pub fn enrolled_marker(data: &Path) -> PathBuf {
     data.join("enrolled")
+}
+
+/// The marker of its enrolment in org `slug`, on a node that enrols in
+/// several ([`super::Config::enrol_orgs`]); the first org's is
+/// [`enrolled_marker`], as a node of one org left it.
+#[must_use]
+pub fn enrolled_marker_for(data: &Path, slug: &str, first: bool) -> PathBuf {
+    if first {
+        enrolled_marker(data)
+    } else {
+        data.join(format!("enrolled-{slug}"))
+    }
 }

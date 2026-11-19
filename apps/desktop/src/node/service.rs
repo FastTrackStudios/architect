@@ -58,6 +58,10 @@ pub struct NodeStatus {
     /// The org whose vaults it serves on its org lane, `/org/{slug}/vox`
     /// (`Config::host_org`): what a signed-in web app opens.
     pub hosts: Option<String>,
+    /// Every org it serves so, on a node that hosts several (#538): the
+    /// first is [`Self::hosts`].
+    #[facet(default)]
+    pub hosted: Vec<String>,
     /// Whether its last account pass went through.
     pub signed_in: bool,
     /// How many vaults it holds, and their notes.
@@ -121,6 +125,11 @@ pub struct FilesStore {
     /// A holding node's fetches in flight or waiting to be written,
     /// beside its tree.
     pub incoming_used: Option<u64>,
+    /// Files its holding rule leaves out (#904, `files_hold_paths`,
+    /// `files_skip_paths`, `files_hold_max`): listed here, their bytes on
+    /// the holders that keep them. Not waiting for anything.
+    #[facet(default)]
+    pub left_out: u32,
 }
 
 /// A note in a vault: `vault_proto::notes`' (the `Notes` contract lives
@@ -179,8 +188,10 @@ pub struct NodeState {
     pub(crate) files: Option<architect_files::sync::Engine>,
     /// Its share links' layer rules, for its status.
     pub(crate) layers: Option<super::share_layers::LayerRules>,
-    /// The org it hosts on its org lane, if any.
-    pub(crate) hosts: Option<String>,
+    /// The orgs it hosts on its org lanes, if any.
+    pub(crate) hosted: Vec<String>,
+    /// Whose each vault is: a call on an org's lane sees only its own.
+    pub(crate) orgs: super::org::VaultOrgs,
     /// Each vault's index, for clients that do not hold it.
     pub(crate) indexed: Indexed,
 }
@@ -191,9 +202,9 @@ pub struct NodeState {
 pub struct Access {
     /// Whether `(who, vault, path)` may be read.
     pub reads: Arc<dyn Fn(&Principal, &str, &str) -> bool + Send + Sync>,
-    /// A fingerprint of what `who` may read (their role): when it moves,
-    /// their next `since` answers a snapshot.
-    pub key: Arc<dyn Fn(&Principal) -> u64 + Send + Sync>,
+    /// A fingerprint of what `who` may read in a vault (their role in
+    /// its org): when it moves, their next `since` answers a snapshot.
+    pub key: Arc<dyn Fn(&Principal, &str) -> u64 + Send + Sync>,
 }
 
 /// How long a vault's index stays held with no one asking for it: past
@@ -282,7 +293,8 @@ impl NodeState {
             version: env!("CARGO_PKG_VERSION").to_owned(),
             endpoint: self.endpoint.clone(),
             org: account.org,
-            hosts: self.hosts.clone(),
+            hosts: self.hosted.first().cloned(),
+            hosted: self.hosted.clone(),
             signed_in: account.signed_in,
             vaults: count(self.backend.vault_ids().len()),
             notes: count(self.catalog().notes().len()),
@@ -309,6 +321,7 @@ impl NodeState {
                     history_max: history.map(|h| h.max),
                     tree_fs_free: history.and_then(|h| h.space).map(|s| s.free),
                     incoming_used: engine.inbox_usage().map(|i| i.used),
+                    left_out: engine.left_out(),
                 })
             }),
             relays: self.iroh.as_ref().map_or_else(Vec::new, |e| {
@@ -344,10 +357,13 @@ impl Notes for NodeState {
                     path: p.to_owned(),
                 })
             })
+            // On an org's lane: that org's vaults only.
+            .filter(|note| self.orgs.serves(&note.vault))
             .collect())
     }
 
     async fn read(&self, vault: String, path: String) -> Result<String, NotesError> {
+        self.served(&vault)?;
         let bytes = self.backend.get_file(&vault, &path)?;
         Ok(String::from_utf8_lossy(&bytes.0).into_owned())
     }
@@ -362,6 +378,16 @@ impl Notes for NodeState {
 }
 
 impl NodeState {
+    /// Vault `vault`, when the lane this call came in on serves it: on a
+    /// node of several orgs another org's vault is not found.
+    fn served(&self, vault: &str) -> Result<(), NotesError> {
+        if self.orgs.serves(vault) {
+            Ok(())
+        } else {
+            Err(NotesError::NotFound("the vault or the note".to_owned()))
+        }
+    }
+
     /// Runs `f` over vault `vault`'s index off the runtime's threads
     /// (opening a vault reads every note).
     async fn indexed<R: Send + 'static>(
@@ -464,11 +490,14 @@ impl NodeState {
     ) -> Result<(Arc<dyn Fn(&str) -> bool + Send + Sync>, u64), IndexError> {
         let who = architect::permissions_gate::caller()
             .ok_or_else(|| IndexError::Refused("no caller: the index is a member's".to_owned()))?;
+        if !self.orgs.serves(vault) {
+            return Err(IndexError::NotFound(vault.to_owned()));
+        }
         let access = self
             .indexed
             .access()
             .ok_or_else(|| IndexError::Refused("this node hosts no org".to_owned()))?;
-        let key = (access.key)(&who);
+        let key = (access.key)(&who, vault);
         let vault = vault.to_owned();
         Ok((
             Arc::new(move |path: &str| (access.reads)(&who, &vault, path)),
@@ -487,6 +516,7 @@ impl NodeState {
         text: String,
         if_match: IfMatch,
     ) -> Result<(), NotesError> {
+        self.served(&vault)?;
         // Registered first, so an open document merges the write as a
         // change rather than the next open finding it.
         self.backend.register_collab(&vault, &path)?;

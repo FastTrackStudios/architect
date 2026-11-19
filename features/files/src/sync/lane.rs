@@ -61,6 +61,30 @@ impl Engine {
             .collect()
     }
 
+    /// The hashes this device's holding rule keeps and `also` keeps too
+    /// (#904): what a node copies to its bucket. A hash some path keeps
+    /// is kept, whatever another path naming the same bytes says.
+    pub async fn named_keeping(&self, also: &crate::hold::HoldRule) -> Vec<Sha256> {
+        let hold = &self.config().hold;
+        if hold.is_all() && also.is_all() {
+            return self.named();
+        }
+        let mut out = std::collections::HashSet::new();
+        for doc_id in self.known() {
+            let Some(doc) = self.doc(doc_id).await else {
+                continue;
+            };
+            for v in Manifest::new(&doc).versions() {
+                if hold.keeps_both(also, &v.path, v.size)
+                    && let Some(hash) = v.content.as_deref().and_then(|c| Sha256::from_hex(c).ok())
+                {
+                    out.insert(hash);
+                }
+            }
+        }
+        out.into_iter().collect()
+    }
+
     /// The manifests this device holds, as of the last pass.
     #[must_use]
     pub fn held(&self) -> Vec<HeldManifest> {

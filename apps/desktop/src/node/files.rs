@@ -177,6 +177,7 @@ pub(super) fn engine(
         site: config.files_site.clone().unwrap_or_default(),
         verify_window: Duration::from_secs(config.files_verify_secs.max(1)),
         scrub_budget: config.files_scrub_mib.saturating_mul(1 << 20),
+        hold: config.hold_rule(),
         ..EngineConfig::new(&config.name, data, files_dir.to_owned(), config.files_hold)
     };
     let engine = Engine::new(
@@ -203,6 +204,48 @@ pub(super) fn engine(
             }
         },
     )
+}
+
+/// Whether `path` of a vault is not one of its attachments.
+///
+/// Its notes and the documents of its extensions' kinds (`kind`) sync as
+/// documents; a hidden file or folder (`.obsidian`, `.git`, the engine's
+/// own temp names) is the device's; `_architect/` holds what a share
+/// link runs, which only the share's owner writes (#710,
+/// `vault_live::ExtensionPaths`) and so never arrives as a file.
+#[must_use]
+pub fn not_an_attachment(path: &str, kind: &dyn Fn(&str) -> bool) -> bool {
+    path.split('/')
+        .any(|segment| segment.starts_with('.') || segment == "_architect")
+        || vault_proto::note_types::is_note_path(path)
+        || kind(path)
+}
+
+/// Hold vault `vault`'s attachments in place at `dir` (#490): the root
+/// `<org>/Vaults/<vault>`, the same on every node that holds the vault,
+/// so they sync as a root's files do and the holding rule applies.
+pub(super) fn hold_vault(
+    engine: &Engine,
+    org: &str,
+    vault: &str,
+    dir: &Path,
+    collab: &vault_collab::VaultCollab,
+) {
+    let section = architect_files::sync::Section::Vaults;
+    let place = format!("{org}/{}/{vault}", section.dir());
+    let meta = architect_files::sync::RootMeta {
+        id: architect_files::sync::layout::id_for_place(&place),
+        org: org.to_owned(),
+        section,
+        name: vault.to_owned(),
+    };
+    let collab = collab.clone();
+    let doc_id = engine.hold_at(
+        meta,
+        dir.to_owned(),
+        Arc::new(move |path| not_an_attachment(path, &|p| collab.kind_of(p).is_some())),
+    );
+    tracing::info!(files.root = %doc_id, files.place = %place, "files: a vault's attachments are held where the vault is");
 }
 
 /// The agent on the node's HTTP side, when it listens on loopback only (a
@@ -307,12 +350,18 @@ pub(super) async fn backend(config: &Config) -> Result<Option<S3Store>, String> 
 
 /// Copy every hash a manifest names into the bucket, from this node;
 /// with [`Placement::Primary`], then keep the local store to its budget.
+///
+/// Only the files the node's holding rule keeps and `rule` keeps too
+/// (#904, [`Config::bucket_rule`](super::Config::bucket_rule)): a
+/// storage server sharing the bucket sends its small files there and
+/// keeps the multitracks to itself.
 pub(super) async fn replicate_forever(
     engine: Engine,
     s3: S3Store,
     placement: Placement,
     cache_bytes: u64,
     every: Duration,
+    rule: architect_files::HoldRule,
 ) {
     let mut there: Option<std::collections::HashSet<Sha256>> = None;
     loop {
@@ -323,7 +372,7 @@ pub(super) async fn replicate_forever(
             }
         }
         if let Some(there) = there.as_mut() {
-            for hash in engine.named() {
+            for hash in engine.named_keeping(&rule).await {
                 if there.contains(&hash) {
                     continue;
                 }

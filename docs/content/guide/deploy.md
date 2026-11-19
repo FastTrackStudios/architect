@@ -83,8 +83,11 @@ where the node reads them, never values in the environment.
 | `ARCHITECT_SESSION_FILE` | none | a file holding the account's session token |
 | `ARCHITECT_ORG` | none | the org it offers the account while the account shares none |
 | `ARCHITECT_HOST_ORG` | none | an issuer org (slug) the session is in: the node serves its enrolment lane at `/org/{slug}/vox` |
+| `ARCHITECT_HOST_ORGS` | none | several orgs (slugs) the session is in, `a,b`, or `*` for every one: one process serves them all, a lane each on the one origin ([below](#one-server-many-orgs)) |
+| `ARCHITECT_VAULT_ORGS` | none | `vault=org,…`: the org a vault is, when its id is not the org's slug |
 | `ARCHITECT_ENROL_AT` | none | another node's HTTP origin: this node enrols itself there, once |
 | `ARCHITECT_ENROL_ORG` | none | the issuer org (slug) it enrols in at `ARCHITECT_ENROL_AT` |
+| `ARCHITECT_ENROL_ORGS` | none | several orgs to enrol in there, `a,b` |
 | `ARCHITECT_ENROL_ROLE` | `member` | the role it asks for, at most the session's own in the org |
 | `ARCHITECT_PEERS` | none | `endpoint@host:port,…`: nodes it dials directly |
 | `ARCHITECT_APPLE_APP_IDS` | none | `<team id>.<bundle id>,…`: the iOS apps its share links open in as universal links ([below](#a-link-opens-architect)); none: no `apple-app-site-association` |
@@ -94,6 +97,9 @@ where the node reads them, never values in the environment.
 | `ARCHITECT_MCP_TOKEN_FILE` | none | `/mcp` is served only with this bearer |
 | `ARCHITECT_SWEEP_SECS` | `30` | how often it sweeps its peers, the fallback for what a live bridge missed |
 | `ARCHITECT_LIVE_MAX` | `256` | how many notes it keeps live with each peer; `0` sweeps only |
+| `ARCHITECT_VAULT_FILES` | `false` | sync each vault's attachments (every file that is not a note) between the nodes that hold it ([below](#a-vault-s-attachments)) |
+| `ARCHITECT_FILES_HOLD_PATHS`, `ARCHITECT_FILES_SKIP_PATHS`, `ARCHITECT_FILES_HOLD_MAX` | none | which files this node fetches and holds: globs to keep, globs never kept, a size no single file may pass ([below](#where-files-live)) |
+| `ARCHITECT_BLOB_S3_MAX`, `ARCHITECT_BLOB_S3_SKIP_PATHS` | none | which of the files it holds it copies to its bucket |
 | `ARCHITECT_FILES_STORE_MAX` | a quarter of the filesystem under the data dir, at most 100 GiB (75% of the data volume with the chart) | the hard limit on the files' blob store, `<data dir>/files/blobs`: bytes, `16Gi`/`500M`, or `40%` of that filesystem ([below](#the-blob-store-s-budget)) |
 | `ARCHITECT_FILES_KEEP_FREE` | 15% of that filesystem, at most 64 GiB | free space the store (and a holding node's tree-side areas) never writes into, whoever else filled the disk; `100%` is refused |
 | `ARCHITECT_FILES_HISTORY_MAX` | a tenth of the tree's filesystem, at most 500 GiB | a holding node's kept versions, beside its tree: at the limit a replacement waits ([below](#the-blob-store-s-budget)) |
@@ -325,6 +331,146 @@ host_org = "fasttrackstudio"
 enrol_at = "https://architect.fasttrackstudio.app"
 enrol_org = "fasttrackstudio"
 ```
+
+## One server, many orgs
+
+One `architect-desktop serve` process serves every org its session is in, on
+one origin (#538): no node per org, no subdomain per org.
+
+```toml
+# /etc/architect/node.toml: fasttrackstudio.app
+host_orgs = ["*"]            # or the slugs: ["fasttrackaudio", "tombrooksmusic"]
+
+[vaults]
+fasttrackaudio = "vaults/fasttrackaudio"
+tombrooksmusic = "vaults/tombrooksmusic"
+```
+
+- **A lane each.** Every hosted org has its own lane at `/org/<slug>/vox`
+  (`apps/desktop/src/node/org.rs` `mount`), with its own gate and members.
+  The orgs are asked of the issuer at start and kept in the data dir
+  (`orgs`), so the node starts with the issuer down.
+- **Whose a vault is.** The vault whose id is an org's slug is that org's;
+  `vault_orgs` names the org of any other (`Config::org_of_vault`). With one
+  org, every vault is its, as before. A vault of no org is served on no lane.
+- **Each org sees its own.** A lane lists, reads, indexes and opens live
+  only its org's vaults, and makes, lists and revokes only their share links
+  (`VaultOrgs::serves`). A member of one org is refused on another's lane,
+  and a device enrolled in one opens and is listed only that org's documents
+  (`crdt::p2p::NodeAccess::org_docs_of`). `/node/status` names them in
+  `hosted`.
+- **A link is a path.** A share link is `https://<origin>/s/<code>/`, and
+  `https://<origin>/<code>` goes there (a permanent redirect, only for a
+  code this node holds, so nothing else at the root is taken). A proxy in
+  front sends the node the paths whose first segment is a code: 16
+  characters of `a-z` and `2-9` without `l`, `o`, `0`, `1`.
+
+Test: `apps/desktop/tests/node.rs`
+`one_process_serves_two_orgs_each_on_its_own_lane`.
+
+Not yet per org: the store's budget and quotas, extensions' node secrets
+(an admin of any hosted org sets them for the node), the share layers' kept
+rules, and a blob is served by its hash to any device the node lets in.
+
+## Where files live
+
+Each node says what it holds (#904), and that decides where a file's bytes
+are: the large ones on a storage server, the small ones on the hosted node
+and in its bucket.
+
+```toml
+# the hosted node: every root's light part, never the multitracks
+files_dir = "/var/lib/architect/files"
+files_hold = true
+files_skip_paths = ["**/Media/**", "**/Audio Files/**", "**/Samples/**"]
+files_hold_max = "256Mi"
+blob_s3_bucket = "architect"          # what it holds goes to the bucket too
+
+# the storage server: everything, in place; only small files to the bucket
+files_dir = "/mnt/starcommand/Task"
+files_hold = true
+blob_s3_bucket = "architect"
+blob_s3_max = "64Mi"
+```
+
+- **A file the rule leaves out stays listed.** Its versions are in the
+  root's manifest and it shows in every listing; its bytes are never fetched
+  or held here, and never copied to this node's bucket
+  (`features/files/src/hold.rs` `HoldRule`, applied in
+  `features/files/src/sync/engine.rs` `Engine`). A root's status counts it
+  as `left_out`, apart from `missing`, and the root still reads as synced;
+  `/node/status` has the count in `files_store.left_out`.
+- **Globs** are root-relative: `*` and `?` in a name, `**` for any number
+  of folders (`**/*.pdf`, `**/Media/**`). With `files_hold_paths` set, only
+  what one of them matches is held; `files_skip_paths` wins over it.
+- **The bucket** gets what the node holds and `blob_s3_max` /
+  `blob_s3_skip_paths` also keep. Without them, everything it holds.
+
+Tests: `features/files/tests/sync.rs`
+`a_holding_rule_takes_the_light_part_and_leaves_the_multitracks_listed`,
+`apps/desktop/tests/files.rs`
+`a_node_with_a_holding_rule_never_fetches_the_multitracks`. Not yet: a rule
+on a pin (`FILES_PIN`), and a rule the org sets for every holder.
+
+### A storage server
+
+A storage server is the app run with `serve` on the machine that holds the
+files, signed in to the person's account like their other devices. A
+machine with no browser is signed in with a code:
+
+```sh
+architect-desktop serve register --issuer https://auth.fasttrackstudio.app \
+    --session-file /var/lib/architect/session --name starcommand
+```
+
+It prints a link and a code; its person approves the code in any browser
+where they are signed in, and the session is written to the file, readable
+by its owner alone (`apps/desktop/src/node/register.rs` `sign_in`,
+`write_session`). Then it runs with `ARCHITECT_ISSUER`,
+`ARCHITECT_SESSION_FILE`, `ARCHITECT_PLATFORM=storage`, `ARCHITECT_FILES_DIR`
+and `ARCHITECT_FILES_HOLD=true`. On the account, the person's other devices
+and nodes let it in, sync their documents with it and fetch bytes from it.
+It is listed with the account's devices (`ACCOUNT_DEVICES`, platform
+`storage`) and among the files' holders (`FILES_HOLDERS`: a `node` at its
+`ARCHITECT_FILES_SITE`, with its copies and whether it is reachable). For an
+org's other members it enrols at the node that hosts the org
+(`ARCHITECT_ENROL_AT`, `ARCHITECT_ENROL_ORGS`).
+
+Test: `apps/desktop/tests/node.rs`
+`a_machine_registers_on_the_account_with_a_code_and_is_listed_as_storage`.
+
+### A vault's attachments
+
+A vault's notes are documents. With `ARCHITECT_VAULT_FILES=true` its other
+files (recordings, PDFs, covers, cue files) sync too, between the nodes
+that hold the vault: each vault is a root `<org>/Vaults/<vault>` held where
+the vault is (`apps/desktop/src/node/files.rs` `hold_vault`,
+`features/files/src/sync/engine.rs` `Engine::hold_at`), so its attachments
+travel as a root's files do (the manifest as a document, the bytes from a
+peer or the bucket), are counted in the copies ledger, and follow the
+holding rule above: the hosted node takes the covers and reference mixes
+and leaves a song's multitracks on the storage server.
+
+The engine never touches what is not an attachment
+(`apps/desktop/src/node/files.rs` `not_an_attachment`): a note or a
+document of an extension's kind (they sync as documents), a hidden file or
+folder, and `_architect/`, which holds what a share link runs and which only
+the share's owner writes. A manifest that names one, a peer's included,
+writes nothing.
+
+Every node names the root the same way: the org is the vault's
+(`Config::vault_files_org`), so a node that neither hosts nor enrols in that
+org names it in `vault_orgs`, unless the vault's id is the org's slug.
+
+Tests: `features/files/tests/sync.rs`
+`a_vaults_attachments_sync_as_a_root_and_its_notes_are_left_alone`,
+`apps/desktop/tests/files.rs`
+`a_vaults_attachments_reach_the_other_node_under_its_holding_rule`.
+
+Not yet: a share link serves an attachment only when the node holds it (a
+file its rule leaves out is not on the link, #490); the app's own copy of
+an org's vault, kept over the org lane, gets its notes and not its
+attachments; the setting is off unless set.
 
 ## Extensions' node actions
 
