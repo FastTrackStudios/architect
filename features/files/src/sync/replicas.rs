@@ -318,6 +318,7 @@ impl Engine {
             what: match meta.section {
                 Section::Projects => "project".to_owned(),
                 Section::Assets => "library".to_owned(),
+                Section::Vaults => "vault".to_owned(),
             },
             props: String::new(),
             name: String::new(),

@@ -209,9 +209,10 @@ pub struct NodeAccess {
     /// same `devices`): when set, [`node_router`] also serves
     /// `DevicePairing`, which any endpoint may call.
     pub pairings: Option<Pairings>,
-    /// The org whose documents these are, for its enrolled devices
-    /// ([`Self::org_docs`]).
-    pub org: Option<OrgDocs>,
+    /// The orgs whose documents these are, for their enrolled devices
+    /// ([`Self::org_docs`], [`Self::org_docs_of`]): one on a node of one
+    /// org, one each on a node that hosts several.
+    pub orgs: Vec<OrgDocs>,
 }
 
 /// The org a node's documents are, and the engine that says what each
@@ -224,7 +225,13 @@ pub struct OrgDocs {
     /// the org's enrolled devices as `Principal::Host` members
     /// (`architect_devices::server::project_members`).
     pub engine: Arc<dyn PermissionEngine>,
+    /// Which documents are this org's, on a node that holds several
+    /// orgs' ([`NodeAccess::org_docs_of`]); `None`: every document.
+    pub holds: Option<HoldsDoc>,
 }
+
+/// Whether a document is one org's ([`OrgDocs::holds`]).
+pub type HoldsDoc = Arc<dyn Fn(Uuid) -> bool + Send + Sync>;
 
 impl std::fmt::Debug for OrgDocs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -241,7 +248,7 @@ impl NodeAccess {
             devices,
             shares,
             pairings: None,
-            org: None,
+            orgs: Vec::new(),
         }
     }
 
@@ -253,34 +260,63 @@ impl NodeAccess {
     /// its enrolment refuses its next call.
     #[must_use]
     pub fn org_docs(mut self, org: impl Into<String>, engine: Arc<dyn PermissionEngine>) -> Self {
-        self.org = Some(OrgDocs {
+        self.orgs.push(OrgDocs {
             org: org.into(),
             engine,
+            holds: None,
         });
         self
     }
 
-    /// Whether `endpoint`, enrolled in the node's org, may `action` the
-    /// org-relative `what`.
-    fn org_allows(&self, endpoint: &str, what: &str, action: &Action) -> bool {
-        let Some(docs) = &self.org else {
+    /// [`Self::org_docs`] on a node that holds several orgs' documents:
+    /// only the documents `holds` says are org `org`'s are opened by its
+    /// enrolled devices. A device enrolled in one org never opens, or is
+    /// listed, another's.
+    #[must_use]
+    pub fn org_docs_of(
+        mut self,
+        org: impl Into<String>,
+        engine: Arc<dyn PermissionEngine>,
+        holds: HoldsDoc,
+    ) -> Self {
+        self.orgs.push(OrgDocs {
+            org: org.into(),
+            engine,
+            holds: Some(holds),
+        });
+        self
+    }
+
+    /// Whether `endpoint`, enrolled in one of the node's orgs, may
+    /// `action` document `doc` there (`None`: all its documents,
+    /// `docs/**`).
+    fn org_allows(&self, endpoint: &str, doc: Option<Uuid>, action: &Action) -> bool {
+        let Some(peer) = self.devices.get(endpoint) else {
             return false;
         };
-        let enrolled = self
-            .devices
-            .get(endpoint)
-            .is_some_and(|peer| peer.orgs().iter().any(|(org, _)| org.0 == docs.org));
-        enrolled
-            && docs
-                .engine
-                .check(
-                    &Principal::Host {
-                        endpoint: endpoint.to_owned(),
-                    },
-                    &Resource::new(format!("org/{}/{what}", docs.org)),
-                    action,
-                )
-                .allowed()
+        let enrolled = peer.orgs();
+        self.orgs.iter().any(|docs| {
+            let what = match doc {
+                Some(id) => {
+                    if docs.holds.as_ref().is_some_and(|holds| !holds(id)) {
+                        return false;
+                    }
+                    format!("docs/{id}")
+                }
+                None => "docs/**".to_owned(),
+            };
+            enrolled.iter().any(|(org, _)| org.0 == docs.org)
+                && docs
+                    .engine
+                    .check(
+                        &Principal::Host {
+                            endpoint: endpoint.to_owned(),
+                        },
+                        &Resource::new(format!("org/{}/{what}", docs.org)),
+                        action,
+                    )
+                    .allowed()
+        })
     }
 
     /// Whether `endpoint` may sweep this node (`DocPeer`, which lists
@@ -288,7 +324,7 @@ impl NodeAccess {
     /// the node's org whose role may write all its documents.
     #[must_use]
     pub fn sweeps(&self, endpoint: &str) -> bool {
-        self.devices.is_account(endpoint) || self.org_allows(endpoint, "docs/**", &Action::write())
+        self.devices.is_account(endpoint) || self.org_allows(endpoint, None, &Action::write())
     }
 
     /// Take pairings: a device that redeems one of `pairings`' offers
@@ -339,7 +375,7 @@ impl NodeAccess {
                     endpoint,
                     &architect_devices::doc_resource(doc_id),
                     &Action::write(),
-                ) || self.org_allows(endpoint, &format!("docs/{doc_id}"), &Action::write())
+                ) || self.org_allows(endpoint, Some(doc_id), &Action::write())
             }
             Some(Principal::Guest { link_id, .. }) => self.shares.writes(link_id, doc_id),
             _ => false,
@@ -689,6 +725,44 @@ mod tests {
         access.devices.revoke_org(STRANGER, &OrgId::new("acme"));
         assert!(!access.admits(Some(&device), doc));
         assert!(!access.devices.admits(STRANGER));
+    }
+
+    /// A node of two orgs: a device enrolled in one opens that org's
+    /// documents and not the other's.
+    #[test]
+    fn a_device_enrolled_in_one_org_opens_none_of_another_s() {
+        use architect_orgs::server::{ConfinedEngine, Members};
+        use architect_orgs::{OrgId, Role};
+
+        let members = Members::new();
+        let engine = || {
+            Arc::new(ConfinedEngine::new(members.clone()).role(
+                &Role::Member,
+                vec![architect_permissions::Rule::new("**", &["read", "write"])],
+            ))
+        };
+        let (ours, theirs) = (Uuid::from_u128(1), Uuid::from_u128(2));
+        let access = access()
+            .org_docs_of("acme", engine(), Arc::new(move |doc| doc == ours))
+            .org_docs_of("globex", engine(), Arc::new(move |doc| doc == theirs));
+        architect_devices::server::project_members(&access.devices, &members);
+        access.devices.admit(
+            architect_devices::Peer::new(STRANGER, "nas", "server").granted(
+                architect_devices::Grant::Org {
+                    org: OrgId::new("acme"),
+                    role: Role::Member,
+                    by: "user:ada".into(),
+                },
+            ),
+        );
+        let device = access.caller(STRANGER, None);
+        assert!(access.admits(Some(&device), ours));
+        assert!(!access.admits(Some(&device), theirs), "another org's");
+        assert!(
+            !access.admits(Some(&device), Uuid::from_u128(3)),
+            "no org's"
+        );
+        assert!(access.sweeps(STRANGER));
     }
 
     #[test]

@@ -450,18 +450,27 @@ async fn a_folder_share_serves_the_folder_live_and_a_revoke_takes_it_down() {
 
     // The folder, rooted at the link: its home note and its other note.
     let home = page_with(&w.url(&link), None, "The album").await;
-    // Links are under `/s/` only (#431): the code at the root is not a
-    // share, `/s/<code>` without its slash is sent to the link, and an
-    // unknown code under `/s/` is 404 from the share layer.
-    let (status, _, body) = get(&w.url(&format!("/{}/", share.code)), None).await;
-    assert!(
-        !body.contains("The album") && !is_app_page(&body),
-        "{status}: {body}"
-    );
-    let bare = reqwest::Client::builder()
+    // A link is served under `/s/` (#431). Its code at the root is sent
+    // there (#538: a link is a path of the origin), only when it is a
+    // code this node holds; `/s/<code>` without its slash is sent to the
+    // link, and an unknown code under `/s/` is 404 from the share layer.
+    let unfollowed = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
-        .unwrap()
+        .unwrap();
+    let root = unfollowed
+        .get(w.url(&format!("/{}/", share.code)))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(root.status(), StatusCode::PERMANENT_REDIRECT);
+    assert_eq!(root.headers()["location"], link.as_str());
+    let (status, _, body) = get(&w.url("/abcdefghjkmnpqrs/"), None).await;
+    assert!(
+        status == StatusCode::NOT_FOUND && !is_app_page(&body),
+        "a code this node does not hold is no link: {status}: {body}"
+    );
+    let bare = unfollowed
         .get(w.url(&format!("/s/{}", share.code)))
         .send()
         .await
@@ -763,6 +772,9 @@ async fn a_share_expires_takes_comments_when_asked_and_has_its_own_domain() {
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
     assert!(links.comments(talk.code.clone()).await.unwrap().is_empty());
 
+    // A thing has one link an audience: the folder's next link is new
+    // only once this one is revoked.
+    links.revoke(talk.code.clone()).await.unwrap();
     let read = w
         .share(
             ShareScope::Folder("Shared".to_owned()),
@@ -799,6 +811,7 @@ async fn a_share_expires_takes_comments_when_asked_and_has_its_own_domain() {
     assert!(body.contains("href=\"/\""), "rooted at the domain: {body}");
 
     // Expiry: open until then, 404 from then on.
+    links.revoke(read.code.clone()).await.unwrap();
     let soon = links
         .create(NewShare {
             vault: "notes".to_owned(),
@@ -2336,9 +2349,14 @@ async fn the_apps_share_actions_set_and_read_how_far_a_link_plays() {
         .unwrap();
     assert_eq!(made["share"]["listen"], "reference");
     let code = made["share"]["code"].as_str().unwrap().to_owned();
-    let page = run("SHARE_CREATE", json!({"folder": "Set", "listen": "page"}))
-        .await
-        .unwrap();
+    // For another audience: sharing the folder with the same one again
+    // returns the link above as it is.
+    let page = run(
+        "SHARE_CREATE",
+        json!({"folder": "Set", "listen": "page", "audience": "public"}),
+    )
+    .await
+    .unwrap();
     assert_eq!(page["share"]["listen"], "page");
     assert!(
         run("SHARE_CREATE", json!({"folder": "Set", "listen": "stems"}))
@@ -4379,10 +4397,11 @@ async fn an_unknown_code_answers_exactly_as_a_revoked_or_expired_one() {
             ShareAccess::Read,
         )
         .await;
+    // Another audience's link: a thing has one link an audience.
     let expired = w
         .share(
             ShareScope::Folder("Shared".to_owned()),
-            Audience::Link,
+            Audience::Public,
             ShareAccess::Read,
         )
         .await;
@@ -4649,6 +4668,8 @@ async fn a_recording_named_only_by_a_property_is_the_references_never_the_pages(
                 "{listen:?} {file}: {listed:?}"
             );
         }
+        // The folder's next link is a new one only once this is revoked.
+        links.revoke(share.code.clone()).await.unwrap();
     }
     w.host.stop().await;
 }

@@ -17,7 +17,8 @@
 //! made again.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
+use std::time::{Duration, Instant};
 
 use architect_files::sync::{Engine, LedgerDoc, manifest};
 use crdt::peer::{DocAt, DocCatalog, HeldDoc};
@@ -33,7 +34,16 @@ pub struct VaultCatalog {
     backend: Backend,
     files: Option<Engine>,
     documents: Option<Documents>,
+    /// The name each document it listed or registered has on the peer
+    /// lane ([`Self::name_of`]).
+    names: Arc<RwLock<HashMap<Uuid, String>>>,
+    /// When the names were last read from a full listing.
+    listed: Arc<Mutex<Option<Instant>>>,
 }
+
+/// How long a document no listing names is taken as unknown before the
+/// vaults are listed again for it.
+const RELIST: Duration = Duration::from_secs(1);
 
 /// The vaults' documents of a kind: the reconciler that keeps them, and
 /// what keeps its kinds up to the extensions installed.
@@ -45,12 +55,48 @@ struct Documents {
 
 impl VaultCatalog {
     #[must_use]
-    pub const fn new(backend: Backend) -> Self {
+    pub fn new(backend: Backend) -> Self {
         Self {
             backend,
             files: None,
             documents: None,
+            names: Arc::default(),
+            listed: Arc::default(),
         }
+    }
+
+    /// The name document `doc_id` has on the peer lane (`<vault>/<path>`,
+    /// `files/<org>/…`, `ledger/<org>/…`): one this node listed, or one a
+    /// peer named and it registered. On a node of several orgs, whose a
+    /// document is follows from it (`super::org::VaultOrgs::of_name`).
+    #[must_use]
+    pub fn name_of(&self, doc_id: Uuid) -> Option<String> {
+        let known = |names: &RwLock<HashMap<Uuid, String>>| {
+            names
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get(&doc_id)
+                .cloned()
+        };
+        if let Some(name) = known(&self.names) {
+            return Some(name);
+        }
+        {
+            let mut listed = self.listed.lock().unwrap_or_else(PoisonError::into_inner);
+            if listed.is_some_and(|at| at.elapsed() < RELIST) {
+                return None;
+            }
+            *listed = Some(Instant::now());
+        }
+        let _ = self.notes();
+        known(&self.names)
+    }
+
+    fn remember(&self, docs: impl IntoIterator<Item = (Uuid, String)>) {
+        self.names
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .extend(docs);
     }
 
     /// The same, listing the vault files of the kinds `kinds` declares as
@@ -117,6 +163,7 @@ impl VaultCatalog {
         if let Some(documents) = &self.documents {
             documents.collab.notice_deletes();
         }
+        self.remember(out.iter().map(|d| (d.doc_id, d.name.clone())));
         out
     }
 
@@ -137,6 +184,12 @@ impl VaultCatalog {
     /// of a registered kind, or its id is not the one its name derives to
     /// (a note's) or the one its file carries (a document's).
     pub fn register(&self, at: &DocAt) -> Result<Uuid, SyncError> {
+        let doc_id = self.registered(at)?;
+        self.remember([(doc_id, at.name.clone())]);
+        Ok(doc_id)
+    }
+
+    fn registered(&self, at: &DocAt) -> Result<Uuid, SyncError> {
         if let Some(which) = LedgerDoc::parse(&at.name) {
             let files = self.files.as_ref().ok_or(SyncError::UnknownDoc)?;
             if which.doc_id() != at.doc_id {

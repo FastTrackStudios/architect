@@ -512,6 +512,20 @@ const FLOAT_AT: Rect = Rect {
     h: 320.0,
 };
 
+/// A pop-out window's own buttons, where the window has no system title
+/// bar off a Mac (as the main window: the shell draws close, minimize and
+/// maximize where a Mac's traffic lights sit). In context for the
+/// pop-out's root, which draws them over its title row.
+#[derive(Clone, Copy, PartialEq)]
+pub struct PopoutButtons {
+    /// Closes the window.
+    pub close: Callback<()>,
+    /// Minimizes it.
+    pub minimize: Callback<()>,
+    /// Maximizes it, or puts it back.
+    pub zoom: Callback<()>,
+}
+
 /// The window's title row, for a workspace that reaches the window's top.
 ///
 /// The tab bars along the top edge become it (Obsidian's): as tall, clear

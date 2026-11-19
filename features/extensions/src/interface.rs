@@ -258,7 +258,11 @@ impl ExtensionUi {
                     rsx! { ExtensionView { ui: me, extension: e.clone(), view: v.clone() } }
                 })
                 .home(home(decl.home))
-                .still();
+                .still()
+                // An extension's view fills its pane: no header row (back,
+                // forward, title, menu), and no tab bar while it is alone
+                // in its group. Its toolbars still get a row of their own.
+                .headless();
                 // A document view has a pane per document (`ViewOpen::pane_id`).
                 if host
                     .get(extension)
@@ -1234,6 +1238,27 @@ pub fn ExtensionView(
                 div { style: "{boxed}", {page} }
             };
         }
+    }
+    // A compiled-in view whose scenes read an engine's values reads them
+    // from the same place a process copy's do: the shared table of the
+    // extension providing a service it uses (an engine in a process of its
+    // own). Without it the layers those values drive (a meter, a lit mute
+    // or solo) draw as if every value were full.
+    #[cfg(all(feature = "remote", unix))]
+    if host.linked_view(&extension, &view).is_some()
+        && host
+            .capabilities(&extension)
+            .is_some_and(|c| c.may_use(crate::capabilities::ENGINE))
+    {
+        let wanted = loaded.manifest.uses.iter().chain(&loaded.manifest.requires);
+        let engines = wanted
+            .filter_map(|(service, req)| {
+                let req = semver::VersionReq::parse(req).ok()?;
+                host.provider(service, &req).map(|(id, _)| id)
+            })
+            .filter(|id| *id != extension)
+            .collect();
+        architect_scene::engine::read_from(&extension, engines);
     }
     if let Some(root) = host.linked_view(&extension, &view) {
         // A list of one, so its key is diffed: a pane that goes from one

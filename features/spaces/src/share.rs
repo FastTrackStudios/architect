@@ -131,6 +131,23 @@ pub enum Audience {
     Invited(Vec<String>),
 }
 
+impl ShareScope {
+    /// The thing a scope shares, apart from what it has in it now: a
+    /// folder, a tag or a base by its name, a list of notes by its first
+    /// (a setlist's note, before its songs'), the vault as itself. Two
+    /// scopes with one root are the same thing shared, at two times.
+    #[must_use]
+    pub fn root(&self) -> String {
+        match self {
+            Self::Vault => "vault".to_owned(),
+            Self::Folder(f) => format!("folder:{f}"),
+            Self::Tag(t) => format!("tag:{t}"),
+            Self::Notes(notes) => format!("note:{}", notes.first().map_or("", String::as_str)),
+            Self::Base(b) => format!("base:{b}"),
+        }
+    }
+}
+
 impl Audience {
     /// Parse `public`, `link`, `org` or `invited:<email>,<email>`.
     ///
@@ -376,6 +393,18 @@ pub struct Share {
     /// default: access fails closed.
     #[facet(default)]
     pub listen: Listen,
+    /// What its owner calls it ("Band", "Client preview"), to find it
+    /// again among a set's links. Never shown to a guest.
+    #[facet(default)]
+    pub name: Option<String>,
+    /// When it was paused, if it is: closed to everyone, its code kept,
+    /// until resumed. Revoking is the only thing that ends a code.
+    #[facet(default)]
+    pub paused_at: Option<i64>,
+    /// When a page of it was last opened by a guest, as the node that
+    /// serves it remembers (since that node started): never saved.
+    #[facet(default)]
+    pub opened_at: Option<i64>,
 }
 
 /// Where a share stands at one moment.
@@ -383,6 +412,8 @@ pub struct Share {
 #[repr(u8)]
 pub enum ShareState {
     Live,
+    /// Closed by its owner for now ([`Share::paused_at`]); its code is kept.
+    Paused,
     Expired,
     Revoked,
 }
@@ -413,11 +444,25 @@ pub enum Verdict {
 }
 
 impl Share {
+    /// Whether it is the link for sharing `scope` of `vault` with
+    /// `audience`: the same thing ([`ShareScope::root`]) and the same
+    /// people, and not revoked. A thing has one link an audience, so
+    /// sharing it again finds this one.
+    #[must_use]
+    pub fn is_link_for(&self, vault: &str, scope: &ShareScope, audience: &Audience) -> bool {
+        self.revoked_at.is_none()
+            && self.vault == vault
+            && self.scope.root() == scope.root()
+            && self.audience.clone().normalised() == audience.clone().normalised()
+    }
+
     /// Where it stands at `now` (unix seconds).
     #[must_use]
     pub fn state(&self, now: i64) -> ShareState {
         if self.revoked_at.is_some() {
             ShareState::Revoked
+        } else if self.paused_at.is_some() {
+            ShareState::Paused
         } else if self.expires_at.is_some_and(|at| now >= at) {
             ShareState::Expired
         } else {
@@ -551,6 +596,13 @@ pub enum ShareChange {
     /// A new expiry; None: until revoked.
     Expires(Option<i64>),
     Title(Option<String>),
+    /// What its owner calls it ([`Share::name`]); `None` or blank clears it.
+    Name(Option<String>),
+    /// Closed for now (`true`) or open again: the code does not change.
+    Paused(bool),
+    /// What it shares, as the thing changed (a setlist gained a song):
+    /// the same link then shows it.
+    Scope(ShareScope),
     /// A domain of its own, or none.
     Domain(Option<String>),
 }
@@ -658,6 +710,9 @@ mod tests {
             domain: None,
             audiences: Vec::new(),
             listen: Listen::Full,
+            name: None,
+            paused_at: None,
+            opened_at: None,
         }
     }
 

@@ -92,6 +92,8 @@ fn attr(v: &str) -> String {
 /// knows. `home` is the share's root page (its URL, ending `/`).
 fn target_json(target: &Target, home: &str) -> Option<Value> {
     match target {
+        // A tab's menu is the app's bar's to draw; this page's shell has none.
+        Target::Menu(_) => None,
         Target::View(view) => VIEWS
             .contains(&view.as_str())
             .then(|| json!({ "view": view })),

@@ -433,6 +433,9 @@ pub struct PaintMount {
     stats: FrameStats,
     budget: Duration,
     wake: PaintWake,
+    /// The engine's values its layers read, when the mount brings them
+    /// ([`PaintMount::with_engine`]).
+    engine: Option<std::sync::Arc<architect_scene::engine::EngineTable>>,
 }
 
 impl PartialEq for PaintMount {
@@ -459,7 +462,22 @@ impl PaintMount {
             stats: FrameStats::new(),
             budget: Duration::from_micros(16_667),
             wake: PaintWake::new(),
+            engine: None,
         }
+    }
+
+    /// Its layers read the engine's values from `table`: a view linked
+    /// into the app whose engine is an extension in a process of its own
+    /// (a process copy of the view is given the table by its host). Parts
+    /// a value shows or moves are then drawn at the level the engine last
+    /// wrote; without a table they draw as if every value were full.
+    #[must_use]
+    pub fn with_engine(
+        mut self,
+        table: std::sync::Arc<architect_scene::engine::EngineTable>,
+    ) -> Self {
+        self.engine = Some(table);
+        self
     }
 
     /// The host's typed data and handles ([`ViewCtx::data`]).
@@ -546,6 +564,10 @@ pub fn PaintPane(mount: PaintMount) -> Element {
         let input = ctx.input.clone();
         let view = (mount.make)(&ctx);
         let painter = Painter::boxed(ctx, view).with_stats(mount.stats.clone());
+        let painter = match &mount.engine {
+            Some(table) => painter.with_engine(std::sync::Arc::clone(table)),
+            None => painter,
+        };
         (
             CustomWidgetAttr::new(PaintWidget::with_wake(painter, mount.wake.clone())),
             input,

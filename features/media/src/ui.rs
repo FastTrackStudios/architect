@@ -11,12 +11,20 @@
 //! started: a share link's guest opens with the first song current) it
 //! keeps its number, in the accent, so nothing looks as if it plays.
 //!
+//! A caller that does something else with a row than play its media gives
+//! the list its press ([`MediaList`]'s `on_press`, with `head`, `on_head`
+//! and `current`): Studio's launcher loads a song's session where this
+//! plays its recording. A row's [`Tile`](crate::collection::Tile) is drawn
+//! where it has no cover, and over the cover's corner where it has one. A
+//! list outside the shell (an extension's own process) takes its colours
+//! from the theme's variables.
+//!
 //! After the share page's setlist (`features/sites/assets/site.css`,
 //! `[data-playlist]`) and the Now Playing card: the same grid, art tile,
 //! type and equalizer mark.
 
 use architect_playhead::Caller;
-use architect_shell::{FormFactor, use_shell};
+use architect_shell::{FormFactor, try_use_shell};
 use dioxus::prelude::*;
 use lucide_dioxus::{AudioLines, ChevronRight, Pause, Play};
 use serde_json::{Value, json};
@@ -74,6 +82,9 @@ const SHEET: &str = "
 .media-list-open { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; border-radius: 999px;
   background: transparent; color: var(--ml-faint); cursor: pointer; }
 .media-list-open:hover { color: var(--ml-ink); background: var(--ml-hover); }
+.media-list-art[data-media-tile=\"true\"] { color: #fff; font-size: 16px; font-weight: 700; letter-spacing: -.01em; }
+.media-list-art[data-media-tile=\"true\"][data-tile-size=\"small\"] { font-size: 12px; }
+.media-list-key { position: absolute; right: 2px; bottom: 2px; padding: 1px 4px; border-radius: 3px; color: #fff; font-size: 10px; font-weight: 700; line-height: 1.3; }
 .media-list-row[data-plays=\"false\"] .media-list-main > * { opacity: .5; }
 .media-list-row[data-plays=\"false\"] .media-list-main { cursor: default; }
 .media-list-row[aria-current=\"true\"] .media-list-title { color: var(--ml-accent); }
@@ -136,11 +147,65 @@ fn toggle(source: &str) {
     );
 }
 
+/// The list's colours: the shell's theme, or the theme's variables where
+/// no shell is around it.
+#[derive(Clone, PartialEq)]
+struct Look {
+    ink: String,
+    faint: String,
+    accent: String,
+    accent_ink: String,
+    hover: String,
+    tile: String,
+    font: String,
+    ground: String,
+    ground_clear: String,
+}
+
+impl Look {
+    /// The shell's, when the list is in one.
+    fn of(shell: Option<&architect_shell::Shell>) -> Self {
+        shell.map_or_else(
+            || Self {
+                ink: "var(--foreground, #e6e8eb)".to_owned(),
+                faint: "var(--muted-foreground, #8b9099)".to_owned(),
+                accent: "var(--signal-safe, #3ecf8e)".to_owned(),
+                accent_ink: "#06140d".to_owned(),
+                hover: "var(--accent, #26292f)".to_owned(),
+                tile: "var(--muted, #26292f)".to_owned(),
+                font: "inherit".to_owned(),
+                ground: "var(--background, #101114)".to_owned(),
+                ground_clear: "transparent".to_owned(),
+            },
+            |shell| {
+                let t = &shell.theme;
+                Self {
+                    ink: t.ink.to_string(),
+                    faint: t.ink_3.to_string(),
+                    accent: t.accent.to_string(),
+                    accent_ink: t.accent_ink.to_string(),
+                    hover: t.active.to_string(),
+                    tile: t.pill.to_string(),
+                    font: t.font.to_string(),
+                    ground: t.sheet.to_string(),
+                    ground_clear: clear(&t.sheet),
+                }
+            },
+        )
+    }
+}
+
 /// A collection's list. `source` is the app's own playhead source it
 /// plays as (outside the extension-id grammar: `app:…`), `name` what the
 /// Now Playing card names it. `art` turns a row's art (a vault path) into
 /// an image's URL where the app can; `on_open` opens a row's note (its
 /// path), offered as each row's chevron and as a greyed row's press.
+///
+/// With `on_press`, a row is pressed rather than played: it is told the
+/// row's id, nothing goes to the playhead, and the row that is current is
+/// `current` (a row's id). The pill then says `head` and runs `on_head`,
+/// and `sum` replaces the line beside it. `phone` is the narrow grid
+/// where no shell says what the screen is.
 #[component]
 pub fn MediaList(
     source: String,
@@ -148,10 +213,17 @@ pub fn MediaList(
     sections: Sections,
     #[props(default)] art: Option<Callback<String, Option<String>>>,
     #[props(default)] on_open: Option<EventHandler<String>>,
+    #[props(default)] on_press: Option<EventHandler<String>>,
+    #[props(default)] on_head: Option<EventHandler<()>>,
+    #[props(default)] head: Option<String>,
+    #[props(default)] sum: Option<String>,
+    #[props(default)] current: Option<String>,
+    #[props(default)] phone: bool,
 ) -> Element {
-    let shell = use_shell();
-    let t = shell.theme.clone();
-    let phone = shell.screen.form() == FormFactor::Phone;
+    let shell = try_use_shell();
+    let t = Look::of(shell.as_ref());
+    let phone = shell.map_or(phone, |s| s.screen.form() == FormFactor::Phone);
+    let pressed = on_press.is_some();
     let now = architect_playhead::ui::use_playhead();
     let q = queue(&sections);
     let total: f64 = sections
@@ -161,15 +233,20 @@ pub fn MediaList(
         .sum();
     let count: usize = sections.iter().map(|(_, r)| r.len()).sum();
     let playable = q.len();
-    let (current, playing) = now().active.as_ref().map_or((None, false), |a| {
-        if a.source == source {
-            (a.item.as_ref().map(|i| i.id.clone()), a.playing)
-        } else {
-            (None, false)
-        }
-    });
+    let (current, playing) = if pressed {
+        // The caller's own: what it loaded, never "playing".
+        (current, false)
+    } else {
+        now().active.as_ref().map_or((None, false), |a| {
+            if a.source == source {
+                (a.item.as_ref().map(|i| i.id.clone()), a.playing)
+            } else {
+                (None, false)
+            }
+        })
+    };
     let ours_playing = current.is_some() && playing;
-    let sum = {
+    let sum = sum.unwrap_or_else(|| {
         let mut s = if count == 1 {
             "1 item".to_owned()
         } else {
@@ -185,25 +262,19 @@ pub fn MediaList(
             s.push_str(" to play");
         }
         s
-    };
+    });
     let vars = format!(
         "--ml-ink: {}; --ml-faint: {}; --ml-accent: {}; --ml-accent-ink: {}; --ml-hover: {}; --ml-tile: {}; --ml-font: {}; \
          --ml-ground: {}; --ml-ground-clear: {};",
-        t.ink,
-        t.ink_3,
-        t.accent,
-        t.accent_ink,
-        t.active,
-        t.pill,
-        t.font,
-        t.sheet,
-        clear(&t.sheet)
+        t.ink, t.faint, t.accent, t.accent_ink, t.hover, t.tile, t.font, t.ground, t.ground_clear
     );
     let head_play = {
         let (source, name, q) = (source.clone(), name.clone(), q.clone());
         let current = current.clone();
         move |_| {
-            if current.is_some() {
+            if let Some(head) = on_head {
+                head.call(());
+            } else if current.is_some() {
                 toggle(&source);
             } else if let Some(first) = q.first().and_then(|i| i["id"].as_str()) {
                 play(&source, &name, &q, first);
@@ -224,14 +295,14 @@ pub fn MediaList(
                     class: "media-list-play",
                     "data-testid": "media-list-play",
                     disabled: playable == 0,
-                    "aria-label": if ours_playing { "Pause" } else { "Play" },
+                    "aria-label": if ours_playing { "Pause".to_owned() } else { head.unwrap_or_else(|| "Play".to_owned()) },
                     onclick: head_play,
                     if ours_playing {
-                        Pause { size: 18, color: t.accent_ink.to_string() }
+                        Pause { size: 18, color: t.accent_ink.clone() }
                         "Pause"
                     } else {
-                        Play { size: 18, color: t.accent_ink.to_string() }
-                        "Play"
+                        Play { size: 18, color: t.accent_ink.clone() }
+                        {head.clone().unwrap_or_else(|| "Play".to_owned())}
                     }
                 }
                 span { class: "media-list-sum", "data-testid": "media-list-sum", "{sum}" }
@@ -249,13 +320,21 @@ pub fn MediaList(
                             current: current.as_deref() == Some(row.id.as_str()),
                             playing,
                             picture: row.art.clone().and_then(|a| art.and_then(|f| f.call(a))),
+                            faint: t.faint.clone(),
+                            pressed,
                             on_play: {
                                 let (source, name, q) = (source.clone(), name.clone(), q.clone());
-                                move |id: String| play(&source, &name, &q, &id)
+                                move |id: String| match on_press {
+                                    Some(press) => press.call(id),
+                                    None => play(&source, &name, &q, &id),
+                                }
                             },
                             on_toggle: {
-                                let source = source.clone();
-                                move |()| toggle(&source)
+                                let (source, id) = (source.clone(), row.id.clone());
+                                move |()| match on_press {
+                                    Some(press) => press.call(id.clone()),
+                                    None => toggle(&source),
+                                }
                             },
                             on_open,
                         }
@@ -274,11 +353,12 @@ fn ListRow(
     current: bool,
     playing: bool,
     picture: Option<String>,
+    faint: String,
+    pressed: bool,
     on_play: EventHandler<String>,
     on_toggle: EventHandler<()>,
     on_open: Option<EventHandler<String>>,
 ) -> Element {
-    let t = use_shell().theme;
     let plays = row.plays();
     let path = row.item.path.clone();
     let can_open = on_open.is_some() && !path.is_empty();
@@ -305,10 +385,25 @@ fn ListRow(
         }
     };
     let has_art = picture.is_some();
-    let label = match (plays, current && playing) {
-        (true, true) => format!("Pause {}", row.item.title),
-        (true, false) => format!("Play {}", row.item.title),
-        (false, _) => format!("{}: nothing to play", row.item.title),
+    let label = match (plays, current && playing, pressed) {
+        (true, _, true) => format!("Open {}", row.item.title),
+        (true, true, false) => format!("Pause {}", row.item.title),
+        (true, false, false) => format!("Play {}", row.item.title),
+        (false, _, true) => format!("{}: nothing to open", row.item.title),
+        (false, _, false) => format!("{}: nothing to play", row.item.title),
+    };
+    // Its tile: the whole square where it has no cover, the corner where
+    // it has one.
+    let tile = row.tile.clone();
+    let tile_fills = tile.is_some() && !has_art;
+    let tile_ground = tile
+        .as_ref()
+        .map(|t| format!("background: hsl({} 42% 40%);", t.hue))
+        .unwrap_or_default();
+    let tile_size = if tile.as_ref().is_some_and(|t| t.text.chars().count() > 2) {
+        "small"
+    } else {
+        "normal"
     };
     rsx! {
         li {
@@ -323,11 +418,21 @@ fn ListRow(
                 "aria-disabled": "{!plays && !can_open}",
                 onclick: press,
                 span { class: "media-list-mark", "{row.number}" }
-                span { class: "media-list-art", "data-media-art": "{has_art}",
+                span {
+                    class: "media-list-art",
+                    "data-media-art": "{has_art}",
+                    "data-media-tile": "{tile_fills}",
+                    "data-tile-size": "{tile_size}",
+                    style: if tile_fills { tile_ground } else { String::new() },
                     if let Some(src) = picture {
                         img { src: "{src}", alt: "", draggable: "false" }
+                        if let Some(tile) = tile {
+                            span { class: "media-list-key", "data-media-key": "{tile.text}", style: "{tile_ground}", "{tile.text}" }
+                        }
+                    } else if let Some(tile) = tile {
+                        "{tile.text}"
                     } else {
-                        AudioLines { size: 22, color: t.ink_3.to_string() }
+                        AudioLines { size: 22, color: faint.clone() }
                     }
                 }
                 span { class: "media-list-text",
@@ -335,7 +440,7 @@ fn ListRow(
                     span { class: "media-list-meta",
                         if let Some(sub) = row.item.subtitle.clone() {
                             "{sub}"
-                        } else if !plays {
+                        } else if !plays && !pressed {
                             "Nothing to play"
                         }
                     }
@@ -354,7 +459,7 @@ fn ListRow(
                             open.call(path.clone());
                         }
                     },
-                    ChevronRight { size: 20, color: t.ink_3.to_string() }
+                    ChevronRight { size: 20, color: faint }
                 }
             } else {
                 span {}

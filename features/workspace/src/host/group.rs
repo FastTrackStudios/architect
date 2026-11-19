@@ -270,6 +270,12 @@ fn GroupView(group: Group, edges: Edges) -> Element {
     let id = group.id;
     let names = tab_names(&group);
     let header = host.pane_header(&current);
+    // A view that left its header out, alone in its group: the tab would
+    // only repeat it, so the bar is not drawn (a second tab brings it
+    // back). On the window's top edge the bar is the window's title row,
+    // and stays.
+    let alone = !header && group.tabs.len() == 1;
+    let titled = edges.top && (host.title_row)().is_some();
     rsx! {
         div {
             style: "flex:1 1 0; min-width:0; min-height:0; display:flex; flex-direction:column; \
@@ -277,7 +283,7 @@ fn GroupView(group: Group, edges: Edges) -> Element {
             "data-group": "{id.0}",
             "data-group-tabs": "{names}",
             onmounted: move |e| host.mount(Mount::Group(id), e.data()),
-            if group.chrome != Chrome::Bare && !group.stacked {
+            if group.chrome != Chrome::Bare && !group.stacked && !(alone && !titled) {
                 TabBar { group: group.clone(), current: current.clone(), edges }
             }
             div { style: "flex:1 1 0; min-width:0; min-height:0; display:flex; position:relative; overflow:hidden;",
@@ -287,6 +293,8 @@ fn GroupView(group: Group, edges: Edges) -> Element {
                     div { style: "flex:1 1 0; width:100%; min-width:0; min-height:0; display:flex; flex-direction:column;",
                         if group.chrome == Chrome::Tabs && header {
                             PaneHeader { key: "h{current.0}", pane: current.clone() }
+                        } else if !header {
+                            PaneTools { key: "t{current.0}", pane: current.clone() }
                         }
                         PaneSlot { key: "{current.0}", pane: current.clone() }
                     }
@@ -439,6 +447,33 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
                     Ellipsis { size: 16, color: t.ink_3.to_string() }
                 }
             }
+        }
+    }
+}
+
+/// Over a pane whose view left its header out: only what toolbars put
+/// there (an extension's `[[toolbars]]` on the pane or the view), in a row
+/// of their own; nothing when there are none.
+#[component]
+fn PaneTools(pane: PaneId) -> Element {
+    let host = use_host();
+    let t = host.theme.read().clone();
+    let s = (host.sizes)();
+    let workspace = host.workspace.read();
+    let Some(p) = workspace.pane(&pane) else {
+        return rsx! {};
+    };
+    let view = p.view.0.clone();
+    drop(workspace);
+    let Some(tools) = try_consume_context::<super::HeaderTools>().and_then(|t| (t.0)(&view, &pane))
+    else {
+        return rsx! {};
+    };
+    rsx! {
+        div {
+            style: "flex:0 0 auto; height:{s.button + 12.0}px; display:flex; align-items:center; \
+                    justify-content:flex-end; gap:2px; padding:0 8px; background:{t.sheet}; color:{t.ink_2}; font-size:13px;",
+            {tools}
         }
     }
 }

@@ -80,6 +80,37 @@ pub struct ShotArgs {
     /// Only this pane (a workspace pane id): the window cropped to it.
     #[facet(default)]
     pub pane: Option<String>,
+    /// Which window: a pop-out's id (`WORKSPACE_LAYOUT`'s, `window-17`);
+    /// the main window unless given. With `pane`, the window that pane is
+    /// in is found from the pane.
+    #[facet(default)]
+    pub window: Option<String>,
+}
+
+thread_local! {
+    /// The pop-out windows' documents, by window id: each pop-out's root
+    /// keeps its own here while it is open ([`use_window_shot`]).
+    static WINDOWS: RefCell<std::collections::HashMap<String, LiveDocument>> =
+        RefCell::new(std::collections::HashMap::new());
+}
+
+/// Keeps a pop-out window's document where `APP_SHOT` finds it by the
+/// window's id, for as long as the calling component (the pop-out's root)
+/// is mounted.
+pub fn use_window_shot(window: &str) {
+    let live = try_use_context::<LiveDocument>();
+    let id = window.to_owned();
+    use_hook({
+        let id = id.clone();
+        move || {
+            if let Some(live) = live {
+                WINDOWS.with(|w| w.borrow_mut().insert(id, live));
+            }
+        }
+    });
+    use_drop(move || {
+        WINDOWS.with(|w| w.borrow_mut().remove(&id));
+    });
 }
 
 /// What `APP_SHOT` answers.
@@ -102,9 +133,11 @@ static META: ActionMeta = ActionMeta {
     trait_name: "",
     method_name: "",
     display_name: "Screenshot the window",
-    description: "Renders the window as the app last laid it out (or only pane `pane`) to a PNG at `path` (an absolute \
+    description: "Renders a window as the app last laid it out (the main one, or pop-out `window` by its id in \
+                  WORKSPACE_LAYOUT; or only pane `pane`, in whichever window it is) to a PNG at `path` (an absolute \
                   path ending in .png) and answers its path and size in pixels. The app's own rendering: no screen \
-                  capture, works while the window is covered.",
+                  capture, works while the window is covered or on another desktop. A process view's frames (a \
+                  renderer in its own program) are not in it.",
     category: "App",
     group: "Agent tools",
     shortcut: "",
@@ -115,6 +148,8 @@ static META: ActionMeta = ActionMeta {
 /// A shot to take on the window's thread.
 struct Job {
     path: PathBuf,
+    /// A pop-out window's id; the main window when none.
+    window: Option<String>,
     crop: Option<(Rect, String)>,
     answer: futures_channel::oneshot::Sender<Result<Shot, String>>,
 }
@@ -127,10 +162,17 @@ pub fn use_app_shot(list: &Arc<ActionList>) {
         let live = live.clone();
         async move {
             while let Some(job) = jobs.next().await {
-                let Some(live) = &live else {
-                    let _ = job
-                        .answer
-                        .send(Err("there is no window to shoot".to_owned()));
+                // A pop-out's document is its own; the main window's is this
+                // component's.
+                let asked = match &job.window {
+                    Some(id) if id != "main" => WINDOWS.with(|w| w.borrow().get(id).cloned()),
+                    _ => live.clone(),
+                };
+                let Some(live) = &asked else {
+                    let _ = job.answer.send(Err(job.window.as_ref().map_or_else(
+                        || "there is no window to shoot".to_owned(),
+                        |id| format!("no open window {id} (WORKSPACE_LAYOUT lists them)"),
+                    )));
                     continue;
                 };
                 let shot = take(live, &job).await;
@@ -155,13 +197,23 @@ pub fn use_app_shot(list: &Arc<ActionList>) {
                     let lookup = Arc::clone(&lookup);
                     async move {
                         let path = target(args.path.as_deref())?;
+                        let mut window = args.window;
                         let crop = match args.pane {
-                            Some(pane) => Some((pane_rect(&lookup, &pane)?, pane)),
+                            Some(pane) => {
+                                let (rect, home) = pane_rect(&lookup, &pane)?;
+                                window = window.or(home);
+                                Some((rect, pane))
+                            }
                             None => None,
                         };
                         let (answer, answered) = futures_channel::oneshot::channel();
-                        tx.unbounded_send(Job { path, crop, answer })
-                            .map_err(|_| "the window is gone".to_owned())?;
+                        tx.unbounded_send(Job {
+                            path,
+                            window,
+                            crop,
+                            answer,
+                        })
+                        .map_err(|_| "the window is gone".to_owned())?;
                         answered
                             .await
                             .map_err(|_| "the window is gone".to_owned())?
@@ -191,8 +243,9 @@ fn target(path: Option<&str>) -> Result<PathBuf, String> {
     std::path::absolute(&path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// Pane `pane`'s rectangle in the window, points: the host's measure.
-fn pane_rect(list: &ActionList, pane: &str) -> Result<Rect, String> {
+/// Pane `pane`'s rectangle in its window, points (the host's measure), and
+/// that window's id when it is not the main one.
+fn pane_rect(list: &ActionList, pane: &str) -> Result<(Rect, Option<String>), String> {
     #[derive(Facet)]
     struct Ask {
         pane: String,
@@ -210,8 +263,10 @@ fn pane_rect(list: &ActionList, pane: &str) -> Result<Rect, String> {
             "pane {pane} is not showing (its group shows another tab)"
         ));
     }
+    let home = Some(info.window.clone()).filter(|w| w != "main");
     info.rect
         .filter(|r| r.w > 0.0 && r.h > 0.0)
+        .map(|r| (r, home))
         .ok_or_else(|| format!("pane {pane} has not been measured yet"))
 }
 

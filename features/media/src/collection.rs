@@ -279,6 +279,19 @@ pub struct Row {
     pub media: Option<String>,
     /// Its cover, a vault path the caller can show.
     pub art: Option<String>,
+    /// Its tile: drawn in the cover's place when it has none, and over the
+    /// cover's corner when it has one.
+    pub tile: Option<Tile>,
+}
+
+/// A row's tile: a short text on a colour (a song's key on the song's
+/// colour).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Tile {
+    /// What it says: a few characters (`C`, `Ab`, `C→Db`).
+    pub text: String,
+    /// Its colour's hue, degrees (0 to 359).
+    pub hue: u32,
 }
 
 impl Row {

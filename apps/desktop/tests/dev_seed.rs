@@ -33,6 +33,9 @@ fn seeded() -> Vec<Share> {
         audiences: Vec::new(),
         // A new link's default (#528).
         listen: Listen::Reference,
+        name: None,
+        paused_at: None,
+        opened_at: None,
     };
     let mut setlist = share(
         4,

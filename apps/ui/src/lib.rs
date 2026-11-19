@@ -789,6 +789,18 @@ pub fn LabApp() -> Element {
     use_hook(|| {
         let _ = architect::action::app_status::register(&list);
     });
+    // Scripts: Luau over the whole Action List (`SCRIPT_RUN`, `SCRIPT_SAVE`,
+    // `SCRIPT_DESCRIBE`…), for a person from ⌘K and for a model over MCP:
+    // every action here and every extension's, in one script, as one step.
+    use_hook(|| {
+        let scripting = architect_scripting::actions::Scripting::new(
+            (*list).clone(),
+            architect_scripting::Library::new(architect_scripting::MemoryStore::new()),
+        );
+        if scripting.install().is_err() {
+            tracing::warn!("scripts: the SCRIPT_* actions did not go on the list");
+        }
+    });
     // Themes: one store for the app, its THEME_* actions on the list.
     let files = use_hook(|| windowed || try_consume_context::<LabFiles>().is_some());
     let (theme, appearance) = theme::use_lab_theme(windowed, files, &list);

@@ -23,8 +23,10 @@ const CHECKPOINTS: &str = "checkpoints";
 
 impl RootMeta {
     /// The manifest's document id: derived from the place, so two
-    /// devices that find the same tree on their own seed one document
-    /// (the second seed adopts the first's lineage, #412).
+    /// devices that find the same tree on their own seed one document.
+    /// Each starts it with the same first change ([`Manifest::seed`]), so
+    /// the two are one history and merge: neither side's versions are
+    /// dropped for the other's.
     #[must_use]
     pub fn doc_id(&self) -> Uuid {
         doc_id_for(&self.place())
@@ -35,6 +37,18 @@ impl RootMeta {
 #[must_use]
 pub fn doc_id_for(place: &str) -> Uuid {
     Uuid::new_v5(&NAMESPACE, format!("architect-files:{place}").as_bytes())
+}
+
+/// The author of a manifest's first change ([`Manifest::seed`]): a Loro
+/// peer id derived from the place, never a device's own.
+fn seed_author(place: &str) -> u64 {
+    let id = Uuid::new_v5(
+        &NAMESPACE,
+        format!("architect-files-seed:{place}").as_bytes(),
+    );
+    let (high, _) = id.as_u64_pair();
+    // Loro keeps the largest id for itself.
+    high.min(u64::MAX - 1)
 }
 
 /// The manifests' name on the peer lane: `files/<place>`.
@@ -88,6 +102,33 @@ impl<'a> Manifest<'a> {
             return None;
         };
         facet_json::from_str(&json).ok()
+    }
+
+    /// Start the document the way every device that finds the root at
+    /// `place` does: one change, the same bytes everywhere (its author is
+    /// derived from the place, not from the device).
+    ///
+    /// Two devices that each hold a root (a vault's attachments on two
+    /// nodes, one project tree on two machines) both write its manifest
+    /// before they meet. Without a change in common the peer lane takes
+    /// them for two documents with one id and keeps one side's state
+    /// (`crdt::peer::adopt_lineage`), which drops the other's versions;
+    /// with it they are one history and both sides' versions merge. A
+    /// document that has it already is left as it is.
+    pub fn seed(&self, place: &str) {
+        let author = seed_author(place);
+        if self.doc.oplog_vv().get(&author).is_some_and(|n| *n > 0) {
+            return;
+        }
+        let first = LoroDoc::new();
+        if first.set_peer_id(author).is_err() {
+            return;
+        }
+        let _ = first.get_map(META).insert("place", place);
+        first.commit();
+        if let Ok(change) = first.export(loro::ExportMode::all_updates()) {
+            let _ = self.doc.import(&change);
+        }
     }
 
     /// Say what the root is (the same on every device, so concurrent sets agree).
@@ -320,6 +361,38 @@ mod tests {
                 .iter()
                 .map(|b| VersionId(Uuid::from_u128(*b)))
                 .collect(),
+        }
+    }
+
+    /// Two devices that each start a root's manifest share its first
+    /// change, so their histories are one and both sides' versions are
+    /// there after they meet.
+    #[test]
+    fn two_devices_that_find_one_root_start_one_history() {
+        let place = "indie/Vaults/setlists";
+        let (a, b) = (LoroDoc::new(), LoroDoc::new());
+        let (ma, mb) = (Manifest::new(&a), Manifest::new(&b));
+        ma.seed(place);
+        mb.seed(place);
+        ma.seed(place);
+        ma.push(&[v(1, "cover.png", Some("x"), 1, "a", &[])]);
+        mb.push(&[v(2, "take.wav", Some("y"), 1, "b", &[])]);
+        let author = seed_author(place);
+        let shares = |doc: &LoroDoc| doc.oplog_vv().get(&author).copied();
+        assert_eq!((shares(&a), shares(&b)), (Some(1), Some(1)));
+        assert_ne!(seed_author("indie/Vaults/other"), author);
+
+        let all = |doc: &LoroDoc| doc.export(loro::ExportMode::all_updates()).ok();
+        assert!(all(&a).is_some_and(|bytes| b.import(&bytes).is_ok()));
+        assert!(all(&b).is_some_and(|bytes| a.import(&bytes).is_ok()));
+        for doc in [&a, &b] {
+            let mut paths: Vec<String> = Manifest::new(doc)
+                .versions()
+                .into_iter()
+                .map(|v| v.path)
+                .collect();
+            paths.sort();
+            assert_eq!(paths, ["cover.png", "take.wav"]);
         }
     }
 

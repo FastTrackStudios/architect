@@ -807,10 +807,50 @@ impl Commands {
         {
             return false;
         }
-        if !self.keymap_for(&self.declared()).binds_in(context, chord) {
+        let keymap = self.keymap_for(&self.declared());
+        if !keymap.binds_in(context, chord) {
+            // A plain key bound everywhere (Space for play) runs from a
+            // view too, in place of what the view does with it, unless a
+            // field is being typed in.
+            if self.plain_key_everywhere(chord) {
+                return self.run_plain_once(chord);
+            }
             return false;
         }
         self.set_view_context(Some(context));
+        self.key_chord(chord)
+    }
+
+    /// Whether `chord` (no ⌘ or ⌃) is a key bound everywhere that may run
+    /// now: the keymap binds it in every context, and no text field has
+    /// the focus (it is typed there).
+    #[must_use]
+    pub fn plain_key_everywhere(&self, chord: &str) -> bool {
+        !architect_shell::keyboard().typing
+            && self
+                .keymap_for(&self.declared())
+                .binds_in(crate::keymap::EVERYWHERE, chord)
+    }
+
+    /// Runs a plain key bound everywhere, once a press: the window hears
+    /// every key and a focused view hears its own, so the same press can
+    /// arrive both ways. True either way (the key was used).
+    #[must_use]
+    pub fn run_plain_once(&self, chord: &str) -> bool {
+        thread_local! {
+            static LAST: std::cell::Cell<Option<f64>> = const { std::cell::Cell::new(None) };
+        }
+        // The shell's clock, in seconds: there on every platform the
+        // window runs on, and a film's or a test's virtual one.
+        let now = architect_shell::motion::now();
+        let again = LAST.with(|last| {
+            let again = last.get().is_some_and(|at| now - at < 0.12);
+            last.set(Some(now));
+            again
+        });
+        if again {
+            return true;
+        }
         self.key_chord(chord)
     }
 

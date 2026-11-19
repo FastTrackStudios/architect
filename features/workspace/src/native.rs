@@ -563,7 +563,22 @@ fn Root(props: RootProps) -> Element {
 #[allow(clippy::unnecessary_wraps)]
 fn popout_title_row(window: &Arc<dyn OsWindow>) -> Option<crate::TitleRow> {
     if !cfg!(target_os = "macos") {
-        return None;
+        // Off a Mac the pop-out has no system decorations (as the main
+        // window): the same row, clear of the buttons its root draws
+        // (`PopoutButtons`).
+        let (drag, zoom) = (Arc::clone(window), Arc::clone(window));
+        return Some(crate::TitleRow {
+            height: narrow(architect_shell::WindowChrome::MAC_ROW),
+            left: 66.0 + 12.0,
+            right: 0.0,
+            sidebar_left: 0.0,
+            on_drag: Some(Callback::new(move |()| {
+                let _ = drag.drag_window();
+            })),
+            on_zoom: Some(Callback::new(move |()| {
+                zoom.set_maximized(!zoom.is_maximized());
+            })),
+        });
     }
     let (drag, zoom) = (Arc::clone(window), Arc::clone(window));
     let chrome = architect_shell::WindowChrome::mac(
@@ -709,6 +724,12 @@ impl App {
                     .with_title_hidden(true),
             ));
         }
+        // Off a Mac: no system decorations, its root draws the title row
+        // and the window's buttons, as the main window's shell does.
+        #[cfg(not(target_os = "macos"))]
+        {
+            attributes = attributes.with_decorations(false);
+        }
         let (w, h) = popout.bounds().map_or((640.0, 480.0), |b| (b.w, b.h));
         attributes = attributes.with_surface_size(LogicalSize::new(f64::from(w), f64::from(h)));
         if let Some(b) = popout.bounds() {
@@ -731,6 +752,8 @@ impl App {
             proxy: self.own.clone(),
         };
         let os_window = Arc::clone(&window);
+        #[cfg(not(target_os = "macos"))]
+        let close_proxy = self.own.clone();
         // Its own document, as the main window's is: what a native view in
         // one of its panes hit-tests to hide under its overlays.
         let live = crate::shot::LiveDocument::new(doc.inner.clone());
@@ -738,6 +761,18 @@ impl App {
             provide_context(live);
             if let Some(row) = popout_title_row(&os_window) {
                 provide_context(row);
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let (mini, zoom) = (Arc::clone(&os_window), Arc::clone(&os_window));
+                let (closer, closing) = (close_proxy, os_window.id());
+                provide_context(crate::host::PopoutButtons {
+                    close: Callback::new(move |()| {
+                        closer.send_event(BlitzShellEvent::CloseWindow { window_id: closing });
+                    }),
+                    minimize: Callback::new(move |()| mini.set_minimized(true)),
+                    zoom: Callback::new(move |()| zoom.set_maximized(!zoom.is_maximized())),
+                });
             }
             let head: Rc<dyn dioxus::document::Document> = Rc::new(head);
             provide_context(head);
