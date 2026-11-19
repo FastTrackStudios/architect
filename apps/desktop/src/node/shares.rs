@@ -4103,7 +4103,7 @@ mod tests {
             Shares::new(
                 Backend::single("notes", vault.clone()).unwrap(),
                 tmp.path(),
-                None,
+                VaultOrgs::default(),
                 None,
                 architect_sites::Blocks::default(),
                 LayerRules::default(),

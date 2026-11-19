@@ -444,8 +444,6 @@ pub enum Verdict {
 }
 
 impl Share {
-    /// Where it stands at `now` (unix seconds).
-    #[must_use]
     /// Whether it is the link for sharing `scope` of `vault` with
     /// `audience`: the same thing ([`ShareScope::root`]) and the same
     /// people, and not revoked. A thing has one link an audience, so
@@ -458,6 +456,8 @@ impl Share {
             && self.audience.clone().normalised() == audience.clone().normalised()
     }
 
+    /// Where it stands at `now` (unix seconds).
+    #[must_use]
     pub fn state(&self, now: i64) -> ShareState {
         if self.revoked_at.is_some() {
             ShareState::Revoked

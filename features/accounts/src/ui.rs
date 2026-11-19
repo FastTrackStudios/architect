@@ -902,7 +902,7 @@ fn ShareRowView(share: architect_spaces::Share) -> Element {
     // Revoking is asked twice: it is the one thing that ends a link.
     let mut revoking = use_signal(|| false);
     let opened = share.opened_at.map(|at| {
-        let ago = (now_secs() - at).max(0);
+        let ago = now_secs().saturating_sub(at).max(0);
         match ago {
             0..=89 => "opened just now".to_owned(),
             90..=5_399 => format!("opened {} min ago", ago / 60),
