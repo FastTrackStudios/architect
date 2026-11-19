@@ -316,7 +316,13 @@ test('a share link opens the web app as its guest: the list in sets, a note, its
       await b.shot(join(shots, `share-guest-note-${tag}.png`));
 
       // The files: each a download, all of them as the link's archive.
-      await b.eval(`${q('[data-testid=guest-files-tab]')}.click()`);
+      // The link's files are in its sidebar (a phone's drawer, opened from
+      // the title line), not a toggle on the page.
+      if (!(await b.eval(`!!${q('[data-testid=guest-side-files]')}`))) {
+        await b.eval(`${q('[data-testid=guest-side-open]')}.click()`);
+        await until(() => b.eval(`!!${q('[data-testid=guest-side-files]')}`), 10000, 'the link\'s sidebar');
+      }
+      await b.eval(`${q('[data-testid=guest-side-files]')}.click()`);
       await until(() => b.eval(`!!${q('[data-testid=guest-download-all]')}`), 10000, 'the files');
       const all = await b.eval(`${q('[data-testid=guest-download-all]')}.getAttribute('href')`);
       assert.equal(all, `/s/${CODE}/_archive.zip?by=note`);
