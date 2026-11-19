@@ -215,7 +215,9 @@ pub fn NoteEmbed(
     );
     rsx! {
         Claimed {
-            key: "{island.folder}/{claim.view}",
+            // A frame is made as tall as its box or as it says once, at
+            // its mount: a view that becomes the page is mounted again.
+            key: "{island.folder}/{claim.view}/{pane}",
             island: island.clone(),
             view: claim.view.clone(),
             note,

@@ -845,6 +845,21 @@ pub fn ExtensionFrame(
         FrameState::Ready => "ready",
         FrameState::Gone(_) => "gone",
     };
+    // A frame that becomes as tall as its box after its mount (a note's
+    // head that turns out to be the page): the frame is told, and its
+    // element takes the box's height at once.
+    {
+        let shared = shared.clone();
+        use_effect(use_reactive!(|fill| {
+            let mut f = shared.borrow_mut();
+            if f.fill != fill {
+                f.fill = fill;
+                if let (true, Some(el)) = (fill, f.iframe.as_ref()) {
+                    let _ = el.style().set_property("height", "100%");
+                }
+            }
+        }));
+    }
     let shown = if ready { "block" } else { "none" };
     let height = if fill { "height: 100%;" } else { "" };
     rsx! {
