@@ -1262,6 +1262,23 @@ impl Host {
             .unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(opener));
     }
 
+    /// Opens `path` with the app's own opener ([`Self::set_path_opener`]),
+    /// asking no extension's: what a guest's host does with a path an
+    /// extension asks to open (`crate::hostapi`).
+    ///
+    /// # Errors
+    ///
+    /// The app set no opener, or its opener refused the path.
+    pub fn open_with_app(&self, path: &str) -> Result<Value, String> {
+        let app = self
+            .inner
+            .path_opener
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        app.map_or_else(|| Err(format!("nothing opens {path}")), |open| open(path))
+    }
+
     /// Takes extensions' popups and overlays away with `closer` (the app's
     /// window's), from now on.
     pub fn set_view_closer(
