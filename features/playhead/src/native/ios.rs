@@ -42,6 +42,37 @@ unsafe extern "C" {
     static MPNowPlayingInfoPropertyPlaybackRate: &'static NSString;
 }
 
+unsafe extern "C" {
+    /// libdispatch's main queue (`dispatch_get_main_queue()` is a macro
+    /// over its address).
+    static _dispatch_main_q: std::ffi::c_void;
+    fn dispatch_async_f(
+        queue: *const std::ffi::c_void,
+        context: *mut std::ffi::c_void,
+        work: extern "C" fn(*mut std::ffi::c_void),
+    );
+}
+
+/// `work` on the main thread, soon: the lock screen's card and buttons
+/// are the app's only when they are set from there.
+fn on_main(work: impl FnOnce() + Send + 'static) {
+    extern "C" fn run(context: *mut std::ffi::c_void) {
+        // SAFETY: `context` is the box `on_main` leaked for this one call.
+        let work = unsafe { Box::from_raw(context.cast::<Box<dyn FnOnce() + Send>>()) };
+        work();
+    }
+    let boxed: Box<Box<dyn FnOnce() + Send>> = Box::new(Box::new(work));
+    // SAFETY: the main queue lives for the process; `run` takes the box
+    // back exactly once.
+    unsafe {
+        dispatch_async_f(
+            &raw const _dispatch_main_q,
+            Box::into_raw(boxed).cast(),
+            run,
+        );
+    }
+}
+
 /// What the lock screen shows.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Card {
@@ -81,6 +112,11 @@ pub fn activate_session() {
 
 /// The card for `card`, or none.
 pub fn now_playing(card: Option<&Card>) {
+    let card = card.cloned();
+    on_main(move || show(card.as_ref()));
+}
+
+fn show(card: Option<&Card>) {
     // SAFETY: `defaultCenter` returns the app's centre; `nowPlayingInfo`
     // is a nullable NSDictionary of the keys linked above to NSString,
     // NSNumber and MPMediaItemArtwork values, as built here.
@@ -213,6 +249,10 @@ static REMOTE: OnceLock<Kept> = OnceLock::new();
 
 /// The lock screen's buttons, each the app's own press: once.
 pub fn commands() {
+    on_main(register);
+}
+
+fn register() {
     let mut first = false;
     let remote = REMOTE.get_or_init(|| {
         first = true;
@@ -236,6 +276,12 @@ pub fn commands() {
     // MPRemoteCommand, which takes a target and an action of the shape
     // `Remote`'s methods have and can be enabled.
     unsafe {
+        // The app takes the system's media buttons (a headset's, the
+        // lock screen's): on the main thread, where UIKit is.
+        let app: *mut AnyObject = msg_send![class!(UIApplication), sharedApplication];
+        if !app.is_null() {
+            let () = msg_send![app, beginReceivingRemoteControlEvents];
+        }
         let centre: *mut AnyObject = msg_send![class!(MPRemoteCommandCenter), sharedCommandCenter];
         if centre.is_null() {
             return;
