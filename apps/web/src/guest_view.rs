@@ -297,6 +297,7 @@ pub fn collection_rows<S: std::hash::BuildHasher>(
                         },
                         media,
                         art: note.art.as_ref().filter(served).cloned(),
+                        tile: None,
                     }
                 })
                 .collect::<Vec<_>>();
