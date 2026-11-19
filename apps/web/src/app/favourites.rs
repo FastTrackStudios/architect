@@ -165,6 +165,54 @@ pub fn use_web_favourites(
         let made = shell::declare(
             &d.favourites,
             |target| {
+                // A tab that opens a menu above itself: its entries, each
+                // with what it opens here (one that opens nothing is left
+                // out; none left, no tab).
+                if let architect_favourites::Target::Menu(entries) = target {
+                    let items: Vec<(String, String, Opens)> = entries
+                        .iter()
+                        .filter_map(|e| {
+                            Some((
+                                e.label.clone(),
+                                e.icon.clone(),
+                                opens(&d.by, &e.target, &reach)?,
+                            ))
+                        })
+                        .collect();
+                    if items.is_empty() {
+                        return None;
+                    }
+                    // The tab stays on nothing: what its entries open is theirs.
+                    let on_show = shell::Shows::Elsewhere;
+                    let label = label_for(&d.favourites, target);
+                    let key = format!("{path}\0{ty}\0{}\0{label}\0menu", d.by.extension);
+                    let (by, path) = (d.by.extension.clone(), path.clone());
+                    let press = presses.get(key, || {
+                        Callback::new(move |()| {
+                            if super::tabmenu::MENU.peek().is_some() {
+                                *super::tabmenu::MENU.write() = None;
+                                return;
+                            }
+                            let entries = items
+                                .iter()
+                                .map(|(label, glyph, what)| {
+                                    let (what, by, said, path) =
+                                        (what.clone(), by.clone(), label.clone(), path.clone());
+                                    super::tabmenu::Entry {
+                                        label: label.clone(),
+                                        glyph: glyph.clone(),
+                                        press: Callback::new(move |()| {
+                                            *super::tabmenu::MENU.write() = None;
+                                            run(&what, &by, &said, &path, workspace, &commands);
+                                        }),
+                                    }
+                                })
+                                .collect();
+                            *super::tabmenu::MENU.write() = Some((label.clone(), entries));
+                        })
+                    });
+                    return Some((press, on_show));
+                }
                 let what = opens(&d.by, target, &reach)?;
                 let on_show = shows(&what, &path);
                 let label = label_for(&d.favourites, target);
