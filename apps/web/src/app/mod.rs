@@ -46,6 +46,9 @@ pub mod extensions;
 mod favourites;
 mod frames;
 mod guest;
+
+/// The action a round button runs to open the Now Playing bar's detail.
+const PLAYER_DETAIL: &str = "PLAYHEAD_DETAIL";
 mod home;
 mod index_sync;
 mod installs;
@@ -55,6 +58,7 @@ mod page;
 mod recording;
 mod screen;
 mod settings;
+mod tabmenu;
 mod theme;
 pub mod vault;
 
@@ -213,9 +217,17 @@ fn WebApp() -> Element {
         ("PLAYHEAD_TOGGLE", "Play or pause"),
         ("PLAYHEAD_NEXT", "Next"),
         ("PLAYHEAD_PREVIOUS", "Previous"),
+        // The bar's detail (the position, previous and next, the
+        // sources): the bar's own `^`, for a round button that stands
+        // for it.
+        (PLAYER_DETAIL, "Show the player"),
     ] {
         architect_commands::use_command(Command::new(id, name).group("Now Playing"), move || {
-            architect_playhead::ui::press(id, &serde_json::json!({}));
+            if id == PLAYER_DETAIL {
+                architect_playhead::ui::toggle_detail();
+            } else {
+                architect_playhead::ui::press(id, &serde_json::json!({}));
+            }
         });
     }
     // The bottom slots: the open note's type's favourites, else the
@@ -261,13 +273,21 @@ fn WebApp() -> Element {
                 let action = action.clone();
                 action.starts_with("PLAYHEAD_").then(|| {
                     let on = playing().active.is_some_and(|a| a.playing);
-                    let (label, icon) = match (&p.on, on) {
-                        (Some(face), true) => (face.label.clone(), icon!(Pause)),
-                        _ => (p.label.clone(), icon!(Play)),
+                    let (label, icon, glyph) = match (&p.on, on) {
+                        (Some(face), true) => (face.label.clone(), icon!(Pause), None),
+                        // Its own icon, by name, where it has no faces.
+                        (None, _) => (p.label.clone(), icon!(Play), Some(guest::kept(&p.icon))),
+                        _ => (p.label.clone(), icon!(Play), None),
                     };
-                    shell::Action::new(label, icon, move |()| {
-                        architect_playhead::ui::press(&action, &serde_json::json!({}));
-                    })
+                    let mut button = shell::Action::new(label, icon, move |()| {
+                        if action == PLAYER_DETAIL {
+                            architect_playhead::ui::toggle_detail();
+                        } else {
+                            architect_playhead::ui::press(&action, &serde_json::json!({}));
+                        }
+                    });
+                    button.glyph = glyph;
+                    button
                 })
             }),
         ),
@@ -301,7 +321,10 @@ fn WebApp() -> Element {
             *vault::VIEW_ON_SHOW.write() = view_on_show;
         }
     }));
-    let (tabs, current) = if has_home {
+    // The Home tab leads the app's own tabs. A note its view draws has
+    // tabs of its own (a setlist's Setlist, Charts, Lyrics, More): there
+    // the way home is the back button at the top left.
+    let (tabs, current) = if has_home && !view_on_show {
         (
             std::iter::once(shell::Tab::named("home", "Home", "house"))
                 .chain(tabs)
@@ -497,6 +520,7 @@ fn WebApp() -> Element {
                             if !home_on {
                                 vault::VaultPage {}
                             }
+                            tabmenu::TabMenu {}
                         }
                     }
                 }

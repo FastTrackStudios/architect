@@ -143,6 +143,7 @@ impl Island {
             .into_iter()
             .flatten()
             .chain(self.embeds.iter().map(|e| &e.view))
+            .chain(self.pages.iter())
         {
             if !out.contains(v) {
                 out.push(v.clone());
@@ -401,6 +402,8 @@ pub struct Island {
     pub lyrics: Option<String>,
     /// Its home view: the app's root for a signed-in member (`app::home`).
     pub home: Option<String>,
+    /// Its views that fill a page (a favourite's tab or menu entry).
+    pub pages: Vec<String>,
     /// Its views drawn at the head of a note by its type.
     pub embeds: Vec<Embed>,
     /// What its extension declares it reads (its manifest's
@@ -547,6 +550,7 @@ fn island_of(v: &Value) -> Option<Island> {
         transport: text(v, "transport"),
         lyrics: text(v, "lyrics"),
         home: text(v, "home"),
+        pages: names_of(v.get("views"), 16, name_ok),
         embeds: embeds_of(v),
         reads: names_of(v.get("reads"), 8, name_ok),
     })
