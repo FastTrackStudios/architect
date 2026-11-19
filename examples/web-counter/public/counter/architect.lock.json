@@ -1,0 +1,13 @@
+{
+  "lockfileVersion": 1,
+  "files": {
+    "architect.json": "sha256-FbKhnbEzdzLVH2bQrW3GrSVXe4MmRkhheuUwfoItws0=",
+    "architect_sandbox_wasi_counter.conditional-host-import-0.wasm": "sha256-jRG+WO1QWwqB7ZplDEWzQMKk+suOorD2migrl1Ypog8=",
+    "architect_sandbox_wasi_counter.conditional-host-import-1.wasm": "sha256-1tCrHA1kmsrvhW+CsNdZUDjFvNADYRPTLarP8+DZxoM=",
+    "architect_sandbox_wasi_counter.conditional-host-import-2.wasm": "sha256-8wqXydXGayl/PX9yqSLpqonVd/bkv87169Qy0jgM6KI=",
+    "architect_sandbox_wasi_counter.core.wasm": "sha256-/qrSi6rDHTAndtPNk7iqbFrJW5NCy4zL1k3Uppv9ZNk=",
+    "architect_sandbox_wasi_counter.core2.wasm": "sha256-P/hgM8YL9+AdSQU2D+jh4XFkjoKDFJJy74uaj3sYrlo=",
+    "architect_sandbox_wasi_counter.core3.wasm": "sha256-Yp8lj+NPtb4jkVfxJ+LdgBo/MqedmsuRNv5bNnCzmjw=",
+    "architect_sandbox_wasi_counter.js": "sha256-fPSiEO3Pgh17gK3X7HNg/SlKxZKZGwVeKvQIBRX7UlE="
+  }
+}
