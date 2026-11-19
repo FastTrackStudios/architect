@@ -37,6 +37,8 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 
 use architect_extensions::Manifest;
+#[cfg(not(target_family = "wasm"))]
+use architect_extensions::Package;
 use architect_extensions::linked::Extension;
 use architect_extensions::registries::Registry;
 #[cfg(not(target_family = "wasm"))]
@@ -174,6 +176,8 @@ pub struct Distribution {
     adopts: Option<Adopted>,
     registries: Vec<Registry>,
     dev_installs: bool,
+    /// Folders of packages it ships beside its binary: [`Self::shipped`].
+    shipped: Vec<String>,
 }
 
 impl std::fmt::Debug for Distribution {
@@ -247,6 +251,7 @@ impl Distribution {
             blocks: Vec::new(),
             #[cfg(not(target_family = "wasm"))]
             islands: Vec::new(),
+            shipped: Vec::new(),
             listed_favourites: Vec::new(),
             adopts: None,
             registries: vec![store()],
@@ -364,6 +369,55 @@ impl Distribution {
     pub fn island(mut self, island: architect_sites::SiteIsland) -> Self {
         self.islands.push(island);
         self
+    }
+
+    /// With the packages in `folder` beside its binary as built-ins: each
+    /// `<binary's folder>/<folder>/<id>/` that holds an `extension.toml`
+    /// is loaded as a first-party extension when the app starts, the way a
+    /// compiled-in one is (it runs unless a newer copy is installed or a
+    /// development copy is, and asks for no grant). For what cannot be
+    /// linked in: a process extension, a program of its own that ships
+    /// with the app (Studio's engine). The folder is part of the app as
+    /// shipped, inside its bundle, never a vault's or a person's: whoever
+    /// can write there can replace the binary too.
+    #[must_use]
+    pub fn shipped(mut self, folder: impl Into<String>) -> Self {
+        self.shipped.push(folder.into());
+        self
+    }
+
+    /// The folders of packages it ships ([`shipped`](Self::shipped)),
+    /// relative to its binary's folder.
+    #[must_use]
+    pub fn shipped_folders(&self) -> &[String] {
+        &self.shipped
+    }
+
+    /// The packages it ships, read from each [shipped
+    /// folder](Self::shipped) under `beside` (the folder its binary is
+    /// in), in the folders' order and by name within one: each that reads,
+    /// and each that does not with where it is and why (a folder of
+    /// packages that is not there ships none: a development build run
+    /// from `target/`).
+    #[cfg(not(target_family = "wasm"))]
+    #[must_use]
+    pub fn shipped_packages(&self, beside: &Path) -> Vec<Result<Package, (PathBuf, String)>> {
+        let mut out = Vec::new();
+        for folder in &self.shipped {
+            let Ok(entries) = std::fs::read_dir(beside.join(folder)) else {
+                continue;
+            };
+            let mut dirs: Vec<PathBuf> = entries
+                .filter_map(Result::ok)
+                .map(|e| e.path())
+                .filter(|p| p.join(architect_extensions::manifest::MANIFEST).is_file())
+                .collect();
+            dirs.sort();
+            for dir in dirs {
+                out.push(Package::read(&dir).map_err(|e| (dir, e.to_string())));
+            }
+        }
+        out
     }
 
     /// Its islands ([`island`](Self::island)).
