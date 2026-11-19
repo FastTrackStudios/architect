@@ -505,6 +505,7 @@ this repo declares one.
 | `page` | string | none | a page file in the package |
 | `claims` | `{ fence, note_type, embed_type }` string lists | `{}` | at least one claim; matched in any case |
 | `max_height` | integer (points) | none | not 0; past it the embed scrolls |
+| `fill` | bool | `false` | for a `note_type` claim: the view is the note's page (the web app hides the note's heading, properties and text), not a card at its head |
 
 Exactly one of `view` and `page`.
 

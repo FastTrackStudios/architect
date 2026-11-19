@@ -490,6 +490,7 @@ impl std::fmt::Display for Claim {
 /// page = "pages/kf.tsx"             # or view = "chart" (one of its [[views]])
 /// claims = { fence = ["kf"], note_type = ["song"] }
 /// max_height = 480                  # past it, the embed scrolls
+/// fill = false                      # true: the view is a claimed note's page
 /// ```
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
@@ -506,6 +507,13 @@ pub struct EmbedDecl {
     pub claims: EmbedClaims,
     /// The most it grows to, points; past it the embed scrolls.
     pub max_height: Option<u32>,
+    /// For a note it claims by type: the view is the note's page, filling
+    /// it, where a shell can show it so (the web app: the note's own
+    /// heading, properties and text are out of the way, as for a setlist
+    /// or a song a view draws whole). Unset, the view is drawn at the
+    /// note's head, over its text.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub fill: bool,
 }
 
 impl EmbedDecl {

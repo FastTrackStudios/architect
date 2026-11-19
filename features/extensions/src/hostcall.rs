@@ -938,6 +938,48 @@ impl From<Result<Value, HostError>> for HostAnswer {
     }
 }
 
+/// The capability a share link's guest lacks, in a refusal
+/// ([`guest_check`]).
+pub const GUEST: &str = "guest";
+
+/// Whether a host that runs for a share link's guest
+/// (`host::Host::for_guest`) answers `request` from `manifest`'s
+/// extension at all, whatever its capabilities say.
+///
+/// A guest has no vault and no session: an extension running for one asks
+/// for nothing of a person's. What passes is what touches nothing kept:
+/// opening a note (the app's own opener decides, and opens only what the
+/// link lists), its own settings read, a line in its log, a notification,
+/// where its view is, and its own actions. Documents, vault queries, kept
+/// data, files, the clipboard, the device, the network, secrets, ports and
+/// every app action are refused.
+///
+/// # Errors
+///
+/// [`GUEST`] and why.
+pub fn guest_check(manifest: &Manifest, request: &HostRequest) -> Result<(), (String, String)> {
+    let passes = match request {
+        HostRequest::Open { .. }
+        | HostRequest::Setting { .. }
+        | HostRequest::Log { .. }
+        | HostRequest::Notify { .. }
+        | HostRequest::SetViewState { .. } => true,
+        HostRequest::Run { action, .. } => action.starts_with(&manifest.action_prefix()),
+        _ => false,
+    };
+    if passes {
+        Ok(())
+    } else {
+        Err((
+            GUEST.to_owned(),
+            format!(
+                "a share link's guest has no vault or session: {} is not answered for one",
+                request.op()
+            ),
+        ))
+    }
+}
+
 /// Whether an extension that may reach `may` may make `request`.
 ///
 /// `may` is its manifest's capabilities as a person granted them; the
@@ -1180,6 +1222,50 @@ pub fn check(
 #[cfg(test)]
 mod tests {
     use super::{HostAnswer, HostError, HostRequest};
+
+    /// A guest's host answers what touches nothing kept, and refuses the
+    /// rest whatever the extension's capabilities are.
+    #[test]
+    fn a_guests_host_answers_nothing_of_a_vault() {
+        let manifest = crate::manifest::Manifest::parse(
+            "id = \"lab.guest\"\nname = \"Guest\"\nversion = \"0.1.0\"\nkind = \"process\"\n\
+             [entry]\npath = \"x\"\n[capabilities]\nreads = [\"documents\", \"files\"]\n\
+             writes = [\"documents\"]\nactions = [\"*\"]\neffect = \"destructive\"\n",
+        )
+        .unwrap();
+        let ask = |json: &str| {
+            let request: HostRequest = serde_json::from_str(json).unwrap();
+            super::guest_check(&manifest, &request)
+        };
+        for refused in [
+            r#"{"op":"read_document","path":"Songs/Joy.md"}"#,
+            r#"{"op":"list_documents"}"#,
+            r#"{"op":"query_vault","source":"x"}"#,
+            r#"{"op":"create_document","path":"a.md","text":""}"#,
+            r#"{"op":"delete_document","path":"a.md"}"#,
+            r#"{"op":"data","key":"k"}"#,
+            r#"{"op":"set_data","key":"k","value":1}"#,
+            r#"{"op":"read_file","path":"a"}"#,
+            r#"{"op":"selection"}"#,
+            r#"{"op":"org"}"#,
+            r#"{"op":"clipboard_read"}"#,
+            r#"{"op":"secret","name":"token"}"#,
+            r#"{"op":"run","action":"VAULT_READ"}"#,
+            r#"{"op":"run","action":"APP_STATUS"}"#,
+        ] {
+            let (capability, why) = ask(refused).unwrap_err();
+            assert_eq!(capability, super::GUEST, "{refused}");
+            assert!(why.contains("guest"), "{refused}: {why}");
+        }
+        for answered in [
+            r#"{"op":"open","path":"Songs/Joy.md"}"#,
+            r#"{"op":"setting","key":"lab.guest.word"}"#,
+            r#"{"op":"log","text":"hello"}"#,
+            r#"{"op":"run","action":"LAB_GUEST_GO"}"#,
+        ] {
+            assert_eq!(ask(answered), Ok(()), "{answered}");
+        }
+    }
 
     #[test]
     fn calls_and_answers_are_plain_json() {

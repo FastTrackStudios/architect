@@ -3,7 +3,8 @@ name: browser
 # The web app in a real browser (headless Firefox), the suites that need
 # one: a share link opened as its guest (apps/web/test/app-share-guest.test.mjs
 # and app-guest-content.test.mjs, #646: `/s/<code>/` is the app's page from
-# the node), the web app's extension frame host against hostile bundles
+# the node; app-guest-linked.test.mjs, #805: a distribution's linked views
+# for the guest), the web app's extension frame host against hostile bundles
 # (apps/web/test/app-ext-host.test.mjs, #495: the release bundle behind a
 # front that sends `/_ext/` to the node), the web view kind's frame host
 # (features/extensions/web/test/webview.test.mjs, #222: a hostile web view
@@ -68,7 +69,7 @@ jobs:
         run: |
           bash scripts/web-bundle.sh target/web-bundle
           ARCHITECT_ISLAND_NODE="$CARGO_TARGET_DIR/debug/examples/island_node" ARCHITECT_AUTH_SERVER="$CARGO_TARGET_DIR/debug/auth-server" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" \
-            env -u LD_LIBRARY_PATH "$NODE" --test --test-concurrency=1 --test-timeout=420000 apps/web/test/app-share-guest.test.mjs apps/web/test/app-guest-content.test.mjs
+            env -u LD_LIBRARY_PATH "$NODE" --test --test-concurrency=1 --test-timeout=420000 apps/web/test/app-share-guest.test.mjs apps/web/test/app-guest-content.test.mjs apps/web/test/app-guest-linked.test.mjs
       - name: the web app's extension frames against hostile bundles
         timeout-minutes: 12
         if: ${{ !cancelled() }}

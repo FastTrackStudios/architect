@@ -410,6 +410,7 @@ max_height = 320                         # points; 480 when unset, then it scrol
   - `wire::EMBED_EVENT` in a process;
   - `architect_extension_wasi::embed()` in a WASI component.
 - **Sizing.** A page, process or WASI embed is a sub-document sized to its content, between `embeds::MIN_HEIGHT` and `max_height`.
+- **A linked view as a note's view on the web.** The web app draws a note of a type a linked extension claims with that view, in its own document, before any island's claim of the type (`apps/web/src/ext_host.rs` `drawn`; `apps/web/src/app/embed.rs` `LinkedView`), for a member and a share link's guest. `use_embed()` gives `claim` `note_type:<type>`, `source` the note's text and `props` `{"note": {path, title, type, properties, body, files}}` (the shape an island gets, `ext_host::linked_note_props`; a guest's without `path` or properties), the text only with `reads = ["documents"]`, files only with `files` too. `fill = true` makes it the note's page. The same view is a favourite's `{view}` target (`apps/web/src/favourites.rs` `Opens::Linked`, handed the open note) and can be the distribution's home (`apps/distribution/src/lib.rs` `Distribution::home`, `props` `{"home": …}`, `claim` `embed_type:home`). The web app reads the linked extensions' `[[embeds]]` and `[[favourites]]` in its process (`Embeds::linked_note_views`, `Host::linked_favourites`, `Host::linked_view_ids`): no island and no `/_ext` listing needed.
 - **Inspecting.** `EXT_EMBEDS` lists every claim, or `{claim: "fence:showcase-chart"}` answers which extension draws one.
 
 Tests:

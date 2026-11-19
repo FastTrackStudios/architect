@@ -47,9 +47,10 @@ guest can't do is a **permission**, never a different app:
   (`apps/desktop/src/node/shares.rs` `GuestLane`), and knows nothing of
   the client: not its views, not its extensions. The app hands a view
   only what that view's extension declares it reads
-  (`apps/web/src/ext_host.rs` `note_reads`, `note_props`: text only with
-  `reads = ["documents"]`, files only with `files` too, nothing with no
-  read). That is a rule about extensions inside the app, the same for a
+  (`apps/web/src/ext_host.rs` `note_reads`, `note_props` for an
+  island's view, `linked_reads`, `linked_note_props` for a linked one:
+  text only with `reads = ["documents"]`, files only with `files` too,
+  nothing with no read). That is a rule about extensions inside the app, the same for a
   member, never a second gate on the guest: a guest's browser already
   holds whatever the link admits.
 - **The client's code is the web app's.** The islands a view is drawn
@@ -60,6 +61,37 @@ guest can't do is a **permission**, never a different app:
 - **A share with a domain of its own** (`ShareChange::Domain`) is a
   publication, a [Site](@/features/sites.md), not a link. Its
   `/s/<code>/` link is still the app.
+
+## The distribution's own linked views draw for a guest
+
+A distribution's linked extensions are compiled into its web app: they
+are the app itself, as much as the page around them is. So the web app
+runs them for a share link's guest too, and lets their views draw the
+guest's notes, the type's tabs and a note they ask to open
+(`apps/web/src/app/mod.rs` `WebApp`). Two things keep that safe:
+
+- **The host holds nothing of a person's.** A guest's host is built for
+  a guest (`features/extensions/src/hostapi.rs` `Host::for_guest`): no
+  session, no documents, no vault query service, no data store. Every
+  host call that would reach a vault, kept data, files, the device or an
+  app action is refused, whatever the extension's capabilities say
+  (`features/extensions/src/hostcall.rs` `guest_check`). A note a view
+  asks to open goes to the app's own opener, which opens only a note the
+  link lists.
+- **What a view is handed is still the link's permission.** The app
+  hands a linked view the guest's note as the node gave it, by the same
+  read rule as an island's (above), never a vault path.
+
+Whether linked views may draw a guest's content is a policy the
+embedding app sets, not a rule inside the embed
+(`features/extensions/src/embeds.rs` `GuestEmbedPolicy`, read by
+`GuestEmbedView`). The web app sets `GuestEmbedPolicy::own_linked`
+because its process holds no one's session. The desktop sets none and
+gets `pages_only`: a linked view there runs in the person's own app,
+with their vaults, so only a page embed (on a host that reaches nothing)
+draws a guest's content. `GuestEmbedPolicy::draws_linked` also asks the
+host itself, so a policy set in error on a person's host still draws
+nothing.
 
 How the node serves a link, its audiences, files and players:
 [Deploy, Share links](@/guide/deploy.md#share-links). What an extension
@@ -82,7 +114,7 @@ permission gate replaces it:
 | Where | What differs | Issue |
 | --- | --- | --- |
 | `apps/web/src/app/guest.rs` `GuestPage`, `apps/web/src/guest_view.rs` | the web app swaps its vault views for a guest-only page (its own note list, sets, files view) over an empty vault source | #804 |
-| `apps/web/src/app/mod.rs` `WebApp`, `own_palette`; `features/pages/src/host.rs` `AppHost::guest`; `features/extensions/src/embeds.rs` `GuestEmbedView` | a guest runs none of the app's extensions; the palette is redrawn by the app; on the desktop only a page embed draws guest content | #805 (and #495 G1) |
+| `features/pages/src/host.rs` `AppHost::guest`; `features/extensions/src/embeds.rs` `GuestEmbedView` | the web app runs the distribution's linked extensions for a guest, but no fetched extension; on the desktop only a page embed draws guest content | #805 (and #495 G1) |
 | `features/sites/src/plain.rs`, `PlainBlock`; node-side block drawing (`features/sites/src/installed.rs`) | the node builds each link as a scoped Site and hands notes as plain blocks, drawn by the node's own extension set | #806 |
 | `apps/ui/src/guest.rs` `GuestPage` | the native app's **Shared** tab is its own renderer of plain blocks | #807 |
 
