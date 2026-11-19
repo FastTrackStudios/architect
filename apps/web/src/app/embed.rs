@@ -258,7 +258,7 @@ pub fn IslandView(extension: String, view: String) -> Element {
     match found {
         Some(island) => rsx! {
             div { "data-testid": "page-view", "data-view": "{view}",
-                style: "display: flex; flex-direction: column; min-height: 70vh;",
+                style: "display: flex; flex-direction: column; min-height: 70vh; margin: 0 -16px;",
                 Claimed { island, view: view.clone(), note: Value::Null, pane: true }
             }
         },
@@ -313,7 +313,7 @@ pub fn Embedded(
     let (testid, style) = if pane {
         (
             "ext-view-pane",
-            "flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; padding: 12px 16px;",
+            "flex: 1 1 0; min-height: 0; display: flex; flex-direction: column;",
         )
     } else {
         // At a note's head: the same gap below it as the core list

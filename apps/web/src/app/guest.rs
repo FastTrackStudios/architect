@@ -644,7 +644,9 @@ pub fn GuestPage(code: String, rest: String) -> Element {
     rsx! {
         TabMenu {}
         div { "data-testid": "guest-page",
-            "data-guest-scroll": "", style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: 6px 16px 120px; color: {t.ink};",
+            // No scrollbar track: a view that is the page goes to both edges (a
+            // note's words still scroll by touch, wheel and keys).
+            "data-guest-scroll": "", style: "flex: 1 1 0; min-height: 0; overflow: auto; scrollbar-width: none; padding: 6px 16px 120px; color: {t.ink};",
             div { style: "max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px;",
                 {body}
             }
@@ -1240,7 +1242,8 @@ fn GuestNoteView(
                         // note here, the height of the page. The note's
                         // words are what the view reads, not a second
                         // copy under it.
-                        div { "data-testid": "guest-note-view", style: "display: flex; flex-direction: column; height: calc(100dvh - 232px); min-height: 320px;",
+                        // To the screen's edges: the view gives its own parts their gutters.
+                        div { "data-testid": "guest-note-view", style: "display: flex; flex-direction: column; height: calc(100dvh - 208px); min-height: 320px; margin: 0 -16px;",
                             super::embed::NoteEmbed {
                                 audience: Audience::Guest,
                                 path: String::new(),
