@@ -22,19 +22,23 @@ pub mod ids {
     pub const SIGN_OUT: &str = "ACCOUNT_SIGN_OUT";
     pub const DEVICES: &str = "ACCOUNT_DEVICES";
     pub const FORGET_DEVICE: &str = "ACCOUNT_FORGET_DEVICE";
+    pub const DEVICE_AUTHORISE: &str = "ACCOUNT_DEVICE_AUTHORISE";
+    pub const DEVICE_REVOKE: &str = "ACCOUNT_DEVICE_REVOKE";
     pub const ORG_LIST: &str = "ORG_LIST";
     pub const ORG_SWITCH: &str = "ORG_SWITCH";
     pub const ORG_DEVICES: &str = "ORG_DEVICES";
     pub const ORG_ENROL: &str = "ORG_ENROL";
     pub const ORG_REVOKE: &str = "ORG_REVOKE";
     /// Every id, in menu order.
-    pub const ALL: [&str; 11] = [
+    pub const ALL: [&str; 13] = [
         LIST,
         SIGN_IN,
         SWITCH,
         SIGN_OUT,
         DEVICES,
         FORGET_DEVICE,
+        DEVICE_AUTHORISE,
+        DEVICE_REVOKE,
         ORG_LIST,
         ORG_SWITCH,
         ORG_DEVICES,
@@ -68,8 +72,13 @@ metas! {
     SIGN_IN = SIGN_IN, "Sign in…", "Signs in in the browser: the issuer's own page opens in the system's browser (on iOS its sign-in sheet), the person signs in and approves the code there, and the app comes back signed in. The sign-in sheet shows its progress and a Cancel. No password is typed into the app. `method` code signs in by a code approved on the issuer's page instead (a device with no browser).";
     SWITCH = SWITCH, "Switch account…", "Makes `account` (its key, id or email, from ACCOUNT_LIST) the active one. With no `account`, opens the accounts sheet to choose.";
     SIGN_OUT = SIGN_OUT, "Sign out", "Signs `account` (the active one when unset) out of this device: its session ends at the issuer and leaves the keychain.";
-    DEVICES = DEVICES, "Devices", "The active account's devices at the issuer (id, name, platform, last seen, which one is this device).";
+    DEVICES = DEVICES, "Devices", "The active account's devices: those signed in at the issuer (id, name, platform, last seen, which one is this device), and in `authorised` those let in by their own key with no sign-in (public key, name, platform such as `storage`, the orgs it is of, who authorised it and at which node).";
     FORGET_DEVICE = FORGET_DEVICE, "Forget a device", "Takes device `id` (from ACCOUNT_DEVICES) off the active account: a lost phone, an old laptop.";
+}
+
+metas! {
+    DEVICE_AUTHORISE = DEVICE_AUTHORISE, "Authorise a device by its key…", "Lets a machine that signs in with nothing but its own key (a storage server: it prints the key with `architect-desktop serve key`) into `orgs` (slugs) as `name`, platform `storage` unless given, at the node that hosts them (`host`, its HTTP origin, or the one given before). `public_key` is not a secret. The device then holds and serves those orgs' files and reads no note; nothing is passed to it. Authorising the same key again makes no second device.";
+    DEVICE_REVOKE = DEVICE_REVOKE, "Revoke an authorised device", "Withdraws the device whose key is `public_key` from `orgs` (every org of the account when unset): its next call to the hosting node is refused and its connections close.";
 }
 
 metas! { @in "Organization";
@@ -234,8 +243,75 @@ pub fn register(list: &Arc<ActionList>, accounts: &Accounts) -> Result<(), Actio
     let a = accounts.clone();
     list.register_async(&DEVICES, Effect::ReadOnly, move |(): ()| {
         let a = a.clone();
-        async move { a.refresh_devices().await.map(|d| DevicesOut { devices: d }) }
+        async move {
+            let devices = a.refresh_devices().await?;
+            let authorised = AuthorisedRow::of(a.authorised_devices().await);
+            Ok(DevicesOut {
+                devices,
+                authorised,
+            })
+        }
     })?;
+    let a = accounts.clone();
+    list.register_async(
+        &DEVICE_AUTHORISE,
+        Effect::Mutating,
+        move |args: AuthoriseArgs| {
+            let a = a.clone();
+            async move {
+                // A storage device's role is its platform's: files, no notes.
+                let platform = args
+                    .platform
+                    .as_deref()
+                    .map_or_else(|| "storage".to_owned(), |p| p.trim().to_ascii_lowercase());
+                let role = architect_orgs::Role::parse(&platform);
+                if !matches!(&role, architect_orgs::Role::Other(r) if r == "storage") {
+                    return Err(format!(
+                        "a device authorised by its key is a `storage` device, not `{platform}`: \
+                         a person's device signs in (ACCOUNT_SIGN_IN) or is enrolled (ORG_ENROL)"
+                    ));
+                }
+                let done = a
+                    .authorise_device(
+                        args.host.as_deref(),
+                        &args.public_key,
+                        &args.name,
+                        &role,
+                        &platform,
+                        &args.orgs,
+                    )
+                    .await?;
+                let orgs: Vec<String> = done.into_iter().map(|(org, _)| org).collect();
+                Ok(AuthorisedOut {
+                    public_key: args.public_key.trim().to_owned(),
+                    said: format!("Authorised {} in {}", args.name, orgs.join(", ")),
+                    orgs,
+                })
+            }
+        },
+    )?;
+    let a = accounts.clone();
+    list.register_async(
+        &DEVICE_REVOKE,
+        Effect::Destructive,
+        move |args: RevokeKeyArgs| {
+            let a = a.clone();
+            async move {
+                let orgs = a
+                    .revoke_device(
+                        args.host.as_deref(),
+                        &args.public_key,
+                        &args.orgs.unwrap_or_default(),
+                    )
+                    .await?;
+                Ok(AuthorisedOut {
+                    public_key: args.public_key.trim().to_owned(),
+                    said: format!("Revoked the device in {}", orgs.join(", ")),
+                    orgs,
+                })
+            }
+        },
+    )?;
     let a = accounts.clone();
     list.register_async(
         &FORGET_DEVICE,
@@ -259,6 +335,91 @@ pub fn register(list: &Arc<ActionList>, accounts: &Accounts) -> Result<(), Actio
 #[derive(Debug, Clone, Facet)]
 pub struct DevicesOut {
     pub devices: Vec<Device>,
+    /// The devices let in by their own key, with no sign-in.
+    pub authorised: Vec<AuthorisedRow>,
+}
+
+/// A device authorised by its key ([`ids::DEVICE_AUTHORISE`]).
+#[derive(Debug, Clone, Facet)]
+pub struct AuthorisedRow {
+    /// Its key (its iroh endpoint id): what `ACCOUNT_DEVICE_REVOKE` takes.
+    pub public_key: String,
+    pub name: String,
+    /// `storage` for a storage server.
+    pub platform: String,
+    /// The orgs it is of (slugs), and its role there.
+    pub orgs: Vec<String>,
+    pub role: String,
+    /// How it was authorised: by whom, at which node.
+    pub authorised: String,
+}
+
+impl AuthorisedRow {
+    /// One row per key, its orgs together.
+    fn of(found: Vec<(String, String, architect_devices::Peer)>) -> Vec<Self> {
+        let mut rows: Vec<Self> = Vec::new();
+        for (org, host, peer) in found {
+            let (role, by) = peer
+                .grants
+                .iter()
+                .find_map(|g| match g {
+                    architect_devices::Grant::Org { role, by, .. } => {
+                        Some((role.label(), by.clone()))
+                    }
+                    _ => None,
+                })
+                .unwrap_or_default();
+            if let Some(row) = rows.iter_mut().find(|r| r.public_key == peer.endpoint) {
+                row.orgs.push(org);
+            } else {
+                rows.push(Self {
+                    public_key: peer.endpoint.clone(),
+                    name: peer.name.clone(),
+                    platform: peer.platform.clone(),
+                    orgs: vec![org],
+                    role,
+                    authorised: format!("its key, by {by} at {host}"),
+                });
+            }
+        }
+        rows
+    }
+}
+
+/// What [`ids::DEVICE_AUTHORISE`] takes.
+#[derive(Debug, Clone, Facet)]
+pub struct AuthoriseArgs {
+    /// The device's key: what `architect-desktop serve key` prints.
+    pub public_key: String,
+    pub name: String,
+    /// The orgs (slugs) it holds files of.
+    pub orgs: Vec<String>,
+    /// `storage` (default): holds and serves files, reads no note.
+    #[facet(default)]
+    pub platform: Option<String>,
+    /// The hosting node's HTTP origin; kept for each org.
+    #[facet(default)]
+    pub host: Option<String>,
+}
+
+/// What [`ids::DEVICE_AUTHORISE`] and [`ids::DEVICE_REVOKE`] answer.
+#[derive(Debug, Clone, Facet)]
+pub struct AuthorisedOut {
+    pub public_key: String,
+    /// The orgs it is now of (or was withdrawn from).
+    pub orgs: Vec<String>,
+    pub said: String,
+}
+
+/// What [`ids::DEVICE_REVOKE`] takes.
+#[derive(Debug, Clone, Facet)]
+pub struct RevokeKeyArgs {
+    pub public_key: String,
+    /// Unset: every org of the account's.
+    #[facet(default)]
+    pub orgs: Option<Vec<String>>,
+    #[facet(default)]
+    pub host: Option<String>,
 }
 
 /// One org, as [`ids::ORG_LIST`] lists it.

@@ -46,6 +46,17 @@ pub trait BlobTransfer {
         offset: u64,
         down: vox::Tx<Vec<u8>>,
     ) -> Result<(), TransferError>;
+
+    /// [`Self::read`], at most `len` bytes: what a reader of one range
+    /// asks for, so the sender stops there rather than sending the rest
+    /// of a large blob to nobody.
+    async fn read_range(
+        &self,
+        hash: String,
+        offset: u64,
+        len: u64,
+        down: vox::Tx<Vec<u8>>,
+    ) -> Result<(), TransferError>;
 }
 
 type Allow = dyn Fn(Sha256) -> bool + Send + Sync;
@@ -115,14 +126,39 @@ impl BlobTransfer for BlobTransferHost {
         offset: u64,
         down: vox::Tx<Vec<u8>>,
     ) -> Result<(), TransferError> {
-        let hash = self.admit(&hash)?;
+        self.send(&hash, offset, u64::MAX, down).await
+    }
+
+    async fn read_range(
+        &self,
+        hash: String,
+        offset: u64,
+        len: u64,
+        down: vox::Tx<Vec<u8>>,
+    ) -> Result<(), TransferError> {
+        self.send(&hash, offset, len, down).await
+    }
+}
+
+impl BlobTransferHost {
+    /// At most `len` bytes of `hash` from `offset`, on `down`.
+    async fn send(
+        &self,
+        hash: &str,
+        offset: u64,
+        len: u64,
+        down: vox::Tx<Vec<u8>>,
+    ) -> Result<(), TransferError> {
+        let hash = self.admit(hash)?;
         let mut blob = match self.store.get_from(hash, offset).await {
             Ok(blob) => blob,
             Err(BlobError::NotFound(_)) => return Ok(()),
             Err(e) => return Err(internal(&e)),
         };
-        loop {
-            let mut buf = vec![0u8; CHUNK];
+        let mut left = len;
+        while left > 0 {
+            let want = usize::try_from(left).map_or(CHUNK, |l| l.min(CHUNK));
+            let mut buf = vec![0u8; want];
             let n = blob
                 .reader
                 .read(&mut buf)
@@ -132,12 +168,14 @@ impl BlobTransfer for BlobTransferHost {
                 return Ok(());
             }
             buf.truncate(n);
+            left = left.saturating_sub(u64::try_from(n).unwrap_or(u64::MAX));
             if down.send(buf).await.is_err() {
                 // The reader went away (seeked elsewhere, the link
                 // dropped): not an error here.
                 return Ok(());
             }
         }
+        Ok(())
     }
 }
 
@@ -181,31 +219,58 @@ impl Remote for VoxRemote {
     }
 
     fn read_from(&self, hash: Sha256, offset: u64) -> BoxFuture<'_, io::Result<Reader>> {
-        Box::pin(async move {
-            let (tx, rx) = vox::channel::<Vec<u8>>();
-            let client = self.client.clone();
-            // The call must run for the request (which binds `tx`) to go
-            // out, and stays in flight while the frames arrive.
-            let call = tokio::spawn(async move { client.read(hash.to_hex(), offset, tx).await });
-            let frames = futures::stream::unfold((rx, Some(call)), |(mut rx, call)| async move {
-                let call = call?;
-                match rx.recv().await {
-                    Ok(Some(frame)) => {
-                        let mut owned = None;
-                        let _ = frame.map(|f| owned = Some(f));
-                        Some((Ok(owned.unwrap_or_default()), (rx, Some(call))))
-                    }
-                    // The stream closed: the call says whether that
-                    // was the end or a failure.
-                    _ => match call.await {
-                        Ok(Ok(())) => None,
-                        Ok(Err(e)) => Some((Err(call_err(&e)), (rx, None))),
-                        Err(e) => Some((Err(io::Error::other(e)), (rx, None))),
-                    },
+        Box::pin(async move { Ok(self.stream(hash, offset, None)) })
+    }
+
+    fn read_range(&self, hash: Sha256, offset: u64, len: u64) -> BoxFuture<'_, io::Result<Reader>> {
+        Box::pin(async move { Ok(self.stream(hash, offset, Some(len))) })
+    }
+}
+
+impl VoxRemote {
+    /// The peer's bytes of `hash` from `offset`, all of them or `len`.
+    ///
+    /// The peer's stream is always read to its end, by a task of its
+    /// own: a reader that stops early (a range that was enough, a
+    /// listener who left) leaves a stream that is drained and thrown
+    /// away, never one abandoned half-read on a connection other
+    /// transfers share. Ask for a range ([`Remote::read_range`]) to bound
+    /// what a reader that leaves can cost.
+    fn stream(&self, hash: Sha256, offset: u64, len: Option<u64>) -> Reader {
+        let (tx, mut rx) = vox::channel::<Vec<u8>>();
+        let client = self.client.clone();
+        // The call must run for the request (which binds `tx`) to go
+        // out, and stays in flight while the frames arrive.
+        let call = tokio::spawn(async move {
+            match len {
+                Some(len) => client.read_range(hash.to_hex(), offset, len, tx).await,
+                None => client.read(hash.to_hex(), offset, tx).await,
+            }
+        });
+        let (out, frames) = tokio::sync::mpsc::channel::<io::Result<Vec<u8>>>(4);
+        tokio::spawn(async move {
+            let mut listening = true;
+            while let Ok(Some(frame)) = rx.recv().await {
+                let mut owned = None;
+                let _ = frame.map(|f| owned = Some(f));
+                if listening && out.send(Ok(owned.unwrap_or_default())).await.is_err() {
+                    listening = false;
                 }
-            });
-            let reader: Reader = Box::pin(StreamReader::new(Box::pin(frames)));
-            Ok(reader)
-        })
+            }
+            // The stream closed: the call says whether that was the end
+            // or a failure.
+            let ended = match call.await {
+                Ok(Ok(())) => None,
+                Ok(Err(e)) => Some(call_err(&e)),
+                Err(e) => Some(io::Error::other(e)),
+            };
+            if let (true, Some(error)) = (listening, ended) {
+                let _ = out.send(Err(error)).await;
+            }
+        });
+        let frames = futures::stream::unfold(frames, |mut frames| async move {
+            frames.recv().await.map(|frame| (frame, frames))
+        });
+        Box::pin(StreamReader::new(Box::pin(frames)))
     }
 }

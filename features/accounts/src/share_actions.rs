@@ -168,7 +168,24 @@ pub struct UpdateArgs {
     pub title: Option<String>,
     /// page, reference or full.
     pub listen: Option<String>,
+    /// What of its files is offered as a download: everything,
+    /// not-media (recordings and multitracks only play) or nothing.
+    pub download: Option<String>,
+    /// The projects it carries beside its notes, all of them (an empty
+    /// list: none): each a file root and the session documents shared.
+    pub projects: Option<Vec<ProjectArg>>,
     pub host: Option<String>,
+}
+
+/// One project of [`UpdateArgs::projects`].
+#[derive(Debug, Clone, Facet)]
+pub struct ProjectArg {
+    /// `<org>/Projects/<project>`.
+    pub root: String,
+    /// Root-relative session documents; none: every one in the root.
+    pub sessions: Option<Vec<String>>,
+    /// Whether a signed-in viewer may save its sessions back.
+    pub edit: Option<bool>,
 }
 
 /// What [`ids::SHARE_REVOKE`] and [`ids::SHARE_COMMENTS`] take.
@@ -381,6 +398,10 @@ pub struct ShareRow {
     pub domain: Option<String>,
     /// How far its own link plays: page, reference or full.
     pub listen: String,
+    /// What it offers as a download: everything, not-media or nothing.
+    pub download: String,
+    /// The projects it carries (their roots).
+    pub projects: Vec<String>,
     /// Its named audiences, each with its own link.
     pub audiences: Vec<AudienceRow>,
 }
@@ -404,6 +425,8 @@ impl ShareRow {
             .to_owned(),
             domain: share.domain.clone(),
             listen: share.listen.label().to_owned(),
+            download: share.download.label().to_owned(),
+            projects: share.projects.iter().map(|p| p.root.clone()).collect(),
             audiences: share
                 .audiences
                 .iter()
@@ -641,9 +664,30 @@ pub fn register(list: &Arc<ActionList>, accounts: &Accounts) -> Result<(), Actio
             if let Some(listen) = &args.listen {
                 changes.push(ShareChange::Listen(Listen::parse(listen)?));
             }
+            if let Some(download) = &args.download {
+                changes.push(ShareChange::Download(
+                    architect_spaces::Download::parse(download)?,
+                ));
+            }
+            if let Some(projects) = &args.projects {
+                changes.push(ShareChange::Projects(
+                    projects
+                        .iter()
+                        .map(|p| architect_spaces::ShareProject {
+                            root: p.root.clone(),
+                            sessions: p.sessions.clone().unwrap_or_default(),
+                            access: if p.edit == Some(true) {
+                                architect_spaces::ProjectAccess::Edit
+                            } else {
+                                architect_spaces::ProjectAccess::Read
+                            },
+                        })
+                        .collect(),
+                ));
+            }
             if changes.is_empty() {
                 return Err(
-                    "say what to change: audience, access, expires, title or listen".to_owned(),
+                    "say what to change: audience, access, expires, title, listen, download or projects".to_owned(),
                 );
             }
             let mut share = None;

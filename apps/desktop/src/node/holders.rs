@@ -23,7 +23,9 @@
 //!    back (`503`, `Retry-After`). A holder that does not start sending
 //!    within [`FIRST_BYTE`] is a `504`. Once bytes flow the listener gets
 //!    them at the holder's pace: a slow holder is a slow stream, never a
-//!    held-up node.
+//!    held-up node. A file is relayed a window at a time ([`WINDOW`]),
+//!    so a listener who leaves (a seek, a closed tab) costs the holder
+//!    at most the rest of one window.
 //!
 //! No size limit in any path: nothing is buffered whole.
 //!
@@ -38,6 +40,7 @@ use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::{Duration, Instant};
 
 use architect::blob::{S3Store, Sha256};
+use architect::http::axum::body::Body;
 use architect::http::axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use architect::http::axum::response::{IntoResponse, Response};
 use architect_files::sync::{Engine, manifest};
@@ -47,12 +50,16 @@ use uuid::Uuid;
 
 /// How long a presigned bucket link reads its one object.
 pub const SIGNED_FOR: Duration = Duration::from_secs(600);
-/// How many files are relayed from peers at once.
-pub const RELAYS: usize = 64;
+/// How many files are relayed from peers at once: half of what one
+/// connection between two nodes carries (vox closes a connection past 64
+/// requests in flight), the rest left to the nodes' own sync.
+pub const RELAYS: usize = 32;
 /// How long a relay waits for a place before it is told to come back.
-pub const RELAY_WAIT: Duration = Duration::from_secs(2);
+pub const RELAY_WAIT: Duration = Duration::from_secs(10);
 /// How long a holder has to start sending.
 pub const FIRST_BYTE: Duration = Duration::from_secs(15);
+/// How much of a file one read of the holder asks for.
+pub const WINDOW: u64 = 4 << 20;
 /// How long the bucket is trusted to still hold what it held.
 const BUCKET_KNOWN: Duration = Duration::from_secs(300);
 
@@ -303,17 +310,22 @@ impl Holders {
             at.size,
             content_type,
             |offset, len| async move {
-                let blob = tokio::time::timeout(FIRST_BYTE, fetcher.relay(at.hash, offset))
-                    .await
-                    .map_err(|_| StatusCode::GATEWAY_TIMEOUT)?
-                    .map_err(|e| match e {
-                        architect::blob::BlobError::NotFound(_) => StatusCode::NOT_FOUND,
-                        _ => StatusCode::BAD_GATEWAY,
-                    })?;
-                Ok::<_, StatusCode>(architect::http::ranged::reader_body(Relayed {
-                    reader: Box::pin(blob.reader.take(len)),
+                // The first window before the answer starts, so a holder
+                // that is gone is a status, not a cut-off body.
+                let first = window(&fetcher, at.hash, offset, len).await?;
+                let state = Relayed {
+                    fetcher,
+                    hash: at.hash,
+                    reader: Some(first),
+                    offset,
+                    left: len,
+                    in_window: len.min(WINDOW),
                     _place: permit,
-                }))
+                };
+                Ok::<_, StatusCode>(Body::from_stream(futures::stream::unfold(
+                    state,
+                    Relayed::next,
+                )))
             },
         )
         .await;
@@ -345,20 +357,92 @@ fn from(from: From, mut response: Response) -> Response {
     response
 }
 
-/// A relayed range: the holder's stream, and its place among the relays,
-/// given back when the body is dropped (sent, or the listener left).
+/// One window of `hash` from the holder: at most [`WINDOW`] of the `left`
+/// bytes from `offset`.
+async fn window(
+    fetcher: &architect::blob::Fetcher,
+    hash: Sha256,
+    offset: u64,
+    left: u64,
+) -> Result<architect::blob::Reader, StatusCode> {
+    tokio::time::timeout(
+        FIRST_BYTE,
+        fetcher.relay_range(hash, offset, left.min(WINDOW)),
+    )
+    .await
+    .map_err(|_| StatusCode::GATEWAY_TIMEOUT)?
+    .map(|blob| blob.reader)
+    .map_err(|e| match e {
+        architect::blob::BlobError::NotFound(_) => StatusCode::NOT_FOUND,
+        _ => StatusCode::BAD_GATEWAY,
+    })
+}
+
+/// A relayed range, a window at a time: the holder's stream of the
+/// window being sent, what is left, and its place among the relays, given
+/// back when the body is dropped (sent, or the listener left).
 struct Relayed {
-    reader: std::pin::Pin<Box<dyn tokio::io::AsyncRead + Send>>,
+    fetcher: architect::blob::Fetcher,
+    hash: Sha256,
+    reader: Option<architect::blob::Reader>,
+    offset: u64,
+    /// Bytes of the range still to send, and of the open window.
+    left: u64,
+    in_window: u64,
     _place: OwnedSemaphorePermit,
 }
 
-impl tokio::io::AsyncRead for Relayed {
-    fn poll_read(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        self.reader.as_mut().poll_read(cx, buf)
+impl Relayed {
+    /// The next piece of the body; `None` at the range's end.
+    async fn next(mut self) -> Option<(std::io::Result<Vec<u8>>, Self)> {
+        const PIECE: usize = 64 << 10;
+        if self.left == 0 {
+            return None;
+        }
+        if self.in_window == 0 {
+            match window(&self.fetcher, self.hash, self.offset, self.left).await {
+                Ok(reader) => {
+                    self.reader = Some(reader);
+                    self.in_window = self.left.min(WINDOW);
+                }
+                Err(status) => {
+                    self.left = 0;
+                    return Some((
+                        Err(std::io::Error::other(format!("the holder: {status}"))),
+                        self,
+                    ));
+                }
+            }
+        }
+        let want = usize::try_from(self.in_window).map_or(PIECE, |w| w.min(PIECE));
+        let mut piece = vec![0_u8; want];
+        let read = match self.reader.as_mut() {
+            Some(reader) => reader.read(&mut piece).await,
+            None => Ok(0),
+        };
+        match read {
+            Ok(0) => {
+                self.left = 0;
+                Some((
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "the holder sent less than the file",
+                    )),
+                    self,
+                ))
+            }
+            Ok(n) => {
+                piece.truncate(n);
+                let n = u64::try_from(n).unwrap_or(u64::MAX);
+                self.offset = self.offset.saturating_add(n);
+                self.left = self.left.saturating_sub(n);
+                self.in_window = self.in_window.saturating_sub(n);
+                Some((Ok(piece), self))
+            }
+            Err(e) => {
+                self.left = 0;
+                Some((Err(e), self))
+            }
+        }
     }
 }
-

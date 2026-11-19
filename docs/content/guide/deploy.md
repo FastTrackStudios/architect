@@ -467,10 +467,10 @@ Tests: `features/files/tests/sync.rs`
 `apps/desktop/tests/files.rs`
 `a_vaults_attachments_reach_the_other_node_under_its_holding_rule`.
 
-Not yet: a share link serves an attachment only when the node holds it (a
-file its rule leaves out is not on the link, #490); the app's own copy of
-an org's vault, kept over the org lane, gets its notes and not its
-attachments; the setting is off unless set.
+A share link names and serves the ones this node does not hold too
+([below](#a-link-s-files-wherever-they-are-held)). Not yet: the app's own
+copy of an org's vault, kept over the org lane, gets its notes and not
+its attachments; the setting is off unless set.
 
 ## Extensions' node actions
 
@@ -1005,6 +1005,113 @@ app-share-guest-test`): the link's notes in their sets with their art and
 play buttons, a note and its picture, the files and their archive; a link
 for signed-in people opened through `/s/_signin` and the node's cookie,
 past a session the issuer no longer knows; a node with no web app.
+
+### A link's files, wherever they are held
+
+The node that answers a link need not hold what the link serves (#490):
+its holding rule leaves a song's multitracks on the storage server, and a
+file may be in the bucket alone. With the files engine on
+(`ARCHITECT_VAULT_FILES` or `ARCHITECT_FILES_DIR`), a link names such a
+file as it names any other (its size and sha-256 from the root's
+manifest) and answers it from the nearest holder
+(`apps/desktop/src/node/holders.rs` `Holders::respond`; the answer says
+which in `x-architect-from`):
+
+| Where the bytes are | What the node answers | Limits |
+| --- | --- | --- |
+| On this node (its vault, a working file, its store) | the file, streamed from disk, ranges honoured | none |
+| In the bucket | `302` to a presigned `GET` of that one object, good for 10 minutes (`SIGNED_FOR`); the browser reads it, ranges too, from the bucket itself | nothing passes through the node; the bucket's own |
+| On a peer only (the storage server) | the range, relayed from the holder over the nodes' own lane (`architect::blob::Fetcher::relay`); nothing is written here | 64 at once (`RELAYS`); one more waits up to 10 s for a place, then `503` with `Retry-After`; a holder that does not start within 15 s is `504` |
+| Nowhere this node can reach | `404` | |
+
+No path buffers a file whole, so none has a size limit. A slow holder is
+a slow stream for that listener and holds up nobody else; a holder that
+is gone is an answer within the 15 seconds, never a hung request.
+
+**What a guest holds is the link's URL**, and that is checked on every
+request: live, its audience, its layer. The presigned URL they are sent
+on to reads one object until it runs out. It signs the method and the
+key, so it lists nothing, names no other object and writes nothing, and
+after a revoke or a lowered layer the link redirects nowhere. A browser's
+`fetch` (an engine decoding audio) needs the bucket to allow the node's
+origin (CORS: `GET`, the `Range` header); an `<audio>` element does not.
+
+**Nothing of the vault is copied into a link's build** any more: a link's
+attachments are read from the vault's own file (never through a symlink)
+by the exact path its build names, so editing a note no longer copies
+every recording again. A share's own domain (a Site) still holds its
+files.
+
+Tests: `apps/desktop/tests/link_files.rs`
+`a_link_streams_a_recording_its_node_does_not_hold_from_the_storage_server`,
+`a_link_sends_the_browser_to_the_bucket_for_a_file_that_is_there`.
+
+### A project on a link
+
+A link carries projects beside its notes
+(`features/spaces/src/share.rs` `ShareProject`): a file root
+`<org>/Projects/<project>`, the session documents of it that are shared
+(none named: every one), and whether a viewer may save them back. Set it
+on a link that exists, so its URL stays:
+
+```sh
+architect-desktop actions run SHARE_UPDATE '{"code": "<code>", "listen": "full",
+  "download": "not-media",
+  "projects": [{"root": "fasttrackaudio/Projects/JT's Senior Recital",
+                "sessions": ["songs/drive-to-la/Drive To LA.fts-session"]}]}'
+```
+
+What a guest gets of the root is decided by the node on every request
+(`apps/desktop/src/node/share_project.rs`), from the root's manifest as it
+is then:
+
+- **The session documents shared**, from the link's `reference` layer up.
+- **What they reference**, at `full`. A session is an Architect document
+  (`features/crdt/crdt/src/file/mod.rs` `read_main` reads it whatever its
+  kind); every string in it that is a path beside the session, a path in
+  the root, or a file's sha-256 names that file. Nothing of a session's
+  format is known to Architect: whoever writes sessions names a file one
+  of those three ways.
+- **Nothing else of the root**, by any name. A file is served by its hash,
+  `<link>_blob/<sha256>/<name>`, and only a hash in that set is answered;
+  any other is the `404` of a path that is nowhere.
+
+`GET <link>_project.json` is the contract a client codes to
+(`features/spaces/src/guest.rs` `GuestProjects`): each project's sessions
+and files with `path`, `sha256`, `size` and `url`, each session's
+`references` (`named`, the string in the document, to the file's
+`sha256`), and `access`. `?listen=reference` asks for less. An edited
+session changes what the link serves with no rebuild.
+
+With `"edit": true` a session's `save` URL takes a `PUT` of its new bytes
+(at most 64 MiB) from a signed-in person the link lets in, their issuer
+session as a bearer; it is a new version of the file in the root, synced
+like any other. Without it the project is read-only: there is no route
+that writes.
+
+Test: `apps/desktop/tests/link_files.rs`
+`a_project_link_carries_its_sessions_and_exactly_the_files_they_reference`.
+
+### What a link offers to keep
+
+`download` on a link (`ShareChange::Download`, `SHARE_UPDATE {download}`)
+says which of the files it serves are offered as downloads: `everything`
+(the default), `not-media` (recordings and multitracks play, and are not
+listed to save), or `nothing`. A file that is not offered is marked in
+`<link>_files.json` (`"download": false`; `ListedFile::stream_only` for a
+guest's app) and in `<link>_project.json`, and is in no `_archive.zip`.
+It still streams to the player: this is what the link offers, not a lock
+on what a browser can keep.
+
+### One link
+
+A link's URL is its code, kept in the share's note: it does not change
+when the vault is edited, the link rebuilt, or what it permits changed
+(audience, layer, download, projects, expiry). Sharing the same scope
+with the same audience, access and layer again answers the link that is
+already there (`Share::is_the_link_of`); another audience or layer is
+another link. Test: `apps/desktop/tests/shares.rs`
+`a_link_keeps_its_url_and_plays_what_it_does_not_offer_to_keep`.
 
 ### How far a link plays
 

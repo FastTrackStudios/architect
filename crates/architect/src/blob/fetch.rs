@@ -43,6 +43,18 @@ pub trait Remote: Send + Sync {
 
     /// The blob's bytes from `offset` to its end.
     fn read_from(&self, hash: Sha256, offset: u64) -> BoxFuture<'_, io::Result<Reader>>;
+
+    /// At most `len` bytes from `offset`. A remote that can tell its
+    /// sender where to stop does (a peer's lane); the default reads on
+    /// and stops listening.
+    fn read_range(&self, hash: Sha256, offset: u64, len: u64) -> BoxFuture<'_, io::Result<Reader>> {
+        Box::pin(async move {
+            use tokio::io::AsyncReadExt as _;
+            let reader = self.read_from(hash, offset).await?;
+            let cut: Reader = Box::pin(reader.take(len));
+            Ok(cut)
+        })
+    }
 }
 
 impl Remote for LocalFs {
@@ -218,6 +230,16 @@ impl Fetcher {
     /// No remote has it ([`BlobError::NotFound`]), or none could start
     /// sending it ([`BlobError::Unavailable`]).
     pub async fn relay(&self, hash: Sha256, offset: u64) -> Result<Blob, BlobError> {
+        self.relay_range(hash, offset, u64::MAX).await
+    }
+
+    /// [`Self::relay`], at most `len` bytes: one range of a large blob,
+    /// and the remote is told where to stop.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::relay`].
+    pub async fn relay_range(&self, hash: Sha256, offset: u64, len: u64) -> Result<Blob, BlobError> {
         let remotes = self
             .inner
             .remotes
@@ -235,13 +257,9 @@ impl Fetcher {
                 }
             };
             let offset = offset.min(size);
-            match remote.read_from(hash, offset).await {
-                Ok(reader) => {
-                    return Ok(Blob {
-                        len: size.saturating_sub(offset),
-                        reader,
-                    });
-                }
+            let len = len.min(size.saturating_sub(offset));
+            match remote.read_range(hash, offset, len).await {
+                Ok(reader) => return Ok(Blob { len, reader }),
                 Err(e) => failures.push(e.to_string()),
             }
         }

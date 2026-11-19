@@ -161,6 +161,11 @@ architect-settings = { workspace = true }
 architect-workspace = { workspace = true, features = ["home"] }
 futures = "0.3"
 tempfile = "3"
+# tests/link_files.rs: a real S3 server in process, as architect's
+# blob_s3.rs (the s3s project's, Apache-2.0).
+s3s = { version = "0.17", default-features = false }
+s3s-fs = { version = "0.17", default-features = false }
+hyper-util = { version = "0.1", features = ["server-auto", "tokio"] }
 # tests/node.rs: the node's logs captured at TRACE, with its own filter.
 tracing-subscriber = { workspace = true }
 

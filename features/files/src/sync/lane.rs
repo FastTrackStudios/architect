@@ -16,6 +16,7 @@ pub const BLOB_PERMITS: ServicePermits = ServicePermits {
     methods: &[
         MethodPermit::new("size", "read", "files/**"),
         MethodPermit::new("read", "read", "files/**"),
+        MethodPermit::new("read_range", "read", "files/**"),
     ],
 };
 
@@ -46,6 +47,34 @@ impl Engine {
                 .read()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .contains(&hash)
+        })
+    }
+
+    /// [`Self::blob_host`], held to the caller's orgs: `orgs` is asked
+    /// per call (the gate's caller is in scope) and answers the org
+    /// folders the caller is of, or `None` for a caller that is not held
+    /// to any (one of the owner's own devices). A device of one org is
+    /// sent only what a manifest of that org names: a hash another org's
+    /// project names is not a key to its bytes.
+    #[must_use]
+    pub fn blob_host_for(
+        &self,
+        orgs: impl Fn() -> Option<Vec<String>> + Send + Sync + 'static,
+    ) -> BlobTransferHost {
+        let (served, named_by) = (self.served.clone(), self.named_by.clone());
+        BlobTransferHost::new(Arc::new(self.store.clone())).allow(move |hash: Sha256| {
+            let named = served
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .contains(&hash);
+            named
+                && orgs().is_none_or(|mine| {
+                    named_by
+                        .read()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .get(&hash)
+                        .is_some_and(|theirs| mine.iter().any(|org| theirs.contains(org)))
+                })
         })
     }
 
@@ -98,6 +127,8 @@ impl Engine {
     pub(super) async fn refresh_lane(&self) {
         let mut held = Vec::new();
         let mut served = std::collections::HashSet::new();
+        let mut named_by: std::collections::HashMap<Sha256, std::collections::BTreeSet<String>> =
+            std::collections::HashMap::new();
         for doc_id in self.known() {
             let Some(doc) = self.doc(doc_id).await else {
                 continue;
@@ -109,6 +140,7 @@ impl Engine {
             for v in manifest.versions() {
                 if let Some(hash) = v.content.as_deref().and_then(|c| Sha256::from_hex(c).ok()) {
                     served.insert(hash);
+                    named_by.entry(hash).or_default().insert(meta.org.clone());
                 }
             }
             held.push(HeldManifest {
@@ -134,6 +166,10 @@ impl Engine {
             .served
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = served;
+        *self
+            .named_by
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = named_by;
     }
 }
 

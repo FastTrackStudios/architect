@@ -41,6 +41,14 @@ guest can't do is a **permission**, never a different app:
   through the link's guest service (`features/spaces/src/guest.rs`
   `ShareGuest`), checked by the node. The app never decides what a guest
   may see.
+- **What a link permits is on the link**, and changes without its URL
+  changing: who opens it (`Audience`), how far it plays (`Listen`), what
+  it offers to keep (`Download`: a recording that only plays is still
+  played by the app's own player, and simply not listed to save), and
+  whether a project it carries opens read-only or may be saved back
+  (`ProjectAccess`). The app reads these from the node's answers
+  (`ListedFile::stream_only`, `GuestProject::access`) and hides or shows
+  its own controls; it never draws another page for them.
 - **A share with a domain of its own** (`ShareChange::Domain`) is a
   publication, a [Site](@/features/sites.md), not a link. Its
   `/s/<code>/` link is still the app.
