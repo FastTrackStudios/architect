@@ -536,6 +536,7 @@ pub fn GuestPage(code: String, rest: String) -> Element {
     });
     use_drop(|| {
         CHOOSER.with(|c| *c.borrow_mut() = None);
+        *MENU.write() = None;
         *BAR.write() = Bar::default();
         *SIDE.write() = None;
     });
@@ -641,6 +642,7 @@ pub fn GuestPage(code: String, rest: String) -> Element {
         }
     };
     rsx! {
+        TabMenu {}
         div { "data-testid": "guest-page",
             "data-guest-scroll": "", style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: 6px 16px 120px; color: {t.ink};",
             div { style: "max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px;",
@@ -753,6 +755,9 @@ pub(super) struct BarTab {
     view: String,
     /// The note types that view claims; none: it fills the page.
     claims: Vec<String>,
+    /// Its menu's entries, for a tab that opens one above itself (a
+    /// phone's "more"); empty for a tab that opens a view.
+    pub menu: Vec<BarTab>,
 }
 
 /// A link's bottom tabs, which is current, and its round button.
@@ -765,6 +770,8 @@ pub(super) struct Bar {
 
 pub(super) static BAR: GlobalSignal<Bar> = Signal::global(Bar::default);
 pub(super) static SIDE: GlobalSignal<Option<Side>> = Signal::global(|| None);
+/// The tab whose menu is open above the bar, by its id.
+pub(super) static MENU: GlobalSignal<Option<&'static str>> = Signal::global(|| None);
 
 thread_local! {
     /// Opens a note, the files or a view on the page ([`GuestPage`]'s `choose`).
@@ -810,29 +817,45 @@ fn bar_of(
     let Some(island) = islands.iter().find(|i| i.id == set.by.extension) else {
         return Bar::default();
     };
+    let tab_of = |f: &architect_favourites::Favourite| -> Option<BarTab> {
+        let (view, menu) = match &f.target {
+            Target::View(view) => (
+                view.rsplit('/').next().unwrap_or(view).to_owned(),
+                Vec::new(),
+            ),
+            // Filled below: a menu's entries are tabs of their own.
+            Target::Menu(_) => (String::new(), Vec::new()),
+            Target::Action(_) | Target::Place(_) => return None,
+        };
+        let claims = island
+            .embeds
+            .iter()
+            .find(|e| !view.is_empty() && e.view == view)
+            .map(|e| e.note_types.clone())
+            .unwrap_or_default();
+        Some(BarTab {
+            id: kept(&f.id),
+            label: kept(&f.label),
+            glyph: kept(&f.icon),
+            extension: island.id.clone(),
+            view,
+            claims,
+            menu,
+        })
+    };
     let tabs: Vec<BarTab> = set
         .favourites
         .tabs
         .iter()
         .filter_map(|f| {
-            let Target::View(view) = &f.target else {
-                return None;
-            };
-            let view = view.rsplit('/').next().unwrap_or(view).to_owned();
-            let claims = island
-                .embeds
-                .iter()
-                .find(|e| e.view == view)
-                .map(|e| e.note_types.clone())
-                .unwrap_or_default();
-            Some(BarTab {
-                id: kept(&f.id),
-                label: kept(&f.label),
-                glyph: kept(&f.icon),
-                extension: island.id.clone(),
-                view,
-                claims,
-            })
+            let mut tab = tab_of(f)?;
+            if let Target::Menu(entries) = &f.target {
+                tab.menu = entries.iter().filter_map(&tab_of).collect();
+                if tab.menu.is_empty() {
+                    return None;
+                }
+            }
+            Some(tab)
         })
         .collect();
     let claims = |t: &BarTab, kind: &str| t.claims.iter().any(|c| c.eq_ignore_ascii_case(kind));
@@ -844,7 +867,10 @@ fn bar_of(
             .and_then(|n| n.kind.as_deref())
             .and_then(|k| tabs.iter().find(|t| claims(t, k)))
             .map(|t| t.id),
-        Open::View(_, view) => tabs.iter().find(|t| &t.view == view).map(|t| t.id),
+        Open::View(_, view) => tabs
+            .iter()
+            .find(|t| &t.view == view || t.menu.iter().any(|m| &m.view == view))
+            .map(|t| t.id),
         Open::Files | Open::Nothing => None,
     };
     Bar {
@@ -859,9 +885,24 @@ fn bar_of(
 /// recording is playing, else the first. A tab whose view claims none
 /// fills the page with that view.
 pub(super) fn press_tab(id: &str) {
-    let Some(tab) = BAR.peek().tabs.iter().find(|t| t.id == id).cloned() else {
+    let found = {
+        let bar = BAR.peek();
+        bar.tabs
+            .iter()
+            .chain(bar.tabs.iter().flat_map(|t| t.menu.iter()))
+            .find(|t| t.id == id)
+            .cloned()
+    };
+    let Some(tab) = found else {
         return;
     };
+    // A tab with a menu opens it above itself (pressed again: closes it).
+    if !tab.menu.is_empty() {
+        let open = *MENU.peek() == Some(tab.id);
+        *MENU.write() = (!open).then_some(tab.id);
+        return;
+    }
+    *MENU.write() = None;
     let Some(side) = SIDE.peek().clone() else {
         return;
     };
@@ -892,6 +933,40 @@ pub(super) fn press_tab(id: &str) {
         .or_else(|| side.link.notes.iter().find(of_type));
     if let Some(note) = note {
         choose_on_page(Open::Note(note.path.clone()));
+    }
+}
+
+/// The menu open above a bottom tab (a phone's "more"): its entries, one
+/// a row, over the page; a press outside closes it.
+#[component]
+pub(super) fn TabMenu() -> Element {
+    let t = use_shell().theme;
+    let Some(open) = MENU() else {
+        return rsx! {};
+    };
+    let bar = BAR();
+    let Some(tab) = bar.tabs.iter().find(|t| t.id == open).cloned() else {
+        return rsx! {};
+    };
+    let now = SIDE().map(|s| s.at);
+    rsx! {
+        div { "data-testid": "tab-menu-scrim", style: "position: fixed; inset: 0; z-index: 60;",
+            onclick: move |_| *MENU.write() = None,
+        }
+        div { "data-testid": "tab-menu", role: "menu", "aria-label": "{tab.label}",
+            style: "position: fixed; z-index: 61; right: 76px; bottom: calc(env(safe-area-inset-bottom, 0px) + 76px); min-width: 208px; padding: 6px; border-radius: 14px; background: {t.sheet}; border: 1px solid {t.rule}; box-shadow: 0 2px 6px rgba(0,0,0,.12), 0 18px 40px -12px rgba(0,0,0,.45); display: flex; flex-direction: column; gap: 2px;",
+            for entry in tab.menu.iter().cloned() {
+                button { key: "{entry.id}", r#type: "button", role: "menuitem", "data-testid": "tab-menu-item",
+                    "aria-current": if matches!(&now, Some(Open::View(_, v)) if *v == entry.view) { "page" },
+                    style: "display: flex; align-items: center; gap: 12px; width: 100%; min-height: 46px; padding: 0 12px; border: 0; border-radius: 10px; background: transparent; color: {t.ink}; font: inherit; font-size: 16px; text-align: left; cursor: pointer;",
+                    onclick: move |_| press_tab(entry.id),
+                    span { style: "display: grid; place-items: center; width: 22px; height: 22px; color: {t.ink_3};",
+                        {architect_shell::Tab::named(entry.id, entry.label, entry.glyph).draw(architect_shell::Icon { size: 20, color: t.ink_3.clone() })}
+                    }
+                    "{entry.label}"
+                }
+            }
+        }
     }
 }
 
