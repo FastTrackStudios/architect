@@ -78,16 +78,6 @@ in
   # the two cannot drift. Ports are dev-stack.toml's; state is under
   # devenv's (`$DEVENV_STATE/stack`, 0700), `just dev-reset` removes it.
   # Plus the telemetry module's Teley (:8787) and collector (:4318).
-  tasks."app:build" = {
-    # The app's build as a task the app process waits on, so `devenv up`'s
-    # TUI shows the app waiting while it compiles, with the build's own
-    # log. The same flags as the app's `dx serve`, so its build after this
-    # is a quick up-to-date check. A failed build fails the task and the
-    # app does not start.
-    exec = "cd apps/desktop && dx build --platform desktop --renderer native";
-    before = [ "devenv:processes:app" ];
-  };
-
   # The stand-in for GitHub, Google and TONE3000 the auth server's social
   # buttons go to. Up once it answers at all (curl exits 0 on any status).
   processes.mock-oauth = {
@@ -108,9 +98,10 @@ in
   # the org lane, share links) on the stack's `app` port. The window's
   # issuer is the local auth server and its orgs' node its own, with a
   # folder of its own (its sessions a file there, never the keychain), on
-  # a scratch copy of the demo vault (`just vault-reset`). Without Rust
-  # hot-patching: it builds a different ("fat") binary from `dx build`,
-  # and dx calls it experimental. rsx hot reload stays.
+  # a scratch copy of the demo vault (`just vault-reset`). Rust
+  # hot-patched on a save (dx's subsecond), rsx hot-reloaded. No `dx build`
+  # task before it: a hot-patched serve builds its own ("fat") binary, so
+  # that build would be thrown away.
   processes.app = {
     exec = "${xdev} app";
     after = [ "devenv:processes:auth" ];
@@ -122,8 +113,8 @@ in
       period = 2;
     };
   };
-  # The web app (apps/web) under `dx serve --platform web`, rebuilt on a
-  # save, its issuer the local one, its node's paths (`/vox`, `/org`, `/s`,
+  # The web app (apps/web) under `dx serve --platform web`, Rust
+  # hot-patched and rsx hot-reloaded on a save, its issuer the local one, its node's paths (`/vox`, `/org`, `/s`,
   # …) proxied to the app's node (apps/web/Dioxus.toml), `/app/?demo` the
   # app on the demo vault.
   processes.web = {

@@ -489,6 +489,8 @@ impl Stack {
             }
             Process::App => {
                 let mut c = Command::new("dx");
+                // Rust hot-patched on a save (dx's subsecond), rsx
+                // hot-reloaded (devenv.nix).
                 c.args([
                     "serve",
                     "--platform",
@@ -496,14 +498,14 @@ impl Stack {
                     "--renderer",
                     "native",
                     "--hot-patch",
-                    "false",
+                    "true",
                 ])
                 .current_dir(self.root.join("apps/desktop"));
                 c
             }
-            // The web app under dx (apps/web/Dioxus.toml): rebuilt on a
-            // save, rsx hot-reloaded, its page the one `prepare_web` wrote.
-            // No Rust hot-patching, as the app's (devenv.nix).
+            // The web app under dx (apps/web/Dioxus.toml): Rust hot-patched
+            // and rsx hot-reloaded on a save, as the app's (devenv.nix), its
+            // page the one `prepare_web` wrote.
             Process::Web => {
                 let mut c = Command::new("dx");
                 c.args([
@@ -515,7 +517,7 @@ impl Stack {
                     "--port",
                 ])
                 .arg(self.ports.web.to_string())
-                .args(["--open", "false", "--hot-patch", "false"])
+                .args(["--open", "false", "--hot-patch", "true"])
                 .current_dir(self.root.join(WEB_APP));
                 c
             }
@@ -1455,6 +1457,8 @@ mod tests {
         assert_eq!(args[port + 1], stack.ports.web.to_string());
         let addr = args.iter().position(|a| a == "--addr").unwrap();
         assert_eq!(args[addr + 1], "127.0.0.1");
+        let hot = args.iter().position(|a| a == "--hot-patch").unwrap();
+        assert_eq!(args[hot + 1], "true", "the web app is hot-patched");
         assert_eq!(
             command.get_current_dir(),
             Some(stack.root.join(WEB_APP).as_path())
@@ -1509,6 +1513,8 @@ mod tests {
             .map(|a| a.to_string_lossy().into_owned())
             .collect();
         assert_eq!(&args[..3], ["serve", "--platform", "desktop"]);
+        let hot = args.iter().position(|a| a == "--hot-patch").unwrap();
+        assert_eq!(args[hot + 1], "true", "the window is hot-patched");
 
         let headless = stack.command(Process::App, true);
         let args: Vec<_> = headless

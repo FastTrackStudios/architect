@@ -46,7 +46,7 @@ in this order, each waiting for the one before it to answer:
 | --- | --- | --- | --- |
 | `mock-oauth` | 7410 | | The stand-in for GitHub, Google and TONE3000 (`apps/mock-oauth`): the auth server's social buttons work with nobody's credentials. |
 | `auth` | 7411 | `mock-oauth` | The auth server (`apps/auth-server`): SQLite on disk under the stack's state, a secret of its own generated on its first start, filled as below. |
-| `app` | 7412, and a window | `auth` | The Architect app under `dx serve`, and in the same process its node, as on anyone's machine (`apps/desktop/src/app.rs` `start_node`): the node signed in to the local auth server, hosting the fill's org and a vault of the demo's content, `ARCHITECT_IROH=local`, files in a local folder, its HTTP face (`/health`, `/vox`, the org lane, share links) on 7412. The window's issuer is the local auth server, its orgs' node its own (`ARCHITECT_ORG_HOST`), a folder of its own with its sessions in a file there (never the keychain), a scratch copy of the demo vault. Ready once `/health` answers. |
+| `app` | 7412, and a window | `auth` | The Architect app under `dx serve`, and in the same process its node, as on anyone's machine (`apps/desktop/src/app.rs` `start_node`): the node signed in to the local auth server, hosting the fill's org and a vault of the demo's content, `ARCHITECT_IROH=local`, files in a local folder, its HTTP face (`/health`, `/vox`, the org lane, share links) on 7412. The window's issuer is the local auth server, its orgs' node its own (`ARCHITECT_ORG_HOST`), a folder of its own with its sessions in a file there (never the keychain), a scratch copy of the demo vault. Rust hot-patched on a save (`--hot-patch true`, dx's subsecond), `rsx!` hot-reloaded. Ready once `/health` answers. |
 | `web` | 7413 | `auth` | The web app (`apps/web`) under `dx serve --platform web`, at `/app/` (`/app/?demo`: the app on the demo vault), its `config.json` naming the local issuer. Below. |
 | `site` | 7414 | | Off by default (`devenv up site`; `just dev plain` starts it): `apps/site`'s dev server, hot-reloaded; its `/app/…` links go to the web app's server. |
 
@@ -70,15 +70,17 @@ secret, the snapshot, the app's node's identity and data (`node/`), the app's fo
 `just dev-status` says what is running, the fill and why, the snapshot's
 age, the URLs to open and the development password.
 
-### The web app, rebuilt on save
+### The web app, hot-patched on save
 
 `devenv up` (and `just dev plain`) serves the web app at
 `http://127.0.0.1:7413/app/`, the demo at `/app/?demo`. dx builds
 `apps/web`'s program (`apps/web/src/main.rs`, which calls the same
 `start` the bundle's library does) in a debug profile, so the first
 build takes a couple of minutes, not the release bundle's; after that an
-`rsx!` edit shows without a reload and any other save in `apps/web` or a
-crate it uses is rebuilt in seconds and the page reloads.
+`rsx!` edit shows without a reload and a Rust edit in `apps/web` or a
+crate it uses is hot-patched into the running page (`--hot-patch true`, as
+the desktop app's); a change hot-patching cannot carry (a new dependency,
+a changed struct layout) rebuilds and reloads.
 
 - **The page** is the bundle's. `cargo xtask dev run web` writes
   an `index.html` beside `apps/web/Dioxus.toml` from `apps/web/app/index.html` at every start
