@@ -539,9 +539,10 @@ impl ShellTheme {
 
 static DRAWER_OPEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Whether a phone's row of buttons over its bottom tabs is put away: the
-/// row is for working on a note (its editing actions, the app's own), and
-/// a page that is for looking and listening has none of it
+/// Whether a phone's row of buttons over its bottom tabs is put away.
+///
+/// The row is for working on a note (its editing actions, the app's own),
+/// and a page that is for looking and listening has none of it
 /// ([`quiet_actions`]).
 pub static ACTIONS_QUIET: GlobalSignal<bool> = Signal::global(|| false);
 
