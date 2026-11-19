@@ -26,6 +26,13 @@ const SESSION_KEY: &str = "architect.session";
 /// `sessionStorage` (one attempt, one tab).
 const VERIFIER_KEY: &str = "architect.pkce.verifier";
 const STATE_KEY: &str = "architect.pkce.state";
+/// When this tab last signed in by itself (`Config::auto_sign_in`), Unix
+/// seconds, in `sessionStorage`: a sign-in that comes back without a
+/// session is said, not tried again (`crate::auto_sign_in`).
+const AUTO_TRIED_KEY: &str = "architect.auto_sign_in.at";
+/// Set in `sessionStorage` when the person signs out in this tab: the app
+/// then waits for the Sign in button instead of signing in by itself.
+const SIGNED_OUT_KEY: &str = "architect.signed_out";
 
 fn window() -> Result<Window, String> {
     web_sys::window().ok_or_else(|| "no window".to_owned())
@@ -254,6 +261,8 @@ async fn open() -> Result<(), String> {
     let config = Rc::new(Config::parse(&text)?);
     CONFIG.with(|c| *c.borrow_mut() = Some((*config).clone()));
     wire(Rc::clone(&config))?;
+    let came_back = matches!(route, Route::Callback { .. });
+    let opened = route.clone();
     let problem = match route {
         #[allow(deprecated)]
         Route::App | Route::Demo | Route::Showcase | Route::Share { .. } => None,
@@ -266,11 +275,51 @@ async fn open() -> Result<(), String> {
             .history()
             .and_then(|h| h.replace_state_with_url(&JsValue::NULL, "", Some(APP)));
     }
+    if came_back && problem.is_none() {
+        // Signed in: an automatic sign-in that brought it here is done.
+        if let Ok(parked) = session_storage() {
+            let _ = parked.remove_item(AUTO_TRIED_KEY);
+        }
+    }
     match problem {
         Some(why) => draw(&Screen::SignedOut { problem: Some(why) }),
-        None => show(&config).await,
+        None => show(&config, &opened).await,
     }
     Ok(())
+}
+
+/// Signed out at `route`: the Sign in button, or the issuer's sign-in
+/// started by itself when the config asks and this tab has not just tried
+/// (`crate::auto_sign_in`; the local dev stack's).
+fn signed_out(config: &Config, route: &Route) {
+    let parked = session_storage().ok();
+    let item = |key: &str| parked.as_ref().and_then(|s| s.get_item(key).ok().flatten());
+    let tried_at = item(AUTO_TRIED_KEY).and_then(|t| t.parse().ok());
+    match crate::auto_sign_in(
+        config,
+        route,
+        item(SIGNED_OUT_KEY).is_some(),
+        tried_at,
+        now(),
+    ) {
+        crate::AutoSignIn::Start => {
+            if let Some(parked) = &parked {
+                let _ = parked.set_item(AUTO_TRIED_KEY, &now().to_string());
+            }
+            if let Err(why) = sign_in(config) {
+                draw(&Screen::SignedOut { problem: Some(why) });
+            }
+        }
+        crate::AutoSignIn::Failed(why) => draw(&Screen::SignedOut { problem: Some(why) }),
+        crate::AutoSignIn::No => draw(&Screen::SignedOut { problem: None }),
+    }
+}
+
+/// The person signed out in this tab: no automatic sign-in after it.
+fn mark_signed_out() {
+    if let Ok(parked) = session_storage() {
+        let _ = parked.set_item(SIGNED_OUT_KEY, "1");
+    }
 }
 
 /// Answer the buttons, by delegation on the app's root.
@@ -287,11 +336,15 @@ fn wire(config: Rc<Config>) -> Result<(), String> {
             .and_then(|e| e.get_attribute("data-action"));
         match action.as_deref() {
             Some("sign-in") => {
+                if let Ok(parked) = session_storage() {
+                    let _ = parked.remove_item(SIGNED_OUT_KEY);
+                }
                 if let Err(why) = sign_in(&config) {
                     draw(&Screen::SignedOut { problem: Some(why) });
                 }
             }
             Some("sign-out") => {
+                mark_signed_out();
                 let config = Rc::clone(&config);
                 spawn_local(async move {
                     revoke(&config).await;
@@ -310,6 +363,7 @@ fn wire(config: Rc<Config>) -> Result<(), String> {
 /// Ends the session at the issuer and here, then shows the app signed
 /// out (the account menu's Sign out, in the app).
 pub fn sign_out() {
+    mark_signed_out();
     spawn_local(async {
         if let Some(config) = CONFIG.with(|c| c.borrow().clone()) {
             revoke(&config).await;
@@ -440,9 +494,9 @@ async fn whoami(config: &Config, token: &str) -> Result<Option<Person>, String> 
     }))
 }
 
-async fn show(config: &Config) {
+async fn show(config: &Config, route: &Route) {
     let Some(mut session) = session(config).await else {
-        draw(&Screen::SignedOut { problem: None });
+        signed_out(config, route);
         return;
     };
     let mut person = whoami(config, &session.token).await;

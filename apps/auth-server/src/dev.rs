@@ -313,12 +313,225 @@ where
     }
 }
 
+/// Why the auto sign-in mode (`AUTH_DEV_AUTO_SIGN_IN`) was refused.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum AutoSignInRefused {
+    #[error("a release build never signs anyone in by itself")]
+    ReleaseBuild,
+    #[error("`{0}` is not a demo account (an address at local.test)")]
+    NotDemo(String),
+    #[error("the server binds `{0}`, which is not loopback")]
+    BindNotLoopback(String),
+    #[error("its public origin `{0}` is not this machine")]
+    OriginNotLoopback(String),
+    #[error(
+        "its database is not the dev stack's: a SQLite file `<state>/auth/auth.db` with the \
+         stack's `<state>/fill.json` beside its folder (what `cargo xtask dev run auth` makes)"
+    )]
+    NotDevState,
+}
+
+/// The account to sign in by itself at `/oauth2/authorize`, when the
+/// auto sign-in mode is asked for (`AUTH_DEV_AUTO_SIGN_IN`) and allowed.
+///
+/// Allowed only on the local dev stack, checked four ways: a debug build
+/// (a release never does it, whatever its environment), bound to
+/// loopback, its public origin (`AUTH_BASE_URL`) this machine, and its
+/// database the stack's own state: a SQLite file at `<state>/auth/auth.db`
+/// where `<state>/fill.json` (the fill `cargo xtask dev run auth` wrote
+/// before it started the server) is a file. The account must be a demo
+/// one (`…@local.test`), whose password is [`DEV_PASSWORD`].
+///
+/// # Errors
+///
+/// Asked for and refused: why.
+pub fn auto_sign_in(config: &crate::ServerConfig) -> Result<Option<String>, AutoSignInRefused> {
+    let Some(email) = config
+        .dev_auto_sign_in
+        .as_deref()
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+    else {
+        return Ok(None);
+    };
+    if !cfg!(debug_assertions) {
+        return Err(AutoSignInRefused::ReleaseBuild);
+    }
+    let demo = email.rsplit_once('@').is_some_and(|(name, domain)| {
+        !name.is_empty() && domain.eq_ignore_ascii_case("local.test")
+    });
+    if !demo {
+        return Err(AutoSignInRefused::NotDemo(email.to_owned()));
+    }
+    if !is_loopback_authority(&config.bind_addr) {
+        return Err(AutoSignInRefused::BindNotLoopback(config.bind_addr.clone()));
+    }
+    let origin = config
+        .base_url
+        .split_once("://")
+        .map(|(_, rest)| rest.split(['/', '?', '#']).next().unwrap_or_default());
+    if !origin.is_some_and(is_loopback_authority) {
+        return Err(AutoSignInRefused::OriginNotLoopback(
+            config.base_url.clone(),
+        ));
+    }
+    if !on_dev_state(&config.database_url) {
+        return Err(AutoSignInRefused::NotDevState);
+    }
+    Ok(Some(email.to_owned()))
+}
+
+/// Whether `authority` (`host`, `host:port`, `[v6]:port`) is this machine.
+fn is_loopback_authority(authority: &str) -> bool {
+    let authority = authority.rsplit_once('@').map_or(authority, |(_, a)| a);
+    let host = authority.strip_prefix('[').map_or_else(
+        || match authority.rsplit_once(':') {
+            Some((h, _)) if !h.contains(':') => h,
+            _ => authority,
+        },
+        |rest| rest.split_once(']').map_or(rest, |(h, _)| h),
+    );
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
+/// Whether `database_url` is the dev stack's auth database: a SQLite file
+/// `<state>/auth/auth.db` with `<state>/fill.json` a file.
+fn on_dev_state(database_url: &str) -> bool {
+    let Some(path) = database_url
+        .trim()
+        .strip_prefix("sqlite://")
+        .or_else(|| database_url.trim().strip_prefix("sqlite:"))
+    else {
+        return false;
+    };
+    let path = std::path::Path::new(path.split('?').next().unwrap_or_default());
+    let Some(auth_dir) = path.parent() else {
+        return false;
+    };
+    path.file_name().is_some_and(|n| n == "auth.db")
+        && auth_dir.file_name().is_some_and(|n| n == "auth")
+        && auth_dir
+            .parent()
+            .is_some_and(|state| state.join("fill.json").is_file())
+}
+
 /// The connection a snapshot reads from, when there is one.
 pub type SnapshotDb = Option<DatabaseConnection>;
 
 #[cfg(test)]
 mod tests {
-    use super::{DEV_ORGS, DEV_PEOPLE, dev_id};
+    #![allow(clippy::unwrap_used)]
+
+    use super::{AutoSignInRefused, DEV_ORGS, DEV_PEOPLE, auto_sign_in, dev_id};
+    use crate::ServerConfig;
+
+    /// A scratch state folder laid out as the dev stack's
+    /// (`<state>/fill.json`, `<state>/auth/`), and a config on it.
+    fn on_stack(name: &str, fill: bool) -> (std::path::PathBuf, ServerConfig) {
+        let state =
+            std::env::temp_dir().join(format!("auth-auto-sign-in-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&state);
+        std::fs::create_dir_all(state.join("auth")).unwrap();
+        if fill {
+            std::fs::write(state.join("fill.json"), "{}").unwrap();
+        }
+        let config = ServerConfig {
+            bind_addr: "127.0.0.1:7411".into(),
+            base_url: "http://127.0.0.1:7411".into(),
+            database_url: format!("sqlite://{}?mode=rwc", state.join("auth/auth.db").display()),
+            dev_auto_sign_in: Some("ada@local.test".into()),
+            ..ServerConfig::local()
+        };
+        (state, config)
+    }
+
+    #[test]
+    fn the_auto_sign_in_is_off_unless_asked() {
+        assert_eq!(auto_sign_in(&ServerConfig::local()), Ok(None));
+    }
+
+    #[test]
+    fn the_auto_sign_in_is_allowed_on_the_stacks_own_state_on_loopback() {
+        let (state, config) = on_stack("ok", true);
+        assert_eq!(auto_sign_in(&config), Ok(Some("ada@local.test".into())));
+        let localhost = ServerConfig {
+            bind_addr: "[::1]:7411".into(),
+            base_url: "http://localhost:7411/".into(),
+            ..config
+        };
+        assert_eq!(auto_sign_in(&localhost), Ok(Some("ada@local.test".into())));
+        let _ = std::fs::remove_dir_all(state);
+    }
+
+    #[test]
+    fn the_auto_sign_in_is_refused_off_loopback_off_the_stack_or_for_a_real_account() {
+        let (state, config) = on_stack("refused", true);
+        let refused = |c: ServerConfig| auto_sign_in(&c).unwrap_err();
+        assert!(matches!(
+            refused(ServerConfig {
+                bind_addr: "0.0.0.0:7411".into(),
+                ..config.clone()
+            }),
+            AutoSignInRefused::BindNotLoopback(_)
+        ));
+        assert!(matches!(
+            refused(ServerConfig {
+                base_url: "https://auth.fasttrackstudio.app".into(),
+                ..config.clone()
+            }),
+            AutoSignInRefused::OriginNotLoopback(_)
+        ));
+        assert!(matches!(
+            refused(ServerConfig {
+                base_url: "http://192.168.1.4:7411".into(),
+                ..config.clone()
+            }),
+            AutoSignInRefused::OriginNotLoopback(_)
+        ));
+        for email in [
+            "cody@fasttrackstudio.app",
+            "ada@local.test.example.com",
+            "@local.test",
+        ] {
+            assert!(
+                matches!(
+                    refused(ServerConfig {
+                        dev_auto_sign_in: Some(email.into()),
+                        ..config.clone()
+                    }),
+                    AutoSignInRefused::NotDemo(_)
+                ),
+                "{email}"
+            );
+        }
+        // Production's database, an in-memory one, another file: not the
+        // stack's state.
+        for url in [
+            "postgres://auth@db.internal/auth".to_owned(),
+            "sqlite::memory:".to_owned(),
+            format!(
+                "sqlite://{}?mode=rwc",
+                state.join("auth/other.db").display()
+            ),
+        ] {
+            assert_eq!(
+                refused(ServerConfig {
+                    database_url: url.clone(),
+                    ..config.clone()
+                }),
+                AutoSignInRefused::NotDevState,
+                "{url}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&state);
+        // The stack's layout without its fill: not a stack that ran.
+        let (bare, config) = on_stack("no-fill", false);
+        assert_eq!(auto_sign_in(&config), Err(AutoSignInRefused::NotDevState));
+        let _ = std::fs::remove_dir_all(bare);
+    }
 
     #[test]
     fn seeded_ids_are_the_same_on_every_machine() {

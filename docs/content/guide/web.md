@@ -105,6 +105,12 @@ The chart (`deploy/chart/architect`, `web.config`) replaces it with a
 ConfigMap. Outside Kubernetes, edit
 the file in the bundle.
 
+One more key is the local dev stack's only: `"auto_sign_in": true`
+makes the app, opened signed out and not on a share link, start the
+sign-in by itself, once a page load, against an issuer that approves the
+demo account without its form (`docs/content/guide/local-stack.md`,
+"Signed in already"). A deployment leaves it out; it is off then.
+
 ## What the app does today
 
 **The demo** (`/app/?demo`, the landing page's Demo button) is the app

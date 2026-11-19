@@ -65,6 +65,7 @@ use lucide_dioxus::{
     Settings2, Timer, Undo2, Users,
 };
 
+pub use accounts::set_dev_sign_in;
 pub use distribution::{app_dir, app_dir_or_temp, distribution, sandbox};
 pub use extensions::on_contributions as on_extension_contributions;
 pub use extensions::on_host as on_extension_host;

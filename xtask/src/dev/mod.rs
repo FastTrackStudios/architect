@@ -70,6 +70,21 @@ const DEV_ASSETS: &str = "/assets/app-dev/";
 pub const NATIVE_LOOPBACK_REDIRECT: &str = "http://127.0.0.1/oauth/callback";
 pub const NATIVE_SCHEME_REDIRECT: &str = "app.fasttrackstudio.architect:/oauth/callback";
 
+/// The account the stack's web app and window sign in as by themselves
+/// on the demo seed: its owner of `acme` (`apps/auth-server/src/dev.rs`
+/// `DEV_PEOPLE`). Never set on a mirror, whose accounts are real people's.
+pub const DEV_SIGN_IN_EMAIL: &str = fill::DEMO_NODE_EMAIL;
+/// The file, in the app's folder of the stack's state, that holds the
+/// development password for the window's own sign-in
+/// (`ARCHITECT_DEV_PASSWORD_FILE`, 0600): a password never rides an
+/// environment variable or an action.
+const DEV_PASSWORD_FILE: &str = "dev-password";
+/// What the stack's window is, as a development instance
+/// (`ARCHITECT_DEV_INSTANCE`, `apps/desktop/src/dev.rs` `INSTANCE_ENV`):
+/// its title says so, it takes no system-wide shortcut, and only such a
+/// window reads `ARCHITECT_DEV_SIGN_IN`.
+pub const DEV_INSTANCE: &str = "dev-stack";
+
 const STRIPPED_PREFIXES: [&str; 4] = ["ARCHITECT_", "AUTH_", "AWS_", "MOCK_OAUTH_"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -341,6 +356,21 @@ impl Stack {
     fn real_emails(&self) -> PathBuf {
         self.state.join("mirror-real-emails")
     }
+    fn dev_password(&self) -> PathBuf {
+        self.state.join("app").join(DEV_PASSWORD_FILE)
+    }
+
+    /// Whether the stack signs its web app and window in by themselves:
+    /// on the demo seed only (`fill` `None`, before the auth server
+    /// decided, is the demo's placeholder too).
+    fn signs_in_by_itself(fill: Option<&Fill>) -> bool {
+        fill.is_none_or(|f| f.mode == Mode::Demo)
+    }
+
+    /// The development password, in the file the window reads it from.
+    fn write_dev_password(&self) -> Result<(), String> {
+        write_private(&self.dev_password(), DEV_PASSWORD.as_bytes())
+    }
 
     /// The environment the stack gives `process`. `fill` names the node's
     /// account and org (a placeholder before the auth server decided).
@@ -356,7 +386,7 @@ impl Stack {
             )],
             Process::Auth => {
                 let dir = self.auth_dir();
-                auth_env(&AuthRun {
+                let mut vars = auth_env(&AuthRun {
                     port: p.auth,
                     host: "127.0.0.1",
                     database_url: format!("sqlite://{}?mode=rwc", dir.join("auth.db").display()),
@@ -365,65 +395,88 @@ impl Stack {
                     seed: false,
                     import: None,
                     web_port: Some(p.web),
-                })
+                });
+                // The web app comes up signed in: the issuer approves the
+                // demo account at `/oauth2/authorize` without its form
+                // (refused by the server off this state or loopback).
+                if Self::signs_in_by_itself(fill) {
+                    vars.push(pair("AUTH_DEV_AUTO_SIGN_IN", DEV_SIGN_IN_EMAIL.to_owned()));
+                }
+                vars
             }
             // The app and its node (the same process): the node's settings
             // first, then the window's.
-            Process::App => vec![
-                pair("ARCHITECT_NAME", "dev-app".to_owned()),
-                pair("ARCHITECT_BIND", format!("127.0.0.1:{}", p.app)),
-                pair("ARCHITECT_DATA_DIR", self.node_data().display().to_string()),
-                pair(
-                    "ARCHITECT_VAULTS",
-                    format!("{NODE_VAULT}=vaults/{NODE_VAULT}"),
-                ),
-                pair("ARCHITECT_ISSUER", auth.clone()),
-                pair(
-                    "ARCHITECT_SESSION_FILE",
-                    self.session().display().to_string(),
-                ),
-                pair(
-                    "ARCHITECT_HOST_ORG",
-                    fill.map_or_else(|| fill::DEMO_NODE_ORG.to_owned(), |f| f.node_org.clone()),
-                ),
-                // The web app's origin (`dx serve`'s proxy may not keep the
-                // `Host` the browser asked): it opens the org lane.
-                pair(
-                    "ARCHITECT_LANE_ORIGINS",
-                    format!("http://127.0.0.1:{0},http://localhost:{0}", p.web),
-                ),
-                // No relays and no lookup: it cannot find or be found by a
-                // peer anywhere but this machine.
-                pair("ARCHITECT_IROH", "local".to_owned()),
-                pair(
-                    "ARCHITECT_FILES_DIR",
-                    self.node_dir().join("files").display().to_string(),
-                ),
-                pair("ARCHITECT_FILES_HOLD", "true".to_owned()),
-                // A share link's page is the web app's (#646): served at
-                // `/app/` by the web app's dev server, beside the node.
-                pair("ARCHITECT_WEB_APP", "beside".to_owned()),
-                // The window: its issuer the local one, its orgs' node its own.
-                pair("ARCHITECT_AUTH_ISSUER", auth),
-                pair("ARCHITECT_ORG_HOST", Self::url(p.app)),
-                pair(
-                    "ARCHITECT_SECRET_STORE",
-                    format!(
-                        "file:{}",
-                        self.state.join("app").join(APP_SECRETS).display()
+            Process::App => {
+                let mut vars = vec![
+                    pair("ARCHITECT_NAME", "dev-app".to_owned()),
+                    pair("ARCHITECT_BIND", format!("127.0.0.1:{}", p.app)),
+                    pair("ARCHITECT_DATA_DIR", self.node_data().display().to_string()),
+                    pair(
+                        "ARCHITECT_VAULTS",
+                        format!("{NODE_VAULT}=vaults/{NODE_VAULT}"),
                     ),
-                ),
-                pair("ARCHITECT_FORBID_KEYCHAIN", "1".to_owned()),
-                pair(
-                    "ARCHITECT_CONFIG_DIR",
-                    self.state.join("app").display().to_string(),
-                ),
-                pair("ARCHITECT_VAULT", self.app_vault().display().to_string()),
-                pair(
-                    "ARCHITECT_VAULT_SEED",
-                    self.root.join(DEMO_VAULT).display().to_string(),
-                ),
-            ],
+                    pair("ARCHITECT_ISSUER", auth.clone()),
+                    pair(
+                        "ARCHITECT_SESSION_FILE",
+                        self.session().display().to_string(),
+                    ),
+                    pair(
+                        "ARCHITECT_HOST_ORG",
+                        fill.map_or_else(|| fill::DEMO_NODE_ORG.to_owned(), |f| f.node_org.clone()),
+                    ),
+                    // The web app's origin (`dx serve`'s proxy may not keep the
+                    // `Host` the browser asked): it opens the org lane.
+                    pair(
+                        "ARCHITECT_LANE_ORIGINS",
+                        format!("http://127.0.0.1:{0},http://localhost:{0}", p.web),
+                    ),
+                    // No relays and no lookup: it cannot find or be found by a
+                    // peer anywhere but this machine.
+                    pair("ARCHITECT_IROH", "local".to_owned()),
+                    pair(
+                        "ARCHITECT_FILES_DIR",
+                        self.node_dir().join("files").display().to_string(),
+                    ),
+                    pair("ARCHITECT_FILES_HOLD", "true".to_owned()),
+                    // A share link's page is the web app's (#646): served at
+                    // `/app/` by the web app's dev server, beside the node.
+                    pair("ARCHITECT_WEB_APP", "beside".to_owned()),
+                    // The window: its issuer the local one, its orgs' node its own.
+                    pair("ARCHITECT_AUTH_ISSUER", auth),
+                    pair("ARCHITECT_ORG_HOST", Self::url(p.app)),
+                    pair(
+                        "ARCHITECT_SECRET_STORE",
+                        format!(
+                            "file:{}",
+                            self.state.join("app").join(APP_SECRETS).display()
+                        ),
+                    ),
+                    pair("ARCHITECT_FORBID_KEYCHAIN", "1".to_owned()),
+                    pair(
+                        "ARCHITECT_CONFIG_DIR",
+                        self.state.join("app").display().to_string(),
+                    ),
+                    pair("ARCHITECT_VAULT", self.app_vault().display().to_string()),
+                    pair(
+                        "ARCHITECT_VAULT_SEED",
+                        self.root.join(DEMO_VAULT).display().to_string(),
+                    ),
+                    // A development window (its title says so; no system-wide
+                    // shortcut), which may sign itself in.
+                    pair("ARCHITECT_DEV_INSTANCE", DEV_INSTANCE.to_owned()),
+                ];
+                // The window comes up signed in: as the demo account, with
+                // the password from a 0600 file of the stack's state
+                // (`apps/desktop/src/dev.rs` `sign_in_from_env`).
+                if Self::signs_in_by_itself(fill) {
+                    vars.push(pair("ARCHITECT_DEV_SIGN_IN", DEV_SIGN_IN_EMAIL.to_owned()));
+                    vars.push(pair(
+                        "ARCHITECT_DEV_PASSWORD_FILE",
+                        self.dev_password().display().to_string(),
+                    ));
+                }
+                vars
+            }
             Process::Web => Vec::new(),
             // The site's dev server sends `/app/…` (its Demo and "Open the
             // web app" links) to the web app's (apps/site/vite.config.ts).
@@ -576,6 +629,13 @@ impl Stack {
             }
             Process::Web => self.prepare_web()?,
             _ => {}
+        }
+        // The window's password file: written with the auth server too,
+        // so a window Studio's stack starts from `dev env app` finds it.
+        if matches!(process, Process::Auth | Process::App)
+            && Self::signs_in_by_itself(fill.as_ref())
+        {
+            self.write_dev_password()?;
         }
         let mut vars = self.env_for(process, fill.as_ref());
         if process == Process::Auth {
@@ -763,9 +823,12 @@ impl Stack {
             &read(&web.join("app/style.css"))?,
         )?;
         // The bundle's config names production's issuer: the local one here.
+        // On the demo seed the app signs in by itself (`apps/web/src/lib.rs`
+        // `Config::auto_sign_in`), the issuer approving the demo account.
         let config = serde_json::json!({
             "issuer": Self::url(self.ports.auth),
             "client_id": "architect",
+            "auto_sign_in": Self::signs_in_by_itself(self.read_fill().ok().as_ref()),
         });
         write(
             &public.join("app/config.json"),
@@ -862,6 +925,11 @@ impl Stack {
                     "  the app's node signs in as {} and hosts `{}`",
                     fill.node_email, fill.node_org
                 );
+                if Self::signs_in_by_itself(Some(&fill)) {
+                    println!(
+                        "  the web app and the window sign in by themselves as {DEV_SIGN_IN_EMAIL}"
+                    );
+                }
             }
             Err(_) => println!("\nNot filled yet: the auth server decides when it starts."),
         }
@@ -1565,6 +1633,58 @@ mod tests {
             env.iter()
                 .all(|(k, _)| !k.starts_with("ARCHITECT_BLOB_S3_"))
         );
+    }
+
+    fn mirror_fill() -> Fill {
+        Fill {
+            mode: Mode::Mirror,
+            why: "a test".to_owned(),
+            at: 0,
+            snapshot_taken_at: None,
+            emails_redacted: Some(true),
+            node_email: "user-1@local.invalid".to_owned(),
+            node_org: "org".to_owned(),
+            db_source: "snapshot:x".to_owned(),
+        }
+    }
+
+    #[test]
+    fn on_the_demo_seed_the_window_and_the_issuer_sign_the_demo_account_in() {
+        let stack = stack();
+        let app = stack.env_for(Process::App, None);
+        let get = |k: &str| app.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
+        assert_eq!(
+            get("ARCHITECT_DEV_SIGN_IN").as_deref(),
+            Some("ada@local.test")
+        );
+        assert_eq!(get("ARCHITECT_DEV_INSTANCE").as_deref(), Some(DEV_INSTANCE));
+        let file = get("ARCHITECT_DEV_PASSWORD_FILE").unwrap();
+        assert!(
+            Path::new(&file).starts_with(stack.state.join("app")),
+            "the password file is the stack's own: {file}"
+        );
+        // Never the password itself in the environment.
+        assert!(app.iter().all(|(_, v)| !v.contains(DEV_PASSWORD)));
+        let auth = stack.env_for(Process::Auth, None);
+        assert!(
+            auth.iter()
+                .any(|(k, v)| k == "AUTH_DEV_AUTO_SIGN_IN" && v == "ada@local.test")
+        );
+    }
+
+    #[test]
+    fn a_mirror_signs_nobody_in_by_itself() {
+        let stack = stack();
+        let fill = mirror_fill();
+        for process in [Process::App, Process::Auth] {
+            let env = stack.env_for(process, Some(&fill));
+            assert!(
+                env.iter().all(|(k, _)| k != "ARCHITECT_DEV_SIGN_IN"
+                    && k != "ARCHITECT_DEV_PASSWORD_FILE"
+                    && k != "AUTH_DEV_AUTO_SIGN_IN"),
+                "{process:?}: {env:?}"
+            );
+        }
     }
 
     #[test]
