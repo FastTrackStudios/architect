@@ -993,6 +993,43 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn opening_another_note_after_a_deleted_note_keeps_working() {
+        let (tmp, backend, collab) = setup();
+        collab.watch_vault("v1");
+        put(&backend, "first.md", "first note").await;
+        let first = backend.open_collab("v1", "first.md").unwrap();
+        let first_doc = collab.registry().doc(first.doc_id).await.unwrap();
+        assert_eq!(
+            first_doc
+                .loro()
+                .get_text(COLLAB_BODY_CONTAINER)
+                .to_string(),
+            "first note"
+        );
+
+        // Model an outside editor (or another device's filesystem action).
+        std::fs::remove_file(tmp.path().join("vault/first.md")).unwrap();
+        let deleted = first_doc.clone();
+        eventually("the deleted note's tombstone", async || {
+            vault_doc::is_deleted(deleted.loro())
+        })
+        .await;
+
+        // The next live attach registers and loads a different note through
+        // the same backend, registry and watcher.
+        put(&backend, "second.md", "second note").await;
+        let second = backend.open_collab("v1", "second.md").unwrap();
+        let second_doc = collab.registry().doc(second.doc_id).await.unwrap();
+        assert_eq!(
+            second_doc
+                .loro()
+                .get_text(COLLAB_BODY_CONTAINER)
+                .to_string(),
+            "second note"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn write_behind_flushes_doc_edits_to_disk() {
         let (_tmp, backend, collab) = setup();
         put(&backend, "n.md", "hello").await;
