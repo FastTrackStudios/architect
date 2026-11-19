@@ -336,15 +336,24 @@ async fn an_unpinned_project_browses_over_webdav_and_a_file_opens_on_demand() {
     assert_eq!(part.bytes().await.unwrap().as_ref(), &[1u8; 10]);
     let whole = http.get(&wav).send().await.unwrap().bytes().await.unwrap();
     assert_eq!(whole.len(), 2_000_000);
-    let entries: serde_json::Value = http
-        .post(format!("http://{}/files/browse", laptop.http))
-        .json(&serde_json::json!({"root": project, "path": "Right Here/Audio Files"}))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+    // Kept: the listing says so once the fetched bytes are in the store,
+    // which is a moment after the read that fetched them answers.
+    let mut entries = serde_json::Value::Null;
+    for _ in 0..100 {
+        entries = http
+            .post(format!("http://{}/files/browse", laptop.http))
+            .json(&serde_json::json!({"root": project, "path": "Right Here/Audio Files"}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if entries[0]["here"] == serde_json::json!(true) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
     assert_eq!(entries[0]["here"], serde_json::json!(true), "{entries}");
 
     // Written over WebDAV, unpinned: a version, in the always-on node's tree.
