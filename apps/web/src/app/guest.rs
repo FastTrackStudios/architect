@@ -305,6 +305,24 @@ fn show_path(path: &str) {
     }
 }
 
+/// The page's scrollers back at their top (the guest page's content
+/// scrolls in an element of its own, `data-guest-scroll`).
+fn to_top() {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    if let Ok(list) = doc.query_selector_all("[data-guest-scroll]") {
+        for i in 0..list.length() {
+            if let Some(el) = list
+                .item(i)
+                .and_then(|n| n.dyn_into::<web_sys::Element>().ok())
+            {
+                el.set_scroll_top(0);
+            }
+        }
+    }
+}
+
 /// The location's path, below the window.
 fn pathname() -> Option<String> {
     web_sys::window()?.location().pathname().ok()
@@ -494,7 +512,23 @@ pub fn GuestPage(code: String, rest: String) -> Element {
             }
         }
         open.set(Some(next));
+        // From its top: the page before it may have been scrolled far down
+        // (the link's list of notes), and the note would open off screen.
+        to_top();
     });
+    // A view's ask to open a note of this link (`ext_host::NOTE_OPEN`: a
+    // set's row, to its song): only a note the link lists, as a press in
+    // the list of its notes.
+    use_hook(move || {
+        super::frames::set_note_opener(Some(std::rc::Rc::new(move |path: &str| {
+            let listed = matches!(&*opened.peek(), Some(Ok(o)) if o.link.notes.iter().any(|n| n.path == path));
+            if listed {
+                choose.call(Open::Note(path.to_owned()));
+            }
+            listed
+        })));
+    });
+    use_drop(|| super::frames::set_note_opener(None));
     let state = opened.read().clone();
     // The root note as the core list (#668): a collection whose type no
     // island claims (an island that does draws its own view instead).
@@ -576,7 +610,7 @@ pub fn GuestPage(code: String, rest: String) -> Element {
     };
     rsx! {
         div { "data-testid": "guest-page",
-            style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: 16px 16px 120px; color: {t.ink};",
+            "data-guest-scroll": "", style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: 16px 16px 120px; color: {t.ink};",
             div { style: "max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px;",
                 {body}
             }
@@ -600,7 +634,7 @@ fn OutOfDate(skew: crate::ShellSkew, node: String) -> Element {
     };
     rsx! {
         div { "data-testid": "guest-page",
-            style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: 16px; color: {t.ink};",
+            "data-guest-scroll": "", style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: 16px; color: {t.ink};",
             section { "data-testid": "guest-problem", "data-why": "{title}",
                 style: "max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; padding: 24px 0;",
                 h1 { style: "margin: 0; font-size: 22px;", "{title}" }

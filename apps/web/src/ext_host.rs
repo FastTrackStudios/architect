@@ -87,6 +87,25 @@ pub const MAX_MESSAGE: usize = 64 * 1024;
 /// its source's state, so it reads nothing.
 pub use architect_playhead::FRAME_ASKS as INTENTS;
 
+/// A view's ask to open a note beside the one it is drawn on: `{path}`,
+/// the note's vault path, as the note's own text names it (a setlist's
+/// row names its song's note). The app opens it only where the viewer may
+/// already open it: for a share link's guest, a note the link lists
+/// ([`note_ask`] checks the path's shape; the app's opener checks the
+/// rest). It reads nothing and moves no file: it is the press the viewer
+/// would make in the app's own list of the link's notes.
+pub const NOTE_OPEN: &str = "NOTE_OPEN";
+
+/// The note a [`NOTE_OPEN`] ask names, where its path is a vault path of
+/// a note (`architect_playhead::model::vault_path`: no scheme, no `..`,
+/// at most 1024 bytes) ending in `.md`; a `#heading` after it is left off.
+#[must_use]
+pub fn note_ask(args: &Value) -> Option<String> {
+    let path = args.get("path")?.as_str()?;
+    let path = path.split_once('#').map_or(path, |(p, _)| p);
+    (path.ends_with(".md") && architect_playhead::model::vault_path(path)).then(|| path.to_owned())
+}
+
 /// The read capability a claim names, and its extension declares
 /// (`[capabilities] reads`), for its view to be handed the note it is
 /// drawn on: the app's documents.
@@ -1222,6 +1241,30 @@ mod tests {
             sha256(b""),
             "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
         );
+    }
+
+    #[test]
+    fn a_note_ask_names_a_note_by_its_vault_path() {
+        let ask = |path: &str| note_ask(&json!({ "path": path }));
+        assert_eq!(ask("Songs/Joy/Joy.md").as_deref(), Some("Songs/Joy/Joy.md"));
+        // One arrangement of a song is the song's note.
+        assert_eq!(
+            ask("Songs/Joy/Joy.md#Live").as_deref(),
+            Some("Songs/Joy/Joy.md")
+        );
+        for bad in [
+            "Songs/Joy/joy.ogg",
+            "/etc/passwd.md",
+            "../Joy.md",
+            "https://x.example/Joy.md",
+            "",
+        ] {
+            assert_eq!(ask(bad), None, "{bad}");
+        }
+        assert_eq!(note_ask(&json!({})), None);
+        assert_eq!(note_ask(&json!({ "path": 3 })), None);
+        // Never one of the playhead's: a frame's other asks stay as they were.
+        assert!(!INTENTS.contains(&NOTE_OPEN));
     }
 
     #[test]
