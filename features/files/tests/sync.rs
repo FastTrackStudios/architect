@@ -488,3 +488,147 @@ async fn a_holding_rule_takes_the_light_part_and_leaves_the_multitracks_listed()
     let status = hosted.engine.root_status(doc_id).await.unwrap();
     assert_eq!((status.left_out, status.missing), (2, 0), "{status:?}");
 }
+
+/// A vault's attachments are a root held where the vault is: its
+/// recordings, PDFs and covers sync as a root's files do, while its notes
+/// (documents, synced another way) and its guarded folders are never
+/// committed, written or deleted by the engine, whatever a manifest says.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_vaults_attachments_sync_as_a_root_and_its_notes_are_left_alone() {
+    use architect_files::sync::{RootMeta, layout};
+    use architect_files::{VersionId, sync::FileVersion};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let not_ours = |path: &str| {
+        Path::new(path)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+            || path
+                .split('/')
+                .any(|s| s.starts_with('.') || s == "_architect")
+    };
+    let vault = |name: &str| {
+        let dir = tmp.path().join(name).join("vault");
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    };
+    let meta = || {
+        let place = "indie/Vaults/setlists";
+        RootMeta {
+            id: layout::id_for_place(place),
+            org: "indie".to_owned(),
+            section: Section::Vaults,
+            name: "setlists".to_owned(),
+        }
+    };
+    let (here, there) = (vault("a"), vault("b"));
+    std::fs::create_dir_all(here.join("Songs/Joy")).unwrap();
+    std::fs::create_dir_all(here.join("_architect/shares")).unwrap();
+    std::fs::write(here.join("Songs/Joy/Joy.md"), "# Joy\n").unwrap();
+    std::fs::write(here.join("Songs/Joy/reference.mp3"), vec![5u8; 40_000]).unwrap();
+    std::fs::write(here.join("Songs/Joy/chart.pdf"), b"%PDF").unwrap();
+    std::fs::write(here.join("_architect/shares/x.extensions.toml"), "x").unwrap();
+    std::fs::write(there.join("only-there.md"), "# Mine\n").unwrap();
+
+    let a = device("a", tmp.path(), tmp.path().join("a-files"), false, None);
+    let b = device(
+        "b",
+        tmp.path(),
+        tmp.path().join("b-files"),
+        false,
+        Some(&a.engine.store),
+    );
+    a.engine
+        .fetcher
+        .add_remote(Arc::new(b.engine.store.clone()));
+    let doc_id = a.engine.hold_at(meta(), here.clone(), Arc::new(not_ours));
+    assert_eq!(
+        b.engine.hold_at(meta(), there.clone(), Arc::new(not_ours)),
+        doc_id
+    );
+
+    passes(&a).await;
+    let status = a.engine.root_status(doc_id).await.unwrap();
+    assert_eq!(status.place, "indie/Vaults/setlists");
+    assert_eq!(status.files, 2, "the recording and the chart: {status:?}");
+
+    exchange(&a, &b);
+    passes(&b).await;
+    assert_eq!(
+        std::fs::metadata(there.join("Songs/Joy/reference.mp3"))
+            .unwrap()
+            .len(),
+        40_000
+    );
+    assert_eq!(
+        std::fs::read(there.join("Songs/Joy/chart.pdf")).unwrap(),
+        b"%PDF"
+    );
+    assert!(
+        !there.join("Songs/Joy/Joy.md").exists(),
+        "a note is a document"
+    );
+    assert!(
+        !there.join("_architect").exists(),
+        "a guarded folder is not synced"
+    );
+    assert_eq!(read(&there.join("only-there.md")), "# Mine\n", "left alone");
+
+    // An attachment added on the other side comes back; a delete follows.
+    tick().await;
+    std::fs::write(there.join("Songs/Joy/cover.jpg"), vec![9u8; 2_000]).unwrap();
+    std::fs::remove_file(there.join("Songs/Joy/chart.pdf")).unwrap();
+    passes(&b).await;
+    exchange(&a, &b);
+    passes(&a).await;
+    assert_eq!(
+        std::fs::metadata(here.join("Songs/Joy/cover.jpg"))
+            .unwrap()
+            .len(),
+        2_000
+    );
+    assert!(!here.join("Songs/Joy/chart.pdf").exists());
+    assert_eq!(read(&here.join("Songs/Joy/Joy.md")), "# Joy\n");
+
+    // A manifest that names a note or a guarded path (a peer's bug, or
+    // worse) writes nothing here; and nobody saves one through the engine.
+    let doc = a.docs.lock().unwrap().get(&doc_id).unwrap().clone();
+    let cover = Manifest::new(&doc)
+        .tree()
+        .current("Songs/Joy/cover.jpg")
+        .unwrap();
+    let forged = |path: &str, content: Option<String>| FileVersion {
+        id: VersionId(Uuid::new_v4()),
+        path: path.to_owned(),
+        content,
+        size: 2_000,
+        by: "elsewhere".to_owned(),
+        at_us: i64::MAX / 2,
+        base: Vec::new(),
+    };
+    Manifest::new(&doc).push(&[
+        forged("Songs/Joy/Joy.md", cover.content.clone()),
+        forged("_architect/shares/x.extensions.toml", cover.content.clone()),
+        forged("Songs/Joy/Joy.md", None),
+    ]);
+    exchange(&a, &b);
+    passes(&a).await;
+    passes(&b).await;
+    assert_eq!(read(&here.join("Songs/Joy/Joy.md")), "# Joy\n");
+    assert_eq!(read(&here.join("_architect/shares/x.extensions.toml")), "x");
+    assert!(!there.join("Songs/Joy/Joy.md").exists());
+    assert!(!there.join("_architect").exists());
+    assert!(
+        a.engine
+            .save_bytes(doc_id, "Songs/Joy/Joy.md", b"x")
+            .await
+            .is_err()
+    );
+    assert!(a.engine.delete_path(doc_id, "_architect").await.is_err());
+    assert!(
+        a.engine
+            .save_bytes(doc_id, "Songs/Joy/stem.wav", b"RIFF")
+            .await
+            .is_ok()
+    );
+}

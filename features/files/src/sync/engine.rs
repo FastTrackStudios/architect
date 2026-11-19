@@ -48,6 +48,9 @@ pub use crate::roots::RootStatus;
 /// filled a disk (#525).
 pub const KEEP_INLINE: u64 = 64 << 20;
 
+/// Which paths of a root's folder are not the root's ([`Engine::hold_at`]).
+pub type Skip = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
 /// A root's document, from the app's registry.
 pub type Docs = Arc<dyn Fn(Uuid) -> BoxFuture<'static, Option<LoroDoc>> + Send + Sync>;
 
@@ -183,6 +186,9 @@ struct RootState {
     /// alone, reported.
     strays: Vec<String>,
     error: Option<String>,
+    /// Paths of its folder that are not its files ([`Engine::hold_at`]):
+    /// never scanned, written, saved or deleted by the engine.
+    skip: Option<Skip>,
 }
 
 /// Bytes kept aside for a version about to be replaced.
@@ -395,6 +401,40 @@ impl Engine {
                 state.found = Some(f.dir);
             });
         }
+    }
+
+    /// Hold the root `meta` in place at `dir`, a folder anywhere on this
+    /// device (a vault's, outside `files_dir`), leaving out every path
+    /// `skip` holds for.
+    ///
+    /// The folder is shared with something else that owns those paths (a
+    /// vault's notes are documents): the engine never commits one, never
+    /// writes or deletes one a manifest names (a peer's manifest
+    /// included), and refuses to save one. Its id.
+    pub fn hold_at(&self, meta: RootMeta, dir: PathBuf, skip: Skip) -> Uuid {
+        let doc_id = meta.doc_id();
+        self.with_root(doc_id, |state| {
+            state.meta = Some(meta);
+            state.found = Some(dir);
+            state.skip = Some(skip);
+        });
+        doc_id
+    }
+
+    /// Whether `path` of root `doc_id` is not the root's ([`Self::hold_at`]).
+    fn skips(&self, doc_id: Uuid, path: &str) -> bool {
+        let skip = self.lock().get(&doc_id).and_then(|s| s.skip.clone());
+        skip.is_some_and(|skip| skip(path))
+    }
+
+    /// Refuse a save, move or delete of a path that is not the root's.
+    fn own_path(&self, doc_id: Uuid, path: &str) -> Result<(), EngineError> {
+        if self.skips(doc_id, path) {
+            return Err(EngineError::Io(format!(
+                "{path} is not a file of this root: it is kept another way"
+            )));
+        }
+        Ok(())
     }
 
     /// Run `f` on a root's state (made if new), the lock held only for it.
@@ -646,6 +686,11 @@ impl Engine {
         };
         let manifest = Manifest::new(&doc);
         let found_meta = self.lock().get(&doc_id).and_then(|s| s.meta.clone());
+        // The same first change on every device that holds this root, so
+        // two that each started its manifest are one history.
+        if let Some(found) = &found_meta {
+            manifest.seed(&found.place());
+        }
         match (&found_meta, manifest.meta()) {
             (Some(found), None) => manifest.set_meta(found),
             (None, Some(meta)) => self.lock().entry(doc_id).or_default().meta = Some(meta),
@@ -702,8 +747,15 @@ impl Engine {
         }
         let scan_dir = dir.clone();
         let settle = self.config.settle;
+        let skip = self.lock().get(&doc_id).and_then(|s| s.skip.clone());
+        let scan_skip = skip.clone();
         let (scanner_back, index_back, seen) = tokio::task::spawn_blocking(move || {
-            let seen = scanner.scan(&scan_dir, &mut index, SystemTime::now(), settle);
+            let seen = match &scan_skip {
+                Some(skip) => {
+                    scanner.scan_but(&scan_dir, &mut index, SystemTime::now(), settle, &**skip)
+                }
+                None => scanner.scan(&scan_dir, &mut index, SystemTime::now(), settle),
+            };
             (scanner, index, seen)
         })
         .await
@@ -722,7 +774,7 @@ impl Engine {
         };
 
         // 2 and 3. Apply, settling forks.
-        let (missing, waiting) = self.apply(&manifest, &dir, &mut index).await;
+        let (missing, waiting) = self.apply(&manifest, &dir, &mut index, skip.as_ref()).await;
         self.note_waiting(doc_id, &waiting);
 
         // 4. Checkpoint.
@@ -969,6 +1021,7 @@ impl Engine {
         manifest: &Manifest<'_>,
         dir: &Path,
         index: &mut Index,
+        skip: Option<&Skip>,
     ) -> (u32, Waiting) {
         let tree = manifest.tree();
         let mut missing = 0u32;
@@ -977,6 +1030,11 @@ impl Engine {
         let mut deletes: Vec<(String, PathBuf, Indexed)> = Vec::new();
         let paths: Vec<String> = tree.paths().map(str::to_owned).collect();
         for path in paths {
+            // Not this root's (a vault's note, its guarded folders): no
+            // manifest, a peer's included, writes or deletes it here.
+            if skip.is_some_and(|skip| skip(&path)) {
+                continue;
+            }
             let Some(settled) = tree.settled(&path) else {
                 continue;
             };
@@ -1541,6 +1599,7 @@ impl Engine {
         path: &str,
         body: architect::blob::Reader,
     ) -> Result<FileVersion, EngineError> {
+        self.own_path(doc_id, path)?;
         let doc = self
             .doc(doc_id)
             .await
@@ -1577,6 +1636,7 @@ impl Engine {
         content: Sha256,
         size: u64,
     ) -> Result<FileVersion, EngineError> {
+        self.own_path(doc_id, path)?;
         let doc = self
             .doc(doc_id)
             .await
@@ -1608,6 +1668,8 @@ impl Engine {
         to: &str,
         remove: bool,
     ) -> Result<u32, EngineError> {
+        self.own_path(doc_id, from)?;
+        self.own_path(doc_id, to)?;
         let doc = self
             .doc(doc_id)
             .await
@@ -1659,6 +1721,7 @@ impl Engine {
     ///
     /// The root is not known.
     pub async fn delete_path(&self, doc_id: Uuid, path: &str) -> Result<u32, EngineError> {
+        self.own_path(doc_id, path)?;
         let doc = self
             .doc(doc_id)
             .await

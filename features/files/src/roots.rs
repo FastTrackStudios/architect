@@ -19,6 +19,11 @@ pub enum Section {
     Projects,
     /// `<org>/Assets/<kind>`: an asset library (`Tracks`, `Setlists`, …).
     Assets,
+    /// `<org>/Vaults/<vault>`: a vault's attachments, the files in it
+    /// that are not notes (recordings, PDFs, covers). Its notes are
+    /// documents and sync as such; these sync as a root's files do, held
+    /// where the vault is, wherever that is on the device.
+    Vaults,
 }
 
 impl Section {
@@ -28,6 +33,7 @@ impl Section {
         match self {
             Self::Projects => "Projects",
             Self::Assets => "Assets",
+            Self::Vaults => "Vaults",
         }
     }
 
@@ -37,6 +43,7 @@ impl Section {
         match dir {
             "Projects" => Some(Self::Projects),
             "Assets" => Some(Self::Assets),
+            "Vaults" => Some(Self::Vaults),
             _ => None,
         }
     }
@@ -53,7 +60,8 @@ pub struct RootMeta {
 }
 
 impl RootMeta {
-    /// `<org>/<Projects|Assets>/<name>`: its place, its name on the lane.
+    /// `<org>/<Projects|Assets|Vaults>/<name>`: its place, its name on
+    /// the lane.
     #[must_use]
     pub fn place(&self) -> String {
         format!("{}/{}/{}", self.org, self.section.dir(), self.name)

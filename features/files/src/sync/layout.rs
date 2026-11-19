@@ -185,15 +185,17 @@ pub fn root_id(dir: &Path, place: &str) -> RootId {
         .ok()
         .and_then(|json| facet_json::from_str::<Marker>(&json).ok())
         .and_then(|m| Uuid::parse_str(&m.id).ok())
-        .map_or_else(
-            || {
-                RootId(Uuid::new_v5(
-                    &Uuid::NAMESPACE_URL,
-                    format!("architect-root:{place}").as_bytes(),
-                ))
-            },
-            RootId,
-        )
+        .map_or_else(|| id_for_place(place), RootId)
+}
+
+/// The id of a root with no marker of its own, derived from its place
+/// (`<org>/<section>/<name>`): the same on every device that finds it.
+#[must_use]
+pub fn id_for_place(place: &str) -> RootId {
+    RootId(Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!("architect-root:{place}").as_bytes(),
+    ))
 }
 
 fn dirs(parent: &Path) -> Vec<PathBuf> {

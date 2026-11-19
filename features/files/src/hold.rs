@@ -30,7 +30,7 @@ pub struct HoldRule {
 impl HoldRule {
     /// Whether it holds everything (no rule).
     #[must_use]
-    pub fn is_all(&self) -> bool {
+    pub const fn is_all(&self) -> bool {
         self.paths.is_empty() && self.skip.is_empty() && self.max.is_none()
     }
 

@@ -46,6 +46,7 @@
 //! | `ARCHITECT_LIVE_MAX` | `live_max` | `256` | how many notes it keeps live with each peer (a `DocSync` bridge each); `0` sweeps only |
 //! | `ARCHITECT_FILES_DIR` | `files_dir` | none | projects and asset libraries (`<org>/Projects/<p>`, `<org>/Assets/<kind>`): the tree held in place, or where pins go (`architect_files::sync`) |
 //! | `ARCHITECT_FILES_HOLD` | `files_hold` | `false` | hold every root found in `files_dir` (the always-on node); otherwise only pinned ones have a working copy |
+//! | `ARCHITECT_VAULT_FILES` | `vault_files` | `false` | sync each vault's attachments (its recordings, PDFs, covers: every file that is not a note) with the other nodes that hold the vault, as a root's files: bytes from a peer or the bucket, under the holding rule below. Runs the files engine (with `files_dir` unset, its pins go under the data dir). The root is `<org>/Vaults/<vault>`: on a node that neither hosts nor enrols in the vault's org, name it in `vault_orgs` |
 //! | `ARCHITECT_FILES_HOLD_PATHS` | `files_hold_paths` | none | `glob,…` (root-relative; `*`, `?`, `**`): with any set, only the files one of them matches are fetched, held and copied to the bucket here (#904). The rest stay listed, their bytes on the holders that keep them (a storage server) |
 //! | `ARCHITECT_FILES_SKIP_PATHS` | `files_skip_paths` | none | `glob,…`: files never fetched or held here, whatever `files_hold_paths` says (`**/Media/**,**/Audio Files/**`: a project's multitracks) |
 //! | `ARCHITECT_FILES_HOLD_MAX` | `files_hold_max` | none | never fetch or hold a single file over this ([`Size`] in bytes: `256Mi`) |
@@ -131,6 +132,7 @@ pub struct Config {
     pub lane_origins: Vec<String>,
     pub files_dir: Option<PathBuf>,
     pub files_hold: bool,
+    pub vault_files: bool,
     pub files_hold_paths: Vec<String>,
     pub files_skip_paths: Vec<String>,
     pub files_hold_max: Option<Size>,
@@ -286,6 +288,7 @@ impl Default for Config {
             lane_origins: Vec::new(),
             files_dir: None,
             files_hold: false,
+            vault_files: false,
             files_hold_paths: Vec::new(),
             files_skip_paths: Vec::new(),
             files_hold_max: None,
@@ -586,6 +589,9 @@ impl Config {
         if let Some(v) = get("ARCHITECT_FILES_HOLD") {
             self.files_hold = matches!(v.trim(), "1" | "true" | "yes");
         }
+        if let Some(v) = get("ARCHITECT_VAULT_FILES") {
+            self.vault_files = matches!(v.trim(), "1" | "true" | "yes");
+        }
         if let Some(v) = get("ARCHITECT_FILES_HOLD_PATHS") {
             self.files_hold_paths = list(&v);
         }
@@ -688,6 +694,29 @@ impl Config {
             })
             .or(self.enrol_org.as_deref())
             .or_else(|| self.enrol_orgs.first().map(String::as_str))
+    }
+
+    /// The org folder vault `vault`'s attachments are filed under
+    /// (`<org>/Vaults/<vault>`, [`Self::vault_files`]): the same on every
+    /// node that holds the vault. The org [`Self::org_of_vault`] says
+    /// (of `orgs`, the ones this node is in), else the one
+    /// [`Self::vault_orgs`] names, else the vault's own id.
+    #[must_use]
+    pub fn vault_files_org<'a>(&'a self, vault: &'a str, orgs: &'a [String]) -> &'a str {
+        self.org_of_vault(vault, orgs)
+            .or_else(|| self.vault_orgs.get(vault).map(String::as_str))
+            .unwrap_or(vault)
+    }
+
+    /// Where the files engine keeps its pins: [`Self::files_dir`], else
+    /// (with [`Self::vault_files`] alone) a folder under the data dir.
+    /// `None`: the node runs no files engine.
+    #[must_use]
+    pub fn files_root(&self) -> Option<PathBuf> {
+        self.files_dir.clone().or_else(|| {
+            self.vault_files
+                .then(|| self.data_dir.join("files").join("roots"))
+        })
     }
 
     /// Which files of its roots it fetches and holds (#904):
@@ -793,7 +822,7 @@ impl Hosted {
 
     /// Whether it hosts any org.
     #[must_use]
-    pub fn any(&self) -> bool {
+    pub const fn any(&self) -> bool {
         !matches!(self, Self::Named(orgs) if orgs.is_empty())
     }
 }
@@ -1009,6 +1038,15 @@ mod tests {
         );
         assert_eq!(config.org_of_vault("notes", &orgs), Some("fasttrackstudio"));
         assert_eq!(config.org_of_vault("scratch", &orgs), None);
+        // Where a vault's attachments are filed: its org's folder, the
+        // one named for it, else its own id (the same on every node).
+        assert_eq!(
+            config.vault_files_org("tombrooksmusic", &orgs),
+            "tombrooksmusic"
+        );
+        assert_eq!(config.vault_files_org("notes", &[]), "fasttrackstudio");
+        assert_eq!(config.vault_files_org("scratch", &orgs), "scratch");
+        assert_eq!(config.files_root(), None);
         // One org: every vault is its, as before.
         let one = ["acme".to_owned()];
         assert_eq!(
