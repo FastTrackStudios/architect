@@ -2008,11 +2008,15 @@ async fn a_links_layer_is_held_by_the_node_on_every_route() {
         .join("audiences")
         .join(&share.audience_named("orchestra").unwrap().code)
         .join("site");
+    // Nor is any attachment: a link's files stay in the vault and are read
+    // from there by the exact path its build names (#490), so the file it
+    // does serve is not in the folder either.
     assert!(
-        orchestra_dir
+        !orchestra_dir
             .join("Songs/Joy/Media/Proxies/Reference.ogg")
-            .is_file()
+            .exists()
     );
+    assert!(orchestra_dir.join("index.html").is_file());
     assert!(
         !orchestra_dir
             .join("Songs/Joy/Media/Proxies/Bass.ogg")
@@ -4388,13 +4392,15 @@ async fn an_unknown_code_answers_exactly_as_a_revoked_or_expired_one() {
             ShareAccess::Read,
         )
         .await;
+    // (With comments: the same ask twice is one link.)
     let expired = w
         .share(
             ShareScope::Folder("Shared".to_owned()),
             Audience::Link,
-            ShareAccess::Read,
+            ShareAccess::Comment,
         )
         .await;
+    assert_ne!(expired.code, revoked.code);
     page_with(&w.url(&format!("/s/{}/", revoked.code)), None, "The album").await;
     links.revoke(revoked.code.clone()).await.unwrap();
     links
@@ -4989,4 +4995,141 @@ async fn a_share_links_guest_follows_its_live_document_read_only() {
     pool().evict(&Endpoint::url(&live));
     let again = pool().client::<DocSyncClient>(&Endpoint::url(&live)).await;
     assert!(again.is_err(), "a revoked link's lane opened");
+}
+
+/// A link is one link (#490's stable links): sharing the same thing with
+/// the same people again gives the link they have; its URL stays through
+/// edits, rebuilds and changes of what it permits; and what it does not
+/// offer as a download still plays, but is in no listing to save and in
+/// no archive.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_link_keeps_its_url_and_plays_what_it_does_not_offer_to_keep() {
+    use architect_spaces::Download;
+
+    let w = world().await;
+    let vault = w.host.state.vault_root("notes").unwrap();
+    touch(
+        &vault,
+        "Gig/01-joy.md",
+        "---\ntitle: Joy\n---\n![[media/joy.mp3]]\n\n[[media/chart.pdf]]\n",
+    );
+    // (Text, so the archive's helper reads it back.)
+    let audio: Vec<u8> = (0..1000_u32)
+        .map(|i| b'a' + u8::try_from(i % 26).unwrap())
+        .collect();
+    std::fs::create_dir_all(vault.join("Gig/media")).unwrap();
+    std::fs::write(vault.join("Gig/media/joy.mp3"), &audio).unwrap();
+    std::fs::write(vault.join("Gig/media/chart.pdf"), b"%PDF-1.7 chart").unwrap();
+
+    let gig = || ShareScope::Folder("Gig".to_owned());
+    let share = w.share(gig(), Audience::Link, ShareAccess::Read).await;
+    // Shared again, the same way: the same link, not a second one.
+    let again = w.share(gig(), Audience::Link, ShareAccess::Read).await;
+    assert_eq!(again.code, share.code);
+    assert_eq!(again.created_at, share.created_at);
+    let links: ShareLinksClient = w.lane(&w.grace).await;
+    let of_gig = |shares: Vec<Share>| shares.into_iter().filter(|s| s.scope == gig()).count();
+    assert_eq!(of_gig(links.shares().await.unwrap()), 1);
+    // For other people it is another link.
+    let org = w.share(gig(), Audience::Org, ShareAccess::Read).await;
+    assert_ne!(org.code, share.code);
+
+    let base = w.url(&format!("/s/{}", share.code));
+    let song = format!("{base}/Gig/media/joy.mp3");
+    page_with(&format!("{base}/"), None, "<!DOCTYPE html>").await;
+    let plays = async || {
+        let (status, headers, bytes) = get_range(&song, Some("bytes=10-19")).await;
+        (status, headers.get("content-range").cloned(), bytes)
+    };
+    let mut first = plays().await;
+    for _ in 0..100 {
+        if first.0 == StatusCode::PARTIAL_CONTENT {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        first = plays().await;
+    }
+    assert_eq!(first.0, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(first.2, audio[10..=19]);
+
+    // The vault is edited and the link rebuilt: the same URL, the new note.
+    touch(
+        &vault,
+        "Gig/01-joy.md",
+        "---\ntitle: Joy\n---\nSecond take.\n\n![[media/joy.mp3]]\n\n[[media/chart.pdf]]\n",
+    );
+    page_with(&format!("{base}/01-joy/"), None, "Second take.").await;
+    assert_eq!(plays().await.2, audio[10..=19]);
+    assert_eq!(
+        links
+            .shares()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|s| s.code == share.code)
+            .count(),
+        1
+    );
+
+    // Everything is offered, until the link says recordings only play.
+    let listed = json_at(&format!("{base}/_files.json")).await;
+    let offered = |json: &serde_json::Value, path: &str| {
+        json["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["path"] == path)
+            .map(|f| f["download"].as_bool().unwrap())
+    };
+    assert_eq!(offered(&listed, "Gig/media/joy.mp3"), Some(true));
+    let zipped = |files: Vec<(String, String)>| -> Vec<String> {
+        files.into_iter().map(|(name, _)| name).collect()
+    };
+    assert!(
+        zipped(zip_at(&format!("{base}/_archive.zip")).await)
+            .iter()
+            .any(|n| n.ends_with("joy.mp3"))
+    );
+
+    let changed = links
+        .update(
+            share.code.clone(),
+            ShareChange::Download(Download::NotMedia),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        changed.code, share.code,
+        "what it permits changes, not its URL"
+    );
+    assert_eq!(changed.download, Download::NotMedia);
+    let listed = json_at(&format!("{base}/_files.json")).await;
+    assert_eq!(
+        offered(&listed, "Gig/media/joy.mp3"),
+        Some(false),
+        "{listed}"
+    );
+    assert_eq!(offered(&listed, "Gig/media/chart.pdf"), Some(true));
+    let names = zipped(zip_at(&format!("{base}/_archive.zip")).await);
+    assert!(names.iter().any(|n| n.ends_with("chart.pdf")), "{names:?}");
+    assert!(!names.iter().any(|n| n.ends_with("joy.mp3")), "{names:?}");
+    // It still plays: the link's layer serves it, by range.
+    let (status, _, bytes) = plays().await;
+    assert_eq!(
+        (status, bytes.as_slice()),
+        (StatusCode::PARTIAL_CONTENT, &audio[10..=19])
+    );
+
+    // Nothing offered: no archive at all, and the recording plays on.
+    links
+        .update(share.code.clone(), ShareChange::Download(Download::Nothing))
+        .await
+        .unwrap();
+    let (status, _, _) = get_bytes(&format!("{base}/_archive.zip")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(plays().await.0, StatusCode::PARTIAL_CONTENT);
+    // The setting is in the share's note, so it survives the node.
+    let note = std::fs::read_to_string(vault.join(format!("_architect/shares/{}.md", share.code)))
+        .unwrap();
+    assert!(note.contains("\"download\":\"Nothing\""), "{note}");
 }

@@ -273,7 +273,7 @@ blob = ["dep:sha2", "dep:tracing", "dep:rustix", "tokio/rt"]
 # `blob::S3Store`: blobs in any S3-compatible bucket (Garage, MinIO, R2,
 # AWS, Ceph RGW), as a `BlobStore` and a fetch `Remote`; `object_store`
 # (MIT/Apache-2.0) signs and streams.
-blob-s3 = ["blob", "dep:object_store"]
+blob-s3 = ["blob", "dep:object_store", "dep:http-types"]
 
 # Signed self-update (`architect::release`): check GitHub Releases for a
 # newer `<prefix>X.Y.Z`, verify the minisign signature over `SHA256SUMS`
@@ -426,6 +426,9 @@ zeroize = { version = "1", optional = true }
 # through auth).
 sha2 = { workspace = true, optional = true }
 object_store = { version = "0.14", default-features = false, features = ["aws"], optional = true }
+# `http::Method`, to presign a bucket read (`S3Store::signed_get`); named
+# apart from this crate's own `http` feature.
+http-types = { package = "http", version = "1", optional = true }
 iroh = { workspace = true, optional = true }
 iroh-mdns-address-lookup = { workspace = true, optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"], optional = true }

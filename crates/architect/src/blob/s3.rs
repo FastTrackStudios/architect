@@ -188,6 +188,31 @@ impl S3Store {
         Key::from(self.key_for(hash))
     }
 
+    /// A link that reads `hash` from the bucket itself for `expires`: a
+    /// presigned `GET` of that one object.
+    ///
+    /// Whoever holds it reads that blob (ranges too) straight from the
+    /// bucket until it runs out, and nothing else: it signs the method
+    /// and the key, so it lists nothing, names no other object, and
+    /// writes nothing. For handing a large file to a browser without
+    /// relaying its bytes.
+    ///
+    /// # Errors
+    ///
+    /// The store cannot sign (no static credentials).
+    pub async fn signed_get(
+        &self,
+        hash: &Sha256,
+        expires: std::time::Duration,
+    ) -> Result<String, BlobError> {
+        use object_store::signer::Signer as _;
+        self.s3
+            .signed_url(http_types::Method::GET, &self.key(hash), expires)
+            .await
+            .map(|url| url.to_string())
+            .map_err(source)
+    }
+
     /// The blob's size, or `None` when the bucket does not hold it.
     ///
     /// # Errors

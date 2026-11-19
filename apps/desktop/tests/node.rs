@@ -2446,3 +2446,286 @@ async fn a_machine_registers_on_the_account_with_a_code_and_is_listed_as_storage
     storage.stop().await;
     vps.stop().await;
 }
+
+/// A storage server authorised by its key (the `authorized_keys` shape):
+/// it has no session and nobody approves anything when it comes up. A
+/// signed-in app declares its public key for an org; it then holds and
+/// serves that org's files and nothing else (no note, no other org's
+/// root or bytes), is the same device after a restart, is listed with
+/// how it was authorised, and is refused once revoked.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_machine_is_authorised_by_its_key_and_holds_only_its_orgs_files() {
+    use architect::blob::{BlobTransferClient, Sha256};
+
+    let origin = issuer().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let free_udp = || {
+        std::net::UdpSocket::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .to_string()
+    };
+
+    // The node that hosts both of Grace's orgs: a vault and a project each.
+    let host_dir = tmp.path().join("host");
+    for (org, project, file, seed) in [("acme", "A", "a.wav", 1_u8), ("indie", "B", "b.wav", 2)] {
+        std::fs::create_dir_all(host_dir.join(format!("data/vaults/{org}"))).unwrap();
+        std::fs::write(
+            host_dir.join(format!("data/vaults/{org}/setlist.md")),
+            format!("# {org}'s setlist\n"),
+        )
+        .unwrap();
+        let root = host_dir.join(format!("files/{org}/Projects/{project}"));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(file), vec![seed; 50_000]).unwrap();
+    }
+    let mut host = config(
+        "host",
+        &host_dir,
+        &origin,
+        session_of(&origin, &host_dir, "grace@local.test").await,
+    );
+    host.vaults = [
+        ("acme".to_owned(), PathBuf::from("vaults/acme")),
+        ("indie".to_owned(), PathBuf::from("vaults/indie")),
+    ]
+    .into();
+    host.host_orgs = vec!["*".to_owned()];
+    host.files_dir = Some(host_dir.join("files"));
+    host.files_hold = true;
+    host.files_secs = 1;
+    host.iroh_bind = Some(free_udp());
+    let host = node::start(host).await.unwrap();
+    let at = format!("http://{}", host.http);
+    let hosted = status(&host).await.hosted_orgs;
+    assert_eq!(hosted.len(), 2, "{hosted:?}");
+
+    // The storage server: no issuer, no session; its own key, its tree,
+    // and the node it holds acme's files for.
+    let storage_dir = tmp.path().join("starcommand");
+    let tree = storage_dir.join("tree");
+    std::fs::create_dir_all(tree.join("acme/Projects/S")).unwrap();
+    std::fs::write(tree.join("acme/Projects/S/s.wav"), vec![3_u8; 60_000]).unwrap();
+    let storage_cfg = Config {
+        name: "starcommand".to_owned(),
+        platform: "storage".to_owned(),
+        bind: "127.0.0.1:0".to_owned(),
+        data_dir: storage_dir.join("data"),
+        iroh: IrohMode::Local,
+        iroh_bind: Some(free_udp()),
+        iroh_key_file: Some(storage_dir.join("secrets/iroh.key")),
+        sweep_secs: 1,
+        enrol_at: Some(at.clone()),
+        enrol_orgs: vec!["acme".to_owned()],
+        peers: vec![host.dial().unwrap()],
+        files_dir: Some(tree.clone()),
+        files_hold: true,
+        files_secs: 1,
+        ..Config::default()
+    };
+    // Its public key is known before it ever starts: what is declared.
+    let key = node::public_key(&storage_cfg).unwrap();
+    assert_eq!(node::public_key(&storage_cfg).unwrap(), key, "made once");
+    let storage = node::start(storage_cfg.clone()).await.unwrap();
+    assert_eq!(storage.endpoint_id(), key);
+    assert!(!status(&storage).await.signed_in, "it signs in nowhere");
+
+    let places = |node: &Running| {
+        let engine = node.files.clone().unwrap();
+        async move {
+            let mut places: Vec<String> =
+                engine.status().await.into_iter().map(|r| r.place).collect();
+            places.sort();
+            places
+        }
+    };
+    // Not authorised yet: the host lets it in nowhere and learns nothing.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert!(!host.state.admits(&key));
+    assert_eq!(places(&host).await, ["acme/Projects/A", "indie/Projects/B"]);
+    assert_eq!(places(&storage).await, ["acme/Projects/S"]);
+
+    // Grace's signed-in app authorises the key for acme: one action.
+    let store = Arc::new(AccountStore::in_memory(Arc::new(MemorySecrets::new())));
+    let accounts = Accounts::new(store, Issuer::new(&origin), "architect-test").without_browser();
+    let list = Arc::new(ActionList::new());
+    architect_accounts::actions::register(&list, &accounts).unwrap();
+    accounts
+        .sign_in_password("grace@local.test", auth_server::dev::DEV_PASSWORD)
+        .await
+        .unwrap();
+    accounts.refresh_orgs().await.unwrap();
+    let authorise = json!({"public_key": key, "name": "starcommand", "orgs": ["acme"], "host": at});
+    let done = run(&list, "ACCOUNT_DEVICE_AUTHORISE", authorise.clone())
+        .await
+        .unwrap();
+    assert_eq!(done["orgs"], json!(["acme"]));
+    assert_eq!(done["public_key"], key);
+    // A person's device is not authorised this way, nor into an org the
+    // account is not in.
+    let mut laptop = authorise.clone();
+    laptop["platform"] = json!("member");
+    assert!(
+        run(&list, "ACCOUNT_DEVICE_AUTHORISE", laptop)
+            .await
+            .is_err()
+    );
+    let mut elsewhere = authorise.clone();
+    elsewhere["orgs"] = json!(["nobody"]);
+    assert!(
+        run(&list, "ACCOUNT_DEVICE_AUTHORISE", elsewhere)
+            .await
+            .is_err()
+    );
+
+    // It syncs acme's file roots both ways, and nothing of indie's.
+    until("the host lets the storage server in", || {
+        host.state.admits(&key)
+    })
+    .await;
+    for _ in 0..200 {
+        if places(&host).await.contains(&"acme/Projects/S".to_owned())
+            && places(&storage)
+                .await
+                .contains(&"acme/Projects/A".to_owned())
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(
+        places(&host).await,
+        ["acme/Projects/A", "acme/Projects/S", "indie/Projects/B"]
+    );
+    assert_eq!(
+        places(&storage).await,
+        ["acme/Projects/A", "acme/Projects/S"]
+    );
+
+    // What the host lists for it: acme's roots and ledgers. No note, and
+    // nothing of the other org.
+    let listed = || async {
+        let link = iroh_link::connect(&storage.endpoint, dial_addr(&host))
+            .await
+            .map_err(|e| e.to_string())?;
+        let client = vox::initiator_on(link)
+            .establish::<DocPeerClient>()
+            .await
+            .map_err(|e| format!("{e:?}"))?;
+        client
+            .list()
+            .await
+            .map(|docs| docs.into_iter().map(|d| d.name).collect::<Vec<String>>())
+            .map_err(|e| format!("{e:?}"))
+    };
+    let names = listed().await.unwrap();
+    assert!(
+        names.iter().any(|n| n == "files/acme/Projects/A"),
+        "{names:?}"
+    );
+    assert!(
+        names
+            .iter()
+            .all(|n| n.starts_with("files/acme/") || n.starts_with("ledger/acme/")),
+        "{names:?}"
+    );
+
+    // Its org's bytes are sent to it; the other org's are not, by hash.
+    let blobs = || async {
+        let link = iroh_link::connect(&storage.endpoint, dial_addr(&host))
+            .await
+            .map_err(|e| e.to_string())?;
+        vox::initiator_on(link)
+            .establish::<BlobTransferClient>()
+            .await
+            .map_err(|e| format!("{e:?}"))
+    };
+    let (ours, theirs) = (
+        Sha256::of(&vec![1_u8; 50_000]),
+        Sha256::of(&vec![2_u8; 50_000]),
+    );
+    let client = blobs().await.unwrap();
+    let mut size = client.size(ours.to_hex()).await;
+    for _ in 0..100 {
+        if matches!(size, Ok(Some(_))) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        size = client.size(ours.to_hex()).await;
+    }
+    assert_eq!(size.ok().flatten(), Some(50_000));
+    let refused = client.size(theirs.to_hex()).await;
+    assert!(refused.is_err(), "another org's bytes: {refused:?}");
+
+    // Listed with the account's devices, as storage, with how it got in.
+    let devices = run(&list, "ACCOUNT_DEVICES", json!(null)).await.unwrap();
+    let authorised = devices["authorised"].as_array().unwrap();
+    assert_eq!(authorised.len(), 1, "{devices}");
+    let row = &authorised[0];
+    assert_eq!(row["public_key"], key);
+    assert_eq!(row["name"], "starcommand");
+    assert_eq!(row["platform"], "storage");
+    assert_eq!(row["orgs"], json!(["acme"]));
+    assert_eq!(row["role"], "storage");
+    assert!(
+        row["authorised"]
+            .as_str()
+            .unwrap()
+            .contains("its key, by user:"),
+        "{row}"
+    );
+
+    // A restart (a rebuilt pod with the same key): the same device.
+    storage.stop().await;
+    let storage = node::start(Config {
+        iroh_bind: Some(free_udp()),
+        ..storage_cfg.clone()
+    })
+    .await
+    .unwrap();
+    assert_eq!(storage.endpoint_id(), key);
+    run(&list, "ACCOUNT_DEVICE_AUTHORISE", authorise)
+        .await
+        .unwrap();
+    let devices = run(&list, "ACCOUNT_DEVICES", json!(null)).await.unwrap();
+    assert_eq!(
+        devices["authorised"].as_array().unwrap().len(),
+        1,
+        "{devices}"
+    );
+    let again = || async {
+        let link = iroh_link::connect(&storage.endpoint, dial_addr(&host))
+            .await
+            .map_err(|e| e.to_string())?;
+        let client = vox::initiator_on(link)
+            .establish::<BlobTransferClient>()
+            .await
+            .map_err(|e| format!("{e:?}"))?;
+        client
+            .size(ours.to_hex())
+            .await
+            .map_err(|e| format!("{e:?}"))
+    };
+    assert_eq!(
+        again().await,
+        Ok(Some(50_000)),
+        "let in again with nothing done"
+    );
+
+    // Revoked from the signed-in app: refused from its next call.
+    let revoked = run(&list, "ACCOUNT_DEVICE_REVOKE", json!({"public_key": key}))
+        .await
+        .unwrap();
+    assert_eq!(revoked["orgs"], json!(["acme"]));
+    until("the host lets it in no more", || !host.state.admits(&key)).await;
+    assert!(again().await.is_err(), "a revoked key reads nothing");
+    let devices = run(&list, "ACCOUNT_DEVICES", json!(null)).await.unwrap();
+    assert!(
+        devices["authorised"].as_array().unwrap().is_empty(),
+        "{devices}"
+    );
+
+    storage.stop().await;
+    host.stop().await;
+}

@@ -167,7 +167,14 @@ fn write_into(site: &Site, dir: &Path, report: &mut Report) -> Result<(), WriteE
     for folder in &site.static_dirs {
         report.files = report.files.saturating_add(copy_dir(folder, dir)?);
     }
-    for rel in &site.attachments {
+    // In place: nothing of the vault is copied; its server reads each
+    // attachment from the vault (or its holder) when it is asked for.
+    let copied: &[String] = if site.attachments_in_place {
+        &[]
+    } else {
+        &site.attachments
+    };
+    for rel in copied {
         // A folder's `index.html` (and the site's 404 page) is the
         // builder's own, served as a page this site wrote
         // (`architect::host::BUILT_PAGE`): a vault file is never copied

@@ -32,7 +32,7 @@
 //! | `ARCHITECT_LANE_RECHECK_SECS` | `lane_recheck_secs` | `30` | on the org lane, how long a person's bearer is trusted before the issuer is asked again, and how often an open note's live session checks it still is: signed out, expired or removed from the org, the session ends within about twice this |
 //! | `ARCHITECT_LANE_ISSUER_GRACE_SECS` | `lane_issuer_grace_secs` | `300` | on the org lane, how long an open note's live session is kept while the issuer cannot be reached, counted from the issuer's last answer for its bearer; then it ends (a refusal ends it at once, and new calls are refused while the issuer is unreachable) |
 //! | `ARCHITECT_LANE_ORIGINS` | `lane_origins` | none | `https://app.example,…`: browser origins besides the node's own that may open its org lane (a WebSocket upgrade from any other `Origin` is refused; one with no `Origin`, a native client's, is let through to the bearer check) |
-//! | `ARCHITECT_ENROL_AT` | `enrol_at` | none | another node's HTTP origin: this node enrols itself in `enrol_org` there, once |
+//! | `ARCHITECT_ENROL_AT` | `enrol_at` | none | another node's HTTP origin: this node enrols itself in `enrol_org` there, once. With no session (a storage server authorised by its key, `ACCOUNT_DEVICE_AUTHORISE`), the node it holds `enrol_orgs`' files for: it lets that node in and syncs with it, and signs in nowhere |
 //! | `ARCHITECT_ENROL_ORG` | `enrol_org` | none | the issuer org (slug) to enrol in there; its vaults are that org's |
 //! | `ARCHITECT_ENROL_ORGS` | `enrol_orgs` | none | several orgs (slugs) to enrol in at `enrol_at`, `a,b`: a storage server of more than one org on a node that hosts them all |
 //! | `ARCHITECT_ENROL_ROLE` | `enrol_role` | `member` | the role it asks for: at most the session's own in the org |
@@ -40,6 +40,7 @@
 //! | `ARCHITECT_APPLE_APP_IDS` | `apple_app_ids` | none | `<team id>.<bundle id>,…` (`28C2G63DA7.app.fasttrackstudio.architect`): the iOS apps that open this node's share links (`/s/*`) as universal links, named in `/.well-known/apple-app-site-association`; none: that file is not served (#629) |
 //! | `ARCHITECT_PEERS` | `peers` | none | `endpoint@host:port,…`: nodes dialled directly (no lookup) |
 //! | `ARCHITECT_IROH` | `iroh` | `n0` | `n0` (relays and lookup) or `local` (loopback, no relay: tests) |
+//! | `ARCHITECT_IROH_KEY_FILE` | `iroh_key_file` | `<data dir>/iroh.key` | the device's own key (made on first start): its iroh endpoint id is its public key, what `serve key` prints and what `ACCOUNT_DEVICE_AUTHORISE` is given. A file a secret is mounted at keeps a rebuilt machine the same device |
 //! | `ARCHITECT_IROH_BIND` | `iroh_bind` | any port | the iroh UDP socket (`0.0.0.0:7777`, for a fixed port) |
 //! | `ARCHITECT_MCP_TOKEN_FILE` | `mcp_token_file` | none | `/mcp` is served only with a bearer, read from this file |
 //! | `ARCHITECT_SWEEP_SECS` | `sweep_secs` | `30` | how often it sweeps its peers: the fallback for what a live bridge missed |
@@ -124,6 +125,7 @@ pub struct Config {
     pub web_app: Option<String>,
     pub iroh: IrohMode,
     pub iroh_bind: Option<String>,
+    pub iroh_key_file: Option<PathBuf>,
     pub mcp_token_file: Option<PathBuf>,
     pub sweep_secs: u64,
     pub live_max: usize,
@@ -280,6 +282,7 @@ impl Default for Config {
             web_app: None,
             iroh: IrohMode::N0,
             iroh_bind: None,
+            iroh_key_file: None,
             mcp_token_file: None,
             sweep_secs: 30,
             live_max: 256,
@@ -543,6 +546,9 @@ impl Config {
         if let Some(v) = get("ARCHITECT_IROH_BIND") {
             self.iroh_bind = Some(v);
         }
+        if let Some(v) = get("ARCHITECT_IROH_KEY_FILE") {
+            self.iroh_key_file = Some(PathBuf::from(v));
+        }
         if let Some(v) = get("ARCHITECT_MCP_TOKEN_FILE") {
             self.mcp_token_file = Some(PathBuf::from(v));
         }
@@ -776,6 +782,15 @@ impl Config {
             [only] => Some(only),
             _ => None,
         }
+    }
+
+    /// Where the device's own key is: [`Self::iroh_key_file`], else
+    /// `iroh.key` in the data dir.
+    #[must_use]
+    pub fn iroh_key(&self) -> PathBuf {
+        self.iroh_key_file
+            .clone()
+            .unwrap_or_else(|| self.data_dir.join("iroh.key"))
     }
 
     /// Where the extensions it draws blocks with are installed.

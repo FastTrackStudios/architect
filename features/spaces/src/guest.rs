@@ -414,6 +414,84 @@ pub struct ListedFile {
     pub layer: Option<String>,
     /// The note that attaches it.
     pub note: String,
+    /// Played, not offered as a download (the link's
+    /// [`crate::Download`]): the app's player reads it, its Files view
+    /// and "Download all" leave it out.
+    #[facet(default)]
+    pub stream_only: bool,
+}
+
+/// The projects a link carries, as its guest's client reads them:
+/// `GET <link>_project.json`.
+///
+/// What an engine in a browser opens: each shared session document, and
+/// for each the files it references, every one by its sha-256 with a URL
+/// that streams it (ranges) from wherever it is held.
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+pub struct GuestProjects {
+    /// How far this answer goes (`page`, `reference`, `full`), and the
+    /// most the link allows (`?listen=` asks for less).
+    pub listen: String,
+    pub max: String,
+    pub projects: Vec<GuestProject>,
+}
+
+/// One project of a link.
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+pub struct GuestProject {
+    /// `<org>/Projects/<project>`.
+    pub root: String,
+    /// The project's folder name.
+    pub name: String,
+    /// `read` or `edit` ([`crate::ProjectAccess`]): with `edit`, a
+    /// signed-in viewer saves a session back with `PUT` on
+    /// [`ProjectSession::save`].
+    pub access: String,
+    /// Its shared session documents, by path. None below `reference`.
+    pub sessions: Vec<ProjectSession>,
+    /// Every file its sessions reference, each once, by path. Empty
+    /// below `full`: nothing above the layer is named.
+    pub files: Vec<ProjectFile>,
+}
+
+/// A shared session document.
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+pub struct ProjectSession {
+    /// Root-relative (`songs/joy/Joy.fts-session`).
+    pub path: String,
+    pub sha256: String,
+    pub size: u64,
+    /// Where its bytes are, on the node.
+    pub url: String,
+    /// Where a new version of it is `PUT` (access `edit` only).
+    pub save: Option<String>,
+    /// What it references, as it names each ([`ProjectRef::named`]).
+    /// Empty below `full`.
+    pub references: Vec<ProjectRef>,
+}
+
+/// One reference of a session to a file of the project.
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+pub struct ProjectRef {
+    /// The string in the document: a path beside the session, a path in
+    /// the root, or a sha-256.
+    pub named: String,
+    /// The file it is: a [`ProjectFile::sha256`].
+    pub sha256: String,
+}
+
+/// One file a project's sessions reference.
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+pub struct ProjectFile {
+    /// Root-relative.
+    pub path: String,
+    pub sha256: String,
+    pub size: u64,
+    /// Where its bytes are (ranged): a path on the node, the same for as
+    /// long as the file's content is.
+    pub url: String,
+    /// Played, not offered as a download ([`ListedFile::stream_only`]).
+    pub stream_only: bool,
 }
 
 /// A note as its guest reads it.

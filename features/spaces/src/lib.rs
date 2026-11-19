@@ -46,8 +46,9 @@ mod share_service;
 pub mod view;
 
 pub use guest::{
-    BlockKind, GUEST_PERMITS, GuestFault, GuestLink, GuestNote, ListedFile, ListedNote, ListedSet,
-    PlainBlock, Refused, ShareGuest, ShareUrl,
+    BlockKind, GUEST_PERMITS, GuestFault, GuestLink, GuestNote, GuestProject, GuestProjects,
+    ListedFile, ListedNote, ListedSet, PlainBlock, ProjectFile, ProjectRef, ProjectSession,
+    Refused, ShareGuest, ShareUrl,
 };
 pub use model::{
     COMMENTER, EDITOR, FILES_PREFIX, Holding, MANAGER, Member, NewSpace, OrgSpaces, SPACES_PREFIX,
@@ -61,8 +62,9 @@ pub use service::{
     spaces_service_rpc_service_descriptor,
 };
 pub use share::{
-    Audience, KeptLayers, LayersReport, Listen, NewAudience, NewShare, Share, ShareAccess,
-    ShareAudience, ShareChange, ShareComment, ShareFault, ShareScope, ShareState, Verdict, Viewer,
+    Audience, Download, KeptLayers, LayersReport, Listen, NewAudience, NewShare, ProjectAccess,
+    Share, ShareAccess, ShareAudience, ShareChange, ShareComment, ShareFault, ShareProject,
+    ShareScope, ShareState, Verdict, Viewer,
 };
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub use share_note::{comments_note, parse_comments, parse_share_note, share_note};

@@ -196,7 +196,7 @@ pub(super) fn engine(
     engine.set_history_off(history_off);
     // Its attestations are signed with its iroh key: its holder id is its endpoint id.
     Ok(
-        match iroh_link::load_or_create_secret_key(&config.data_dir.join("iroh.key")) {
+        match iroh_link::load_or_create_secret_key(&config.iroh_key()) {
             Ok(key) => engine.with_identity(key.to_bytes()),
             Err(error) => {
                 tracing::warn!(%error, "files: the iroh key is not readable; attestations use a key of their own");
@@ -230,7 +230,7 @@ pub(super) fn hold_vault(
     vault: &str,
     dir: &Path,
     collab: &vault_collab::VaultCollab,
-) {
+) -> uuid::Uuid {
     let section = architect_files::sync::Section::Vaults;
     let place = format!("{org}/{}/{vault}", section.dir());
     let meta = architect_files::sync::RootMeta {
@@ -246,6 +246,7 @@ pub(super) fn hold_vault(
         Arc::new(move |path| not_an_attachment(path, &|p| collab.kind_of(p).is_some())),
     );
     tracing::info!(files.root = %doc_id, files.place = %place, "files: a vault's attachments are held where the vault is");
+    doc_id
 }
 
 /// The agent on the node's HTTP side, when it listens on loopback only (a
@@ -294,14 +295,20 @@ pub(super) fn mount_drive(
     }
 }
 
-/// `BlobTransfer` on the node's peer lane, behind its gate.
-pub(super) fn more(engine: &Engine) -> More {
+/// `BlobTransfer` on the node's peer lane, behind its gate, for one
+/// connection. `orgs` says which orgs' files the device on it is held to
+/// (their folders), or `None` for one of the owner's own devices: a
+/// device of one org is sent only bytes a manifest of that org names.
+pub(super) fn more(
+    engine: &Engine,
+    orgs: impl Fn() -> Option<Vec<String>> + Send + Sync + 'static,
+) -> More {
     More {
         router: Some(
             LayerRouter::new()
                 .with(
                     blob_transfer_service_descriptor(),
-                    BlobTransferDispatcher::new(engine.blob_host()),
+                    BlobTransferDispatcher::new(engine.blob_host_for(orgs)),
                 )
                 .with(
                     possession_service_descriptor(),

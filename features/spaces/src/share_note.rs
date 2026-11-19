@@ -124,6 +124,12 @@ mod tests {
                 listen: Some(Listen::Page),
             }],
             listen: Listen::Reference,
+            download: crate::Download::NotMedia,
+            projects: vec![crate::ShareProject {
+                root: "indie/Projects/Album".to_owned(),
+                sessions: vec!["songs/joy/Joy.fts-session".to_owned()],
+                access: crate::ProjectAccess::Edit,
+            }],
         };
         let note = share_note(&share);
         assert!(note.starts_with("---\npublish: false\n---\n"), "{note}");

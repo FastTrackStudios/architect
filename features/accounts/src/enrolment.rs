@@ -80,6 +80,162 @@ impl Accounts {
         Ok((org, host))
     }
 
+    /// Org `org` (its id, slug or name) of the account's and the node
+    /// hosting it: `host` when given (and kept for the org), else the one
+    /// kept. Unlike [`Self::org_and_host`], whichever org the window is in.
+    fn named_org_and_host(&self, org: &str, host: Option<&str>) -> Result<(Org, String), String> {
+        let account = self
+            .active()
+            .ok_or_else(|| "no account is signed in".to_owned())?;
+        let org = self
+            .orgs()
+            .find(org)
+            .cloned()
+            .filter(|o| o.id.0 != crate::DEVICE_ORG)
+            .ok_or_else(|| format!("the account is in no org `{org}`"))?;
+        let host = match host.map(str::trim).filter(|h| !h.is_empty()) {
+            Some(host) => {
+                self.store()
+                    .set_org_host(&org.id.0, host)
+                    .map_err(|e| e.to_string())?;
+                host.trim_end_matches('/').to_owned()
+            }
+            None => host_or_default(account.org_host(&org.id.0), org_host_from_env()).ok_or_else(
+                || format!("no node hosts {}'s devices yet: give its address", org.name),
+            )?,
+        };
+        Ok((org, host))
+    }
+
+    async fn enrolment_in(
+        &self,
+        org: &str,
+        host: Option<&str>,
+    ) -> Result<(Org, String, DeviceEnrolmentClient), String> {
+        let (org, host) = self.named_org_and_host(org, host)?;
+        let token = self
+            .store()
+            .active_session()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "no account is signed in".to_owned())?
+            .token;
+        let endpoint = Endpoint::url(lane(&host, &org.slug)).with_bearer(Some(token));
+        let client = Pool::new()
+            .client(&endpoint)
+            .await
+            .map_err(|e| format!("{host}: {e}"))?;
+        Ok((org, host, client))
+    }
+
+    /// Authorise the device whose key is `public_key` (its iroh endpoint
+    /// id, which it prints with `serve key`) in each of `orgs`, at the
+    /// node that hosts them: the SSH `authorized_keys` shape. The device
+    /// holds its own key and signs in with nothing else: no session, no
+    /// code, nothing secret passed to it. Each org's answer, by slug.
+    /// Authorising a key again changes nothing but its name or role.
+    ///
+    /// # Errors
+    ///
+    /// Signed out, an org the account is not in, or the host refused.
+    pub async fn authorise_device(
+        &self,
+        host: Option<&str>,
+        public_key: &str,
+        name: &str,
+        role: &Role,
+        platform: &str,
+        orgs: &[String],
+    ) -> Result<Vec<(String, Peer)>, String> {
+        if orgs.is_empty() {
+            return Err("name the orgs the device is of".to_owned());
+        }
+        let mut out = Vec::new();
+        for org in orgs {
+            let (org, _, client) = self.enrolment_in(org, host).await?;
+            let peer = client
+                .enrol(Enrolment {
+                    endpoint: public_key.trim().to_owned(),
+                    name: name.to_owned(),
+                    platform: platform.to_owned(),
+                    role: role.clone(),
+                })
+                .await
+                .map_err(|e| format!("{}: {e}", org.slug))?;
+            out.push((org.slug, peer));
+        }
+        Ok(out)
+    }
+
+    /// Every device authorised by its key in the account's orgs
+    /// ([`Self::authorise_device`], `ORG_ENROL`), at the nodes hosting
+    /// them: `(org slug, host, device)`. An org with no known host, or
+    /// whose host does not answer, is left out.
+    pub async fn authorised_devices(&self) -> Vec<(String, String, Peer)> {
+        let orgs: Vec<String> = self
+            .orgs()
+            .orgs
+            .iter()
+            .filter(|o| o.id.0 != crate::DEVICE_ORG)
+            .map(|o| o.slug.clone())
+            .collect();
+        let mut out = Vec::new();
+        for slug in orgs {
+            let Ok((org, host, client)) = self.enrolment_in(&slug, None).await else {
+                continue;
+            };
+            if let Ok(devices) = client.enrolments().await {
+                out.extend(
+                    devices
+                        .into_iter()
+                        .map(|d| (org.slug.clone(), host.clone(), d)),
+                );
+            }
+        }
+        out
+    }
+
+    /// Withdraw the device whose key is `public_key` from `orgs` (every
+    /// org of the account's when none is named): its next call to the
+    /// hosting node is refused and its connections close. The orgs it
+    /// was withdrawn from.
+    ///
+    /// # Errors
+    ///
+    /// Signed out; or it was authorised in none of them.
+    pub async fn revoke_device(
+        &self,
+        host: Option<&str>,
+        public_key: &str,
+        orgs: &[String],
+    ) -> Result<Vec<String>, String> {
+        let named: Vec<String> = if orgs.is_empty() {
+            self.orgs()
+                .orgs
+                .iter()
+                .filter(|o| o.id.0 != crate::DEVICE_ORG)
+                .map(|o| o.slug.clone())
+                .collect()
+        } else {
+            orgs.to_vec()
+        };
+        let mut out = Vec::new();
+        let mut last = None;
+        for org in named {
+            match self.enrolment_in(&org, host).await {
+                Ok((org, _, client)) => match client.revoke(public_key.trim().to_owned()).await {
+                    Ok(()) => out.push(org.slug),
+                    Err(e) => last = Some(format!("{}: {e}", org.slug)),
+                },
+                Err(e) if !orgs.is_empty() => return Err(e),
+                Err(e) => last = Some(e),
+            }
+        }
+        if out.is_empty() {
+            return Err(last.unwrap_or_else(|| "the device is authorised in no org".to_owned()));
+        }
+        Ok(out)
+    }
+
     /// The node that hosts org `org` (its id): the one given for it, else
     /// the one `ARCHITECT_ORG_HOST` names. An app pulls the org's vault from
     /// its lane (`lane`).

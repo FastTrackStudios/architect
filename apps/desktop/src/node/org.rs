@@ -87,10 +87,35 @@ pub fn engine(members: Members) -> ConfinedEngine {
     let write = || vec![Rule::new("**", &["read", "write"])];
     let admin = || vec![Rule::new("**", &["read", "write", "admin"])];
     ConfinedEngine::new(members)
+        // A storage device (authorised by its key): the org's documents
+        // as far as the node's own rule lets it, which is its file roots
+        // and their ledgers and no note (`super::storage_opens`).
+        .role(
+            &storage_role(),
+            vec![Rule::new("docs/**", &["read", "write"])],
+        )
         .role(&Role::Viewer, read())
         .role(&Role::Member, write())
         .role(&Role::Admin, admin())
         .role(&Role::Owner, admin())
+}
+
+/// The role of a storage device in an org: a machine let in by its own
+/// key (`ACCOUNT_DEVICE_AUTHORISE`) to hold and serve the org's files.
+pub const STORAGE: &str = "storage";
+
+/// [`STORAGE`] as a role.
+#[must_use]
+pub fn storage_role() -> Role {
+    Role::Other(STORAGE.to_owned())
+}
+
+/// Whether `peer` is in its orgs as a storage device and nothing more:
+/// not one of the owner's own devices, and `storage` in every org.
+#[must_use]
+pub fn is_storage(peer: &Peer) -> bool {
+    let orgs = peer.orgs();
+    !peer.is_account() && !orgs.is_empty() && orgs.iter().all(|(_, role)| *role == storage_role())
 }
 
 /// `Notes` on the org lane: any member lists and reads, writing is a

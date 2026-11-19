@@ -414,9 +414,76 @@ on a pin (`FILES_PIN`), and a rule the org sets for every holder.
 
 ### A storage server
 
-A storage server is the app run with `serve` on the machine that holds the
-files, signed in to the person's account like their other devices. A
-machine with no browser is signed in with a code:
+A storage server is the app run with `serve` on the machine that holds
+the files. It gets in one of two ways.
+
+**By its own key, with nobody at the machine** (the SSH `authorized_keys`
+shape). Every node has a key of its own, made on first start: its iroh
+endpoint id is the public half. The machine prints it, a signed-in app
+declares it for the orgs it serves, and from then on the machine is let
+in by proving that key on every connection. It has no session, signs in
+nowhere, and nothing secret is passed to it.
+
+```sh
+# 1. On the machine (or wherever its key file is): its public key.
+architect-desktop serve key            # ARCHITECT_IROH_KEY_FILE, else <data dir>/iroh.key
+
+# 2. From any signed-in app (its action list: CLI or MCP), once:
+architect-desktop actions run ACCOUNT_DEVICE_AUTHORISE '{
+  "public_key": "<what step 1 printed>", "name": "starcommand",
+  "orgs": ["fasttrackaudio", "tombrooksmusic"],
+  "host": "https://fasttrackstudio.app"}'
+```
+
+```sh
+# 3. The machine's configuration: no issuer, no session.
+ARCHITECT_PLATFORM=storage
+ARCHITECT_IROH_KEY_FILE=/run/secrets/architect/iroh.key   # a secret file keeps a rebuilt machine the same device
+ARCHITECT_ENROL_AT=https://fasttrackstudio.app            # the node whose orgs' files it holds
+ARCHITECT_ENROL_ORGS=fasttrackaudio,tombrooksmusic
+ARCHITECT_FILES_DIR=/mnt/starcommand/Task
+ARCHITECT_FILES_HOLD=true
+```
+
+- **What the declaration is.** `ACCOUNT_DEVICE_AUTHORISE`
+  (`features/accounts/src/actions.rs`, `Accounts::authorise_device`)
+  enrols the key in each org at the node that hosts it, as the role
+  `storage` (`apps/desktop/src/node/org.rs` `storage_role`), by the
+  person's own session. The public key is not a secret, so it can sit in
+  a nix file. Declaring the same key again makes no second device.
+- **What the machine does on start.** With `ARCHITECT_ENROL_AT` and no
+  session it asks that origin (over HTTPS) which endpoint it is and which
+  orgs it hosts (`/node/status` `hosted_orgs`), lets that node in as
+  those orgs', and syncs with it (`apps/desktop/src/node/mod.rs`
+  `serve_declared`). Until its key is declared its calls are refused and
+  it waits; once it is, nothing more is needed. The same key after a
+  restart or a rebuild is the same device.
+- **What a storage device gets.** Its orgs' file roots and their ledgers
+  (`files/<org>/…`, `ledger/<org>/…`), to read and write, and the bytes a
+  manifest of those orgs names. No note of any vault, no document or
+  bytes of another org, and nothing at all as the person: it holds no
+  session (`storage_opens`, `apps/desktop/src/node/files.rs` `more`,
+  `architect_files::sync::Engine::blob_host_for`).
+- **Listing and revoking.** `ACCOUNT_DEVICES` lists it under `authorised`
+  (its key, name, platform `storage`, orgs, and "its key, by <who> at
+  <node>"); `ORG_DEVICES` lists it in each org. `ACCOUNT_DEVICE_REVOKE
+  {public_key}` from any signed-in app withdraws it: its next call is
+  refused and its connections close.
+- **If the key leaks.** Whoever holds the machine's key file can be that
+  storage device: read and write those orgs' file roots, until it is
+  revoked. They cannot read notes, reach another org, or act as the
+  person. Revoke the key, make a new one (delete the file; `serve key`),
+  declare it.
+
+Test: `apps/desktop/tests/node.rs`
+`a_machine_is_authorised_by_its_key_and_holds_only_its_orgs_files`.
+
+Not yet: the account's own devices reach a key-authorised storage server
+through the node that hosts the org, not directly (the issuer does not
+carry authorised keys, so a laptop does not learn to dial it).
+
+**By signing in with a code**, for a person who wants the machine on
+their account like their other devices:
 
 ```sh
 architect-desktop serve register --issuer https://auth.fasttrackstudio.app \
@@ -429,14 +496,9 @@ by its owner alone (`apps/desktop/src/node/register.rs` `sign_in`,
 `write_session`). Then it runs with `ARCHITECT_ISSUER`,
 `ARCHITECT_SESSION_FILE`, `ARCHITECT_PLATFORM=storage`, `ARCHITECT_FILES_DIR`
 and `ARCHITECT_FILES_HOLD=true`. On the account, the person's other devices
-and nodes let it in, sync their documents with it and fetch bytes from it.
-It is listed with the account's devices (`ACCOUNT_DEVICES`, platform
-`storage`) and among the files' holders (`FILES_HOLDERS`: a `node` at its
-`ARCHITECT_FILES_SITE`, with its copies and whether it is reachable). For an
-org's other members it enrols at the node that hosts the org
-(`ARCHITECT_ENROL_AT`, `ARCHITECT_ENROL_ORGS`).
-
-Test: `apps/desktop/tests/node.rs`
+and nodes let it in and sync everything with it: it is one of their
+devices, with all that a device of theirs reads. Test:
+`apps/desktop/tests/node.rs`
 `a_machine_registers_on_the_account_with_a_code_and_is_listed_as_storage`.
 
 ### A vault's attachments
@@ -467,10 +529,10 @@ Tests: `features/files/tests/sync.rs`
 `apps/desktop/tests/files.rs`
 `a_vaults_attachments_reach_the_other_node_under_its_holding_rule`.
 
-Not yet: a share link serves an attachment only when the node holds it (a
-file its rule leaves out is not on the link, #490); the app's own copy of
-an org's vault, kept over the org lane, gets its notes and not its
-attachments; the setting is off unless set.
+A share link names and serves the ones this node does not hold too
+([below](#a-link-s-files-wherever-they-are-held)). Not yet: the app's own
+copy of an org's vault, kept over the org lane, gets its notes and not
+its attachments; the setting is off unless set.
 
 ## Extensions' node actions
 
@@ -1005,6 +1067,113 @@ app-share-guest-test`): the link's notes in their sets with their art and
 play buttons, a note and its picture, the files and their archive; a link
 for signed-in people opened through `/s/_signin` and the node's cookie,
 past a session the issuer no longer knows; a node with no web app.
+
+### A link's files, wherever they are held
+
+The node that answers a link need not hold what the link serves (#490):
+its holding rule leaves a song's multitracks on the storage server, and a
+file may be in the bucket alone. With the files engine on
+(`ARCHITECT_VAULT_FILES` or `ARCHITECT_FILES_DIR`), a link names such a
+file as it names any other (its size and sha-256 from the root's
+manifest) and answers it from the nearest holder
+(`apps/desktop/src/node/holders.rs` `Holders::respond`; the answer says
+which in `x-architect-from`):
+
+| Where the bytes are | What the node answers | Limits |
+| --- | --- | --- |
+| On this node (its vault, a working file, its store) | the file, streamed from disk, ranges honoured | none |
+| In the bucket | `302` to a presigned `GET` of that one object, good for 10 minutes (`SIGNED_FOR`); the browser reads it, ranges too, from the bucket itself | nothing passes through the node; the bucket's own |
+| On a peer only (the storage server) | the range, relayed from the holder over the nodes' own lane (`architect::blob::Fetcher::relay`); nothing is written here | 64 at once (`RELAYS`); one more waits up to 10 s for a place, then `503` with `Retry-After`; a holder that does not start within 15 s is `504` |
+| Nowhere this node can reach | `404` | |
+
+No path buffers a file whole, so none has a size limit. A slow holder is
+a slow stream for that listener and holds up nobody else; a holder that
+is gone is an answer within the 15 seconds, never a hung request.
+
+**What a guest holds is the link's URL**, and that is checked on every
+request: live, its audience, its layer. The presigned URL they are sent
+on to reads one object until it runs out. It signs the method and the
+key, so it lists nothing, names no other object and writes nothing, and
+after a revoke or a lowered layer the link redirects nowhere. A browser's
+`fetch` (an engine decoding audio) needs the bucket to allow the node's
+origin (CORS: `GET`, the `Range` header); an `<audio>` element does not.
+
+**Nothing of the vault is copied into a link's build** any more: a link's
+attachments are read from the vault's own file (never through a symlink)
+by the exact path its build names, so editing a note no longer copies
+every recording again. A share's own domain (a Site) still holds its
+files.
+
+Tests: `apps/desktop/tests/link_files.rs`
+`a_link_streams_a_recording_its_node_does_not_hold_from_the_storage_server`,
+`a_link_sends_the_browser_to_the_bucket_for_a_file_that_is_there`.
+
+### A project on a link
+
+A link carries projects beside its notes
+(`features/spaces/src/share.rs` `ShareProject`): a file root
+`<org>/Projects/<project>`, the session documents of it that are shared
+(none named: every one), and whether a viewer may save them back. Set it
+on a link that exists, so its URL stays:
+
+```sh
+architect-desktop actions run SHARE_UPDATE '{"code": "<code>", "listen": "full",
+  "download": "not-media",
+  "projects": [{"root": "fasttrackaudio/Projects/JT's Senior Recital",
+                "sessions": ["songs/drive-to-la/Drive To LA.fts-session"]}]}'
+```
+
+What a guest gets of the root is decided by the node on every request
+(`apps/desktop/src/node/share_project.rs`), from the root's manifest as it
+is then:
+
+- **The session documents shared**, from the link's `reference` layer up.
+- **What they reference**, at `full`. A session is an Architect document
+  (`features/crdt/crdt/src/file/mod.rs` `read_main` reads it whatever its
+  kind); every string in it that is a path beside the session, a path in
+  the root, or a file's sha-256 names that file. Nothing of a session's
+  format is known to Architect: whoever writes sessions names a file one
+  of those three ways.
+- **Nothing else of the root**, by any name. A file is served by its hash,
+  `<link>_blob/<sha256>/<name>`, and only a hash in that set is answered;
+  any other is the `404` of a path that is nowhere.
+
+`GET <link>_project.json` is the contract a client codes to
+(`features/spaces/src/guest.rs` `GuestProjects`): each project's sessions
+and files with `path`, `sha256`, `size` and `url`, each session's
+`references` (`named`, the string in the document, to the file's
+`sha256`), and `access`. `?listen=reference` asks for less. An edited
+session changes what the link serves with no rebuild.
+
+With `"edit": true` a session's `save` URL takes a `PUT` of its new bytes
+(at most 64 MiB) from a signed-in person the link lets in, their issuer
+session as a bearer; it is a new version of the file in the root, synced
+like any other. Without it the project is read-only: there is no route
+that writes.
+
+Test: `apps/desktop/tests/link_files.rs`
+`a_project_link_carries_its_sessions_and_exactly_the_files_they_reference`.
+
+### What a link offers to keep
+
+`download` on a link (`ShareChange::Download`, `SHARE_UPDATE {download}`)
+says which of the files it serves are offered as downloads: `everything`
+(the default), `not-media` (recordings and multitracks play, and are not
+listed to save), or `nothing`. A file that is not offered is marked in
+`<link>_files.json` (`"download": false`; `ListedFile::stream_only` for a
+guest's app) and in `<link>_project.json`, and is in no `_archive.zip`.
+It still streams to the player: this is what the link offers, not a lock
+on what a browser can keep.
+
+### One link
+
+A link's URL is its code, kept in the share's note: it does not change
+when the vault is edited, the link rebuilt, or what it permits changed
+(audience, layer, download, projects, expiry). Sharing the same scope
+with the same audience, access and layer again answers the link that is
+already there (`Share::is_the_link_of`); another audience or layer is
+another link. Test: `apps/desktop/tests/shares.rs`
+`a_link_keeps_its_url_and_plays_what_it_does_not_offer_to_keep`.
 
 ### How far a link plays
 
