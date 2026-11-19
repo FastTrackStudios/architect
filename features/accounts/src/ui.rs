@@ -855,6 +855,7 @@ fn ShareRowView(share: architect_spaces::Share) -> Element {
     let url = accounts.share_url(&share).unwrap_or_default();
     let state = match share.state(now_secs()) {
         architect_spaces::ShareState::Live => "live",
+        architect_spaces::ShareState::Paused => "paused",
         architect_spaces::ShareState::Expired => "expired",
         architect_spaces::ShareState::Revoked => "revoked",
     };

@@ -266,6 +266,9 @@ struct Inner {
     table: RwLock<HashMap<String, Held>>,
     viewers: Mutex<HashMap<String, (Viewer, Instant)>>,
     signins: Mutex<HashMap<String, Pending>>,
+    /// When a guest last opened each link (by code), since this node
+    /// started: told with the link ([`Shares::list`]), never saved.
+    opened: Mutex<HashMap<String, i64>>,
     /// Per vault: rebuild now.
     kick: Mutex<HashMap<String, Arc<Notify>>>,
     /// What draws the fences extensions claim (#488).
@@ -316,6 +319,7 @@ impl Shares {
             table: RwLock::new(HashMap::new()),
             viewers: Mutex::new(HashMap::new()),
             signins: Mutex::new(HashMap::new()),
+            opened: Mutex::new(HashMap::new()),
             kick: Mutex::new(HashMap::new()),
             blocks,
             layers,
@@ -372,6 +376,12 @@ impl Shares {
             let table = self.0.table.read().unwrap_or_else(PoisonError::into_inner);
             table.values().map(|h| h.share.clone()).collect()
         };
+        {
+            let opened = self.0.opened.lock().unwrap_or_else(PoisonError::into_inner);
+            for share in &mut out {
+                share.opened_at = opened.get(&share.code).copied();
+            }
+        }
         out.sort_by(|a, b| (a.created_at, &a.code).cmp(&(b.created_at, &b.code)));
         out
     }
@@ -1009,6 +1019,23 @@ impl Shares {
                 new.vault
             )));
         }
+        // One link for a thing and an audience: sharing what is shared
+        // already finds that link, with what the thing holds now (a
+        // setlist that gained a song), and mints nothing. The code a
+        // person was sent is the code for good; revoking is what ends it.
+        let audience = new.audience.clone().normalised();
+        let existing = self
+            .list()
+            .into_iter()
+            .find(|s| s.is_link_for(&new.vault, &new.scope, &audience));
+        if let Some(mut share) = existing {
+            share.scope = new.scope;
+            if let Some(title) = new.title.filter(|t| !t.trim().is_empty()) {
+                share.title = Some(title);
+            }
+            share.opened_at = None;
+            return self.save(share).await;
+        }
         self.save(Share {
             code: self.new_code(),
             vault: new.vault,
@@ -1023,6 +1050,9 @@ impl Shares {
             domain: new.domain.map(|d| d.trim().to_lowercase()),
             audiences: Vec::new(),
             listen: new.listen,
+            name: None,
+            paused_at: None,
+            opened_at: None,
         })
         .await
     }
@@ -1047,6 +1077,31 @@ impl Shares {
             ShareChange::Listen(l) => share.listen = l,
             ShareChange::Expires(at) => share.expires_at = at,
             ShareChange::Title(t) => share.title = t.filter(|t| !t.trim().is_empty()),
+            ShareChange::Name(n) => {
+                share.name = n.map(|n| n.trim().to_owned()).filter(|n| !n.is_empty());
+                if share.name.as_ref().is_some_and(|n| n.chars().count() > 80) {
+                    return Err(ShareFault::Invalid(
+                        "a name of at most 80 characters".to_owned(),
+                    ));
+                }
+            }
+            ShareChange::Paused(paused) => {
+                share.paused_at = if paused {
+                    share.paused_at.or_else(|| Some(now()))
+                } else {
+                    None
+                };
+            }
+            ShareChange::Scope(scope) => {
+                // The same thing, as it is now: never another thing under
+                // a code someone was sent.
+                if scope.root() != share.scope.root() {
+                    return Err(ShareFault::Invalid(
+                        "a link stays on the thing it shares".to_owned(),
+                    ));
+                }
+                share.scope = scope;
+            }
             ShareChange::Domain(d) => {
                 let d = d.map(|d| d.trim().to_lowercase()).filter(|d| !d.is_empty());
                 if let Some(d) = &d {
@@ -1062,6 +1117,7 @@ impl Shares {
                 share.domain = d;
             }
         }
+        share.opened_at = None;
         self.save(share).await
     }
 
@@ -1077,6 +1133,7 @@ impl Shares {
         if share.revoked_at.is_none() {
             share.revoked_at = Some(now());
         }
+        share.opened_at = None;
         self.save(share).await
     }
 
@@ -2200,6 +2257,11 @@ impl Shares {
         if share.state(now()) != ShareState::Live {
             return Err(Closed::Gone);
         }
+        self.0
+            .opened
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(share.code.clone(), now());
         let viewer = if share.audience.signed_in() {
             self.viewer_of(token).await
         } else {
@@ -3958,5 +4020,188 @@ mod tests {
             "attachment; filename=\"Carols: viol_n.zip\"; filename*=UTF-8''Carols%3A%20viol%C3%ADn.zip"
         );
         assert_eq!(encode("/a b/"), "/a%20b/");
+    }
+    /// A link's URL is for good. What it shows follows the thing it
+    /// shares; its code does not move for an edit, a rebuild, the node
+    /// starting again, sharing the thing again, or a pause. Only a revoke
+    /// ends it (the owner's "links are the same every time").
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_links_code_is_for_good_across_edits_rebuilds_and_sharing_again() {
+        use architect_spaces::{Audience, ShareAccess};
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = tmp.path().join("vault");
+        let put = |path: &str, text: &str| {
+            let at = vault.join(path);
+            std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+            std::fs::write(at, text).unwrap();
+        };
+        put(
+            "Setlists/Eve.md",
+            "---\ntype: setlist\n---\n# Eve\n\n[[Songs/Joy]]\n",
+        );
+        put("Songs/Joy.md", "---\ntype: song\n---\n# Joy\n");
+        put("Songs/Fire.md", "---\ntype: song\n---\n# Fire\n");
+        let store = || {
+            Shares::new(
+                Backend::single("notes", vault.clone()).unwrap(),
+                tmp.path(),
+                None,
+                None,
+                architect_sites::Blocks::default(),
+                LayerRules::default(),
+            )
+        };
+        let sharing = |notes: &[&str], audience: Audience| NewShare {
+            vault: "notes".to_owned(),
+            scope: ShareScope::Notes(notes.iter().map(|n| (*n).to_owned()).collect()),
+            title: Some("Eve".to_owned()),
+            audience,
+            access: ShareAccess::Read,
+            expires_at: None,
+            domain: None,
+            listen: Listen::Reference,
+        };
+        let shares = store();
+        let first = shares
+            .create(
+                sharing(&["Setlists/Eve.md", "Songs/Joy.md"], Audience::Link),
+                "ada",
+            )
+            .await
+            .unwrap();
+        let code = first.code.clone();
+
+        // The set and a song are edited, the link's pages built again.
+        put(
+            "Setlists/Eve.md",
+            "---\ntype: setlist\n---\n# Eve\n\n[[Songs/Joy]]\n[[Songs/Fire]]\n",
+        );
+        put(
+            "Songs/Joy.md",
+            "---\ntype: song\nkey: D\n---\n# Joy\n\nA new verse.\n",
+        );
+        shares.load("notes");
+        shares.build_all("notes");
+        assert_eq!(
+            shares
+                .list()
+                .iter()
+                .map(|s| s.code.as_str())
+                .collect::<Vec<_>>(),
+            [code.as_str()]
+        );
+
+        // Shared again, with the song the set gained: the same link, now
+        // with three notes. Nothing is minted.
+        let again = shares
+            .create(
+                sharing(
+                    &["Setlists/Eve.md", "Songs/Joy.md", "Songs/Fire.md"],
+                    Audience::Link,
+                ),
+                "ada",
+            )
+            .await
+            .unwrap();
+        assert_eq!(again.code, code);
+        assert_eq!(
+            again.scope,
+            ShareScope::Notes(vec![
+                "Setlists/Eve.md".into(),
+                "Songs/Joy.md".into(),
+                "Songs/Fire.md".into()
+            ])
+        );
+        assert_eq!(shares.list().len(), 1);
+
+        // The node starts again: the link is read from its note, the same.
+        let restarted = store();
+        restarted.load("notes");
+        assert_eq!(
+            restarted.get(&code).map(|s| s.scope),
+            Some(again.scope.clone())
+        );
+
+        // Named, paused and resumed: one code throughout. Paused, it is
+        // closed to everyone; resumed, live.
+        let named = shares
+            .update(&code, ShareChange::Name(Some(" Band ".into())))
+            .await
+            .unwrap();
+        assert_eq!(named.name.as_deref(), Some("Band"));
+        let paused = shares
+            .update(&code, ShareChange::Paused(true))
+            .await
+            .unwrap();
+        assert_eq!(
+            (paused.code.as_str(), paused.state(now())),
+            (code.as_str(), ShareState::Paused)
+        );
+        assert!(matches!(
+            shares.open(&paused, None).await,
+            Err(Closed::Gone)
+        ));
+        let resumed = shares
+            .update(&code, ShareChange::Paused(false))
+            .await
+            .unwrap();
+        assert_eq!(
+            (resumed.code.as_str(), resumed.state(now())),
+            (code.as_str(), ShareState::Live)
+        );
+        assert!(shares.open(&resumed, None).await.is_ok());
+        // Opened: remembered, and told with the link.
+        assert!(shares.list()[0].opened_at.is_some());
+        // And the name is kept through a restart; when it was opened is not saved.
+        let restarted = store();
+        restarted.load("notes");
+        let kept = restarted.get(&code).unwrap();
+        assert_eq!((kept.name.as_deref(), kept.opened_at), (Some("Band"), None));
+
+        // A link stays on the thing it shares.
+        let moved = shares
+            .update(
+                &code,
+                ShareChange::Scope(ShareScope::Notes(vec!["Songs/Joy.md".into()])),
+            )
+            .await;
+        assert!(matches!(moved, Err(ShareFault::Invalid(_))));
+
+        // Another audience is another link: the band's, beside this one.
+        let band = shares
+            .create(
+                sharing(
+                    &["Setlists/Eve.md", "Songs/Joy.md"],
+                    Audience::Invited(vec!["Band@X.test".into()]),
+                ),
+                "ada",
+            )
+            .await
+            .unwrap();
+        assert_ne!(band.code, code);
+        let band_again = shares
+            .create(
+                sharing(
+                    &["Setlists/Eve.md"],
+                    Audience::Invited(vec!["band@x.test".into()]),
+                ),
+                "ada",
+            )
+            .await
+            .unwrap();
+        assert_eq!(band_again.code, band.code);
+        assert_eq!(shares.list().len(), 2);
+
+        // Revoked, the code is over; sharing the set again is a new link.
+        let revoked = shares.revoke(&code).await.unwrap();
+        assert_eq!(revoked.state(now()), ShareState::Revoked);
+        let anew = shares
+            .create(
+                sharing(&["Setlists/Eve.md", "Songs/Joy.md"], Audience::Link),
+                "ada",
+            )
+            .await
+            .unwrap();
+        assert_ne!(anew.code, code);
     }
 }
