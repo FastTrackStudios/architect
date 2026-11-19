@@ -63,6 +63,16 @@ pub struct WebVault {
     pub org: Option<super::org::OrgVaults>,
 }
 
+/// A note its extension's view draws shows that view and nothing else of
+/// its page.
+const VIEW_ONLY: &str =
+    ".web-note[data-view-only] > :not([data-testid=\"note-view\"]) { display: none !important; }";
+
+/// Whether the note on show is one an extension's view draws (its type
+/// is claimed by an island): set by the app's root, read by the note's
+/// page and the shell's row of editing buttons.
+pub static VIEW_ON_SHOW: GlobalSignal<bool> = Signal::global(|| false);
+
 /// Unix milliseconds now.
 #[allow(clippy::as_conversions, clippy::cast_possible_truncation)] // a time in ms, well inside i64
 pub fn now() -> Millis {
@@ -1092,10 +1102,17 @@ fn NoteText(path: String, text: String) -> Element {
     // The claimed view gets the body as the note last read it; the text
     // area is the live copy.
     let body = body0.to_owned();
+    let view_only = VIEW_ON_SHOW();
+    let pad = if view_only {
+        "8px 16px 96px"
+    } else {
+        "24px 28px 96px"
+    };
     rsx! {
         document::Style { {LAYOUT} }
-        div { style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: 24px 28px 96px; color: {t.ink};",
-            div { class: "web-note", "data-note": "{path}",
+        document::Style { {VIEW_ONLY} }
+        div { style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: {pad}; color: {t.ink};",
+            div { class: "web-note", "data-note": "{path}", "data-view-only": if view_only { "" },
                 if core_list {
                     super::collection::CollectionHead {
                         path: path.clone(),
@@ -1104,15 +1121,22 @@ fn NoteText(path: String, text: String) -> Element {
                     }
                 }
                 if !note_type.is_empty() {
-                    super::embed::NoteEmbed {
-                        // The signed-in person's own vault, or the demo; a
-                        // share's guest is `Audience::Guest` (#629, #648).
-                        audience: crate::ext_host::Audience::Member,
-                        path: path.clone(),
-                        title: note_title.clone(),
-                        note_type,
-                        properties: shown_properties,
-                        body,
+                    // A note an extension's view draws: the view is the
+                    // page, its height; the rest of the note's page (its
+                    // heading, its properties, its text to edit) is out of
+                    // the way (`LAYOUT`: `[data-view-only]`).
+                    div { "data-testid": "note-view", style: if view_only { "display: flex; flex-direction: column; height: calc(100dvh - 250px); min-height: 320px;" } else { "display: contents;" },
+                        super::embed::NoteEmbed {
+                            // The signed-in person's own vault, or the demo; a
+                            // share's guest is `Audience::Guest` (#629, #648).
+                            audience: crate::ext_host::Audience::Member,
+                            path: path.clone(),
+                            title: note_title.clone(),
+                            note_type,
+                            properties: shown_properties,
+                            body,
+                            pane: view_only,
+                        }
                     }
                 }
                 if let Some(r) = recording {
@@ -1121,7 +1145,10 @@ fn NoteText(path: String, text: String) -> Element {
                         artist: prop("artist"), cover: prop("cover"),
                     }
                 }
-                if !table.is_empty() {
+                // A note an extension's view draws (a setlist, a song) is
+                // for looking and listening: its properties are what the
+                // view shows, not a table under it.
+                if !table.is_empty() && !VIEW_ON_SHOW() {
                     dl { "data-testid": "note-properties",
                         style: "display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0 0 16px; \
                                 font-size: 13px; color: {t.ink_3};",

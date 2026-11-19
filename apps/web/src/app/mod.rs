@@ -279,6 +279,28 @@ fn WebApp() -> Element {
     let home_view = home::use_home();
     let has_home = matches!(mode, Mode::Org { .. }) && home_view().is_some();
     let home_on = has_home && home::HOME();
+    // A page for looking and listening has no row of editing buttons: a
+    // link's guest page, the home, and a note an extension's view draws.
+    let listing = frames::use_listing();
+    let on_show_type = {
+        let source = web_vault.source.clone();
+        use_memo(move || vault::note_on_show(&workspace.read(), &source).and_then(|(_, ty)| ty))
+    };
+    let view_on_show = !guest
+        && !home_on
+        && on_show_type().is_some_and(|ty| {
+            listing
+                .read()
+                .as_ref()
+                .is_some_and(|l| crate::ext_host::claimed(l, &ty).is_some())
+        });
+    let quiet = guest || home_on || view_on_show;
+    use_effect(use_reactive!(|(quiet, view_on_show)| {
+        shell::quiet_actions(quiet);
+        if *vault::VIEW_ON_SHOW.peek() != view_on_show {
+            *vault::VIEW_ON_SHOW.write() = view_on_show;
+        }
+    }));
     let (tabs, current) = if has_home {
         (
             std::iter::once(shell::Tab::named("home", "Home", "house"))

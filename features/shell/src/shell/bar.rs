@@ -473,7 +473,7 @@ pub(super) fn PhoneFoot(
     // up, first on the bar.
     let keyboard_button = foot == Foot::TabsWithKeyboardButton;
     rsx! {
-        if !items.is_empty() || keyboard_button {
+        if (!items.is_empty() && !super::ACTIONS_QUIET()) || keyboard_button {
             ActionBar { items, keyboard_button, bottom: if tab_bar { 0.0 } else { ins.bottom }, screen }
         }
         if tab_bar {
