@@ -3,8 +3,8 @@
 //! The deck keeps the time itself (a silent clock: arithmetic over
 //! `Transport`). A [`Clock`] is what makes it heard: the web app's audio
 //! element (`apps/web/src/app/audio.rs`), later a native player, or an
-//! engine attached as the clock (studio#400, #528: designed here, not
-//! built). A [`Follower`] tells the clock what the deck's active source
+//! engine attached as the clock (studio#400, #528: [`crate::engine`], the
+//! web app's player hands an item the engine carries to it). A [`Follower`] tells the clock what the deck's active source
 //! does (load its item's media, play, pause, seek), and hands what the
 //! clock reads back to the deck ([`crate::deck::Deck::report`]): its time
 //! while it really moves, its media's length, its end.
@@ -38,7 +38,8 @@ pub struct Reading {
 
 /// What makes the deck heard.
 pub trait Clock {
-    /// `"media"` (an element the app owns), `"silent"`, later `"engine"`.
+    /// `"media"` (an element the app owns), `"silent"`, `"engine"`
+    /// ([`crate::engine`]).
     fn kind(&self) -> &'static str;
     /// Item media at this vault path from now on (`None`: nothing to hear).
     fn load(&mut self, media: Option<&str>);
