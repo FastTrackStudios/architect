@@ -39,6 +39,7 @@
 mod audio;
 mod click;
 mod collection;
+mod decoded;
 mod documents;
 mod embed;
 pub mod extensions;
