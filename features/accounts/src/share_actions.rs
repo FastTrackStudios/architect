@@ -168,6 +168,10 @@ pub struct UpdateArgs {
     pub title: Option<String>,
     /// page, reference or full.
     pub listen: Option<String>,
+    /// What its owner calls it ("Band"); empty clears it.
+    pub name: Option<String>,
+    /// Closed for now (`true`) or open again; its link does not change.
+    pub paused: Option<bool>,
     pub host: Option<String>,
 }
 
@@ -381,6 +385,12 @@ pub struct ShareRow {
     pub domain: Option<String>,
     /// How far its own link plays: page, reference or full.
     pub listen: String,
+    /// What its owner calls it ("Band"), to find it again.
+    pub name: Option<String>,
+    /// The scope's root: the thing it shares, whatever it holds now.
+    pub root: String,
+    /// When a guest last opened it, since its node started (seconds).
+    pub opened_at: Option<i64>,
     /// Its named audiences, each with its own link.
     pub audiences: Vec<AudienceRow>,
 }
@@ -405,6 +415,9 @@ impl ShareRow {
             .to_owned(),
             domain: share.domain.clone(),
             listen: share.listen.label().to_owned(),
+            name: share.name.clone(),
+            root: share.scope.root(),
+            opened_at: share.opened_at,
             audiences: share
                 .audiences
                 .iter()
@@ -638,6 +651,12 @@ pub fn register(list: &Arc<ActionList>, accounts: &Accounts) -> Result<(), Actio
             }
             if let Some(title) = &args.title {
                 changes.push(ShareChange::Title(Some(title.clone())));
+            }
+            if let Some(name) = &args.name {
+                changes.push(ShareChange::Name(Some(name.clone())));
+            }
+            if let Some(paused) = args.paused {
+                changes.push(ShareChange::Paused(paused));
             }
             if let Some(listen) = &args.listen {
                 changes.push(ShareChange::Listen(Listen::parse(listen)?));
