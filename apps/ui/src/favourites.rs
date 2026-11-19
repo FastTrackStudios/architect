@@ -243,6 +243,9 @@ pub fn opens(declaring: &str, target: &Target, reach: &Reach<'_>) -> Option<Open
             let e = *reach.actions.get(a)?;
             may_run(declaring, a, e, reach).then(|| Opens::Action(a.clone()))
         }
+        // A menu of targets: the web app's guest bar draws it; this shell
+        // has no menu tab yet, so the tab is left out.
+        Target::Menu(_) => None,
         Target::Place(p) => {
             let path = architect_extensions::favourites::place_path(reach.note, p)?;
             let md = format!("{path}.md");
