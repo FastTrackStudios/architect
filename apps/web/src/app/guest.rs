@@ -10,9 +10,10 @@
 //! - the link's notes, in its order, in the sets its root note lays out
 //!   (`crate::guest_view::sections`), each with its art and a play button
 //!   when it has a recording;
-//! - the chosen note: the view its type's island claims, as a guest
-//!   (`Audience::Guest`), handed what the node gave a guest, then its
-//!   page's words and images as plain blocks;
+//! - the chosen note: the view that claims its type (a linked
+//!   extension's, compiled into the app, before an island's:
+//!   `ext_host::drawn`), as a guest (`Audience::Guest`), handed what the
+//!   node gave a guest, then its page's words and images as plain blocks;
 //! - the link's recordings on the Now Playing bar, streamed from the
 //!   link's own file URLs ([`file_url`]);
 //! - its files by note, each a download, and "Download all" (the link's
@@ -26,7 +27,8 @@
 //! from a vault: the note's text as the node gave it, and only the files
 //! the node listed for it (`GuestNote::files`). The node gives what the
 //! link admits; what a view is handed of it is kept here, by what the
-//! view's island declares it reads (`ext_host::note_reads`): the text
+//! view's extension declares it reads (`ext_host::reads_of`: an island's
+//! listing, a linked extension's manifest): the text
 //! only to a view that reads the note, a file fetched and handed only to
 //! one that reads files, nothing to a view that declares no read. Each
 //! file is fetched below the link on this
@@ -175,7 +177,7 @@ async fn checked(code: &str, file: &ListedFile) -> Result<ViewFile, String> {
 /// The files the node gave for `note`, each checked; what fails is left
 /// out. Within the caps again, whatever the node listed. None, and none
 /// fetched, unless the view that draws the note's type reads files
-/// (`reads`, `ext_host::note_reads`).
+/// (`reads`, `ext_host::reads_of`).
 async fn files_of(
     code: &str,
     note: &GuestNote,
@@ -532,16 +534,23 @@ pub fn GuestPage(code: String, rest: String) -> Element {
     // A view's ask to open a note of this link (`ext_host::NOTE_OPEN`: a
     // set's row, to its song): only a note the link lists, as a press in
     // the list of its notes.
+    // The same rule for a linked view's `open` (the host's path opener,
+    // `super::extensions::set_note_opener`): only a note the link lists.
     use_hook(move || {
-        super::frames::set_note_opener(Some(std::rc::Rc::new(move |path: &str| {
+        let open: Rc<dyn Fn(&str) -> bool> = Rc::new(move |path: &str| {
             let listed = matches!(&*opened.peek(), Some(Ok(o)) if o.link.notes.iter().any(|n| n.path == path));
             if listed {
                 choose.call(Open::Note(path.to_owned()));
             }
             listed
-        })));
+        });
+        super::frames::set_note_opener(Some(Rc::clone(&open)));
+        super::extensions::set_note_opener(Some(open));
     });
-    use_drop(|| super::frames::set_note_opener(None));
+    use_drop(|| {
+        super::frames::set_note_opener(None);
+        super::extensions::set_note_opener(None);
+    });
     // The same chooser for the shell's bottom tabs and the sidebar, which
     // are drawn outside this page ([`press_tab`], [`GuestSide`]).
     use_hook(move || {
@@ -558,18 +567,38 @@ pub fn GuestPage(code: String, rest: String) -> Element {
     // Arrangement), each a view of that extension's; and which is current.
     let declared = use_resource(super::frames::favourites);
     let islands = use_resource(super::frames::islands);
+    // The app's own linked extensions: their favourites and their views,
+    // read in this page, before the node's.
+    let ext_ui = try_use_context::<architect_extensions::interface::ExtensionUi>();
+    let linked_claims = super::extensions::use_linked_claims();
     use_effect(move || {
         let (link, files) = match &*opened.read() {
             Some(Ok(o)) => ((*o.link).clone(), o.files.len()),
             _ => return,
         };
         let at = open().unwrap_or_else(|| guest_view::open(&link, &at_path()));
-        let bar = bar_of(
-            &link,
-            &at,
+        let own = ext_ui
+            .map(super::extensions::linked_favourites)
+            .unwrap_or_default();
+        let listed = crate::favourites::merged(
+            &own,
             declared.read().as_deref().map_or(&[][..], |d| d.as_slice()),
-            islands.read().as_deref().map_or(&[][..], |i| i.as_slice()),
         );
+        let mut sources = linked_sources(
+            &ext_ui
+                .map(super::extensions::linked_view_ids)
+                .unwrap_or_default(),
+            &linked_claims.read(),
+        );
+        sources.extend(
+            islands
+                .read()
+                .as_deref()
+                .map_or(&[][..], |i| i.as_slice())
+                .iter()
+                .map(ViewSource::island),
+        );
+        let bar = bar_of(&link, &at, &listed, &sources);
         if *BAR.peek() != bar {
             *BAR.write() = bar;
         }
@@ -580,17 +609,21 @@ pub fn GuestPage(code: String, rest: String) -> Element {
     });
     let state = opened.read().clone();
     // The root note as the core list (#668): a collection whose type no
-    // island claims (an island that does draws its own view instead).
+    // view claims (a linked extension's or an island's that does draws
+    // its own view instead).
     let listing = super::frames::use_listing();
-    // A root collection an island claims: its view lists it, so it comes
+    // A root collection a view claims: its view lists it, so it comes
     // first and the link's notes follow under their own heading.
     let (core_list, claimed_list) = match &state {
         Some(Ok(o)) => guest_view::root_note(&o.link)
             .filter(|r| !r.sets.is_empty())
             .map_or((false, false), |r| {
-                let claimed = listing.read().as_ref().is_some_and(|l| {
-                    crate::ext_host::claimed(l, r.kind.as_deref().unwrap_or_default()).is_some()
-                });
+                let claimed = crate::ext_host::drawn(
+                    &linked_claims.read(),
+                    listing.read().as_ref().map_or(&[][..], |l| l.as_slice()),
+                    r.kind.as_deref().unwrap_or_default(),
+                )
+                .is_some();
                 (!claimed, claimed)
             }),
         _ => (false, false),
@@ -811,13 +844,62 @@ fn choose_on_page(next: Open) {
     }
 }
 
+/// An extension whose views a link's tabs open: a linked extension
+/// compiled into the app, or an island the node lists.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ViewSource {
+    /// The extension's id.
+    id: String,
+    /// The views it has, when known (a linked extension's code draws
+    /// exactly these; an island's are whatever its bundle mounts).
+    known: Option<Vec<String>>,
+    /// Its views that claim note types, each with the types.
+    embeds: Vec<(String, Vec<String>)>,
+}
+
+impl ViewSource {
+    fn island(island: &crate::ext_host::Island) -> Self {
+        Self {
+            id: island.id.clone(),
+            known: None,
+            embeds: island
+                .embeds
+                .iter()
+                .map(|e| (e.view.clone(), e.note_types.clone()))
+                .collect(),
+        }
+    }
+}
+
+/// The linked extensions as tab sources: each with the views its code
+/// draws (`views`) and those that claim note types (`claims`).
+fn linked_sources(
+    views: &[(String, Vec<String>)],
+    claims: &[crate::ext_host::LinkedClaim],
+) -> Vec<ViewSource> {
+    views
+        .iter()
+        .map(|(id, views)| ViewSource {
+            id: id.clone(),
+            known: Some(views.clone()),
+            embeds: claims
+                .iter()
+                .filter(|c| c.extension == *id)
+                .map(|c| (c.view.clone(), c.note_types.clone()))
+                .collect(),
+        })
+        .collect()
+}
+
 /// The bar for `link` with `at` open: the favourites declared for its
-/// root note's type whose targets are views of an island the node lists.
+/// root note's type whose targets are views of their extension's, from
+/// `sources` (the first of that id: a linked extension's before its
+/// island's).
 fn bar_of(
     link: &GuestLink,
     at: &Open,
     declared: &[architect_favourites::Listed],
-    islands: &[crate::ext_host::Island],
+    sources: &[ViewSource],
 ) -> Bar {
     use architect_favourites::Target;
     let Some(kind) = guest_view::root_note(link).and_then(|r| r.kind.clone()) else {
@@ -829,7 +911,7 @@ fn bar_of(
     else {
         return Bar::default();
     };
-    let Some(island) = islands.iter().find(|i| i.id == set.by.extension) else {
+    let Some(island) = sources.iter().find(|i| i.id == set.by.extension) else {
         return Bar::default();
     };
     let tab_of = |f: &architect_favourites::Favourite| -> Option<BarTab> {
@@ -842,11 +924,20 @@ fn bar_of(
             Target::Menu(_) => (String::new(), Vec::new()),
             Target::Action(_) | Target::Place(_) => return None,
         };
+        // A linked extension's tab opens only a view its code draws.
+        if !view.is_empty()
+            && island
+                .known
+                .as_ref()
+                .is_some_and(|known| !known.contains(&view))
+        {
+            return None;
+        }
         let claims = island
             .embeds
             .iter()
-            .find(|e| !view.is_empty() && e.view == view)
-            .map(|e| e.note_types.clone())
+            .find(|(v, _)| !view.is_empty() && *v == view)
+            .map(|(_, types)| types.clone())
             .unwrap_or_default();
         Some(BarTab {
             id: kept(&f.id),
@@ -1203,8 +1294,9 @@ fn FilesView(opened: Opened) -> Element {
     }
 }
 
-/// Note `path` of link `code`: the view its type's island claims, handed
-/// what the node gave a guest, then its page's words and images.
+/// Note `path` of link `code`: the view that claims its type (a linked
+/// extension's before an island's), handed what the node gave a guest,
+/// then its page's words and images.
 #[component]
 fn GuestNoteView(
     code: String,
@@ -1215,22 +1307,32 @@ fn GuestNoteView(
     #[props(default)]
     untitled: bool,
 ) -> Element {
+    let linked = super::extensions::use_linked_claims();
     // Read again when the note asked for changes (props are not signals).
     let note = use_resource(use_reactive!(|(code, path)| {
         {
+            let linked = linked();
             async move {
                 let c = client().ok_or("no origin")?;
                 let note = as_guest(|t| c.read(code.clone(), t, path.clone()))
                     .await
                     .map_err(|e| said(&e))?;
                 // What the view that draws its type is handed of it, by
-                // the islands listed here: the node gave what the link
-                // admits, whoever draws it.
+                // what its extension declares (a linked extension's
+                // manifest, an island's listing): the node gave what the
+                // link admits, whoever draws it.
                 let islands = super::frames::islands().await;
+                let drawn = crate::ext_host::drawn(
+                    &linked,
+                    &islands,
+                    note.kind.as_deref().unwrap_or_default(),
+                );
                 let reads =
-                    crate::ext_host::note_reads(&islands, note.kind.as_deref().unwrap_or_default());
+                    drawn.map_or_else(crate::ext_host::NoteReads::default, |d| d.note_reads());
+                // Whether the view is the note's page, or a card at its head.
+                let page = drawn.is_some_and(|d| d.is_page());
                 let files = files_of(&code, &note, reads).await;
-                Ok::<_, String>((Rc::new(note), files, reads, code))
+                Ok::<_, String>((Rc::new(note), files, reads, page, code))
             }
         }
     }));
@@ -1238,14 +1340,14 @@ fn GuestNoteView(
     match state {
         None => rsx! {},
         Some(Err(why)) => rsx! { p { "data-testid": "guest-problem", "{why}" } },
-        Some(Ok((note, files, reads, code))) => {
+        Some(Ok((note, files, reads, page, code))) => {
             let kind = note.kind.clone().unwrap_or_default();
             // The note's text, for a view that reads the note and no
             // other: never handed on, nor said to be there, otherwise.
             let text = note.source.clone().filter(|_| reads.text);
-            // An extension claims this type and its view reads the note's
-            // text: the view draws the note.
-            let claimed = text.is_some();
+            // An extension claims this type, its view reads the note's
+            // text and is the note's page: the view draws the note.
+            let claimed = text.is_some() && page;
             let count = files.len();
             rsx! {
                 article { "data-testid": "guest-note", "data-files": "{count}",

@@ -289,6 +289,8 @@ title = "More"
 id = "card"
 view = "card"
 claims = { note_type = ["Recipe", "menu"] }
+fill = true
+max_height = 600
 
 [[embeds]]
 id = "fence"
@@ -337,13 +339,18 @@ fn a_linked_extensions_note_views_and_favourites_are_read_in_process() {
     assert_eq!(views[0].view, "card");
     assert_eq!(views[0].note_types, ["Recipe", "menu"]);
     assert_eq!(views[0].reads, ["documents", "files"]);
+    assert!(views[0].fill);
+    assert_eq!(views[0].max_height, 600);
     let favourites = host.linked_favourites();
     assert_eq!(favourites.len(), 1);
     assert_eq!(favourites[0].by.extension, "lab.noted");
     assert!(favourites[0].favourites.is_for("Recipe"));
     let ids = host.linked_view_ids();
     assert!(
-        ids.contains(&("lab.noted".to_owned(), vec!["card".to_owned(), "more".to_owned()])),
+        ids.contains(&(
+            "lab.noted".to_owned(),
+            vec!["card".to_owned(), "more".to_owned()]
+        )),
         "{ids:?}"
     );
     assert!(ids.contains(&("lab.linked".to_owned(), vec!["panel".to_owned()])));
@@ -360,7 +367,11 @@ fn a_linked_extensions_note_views_and_favourites_are_read_in_process() {
     let _ = ext.dev(&dev);
     assert!(host.embeds().linked_note_views().is_empty());
     assert!(host.linked_favourites().is_empty());
-    assert!(host.linked_view_ids().iter().all(|(id, _)| id != "lab.noted"));
+    assert!(
+        host.linked_view_ids()
+            .iter()
+            .all(|(id, _)| id != "lab.noted")
+    );
 }
 
 /// A guest's host: a linked extension that may read and write documents
@@ -422,7 +433,10 @@ fn a_guests_host_refuses_a_linked_extension_the_vault() {
     assert_eq!(answer["ok"]["opened"], "Songs/Joy.md", "{answer}");
     let answer = ask(json!({ "op": "open", "path": "Private/Plan.md" }));
     assert!(
-        answer["error"].as_str().unwrap_or_default().contains("not a note"),
+        answer["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("not a note"),
         "{answer}"
     );
     assert_eq!(*opened.lock().unwrap(), ["Songs/Joy.md"]);

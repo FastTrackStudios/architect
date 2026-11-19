@@ -75,7 +75,7 @@ futures-util = { version = "0.3", default-features = false }
 architect-shell = { workspace = true, features = ["ui"] }
 architect-workspace = { workspace = true, features = ["ui"] }
 architect-commands = { workspace = true, features = ["ui"] }
-# ⌘K and ⌘O: the Command Palette, linked in (#495); a share guest draws its views alone.
+# ⌘K and ⌘O: the Command Palette, linked in (#495), for a share link's guest too.
 architect-command-palette = { workspace = true, features = ["extension"] }
 architect-settings = { workspace = true, features = ["ui", "appearance"] }
 architect-navigator = { workspace = true, features = ["ui"] }

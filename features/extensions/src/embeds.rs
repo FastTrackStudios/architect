@@ -125,6 +125,7 @@ impl Embeds {
                 ..Default::default()
             },
             max_height: None,
+            fill: false,
         };
         self.spec(by.owner, embed, Claim::EmbedType("base_view".to_owned()))
     }
@@ -181,6 +182,8 @@ impl Embeds {
                     extension: by.owner,
                     view,
                     note_types: by.item.claims.note_type,
+                    fill: by.item.fill,
+                    max_height: by.item.max_height.unwrap_or(DEFAULT_MAX_HEIGHT),
                 })
             })
             .collect()
@@ -244,13 +247,12 @@ impl Host {
             })
             .flat_map(|l| {
                 let by = l.manifest.declarer();
-                l.manifest
-                    .favourites
-                    .into_iter()
-                    .map(move |favourites| architect_favourites::Listed {
+                l.manifest.favourites.into_iter().map(move |favourites| {
+                    architect_favourites::Listed {
                         by: by.clone(),
                         favourites,
-                    })
+                    }
+                })
             })
             .collect()
     }
@@ -280,6 +282,12 @@ pub struct LinkedNoteView {
     pub view: String,
     /// The note types the view claims, as declared.
     pub note_types: Vec<String>,
+    /// Whether the view is the note's page (its embed's `fill`), not a
+    /// card at the note's head.
+    pub fill: bool,
+    /// The most it grows to at a note's head, points (its embed's
+    /// `max_height`, else [`DEFAULT_MAX_HEIGHT`]).
+    pub max_height: u32,
     /// What its extension may read (`[capabilities] reads`): the app
     /// hands its view a note's text only with `documents`, a note's files
     /// only with `files` too.

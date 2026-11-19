@@ -15,7 +15,10 @@
 //!   extension: the app draws them itself);
 //! - the distribution's linked extensions (`extensions`, #495): their
 //!   actions in ⌘K, their settings sections, their views as workspace
-//!   panes, on the same host as a desk's (no Luau);
+//!   panes, on the same host as a desk's (no Luau); and their views
+//!   wherever an extension's view is drawn: a note by its type, the
+//!   home, a favourite's view, for a member and for a share link's guest
+//!   (a distribution's own views need no island);
 //! - extensions' views in sandboxed frames of their own (`frames`, route A
 //!   of #495): the view an island claims a note's type with, at the
 //!   note's head (`embed`), and any view a favourite of its extension
@@ -61,12 +64,13 @@ mod settings;
 mod tabmenu;
 mod theme;
 pub mod vault;
+mod view_probe;
 
 use std::rc::Rc;
 use std::sync::Arc;
 
 use architect::action::ActionList;
-use architect_commands::{Command, Overlay, PaletteView};
+use architect_commands::{Command, Overlay};
 use architect_shell::{self as shell, AppShell, icon};
 use dioxus::prelude::*;
 use lucide_dioxus::{
@@ -165,23 +169,22 @@ fn WebApp() -> Element {
     // Commands: the palette (⌘K), quick open (⌘O), every command's key.
     let commands = architect_commands::use_commands_provider();
     // Under the commands (its actions are listed in ⌘K).
-    // The distribution's linked extensions (#495, W1), on the demo and
-    // the signed-in vaults. A share link's guest runs none yet: a known
-    // gap (#805), since a link is this same app as a guest and should run
-    // them under `share_needs::guest_capabilities`
-    // (`docs/content/guide/shares.md`). The mode never changes while the
-    // app runs, so the hooks below keep their order.
-    let ext_ui = (!matches!(mode, Mode::Guest { .. })).then(|| {
-        let ui = extensions::use_web_extensions(&list);
+    // The distribution's linked extensions (#495, W1), on the demo, the
+    // signed-in vaults and a share link (#805): a link is this same app
+    // as a guest, so it runs the same compiled-in extensions, on a host
+    // built for a guest (no session, no documents, no vault index, no
+    // kept data: every such request is refused,
+    // `architect_extensions::hostcall::guest_check`).
+    let ext_ui = {
+        let ui = extensions::use_web_extensions(&list, matches!(mode, Mode::Guest { .. }));
         use_context_provider(|| ui)
-    });
+    };
+    // Which views draw a guest's content: the app's own linked
+    // extensions, on that guest's host. They are compiled into this app,
+    // so they are the app itself; what each is handed is still what the
+    // link admits and its manifest reads (`embed`, `guest`).
+    use_context_provider(architect_extensions::embeds::GuestEmbedPolicy::own_linked);
     architect_commands::use_command_actions(list);
-    // A share link's guest runs no extensions yet (#805): the Command
-    // Palette's views drawn by the app itself, as its extension does
-    // elsewhere (`[[palette_views]]`). A second implementation to remove.
-    if ext_ui.is_none() {
-        own_palette(commands);
-    }
     architect_commands::use_command(
         Command::new("APP_SETTINGS", "Settings")
             .group("App")
@@ -190,6 +193,33 @@ fn WebApp() -> Element {
     );
     let demo = matches!(mode, Mode::Demo);
     let guest = matches!(mode, Mode::Guest { .. });
+    // A note a linked view asks to open (the host's `open`): a member's
+    // (and the demo's) any note of the vault, in the workspace, the home
+    // out of its way. A guest's page sets its own, for the notes the link
+    // lists (`guest::GuestPage`). The mode never changes while the app
+    // runs, so the hooks below keep their order.
+    if !guest {
+        let vault = web_vault.clone();
+        // A host call's answer arrives outside this scope: back into it,
+        // or the signals written below find no runtime.
+        let (runtime, scope) = (
+            dioxus::core::Runtime::current(),
+            dioxus::core::current_scope_id(),
+        );
+        use_hook(move || {
+            extensions::set_note_opener(Some(Rc::new(move |path: &str| {
+                let Some(found) = vault::note_named(&vault, path) else {
+                    return false;
+                };
+                home::remember(&found);
+                runtime.in_scope(scope, || {
+                    vault::show(workspace, &found);
+                    *home::HOME.write() = false;
+                });
+                true
+            })));
+        });
+    }
     // The card's art: an item's `art` (a vault path) as the demo vault's
     // image, a `data:` URL (`crate::demo::image_url`); a share link's, the
     // link's own file (`guest::file_url`).
@@ -294,14 +324,21 @@ fn WebApp() -> Element {
         None => (tabs, current, separate),
     };
     let on_link_bar = link_bar.is_some();
-    // A member's home: an island's view over the workspace, first on show
-    // (`home`), with a tab and a foot button back to it.
+    // A member's home: the distribution's linked view, else an island's,
+    // over the workspace, first on show (`home`), with a tab and a foot
+    // button back to it. The demo has the distribution's own too, on its
+    // vault; an island's home is a signed-in member's alone, as before.
     let home_view = home::use_home();
-    let has_home = matches!(mode, Mode::Org { .. }) && home_view().is_some();
+    let has_home = match (&mode, home_view()) {
+        (Mode::Org { .. }, Some(_)) => true,
+        (Mode::Demo, Some(home)) => home.is_linked(),
+        _ => false,
+    };
     let home_on = has_home && home::HOME();
     // A page for looking and listening has no row of editing buttons: a
     // link's guest page, the home, and a note an extension's view draws.
     let listing = frames::use_listing();
+    let linked_claims = extensions::use_linked_claims();
     let on_show_type = {
         let source = web_vault.source.clone();
         use_memo(move || vault::note_on_show(&workspace.read(), &source).and_then(|(_, ty)| ty))
@@ -309,10 +346,12 @@ fn WebApp() -> Element {
     let view_on_show = !guest
         && !home_on
         && on_show_type().is_some_and(|ty| {
-            listing
-                .read()
-                .as_ref()
-                .is_some_and(|l| crate::ext_host::claimed(l, &ty).is_some())
+            crate::ext_host::drawn(
+                &linked_claims.read(),
+                listing.read().as_ref().map_or(&[][..], |l| l.as_slice()),
+                &ty,
+            )
+            .is_some_and(|d| d.is_page())
         });
     let quiet = guest || home_on || view_on_show;
     use_effect(use_reactive!(|(quiet, view_on_show)| {
@@ -431,11 +470,8 @@ fn WebApp() -> Element {
         }
     }
     // The extensions' status items (their `[[status]]` and what their code
-    // sets with `ext.state`), after the app's own, as a desk shows them. A
-    // guest runs none (#805).
-    if let Some(ui) = ext_ui.as_ref() {
-        status.extend(ui.chrome().status);
-    }
+    // sets with `ext.state`), after the app's own, as a desk shows them.
+    status.extend(ext_ui.chrome().status);
     // A phone's demo: a strip over the top says so, the shell laid out
     // under it (as under a notch).
     let phone = screen().form() == shell::FormFactor::Phone;
@@ -513,6 +549,11 @@ fn WebApp() -> Element {
                             if let (true, Mode::Org { person, org, .. }) = (home_on, &mode) {
                                 home::HomePage { person: person.clone(), org: org.clone() }
                             }
+                            // The demo's: the distribution's own home, on
+                            // the demo's vault.
+                            if home_on && demo {
+                                home::HomePage { person: "Demo".to_owned(), org: "demo".to_owned() }
+                            }
                             // The workspace itself (its panes, what is
                             // open) is the app's and stays; its page, with
                             // the bar buttons it adds, is off while the
@@ -541,48 +582,13 @@ fn WebApp() -> Element {
                     DemoBadge {}
                 }
             }
-            if let Some(ui) = ext_ui {
-                architect_extensions::interface::ExtensionOverlays { ui }
-            }
+            architect_extensions::interface::ExtensionOverlays { ui: ext_ui }
             architect_commands::CommandLayer {}
             architect_commands::ConfirmSheet {}
             architect_settings::SettingsPage {}
             SettingsLayer { phone }
         }
     }
-}
-
-/// ⌘K and ⌘O without the Command Palette extension (a share link's guest):
-/// its views, drawn by the app.
-fn own_palette(commands: architect_commands::Commands) {
-    // The Command Palette's views draw both overlays, as its extension
-    // does on a desk (`[[palette_views]]`).
-    use_hook(move || {
-        commands.set_palette_views(vec![
-            PaletteView {
-                overlay: Overlay::Palette,
-                owner: architect_command_palette::ID.to_owned(),
-                draw: Rc::new(|| rsx! { architect_command_palette::views::PaletteView {} }),
-            },
-            PaletteView {
-                overlay: Overlay::QuickOpen,
-                owner: architect_command_palette::ID.to_owned(),
-                draw: Rc::new(|| rsx! { architect_command_palette::views::QuickOpenView {} }),
-            },
-        ]);
-    });
-    architect_commands::use_command(
-        Command::new(architect_command_palette::OPEN_ACTION, "Commands")
-            .group("Help")
-            .shortcut("⌘K"),
-        move || commands.show(Overlay::Palette),
-    );
-    architect_commands::use_command(
-        Command::new(architect_command_palette::OPEN_ANYTHING_ACTION, "Open…")
-            .group("Go")
-            .shortcut("⌘O"),
-        move || commands.show(Overlay::QuickOpen),
-    );
 }
 
 /// The settings page over the app while a section is open: a card on a
