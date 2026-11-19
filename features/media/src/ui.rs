@@ -295,7 +295,7 @@ pub fn MediaList(
                     class: "media-list-play",
                     "data-testid": "media-list-play",
                     disabled: playable == 0,
-                    "aria-label": if ours_playing { "Pause".to_owned() } else { head.clone().unwrap_or_else(|| "Play".to_owned()) },
+                    "aria-label": if ours_playing { "Pause".to_owned() } else { head.unwrap_or_else(|| "Play".to_owned()) },
                     onclick: head_play,
                     if ours_playing {
                         Pause { size: 18, color: t.accent_ink.clone() }
@@ -423,7 +423,7 @@ fn ListRow(
                     "data-media-art": "{has_art}",
                     "data-media-tile": "{tile_fills}",
                     "data-tile-size": "{tile_size}",
-                    style: if tile_fills { tile_ground.clone() } else { String::new() },
+                    style: if tile_fills { tile_ground } else { String::new() },
                     if let Some(src) = picture {
                         img { src: "{src}", alt: "", draggable: "false" }
                         if let Some(tile) = tile {
@@ -459,7 +459,7 @@ fn ListRow(
                             open.call(path.clone());
                         }
                     },
-                    ChevronRight { size: 20, color: faint.clone() }
+                    ChevronRight { size: 20, color: faint }
                 }
             } else {
                 span {}
