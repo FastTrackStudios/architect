@@ -205,6 +205,56 @@ impl Fetcher {
         }
     }
 
+    /// The blob's bytes from `offset`, straight from the first remote
+    /// that has it. Nothing is written to the store, now or later.
+    ///
+    /// What a node that does not hold a blob (and is not to: its holding
+    /// rule leaves it out) answers a ranged read with: the reader is the
+    /// remote's own stream, so reading from the middle of a large blob
+    /// costs that range and no more, and dropping it ends the transfer.
+    ///
+    /// # Errors
+    ///
+    /// No remote has it ([`BlobError::NotFound`]), or none could start
+    /// sending it ([`BlobError::Unavailable`]).
+    pub async fn relay(&self, hash: Sha256, offset: u64) -> Result<Blob, BlobError> {
+        let remotes = self
+            .inner
+            .remotes
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let mut failures = Vec::new();
+        for remote in remotes {
+            let size = match remote.size(hash).await {
+                Ok(Some(size)) => size,
+                Ok(None) => continue,
+                Err(e) => {
+                    failures.push(e.to_string());
+                    continue;
+                }
+            };
+            let offset = offset.min(size);
+            match remote.read_from(hash, offset).await {
+                Ok(reader) => {
+                    return Ok(Blob {
+                        len: size.saturating_sub(offset),
+                        reader,
+                    });
+                }
+                Err(e) => failures.push(e.to_string()),
+            }
+        }
+        if failures.is_empty() {
+            Err(BlobError::NotFound(hash))
+        } else {
+            Err(BlobError::Unavailable {
+                hash,
+                reason: failures.join("; "),
+            })
+        }
+    }
+
     /// The blob's bytes from the start; see [`Self::open_at`].
     ///
     /// # Errors

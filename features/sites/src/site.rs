@@ -64,6 +64,17 @@ pub struct Options {
     /// [`crate::plain`]): what a share link's guest reads in the app
     /// (#629). Off by default.
     pub page_data: bool,
+    /// Attachments of the vault (vault paths) that are not in its folder
+    /// here: this device knows of them and another holder has their
+    /// bytes. They are linked, embedded and listed as any attachment is;
+    /// whoever serves the site answers them from where they are.
+    pub elsewhere: Vec<String>,
+    /// Leave the attachments where they are instead of copying them into
+    /// the site ([`Site::attachments`] still names them): whoever serves
+    /// it reads each from the vault, or from its holder. A share link's
+    /// build, so a large recording is not copied again on every edit of
+    /// the vault (#490). Off by default: a static site holds its files.
+    pub attachments_in_place: bool,
 }
 
 impl Options {
@@ -86,6 +97,8 @@ impl Options {
             filter: None,
             hold_back: BTreeSet::new(),
             page_data: false,
+            elsewhere: Vec::new(),
+            attachments_in_place: false,
         }
     }
 }
@@ -189,6 +202,8 @@ pub struct Site {
     pub root: PathBuf,
     /// Attachments linked or embedded from a page, by vault path.
     pub attachments: Vec<String>,
+    /// Whether they stay where they are ([`Options::attachments_in_place`]).
+    pub attachments_in_place: bool,
     pub static_dirs: Vec<PathBuf>,
 }
 
@@ -226,7 +241,8 @@ impl Site {
             return Err(SiteError::Missing(opts.vault.clone()));
         }
         let vault = Vault::open(&opts.vault)
-            .map_err(|e| SiteError::Unreadable(opts.vault.clone(), e.to_string()))?;
+            .map_err(|e| SiteError::Unreadable(opts.vault.clone(), e.to_string()))?
+            .with_attachments_elsewhere(opts.elsewhere.iter().map(String::as_str));
         let notes: Vec<Note<'_>> = vault
             .pages
             .iter()
@@ -302,6 +318,7 @@ impl Site {
             problems: Vec::new(),
             root: opts.vault.clone(),
             attachments: Vec::new(),
+            attachments_in_place: opts.attachments_in_place,
             static_dirs: opts.static_dirs.clone(),
         };
 

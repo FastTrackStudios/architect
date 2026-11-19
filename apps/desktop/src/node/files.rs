@@ -230,7 +230,7 @@ pub(super) fn hold_vault(
     vault: &str,
     dir: &Path,
     collab: &vault_collab::VaultCollab,
-) {
+) -> uuid::Uuid {
     let section = architect_files::sync::Section::Vaults;
     let place = format!("{org}/{}/{vault}", section.dir());
     let meta = architect_files::sync::RootMeta {
@@ -246,6 +246,7 @@ pub(super) fn hold_vault(
         Arc::new(move |path| not_an_attachment(path, &|p| collab.kind_of(p).is_some())),
     );
     tracing::info!(files.root = %doc_id, files.place = %place, "files: a vault's attachments are held where the vault is");
+    doc_id
 }
 
 /// The agent on the node's HTTP side, when it listens on loopback only (a

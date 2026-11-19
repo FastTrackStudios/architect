@@ -2008,11 +2008,15 @@ async fn a_links_layer_is_held_by_the_node_on_every_route() {
         .join("audiences")
         .join(&share.audience_named("orchestra").unwrap().code)
         .join("site");
+    // Nor is any attachment: a link's files stay in the vault and are read
+    // from there by the exact path its build names (#490), so the file it
+    // does serve is not in the folder either.
     assert!(
-        orchestra_dir
+        !orchestra_dir
             .join("Songs/Joy/Media/Proxies/Reference.ogg")
-            .is_file()
+            .exists()
     );
+    assert!(orchestra_dir.join("index.html").is_file());
     assert!(
         !orchestra_dir
             .join("Songs/Joy/Media/Proxies/Bass.ogg")
@@ -4388,13 +4392,15 @@ async fn an_unknown_code_answers_exactly_as_a_revoked_or_expired_one() {
             ShareAccess::Read,
         )
         .await;
+    // (With comments: the same ask twice is one link.)
     let expired = w
         .share(
             ShareScope::Folder("Shared".to_owned()),
             Audience::Link,
-            ShareAccess::Read,
+            ShareAccess::Comment,
         )
         .await;
+    assert_ne!(expired.code, revoked.code);
     page_with(&w.url(&format!("/s/{}/", revoked.code)), None, "The album").await;
     links.revoke(revoked.code.clone()).await.unwrap();
     links

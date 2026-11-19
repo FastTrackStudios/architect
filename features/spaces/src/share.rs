@@ -344,6 +344,166 @@ pub enum ShareAccess {
     Comment,
 }
 
+/// What of a link's files is offered as a download.
+///
+/// A permission of the link, not another page: every viewer plays what
+/// the link's layer serves; this says which of those files the app lists
+/// to save and puts in "Download all". A file that is not offered is
+/// still streamed to the player (its bytes must reach the browser), so
+/// this is what the link offers, not a lock on what a browser can keep.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Facet)]
+#[repr(u8)]
+pub enum Download {
+    /// Every file the link serves (as before).
+    #[default]
+    Everything,
+    /// Everything but recordings and multitracks ([`is_media`]): they
+    /// play, and are not listed to save or put in the archive.
+    NotMedia,
+    /// Nothing: the link is for looking and listening.
+    Nothing,
+}
+
+impl Download {
+    /// `everything`, `not-media` or `nothing`.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Everything => "everything",
+            Self::NotMedia => "not-media",
+            Self::Nothing => "nothing",
+        }
+    }
+
+    /// Parse [`Self::label`] (any case).
+    ///
+    /// # Errors
+    ///
+    /// Anything else.
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "everything" | "all" => Ok(Self::Everything),
+            "not-media" | "notmedia" | "no-media" => Ok(Self::NotMedia),
+            "nothing" | "none" => Ok(Self::Nothing),
+            other => Err(format!(
+                "no download rule `{other}`: everything, not-media or nothing"
+            )),
+        }
+    }
+
+    /// Whether the file at `path` is offered as a download.
+    #[must_use]
+    pub fn offers(self, path: &str) -> bool {
+        match self {
+            Self::Everything => true,
+            Self::NotMedia => !is_media(path),
+            Self::Nothing => false,
+        }
+    }
+}
+
+/// Whether `path` is a recording by its name: sound or video.
+#[must_use]
+pub fn is_media(path: &str) -> bool {
+    const MEDIA: [&str; 19] = [
+        "wav", "wave", "flac", "aif", "aiff", "mp3", "m4a", "aac", "ogg", "oga", "opus", "wv",
+        "caf", "w64", "mp4", "m4v", "mov", "webm", "mkv",
+    ];
+    path.rsplit_once('.')
+        .is_some_and(|(_, ext)| MEDIA.iter().any(|m| ext.eq_ignore_ascii_case(m)))
+}
+
+/// What a link's viewers may do with a project it carries.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Facet)]
+#[repr(u8)]
+pub enum ProjectAccess {
+    /// Open it read-only: its sessions and the media they reference.
+    #[default]
+    Read,
+    /// That, and save its session documents back: a new version of the
+    /// file each time, by a signed-in viewer the link lets in (never an
+    /// anonymous one).
+    Edit,
+}
+
+/// A project a link carries beside its notes: session documents of one
+/// file root and the media they reference, and nothing else of the root.
+///
+/// The root is named by its place, `<org>/Projects/<project>`, as the
+/// files engine does. The node resolves each session's references to the
+/// root's files (a path beside the session, a path in the root, or a
+/// file's sha-256, as a string anywhere in the document) and serves
+/// exactly those, by hash.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Facet)]
+pub struct ShareProject {
+    /// `<org>/Projects/<project>`.
+    pub root: String,
+    /// The session documents shared, root-relative
+    /// (`songs/joy/Joy.fts-session`). None named: every session document
+    /// in the root.
+    #[facet(default)]
+    pub sessions: Vec<String>,
+    #[facet(default)]
+    pub access: ProjectAccess,
+}
+
+/// The most projects one link carries.
+pub const PROJECTS_MAX: usize = 16;
+
+/// Whether `path` names a session document: what a project link shares
+/// and reads references from.
+#[must_use]
+pub fn is_session_document(path: &str) -> bool {
+    path.rsplit_once('.').is_some_and(|(_, ext)| {
+        ext.eq_ignore_ascii_case("fts-session") || ext.eq_ignore_ascii_case("session")
+    })
+}
+
+/// Whether `projects` may be a share's.
+///
+/// # Errors
+///
+/// A root that is not `<org>/Projects/<name>`, a session that is not a
+/// session document's path inside it, the same root twice, or too many.
+pub fn validate_projects(projects: &[ShareProject]) -> Result<(), ShareFault> {
+    let bad = |why: String| Err(ShareFault::Invalid(why));
+    if projects.len() > PROJECTS_MAX {
+        return bad(format!("a link carries at most {PROJECTS_MAX} projects"));
+    }
+    let plain = |path: &str| {
+        !path.is_empty()
+            && path
+                .split('/')
+                .all(|s| !s.is_empty() && s != "." && s != ".." && !s.contains(['\\', '\0']))
+    };
+    for (i, project) in projects.iter().enumerate() {
+        let parts: Vec<&str> = project.root.split('/').collect();
+        if !(parts.len() == 3 && parts.get(1) == Some(&"Projects") && plain(&project.root)) {
+            return bad(format!(
+                "`{}` is not a project's root: <org>/Projects/<project>",
+                project.root
+            ));
+        }
+        if projects
+            .iter()
+            .take(i)
+            .any(|earlier| earlier.root == project.root)
+        {
+            return bad(format!("`{}` is named twice", project.root));
+        }
+        if let Some(session) = project
+            .sessions
+            .iter()
+            .find(|s| !plain(s) || !is_session_document(s))
+        {
+            return bad(format!(
+                "`{session}` is not a session document's path in the project"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// A share link.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct Share {
@@ -376,6 +536,14 @@ pub struct Share {
     /// default: access fails closed.
     #[facet(default)]
     pub listen: Listen,
+    /// What of its files is offered as a download; a share written
+    /// before it offers everything.
+    #[facet(default)]
+    pub download: Download,
+    /// The projects it carries beside its notes: their session documents
+    /// and the media those reference.
+    #[facet(default)]
+    pub projects: Vec<ShareProject>,
 }
 
 /// Where a share stands at one moment.
@@ -476,6 +644,23 @@ impl Share {
             .map_or(self.listen, |a| a.min(self.listen))
     }
 
+    /// Whether `new` asks for the link this share already is: the same
+    /// vault, scope and audience, with the same access, layer, expiry
+    /// and domain, and still open. Sharing the same thing with the same
+    /// people again gives the link they already have; asking for another
+    /// audience, layer or access is asking for another link.
+    #[must_use]
+    pub fn is_the_link_of(&self, new: &NewShare, now: i64) -> bool {
+        self.state(now) == ShareState::Live
+            && self.vault == new.vault
+            && self.scope == new.scope
+            && self.audience == new.audience.clone().normalised()
+            && self.access == new.access
+            && self.listen == new.listen
+            && self.expires_at == new.expires_at
+            && self.domain.as_deref() == new.domain.as_deref().map(str::trim)
+    }
+
     /// Whether the people it lets in may comment.
     #[must_use]
     pub fn comments(&self) -> bool {
@@ -553,6 +738,10 @@ pub enum ShareChange {
     Title(Option<String>),
     /// A domain of its own, or none.
     Domain(Option<String>),
+    /// What of its files is offered as a download.
+    Download(Download),
+    /// The projects it carries, all of them (none: an empty list).
+    Projects(Vec<ShareProject>),
 }
 
 /// A comment left on a shared page.
@@ -658,7 +847,78 @@ mod tests {
             domain: None,
             audiences: Vec::new(),
             listen: Listen::Full,
+            download: Download::default(),
+            projects: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_link_plays_what_it_does_not_offer_to_keep() {
+        assert!(Download::Everything.offers("Songs/joy.wav"));
+        assert!(!Download::NotMedia.offers("Songs/joy.WAV"));
+        assert!(!Download::NotMedia.offers("Songs/Joy/Media/kick.flac"));
+        assert!(Download::NotMedia.offers("Songs/joy.pdf"));
+        assert!(Download::NotMedia.offers("Songs/Joy.fts-session"));
+        assert!(!Download::Nothing.offers("Songs/joy.pdf"));
+        for rule in [Download::Everything, Download::NotMedia, Download::Nothing] {
+            assert_eq!(Download::parse(rule.label()), Ok(rule));
+        }
+        assert!(Download::parse("some").is_err());
+        assert!(is_media("a.mp3") && !is_media("a.mp3.txt") && !is_media("wav"));
+    }
+
+    #[test]
+    fn a_project_scope_names_a_root_and_session_documents_in_it() {
+        let project = |root: &str, sessions: &[&str]| ShareProject {
+            root: root.to_owned(),
+            sessions: sessions.iter().map(|s| (*s).to_owned()).collect(),
+            access: ProjectAccess::Read,
+        };
+        let good = project("indie/Projects/Album", &["songs/joy/Joy.fts-session"]);
+        assert!(validate_projects(std::slice::from_ref(&good)).is_ok());
+        assert!(validate_projects(&[project("indie/Projects/Album", &[])]).is_ok());
+        for bad in [
+            project("indie/Assets/Tracks", &[]),
+            project("indie/Projects", &[]),
+            project("indie/Projects/../x", &[]),
+            project("indie/Projects/Album", &["songs/joy/kick.wav"]),
+            project("indie/Projects/Album", &["../other/Joy.session"]),
+            project("indie/Projects/Album", &["/abs/Joy.session"]),
+        ] {
+            assert!(validate_projects(std::slice::from_ref(&bad)).is_err(), "{bad:?}");
+        }
+        assert!(validate_projects(&[good.clone(), good]).is_err(), "twice");
+        assert!(is_session_document("a/b.SESSION") && !is_session_document("a/b.session-wal"));
+    }
+
+    #[test]
+    fn sharing_the_same_thing_with_the_same_people_is_the_same_link() {
+        let mut s = share(Audience::Invited(vec!["b@x.test".into(), "a@x.test".into()]));
+        s.audience = s.audience.clone().normalised();
+        let again = |audience: Audience, scope: ShareScope| NewShare {
+            vault: s.vault.clone(),
+            scope,
+            title: Some("another name".into()),
+            audience,
+            access: s.access,
+            expires_at: None,
+            domain: None,
+            listen: s.listen,
+        };
+        let same = Audience::Invited(vec![" A@x.test".into(), "b@X.test".into()]);
+        assert!(s.is_the_link_of(&again(same.clone(), s.scope.clone()), 1));
+        assert!(!s.is_the_link_of(&again(Audience::Link, s.scope.clone()), 1));
+        assert!(!s.is_the_link_of(&again(same.clone(), ShareScope::Tag("x".into())), 1));
+        // Another layer or access is another link.
+        let mut deeper = again(same.clone(), s.scope.clone());
+        deeper.listen = Listen::Page;
+        assert!(!s.is_the_link_of(&deeper, 1));
+        let mut comments = again(same.clone(), s.scope.clone());
+        comments.access = ShareAccess::Comment;
+        assert!(!s.is_the_link_of(&comments, 1));
+        let mut gone = s.clone();
+        gone.revoked_at = Some(1);
+        assert!(!gone.is_the_link_of(&again(same, s.scope.clone()), 2), "revoked");
     }
 
     fn person(email: &str, member: bool) -> Viewer {

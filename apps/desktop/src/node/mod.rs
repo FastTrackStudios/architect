@@ -63,6 +63,8 @@ pub mod cli;
 pub mod config;
 mod files;
 mod guest_live;
+pub mod holders;
+pub mod share_project;
 
 /// How often a share guest's live session asks again whether its link
 /// still serves the document (`/s/<code>/_guest/live`, #847).
@@ -578,16 +580,18 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
         org::VaultOrgs::new(orgs.clone(), by_vault)
     };
     // Each vault's attachments, a root held where the vault is.
+    let mut vault_roots = std::collections::HashMap::new();
     if let (true, Some(engine)) = (config.vault_files, &files) {
         let slugs: Vec<String> = orgs.iter().map(|o| o.slug.clone()).collect();
         for (id, root) in &roots {
-            files::hold_vault(
+            let doc_id = files::hold_vault(
                 engine,
                 config.vault_files_org(id, &slugs),
                 id,
                 root,
                 &collab,
             );
+            vault_roots.insert(id.clone(), doc_id);
         }
     }
     let lanes: Vec<org::OrgLane> = issuer.as_ref().map_or_else(Vec::new, |issuer| {
@@ -777,6 +781,9 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
         .map_err(StartError::Other)?,
     );
     let dials = parse_peers(&config.peers);
+    // The node's bucket, for what answers a link from wherever its files
+    // are (#490).
+    let mut link_bucket = None;
     if let Some(engine) = &files {
         let every = Duration::from_secs(config.files_secs.max(1));
         let bucket = files::backend(&config).await.map_err(StartError::Other)?;
@@ -789,6 +796,7 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
                 config.blob_s3_endpoint.as_deref(),
             );
             let s3 = s3.with_events(Arc::new(holder));
+            link_bucket = Some(s3.clone());
             fixed.push(Arc::new(s3.clone()));
             tasks.push(tokio::spawn(files::replicate_forever(
                 engine.clone(),
@@ -847,6 +855,27 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
         }
         web
     });
+    // A link's files from wherever they are held (#490): with the files
+    // engine, a link names a vault's attachments this node does not hold
+    // and carries projects.
+    let shares = match &files {
+        Some(engine) => {
+            let holders = holders::Holders::new(engine.clone(), link_bucket, vault_roots);
+            let watched = (holders.clone(), shares.clone());
+            let every = Duration::from_secs(config.files_secs.max(1));
+            tasks.push(tokio::spawn(async move {
+                let (holders, shares) = watched;
+                loop {
+                    for vault in holders.refresh().await {
+                        shares.vault_moved(&vault);
+                    }
+                    tokio::time::sleep(every).await;
+                }
+            }));
+            shares.with_holders(holders)
+        }
+        None => shares,
+    };
     for id in config.vaults.keys() {
         tasks.push(tokio::spawn(shares.clone().keep_built(id.clone())));
     }

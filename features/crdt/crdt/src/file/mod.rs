@@ -656,6 +656,21 @@ fn image(records: &[Record]) -> Result<Vec<u8>, FileError> {
 }
 
 /// The index `storage`'s records add up to, and the torn tail cut off.
+/// The main branch of the document `bytes` are, whatever its kind, as it
+/// was last saved.
+///
+/// For a reader that only looks (which files does this document name?)
+/// and has no need of the kind: nothing is upgraded, stamped or written.
+///
+/// # Errors
+///
+/// `bytes` are not a document's file.
+pub async fn read_main(bytes: Vec<u8>) -> Result<LoroDoc, FileError> {
+    let storage = MemoryStorage::from_bytes(bytes);
+    let (index, _) = read(&storage).await?;
+    index.materialize(MAIN)
+}
+
 async fn read(storage: &impl Storage) -> Result<(Index, Option<Recovery>), FileError> {
     let bytes = storage.read().await?;
     let parsed = format::parse(&bytes)?;

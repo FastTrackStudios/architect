@@ -149,6 +149,31 @@ impl Vault {
         ))
     }
 
+    /// Count `paths` among the vault's attachments though they are not
+    /// in its folder here: files of the vault this device knows of and
+    /// does not hold (their bytes are with another holder). A note's
+    /// link to one resolves as to any attachment. One already found on
+    /// disk is left as it is.
+    pub fn with_attachments_elsewhere<'a>(
+        mut self,
+        paths: impl IntoIterator<Item = &'a str>,
+    ) -> Self {
+        let have: std::collections::HashSet<String> = self
+            .attachments
+            .iter()
+            .map(|a| a.rel_path.clone())
+            .collect();
+        for path in paths {
+            if !have.contains(path) {
+                self.attachments.push(VaultEntryRef {
+                    rel_path: path.to_owned(),
+                    kind: VaultEntryKind::Attachment,
+                });
+            }
+        }
+        self
+    }
+
     /// Look up a page by vault-relative path.
     #[must_use]
     pub fn page(&self, rel_path: &str) -> Option<&VaultPage> {

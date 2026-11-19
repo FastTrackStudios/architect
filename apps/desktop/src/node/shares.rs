@@ -91,7 +91,7 @@ use architect_sites::archive::ZipWriter;
 use architect_sites::listing::{self, Entry, Group, Grouping, Vault};
 use architect_spaces::share::{
     LINKS, SHARES_FOLDER, code_from, comments_note_path, is_code, link_path, share_note_path,
-    validate, validate_audience, validate_domain,
+    validate, validate_audience, validate_domain, validate_projects,
 };
 use architect_spaces::{
     GuestFault, GuestLink, GuestNote, LayersReport, ListedFile, ListedNote, Listen, NewAudience,
@@ -102,7 +102,9 @@ use tokio::sync::{Notify, watch};
 use vault_live::Backend;
 use vault_proto::{IfMatch, VaultSync as _};
 
+use super::holders::Holders;
 use super::org::{IssuerLane, NodeOrg, VaultOrgs};
+use super::share_project;
 use super::share_layers::{LayerRules, same_file, within};
 use super::share_shell;
 
@@ -286,6 +288,9 @@ struct Inner {
     /// Whether the web app is served beside the node: a link's page is
     /// the app's, or says it needs it ([`share_shell::WebApp`]).
     web_app: std::sync::OnceLock<share_shell::WebApp>,
+    /// Where a link's files are when they are not on this disk (#490):
+    /// set when the node runs the files engine.
+    holders: std::sync::OnceLock<Holders>,
 }
 
 /// A device sign-in a browser is waiting on.
@@ -325,6 +330,7 @@ impl Shares {
             islands: std::sync::OnceLock::new(),
             favourites: std::sync::OnceLock::new(),
             web_app: std::sync::OnceLock::new(),
+            holders: std::sync::OnceLock::new(),
         }))
     }
 
@@ -335,6 +341,26 @@ impl Shares {
     pub fn with_web_app(self, web: share_shell::WebApp) -> Self {
         let _ = self.0.web_app.set(web);
         self
+    }
+
+    /// With the files engine's holders (#490): a link then names and
+    /// serves a vault's attachments this node does not hold, and carries
+    /// projects ([`share_project`]). The first call holds.
+    #[must_use]
+    pub fn with_holders(self, holders: Holders) -> Self {
+        let _ = self.0.holders.set(holders);
+        self
+    }
+
+    fn holders(&self) -> Option<&Holders> {
+        self.0.holders.get()
+    }
+
+    /// `vault` changed in a way its folder does not show (a file held
+    /// elsewhere came or went): read it again, build its links again.
+    pub fn vault_moved(&self, vault: &str) {
+        self.moved(vault).fetch_add(1, Ordering::SeqCst);
+        self.kick(vault).notify_one();
     }
 
     fn web_app(&self) -> share_shell::WebApp {
@@ -494,6 +520,10 @@ impl Shares {
             };
             held.insert(cap, set);
         }
+        let elsewhere: Vec<String> = self
+            .holders()
+            .map(|h| h.elsewhere(&share.vault).keys().cloned().collect())
+            .unwrap_or_default();
         let options = |base: String, filter: Option<String>, cap: Listen| {
             let mut opts =
                 architect_sites::Options::new(&root, share.title.clone().unwrap_or_default());
@@ -503,13 +533,17 @@ impl Shares {
             opts.filter = filter;
             // Each page's plain blocks, for the link's guests (#629).
             opts.page_data = true;
+            opts.elsewhere.clone_from(&elsewhere);
             if let Some(set) = held.get(&cap) {
                 opts.hold_back.clone_from(set);
             }
             opts
         };
         // Its own link: the whole scope. And its domain's root.
-        let own = options(share.path(), None, share.listen);
+        // A link's attachments stay in the vault (#490): read from there,
+        // or from their holder, when asked for; never copied per build.
+        let mut own = options(share.path(), None, share.listen);
+        own.attachments_in_place = true;
         if let Some(manifest) = self.build_one(share, &own, &at.join("site")) {
             manifests.insert(share.code.clone(), Arc::new(manifest));
         }
@@ -523,11 +557,12 @@ impl Shares {
         // Each audience: the notes its filter holds for, and no others.
         for audience in &share.audiences {
             let out = self.audience_dir(&share.code, &audience.code).join("site");
-            let opts = options(
+            let mut opts = options(
                 audience.path(),
                 Some(audience.filter.clone()),
                 share.listen_for(Some(audience)),
             );
+            opts.attachments_in_place = true;
             // An audience nothing is in has no pages, and says so.
             let manifest = self.build_one(share, &opts, &out).unwrap_or_default();
             manifests.insert(audience.code.clone(), Arc::new(manifest));
@@ -601,6 +636,14 @@ impl Shares {
         let (read, unread) = listing::open_reporting(&root)
             .map_err(|error| tracing::warn!(%vault, %error, "a shared vault could not be read"))
             .ok()?;
+        // Its attachments held elsewhere are its attachments too.
+        let read = match self.holders() {
+            Some(holders) => {
+                let elsewhere = holders.elsewhere(vault);
+                read.with_attachments_elsewhere(elsewhere.keys().map(String::as_str))
+            }
+            None => read,
+        };
         let view = Arc::new(VaultView {
             generation,
             vault: read,
@@ -1010,6 +1053,15 @@ impl Shares {
                 new.vault
             )));
         }
+        // The same scope for the same people again: the link they have.
+        if let Some(existing) = self
+            .list()
+            .into_iter()
+            .filter(|share| share.is_the_link_of(&new, at))
+            .min_by_key(|share| share.created_at)
+        {
+            return Ok(existing);
+        }
         self.save(Share {
             code: self.new_code(),
             vault: new.vault,
@@ -1024,6 +1076,8 @@ impl Shares {
             domain: new.domain.map(|d| d.trim().to_lowercase()),
             audiences: Vec::new(),
             listen: new.listen,
+            download: architect_spaces::Download::default(),
+            projects: Vec::new(),
         })
         .await
     }
@@ -1061,6 +1115,11 @@ impl Shares {
                     }
                 }
                 share.domain = d;
+            }
+            ShareChange::Download(d) => share.download = d,
+            ShareChange::Projects(projects) => {
+                validate_projects(&projects)?;
+                share.projects = projects;
             }
         }
         self.save(share).await
@@ -1970,6 +2029,16 @@ async fn serve(
     match rest {
         "/_live" => live(shares, code),
         "/_files.json" => private(&share, files_json(shares, &link, &query).await),
+        // The projects it carries, and their files by hash (#490).
+        "/_project.json" if !domain => {
+            private(&share, project_json(shares, &link, &query).await)
+        }
+        _ if !domain && rest.starts_with(BLOB_PREFIX) => {
+            private(&share, blob(shares, &link, rest, &headers).await)
+        }
+        _ if !domain && rest.starts_with(SAVE_PREFIX) => {
+            private(&share, save_session(shares, &link, rest, request).await)
+        }
         "/_archive.zip" => private(&share, archive(shares, &link, &query).await),
         // The files page is the app's Files view of the link.
         "/_files" | "/_files/" if !domain => private(
@@ -2027,11 +2096,222 @@ async fn serve(
                 Admit::Building => return private(&share, being_built()),
                 Admit::Empty => return private(&share, gone()),
             }
+            // One of the link's attachments: the vault's own file, or its
+            // holder's, never a copy in the build (#490).
+            if !domain {
+                if let Some(response) = shares
+                    .attachment(&share, audience.as_ref(), rest, &headers)
+                    .await
+                {
+                    return private(&share, inert(response));
+                }
+            }
             let response = file(&dir, rest, &headers, domain).await;
             // A link's own file never runs on this origin (a domain's Site
             // is its own origin's, and keeps its pages).
             let response = if domain { response } else { inert(response) };
             private(&share, response)
+        }
+    }
+}
+
+/// `/_blob/`: a project's files, by hash.
+const BLOB_PREFIX: &str = "/_blob/";
+/// `/_project/`: where a session is saved back.
+const SAVE_PREFIX: &str = "/_project/";
+/// The largest session a link's viewer saves back.
+const SAVE_MAX: usize = 64 << 20;
+
+/// An open file, streamed, honouring `Range`.
+async fn serve_open(
+    headers: &HeaderMap,
+    file: std::fs::File,
+    kind: &str,
+) -> std::io::Result<Response> {
+    use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
+    let mut file = tokio::fs::File::from_std(file);
+    let meta = file.metadata().await?;
+    if !meta.is_file() {
+        return Err(std::io::Error::other("not a file"));
+    }
+    architect::http::ranged::serve_body(headers, meta.len(), kind, |offset, len| async move {
+        file.seek(std::io::SeekFrom::Start(offset)).await?;
+        Ok(architect::http::ranged::reader_body(file.take(len)))
+    })
+    .await
+}
+
+impl Shares {
+    /// The attachment a link's build names at `rest`, from where it is:
+    /// the vault's own file as it is now (never through a symlink), else
+    /// the holder that has it ([`Holders`]). `None` when `rest` is not
+    /// one of the link's attachments (a page's asset, a path nowhere).
+    /// Called only for a request [`admit`] let through.
+    async fn attachment(
+        &self,
+        share: &Share,
+        audience: Option<&ShareAudience>,
+        rest: &str,
+        headers: &HeaderMap,
+    ) -> Option<Response> {
+        let key = decode(rest);
+        let vault_path = {
+            let table = self.0.table.read().unwrap_or_else(PoisonError::into_inner);
+            table
+                .get(&share.code)?
+                .manifests
+                .get(audience.map_or(&share.code, |a| &a.code))?
+                .files
+                .get(&key)?
+                .clone()
+        };
+        let root = self.0.backend.root(&share.vault).ok()?;
+        let kind = content_type(Path::new(&vault_path));
+        let opened = {
+            let (root, rel) = (root, vault_path.clone());
+            blocking(move || listing::open_own(&root, &rel).ok())
+                .await
+                .flatten()
+        };
+        if let Some(file) = opened {
+            return Some(serve_open(headers, file, kind).await.unwrap_or_else(|_| gone()));
+        }
+        let elsewhere = self
+            .holders()
+            .and_then(|h| h.elsewhere(&share.vault).get(&vault_path).copied());
+        match (elsewhere, self.holders()) {
+            (Some(at), Some(holders)) => Some(holders.respond(at, kind, headers).await),
+            _ => Some(gone()),
+        }
+    }
+}
+
+/// `<link>_project.json`: the projects the link carries, for a guest's
+/// client ([`architect_spaces::GuestProjects`]). `?listen=` asks for
+/// less than the link allows.
+async fn project_json(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
+    // A named audience's link is a slice of the notes: no project.
+    if link.audience.is_some() {
+        return gone();
+    }
+    let asked = query
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("listen="))
+        .map_or(Ok(link.listen), Listen::parse)
+        .unwrap_or(Listen::Page);
+    let base = link.mount.trim_end_matches('/');
+    let listed =
+        share_project::listed(shares.holders(), link.share, base, link.listen, asked).await;
+    let mut response = (StatusCode::OK, facet_json::to_string(&listed).unwrap_or_default())
+        .into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    response
+}
+
+/// `<link>_blob/<sha256>/<name>`: one file of the link's projects, by
+/// its hash, from wherever it is held. Only a hash the link's sessions
+/// name at its layer; any other is the `404` of a path that is nowhere.
+async fn blob(shares: &Shares, link: &Link<'_>, rest: &str, headers: &HeaderMap) -> Response {
+    let (Some(holders), None) = (shares.holders(), link.audience) else {
+        return gone();
+    };
+    let sha = rest
+        .strip_prefix(BLOB_PREFIX)
+        .and_then(|r| r.split('/').next())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let served = share_project::served(holders, link.share, link.listen).await;
+    let Some(file) = served.get(&sha) else {
+        return gone();
+    };
+    let kind = content_type(Path::new(&file.name));
+    let mut response = inert(holders.respond(file.at, kind, headers).await);
+    if file.stream_only {
+        // Played in the page, not handed over as a file to keep.
+        response
+            .headers_mut()
+            .insert(header::CONTENT_DISPOSITION, HeaderValue::from_static("inline"));
+    }
+    response
+}
+
+/// `PUT <link>_project/<n>/<path>`: a new version of a shared session
+/// document, from a viewer who may edit the project.
+///
+/// Only with [`architect_spaces::ProjectAccess::Edit`] on that project,
+/// only a session the link shares, and only a signed-in person the link
+/// lets in, who presents their session as a bearer (never the node's
+/// cookie, so no other page can write as them).
+async fn save_session(shares: &Shares, link: &Link<'_>, rest: &str, request: Request) -> Response {
+    let refuse = |status: StatusCode, why: &'static str| plain(status, why);
+    if request.method() != Method::PUT {
+        let mut response = refuse(StatusCode::METHOD_NOT_ALLOWED, "Only PUT.");
+        response
+            .headers_mut()
+            .insert(header::ALLOW, HeaderValue::from_static("PUT"));
+        return response;
+    }
+    let (Some(holders), None) = (shares.holders(), link.audience) else {
+        return gone();
+    };
+    let below = decode(rest.strip_prefix(SAVE_PREFIX).unwrap_or_default());
+    let Some((n, path)) = below.split_once('/') else {
+        return gone();
+    };
+    let Some(project) = n
+        .parse::<usize>()
+        .ok()
+        .and_then(|n| link.share.projects.get(n))
+    else {
+        return gone();
+    };
+    if project.access != architect_spaces::ProjectAccess::Edit {
+        return refuse(
+            StatusCode::FORBIDDEN,
+            "This link opens the project read-only.",
+        );
+    }
+    if link.listen < share_project::SESSIONS {
+        return gone();
+    }
+    let who = shares
+        .viewer_of(
+            bearer(request.headers()),
+            shares.0.orgs.of(&link.share.vault).cloned(),
+        )
+        .await;
+    if !matches!(who, Viewer::Person { .. }) || link.share.admits(&who) != Verdict::Open {
+        return refuse(StatusCode::UNAUTHORIZED, "Sign in to save to this project.");
+    }
+    let shared = share_project::resolve(holders, project)
+        .await
+        .is_some_and(|r| r.sessions.iter().any(|(p, _, _)| p == path));
+    if !shared {
+        return gone();
+    }
+    let Ok(bytes) = architect::http::axum::body::to_bytes(request.into_body(), SAVE_MAX).await
+    else {
+        return refuse(StatusCode::PAYLOAD_TOO_LARGE, "A session of at most 64 MiB.");
+    };
+    match holders.save(&project.root, path, &bytes).await {
+        Ok(at) => {
+            let mut response = (
+                StatusCode::OK,
+                serde_json::json!({ "sha256": at.hash.to_hex(), "size": at.size }).to_string(),
+            )
+                .into_response();
+            response.headers_mut().insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/json"),
+            );
+            response
+        }
+        Err(why) => {
+            tracing::warn!(code = %link.share.code, %why, "a session was not saved through its link");
+            refuse(StatusCode::SERVICE_UNAVAILABLE, "The project is not here to save to now.")
         }
     }
 }
@@ -2652,6 +2932,7 @@ async fn files_json(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
                 "sha256": f.sha256,
                 "layer": f.layer,
                 "note": f.note,
+                "download": !f.stream_only,
             })
         })
         .collect();
@@ -2703,6 +2984,14 @@ async fn listing(
                         .collect()
                 })
                 .unwrap_or_default();
+            // And the vault's files that are with another holder.
+            let mut held = held;
+            if let Some(holders) = shares.holders() {
+                for (path, at) in holders.elsewhere(&share.vault).iter() {
+                    held.entry(path.clone())
+                        .or_insert_with(|| (at.size, at.hash.to_hex()));
+                }
+            }
             (held, shares.placed(&share))
         })
         .await
@@ -2791,6 +3080,7 @@ async fn listing(
                         .to_owned()
                 }),
                 note: entry.path.clone(),
+                stream_only: !link.share.download.offers(file),
             });
         }
     }
@@ -3094,6 +3384,9 @@ async fn archive(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
         .iter()
         .filter(|g| group.as_ref().is_none_or(|want| *want == g.label))
         .flat_map(|g| g.files.iter())
+        // Only what the link offers to keep: a recording that only plays
+        // is in no archive.
+        .filter(|f| link.share.download.offers(&f.file))
         .map(|f| (f.archive.clone(), listed.root.join(&f.file), f.file.clone()))
         .collect();
     if files.is_empty() {
