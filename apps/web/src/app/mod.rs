@@ -46,6 +46,7 @@ pub mod extensions;
 mod favourites;
 mod frames;
 mod guest;
+mod home;
 mod index_sync;
 mod installs;
 mod keys;
@@ -65,7 +66,7 @@ use architect_commands::{Command, Overlay, PaletteView};
 use architect_shell::{self as shell, AppShell, icon};
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    Command as CommandIcon, Files, LogIn, LogOut, Pause, Play, Search, Settings2, SquarePen,
+    Command as CommandIcon, Files, House, LogIn, LogOut, Pause, Play, Search, Settings2, SquarePen,
 };
 
 /// Which app the page is.
@@ -273,13 +274,37 @@ fn WebApp() -> Element {
         None => (tabs, current, separate),
     };
     let on_link_bar = link_bar.is_some();
-    let foot = vec![shell::Action::new(
+    // A member's home: an island's view over the workspace, first on show
+    // (`home`), with a tab and a foot button back to it.
+    let home_view = home::use_home();
+    let has_home = matches!(mode, Mode::Org { .. }) && home_view().is_some();
+    let home_on = has_home && home::HOME();
+    let (tabs, current) = if has_home {
+        (
+            std::iter::once(shell::Tab::named("home", "Home", "house"))
+                .chain(tabs)
+                .collect::<Vec<_>>(),
+            if home_on { Some("home") } else { current },
+        )
+    } else {
+        (tabs, current)
+    };
+    let mut foot = vec![shell::Action::new(
         "Settings",
         icon!(Settings2),
         move |()| {
             settings.show(None);
         },
     )];
+    if has_home {
+        // A desk has no bottom tabs: the way back to the home is here.
+        foot.insert(
+            0,
+            shell::Action::new("Home", icon!(House), move |()| {
+                *home::HOME.write() = true;
+            }),
+        );
+    }
     let account = match &mode {
         Mode::Demo => shell::Account::new("Demo")
             .detail("Nothing leaves this tab")
@@ -394,8 +419,15 @@ fn WebApp() -> Element {
                         on_tab: move |id: &'static str| {
                             if on_link_bar {
                                 guest::press_tab(id);
-                            } else if !set.press(id) {
-                                favourites::own_tab(id, workspace, &commands);
+                            } else if id == "home" {
+                                *home::HOME.write() = true;
+                            } else {
+                                if has_home {
+                                    *home::HOME.write() = false;
+                                }
+                                if !set.press(id) {
+                                    favourites::own_tab(id, workspace, &commands);
+                                }
                             }
                         },
                         separate,
@@ -425,7 +457,7 @@ fn WebApp() -> Element {
                         .into_iter()
                         // The row is for working on notes: a viewer who
                         // writes none has none of it.
-                        .filter(|(needs, _)| permits.allows(crate::permits::Needs::Write) && permits.allows(*needs))
+                        .filter(|(needs, _)| !home_on && permits.allows(crate::permits::Needs::Write) && permits.allows(*needs))
                         .map(|(_, action)| action)
                         .chain(demo.then(|| shell::BarAction::new("WEB_SIGN_IN", "Sign in", icon!(LogIn))))
                         .collect::<Vec<_>>(),
@@ -433,7 +465,16 @@ fn WebApp() -> Element {
                         if let Mode::Guest { code, rest } = &mode {
                             guest::GuestPage { code: code.clone(), rest: rest.clone() }
                         } else {
-                            vault::VaultPage {}
+                            if let (true, Mode::Org { person, org, .. }) = (home_on, &mode) {
+                                home::HomePage { person: person.clone(), org: org.clone() }
+                            }
+                            // The workspace itself (its panes, what is
+                            // open) is the app's and stays; its page, with
+                            // the bar buttons it adds, is off while the
+                            // home shows.
+                            if !home_on {
+                                vault::VaultPage {}
+                            }
                         }
                     }
                 }

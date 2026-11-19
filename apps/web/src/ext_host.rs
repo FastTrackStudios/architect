@@ -138,7 +138,7 @@ impl Island {
     #[must_use]
     pub fn views(&self) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
-        let named = [&self.progress, &self.transport, &self.lyrics];
+        let named = [&self.progress, &self.transport, &self.lyrics, &self.home];
         for v in named
             .into_iter()
             .flatten()
@@ -399,6 +399,8 @@ pub struct Island {
     pub transport: Option<String>,
     /// The lyrics' view.
     pub lyrics: Option<String>,
+    /// Its home view: the app's root for a signed-in member (`app::home`).
+    pub home: Option<String>,
     /// Its views drawn at the head of a note by its type.
     pub embeds: Vec<Embed>,
     /// What its extension declares it reads (its manifest's
@@ -544,6 +546,7 @@ fn island_of(v: &Value) -> Option<Island> {
         progress: text(v, "progress"),
         transport: text(v, "transport"),
         lyrics: text(v, "lyrics"),
+        home: text(v, "home"),
         embeds: embeds_of(v),
         reads: names_of(v.get("reads"), 8, name_ok),
     })
