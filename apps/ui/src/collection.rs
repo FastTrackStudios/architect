@@ -132,6 +132,20 @@ thread_local! {
     static ART: RefCell<ArtCache> = RefCell::new(ArtCache::default());
 }
 
+/// The file a playhead item's media or art at vault path `path` is: the
+/// app's open vault's own, never one a link leads out of it to
+/// (`vault::obsidian::open_own`). None with no vault open, or no such
+/// file on this device: the deck's silent clock goes on.
+#[must_use]
+pub fn vault_file(path: &str) -> Option<std::path::PathBuf> {
+    if !architect_playhead::model::vault_path(path) {
+        return None;
+    }
+    let root = crate::notes::open_vault()?.root();
+    let file = vault::obsidian::open_own(&root, path).ok()?;
+    file.metadata().ok()?.is_file().then(|| root.join(path))
+}
+
 /// The image at vault path `path` in the vault at `root`, as a `data:`
 /// URL: only a vault path (`architect_playhead::model::vault_path`, no
 /// `.` or `..` segment) to an image file of the vault's own, opened

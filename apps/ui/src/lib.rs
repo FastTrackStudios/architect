@@ -65,6 +65,7 @@ use lucide_dioxus::{
     Settings2, Timer, Undo2, Users,
 };
 
+pub use collection::vault_file;
 pub use distribution::{app_dir, app_dir_or_temp, distribution, sandbox};
 pub use extensions::on_contributions as on_extension_contributions;
 pub use extensions::on_host as on_extension_host;
@@ -1691,8 +1692,9 @@ pub fn LabApp() -> Element {
                         status,
                         status_style: (lab.status)(),
                         // The Now Playing bar (#589): whatever an extension
-                        // queued on the playhead, on a silent clock here
-                        // (audible native playback is a later step).
+                        // queued on the playhead: heard where the app
+                        // started a player (`architect_playhead::native`,
+                        // the iOS app), on a silent clock elsewhere.
                         now_playing: rsx! { architect_playhead::ui::NowPlayingBar { art: now_playing_art } },
                         // A phone's action bar (a page adds its own: the
                         // Vault, its tabs).

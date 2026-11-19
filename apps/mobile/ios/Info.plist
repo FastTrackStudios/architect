@@ -55,6 +55,10 @@
 	<string>Architect connects to an Architect node on your local network when you sign in to one there.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Extensions you allowed list your recent photos and copy the ones they use, such as a meal photo.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

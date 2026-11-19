@@ -54,6 +54,9 @@ pub fn FirstRun(on_open: Callback<()>) -> Element {
          border-radius: 10px; border: 1px solid {}; background: {}; color: {}; font-family: {}; cursor: pointer;",
         t.accent, t.accent, t.accent_ink, t.font
     );
+    // The build's own name: a distribution's first run is its own.
+    let name = crate::distribution().name().to_owned();
+    let initial = name.chars().next().map_or_else(String::new, |c| c.to_uppercase().to_string());
     let label = "font-size: 14px; font-weight: 650;";
     let about = format!("font-size: 12.5px; color: {};", t.ink_2);
     let about_first = "font-size: 12.5px; opacity: 0.85;";
@@ -68,12 +71,12 @@ pub fn FirstRun(on_open: Callback<()>) -> Element {
                 div { style: "display: flex; align-items: center; gap: 10px; margin-bottom: 4px;",
                     span { style: "width: 32px; height: 32px; border-radius: 8px; background: {t.ink}; color: {t.desk}; \
                                    display: flex; align-items: center; justify-content: center; font-size: 17px; font-weight: 800;",
-                        "A"
+                        "{initial}"
                     }
-                    span { style: "font-size: 22px; font-weight: 750; letter-spacing: -0.03em;", "Welcome to Architect" }
+                    span { style: "font-size: 22px; font-weight: 750; letter-spacing: -0.03em;", "Welcome to {name}" }
                 }
                 p { style: "margin: 0 0 8px 0; font-size: 13.5px; line-height: 1.45; color: {t.ink_2};",
-                    "Architect keeps your notes in a vault: a folder of markdown files on this device. Choose one to start."
+                    "{name} keeps your notes in a vault: a folder of markdown files on this device. Choose one to start."
                 }
                 if can_pick() {
                     button { "data-testid": "first-run-open", style: "{first}", onclick: pick,
@@ -84,7 +87,7 @@ pub fn FirstRun(on_open: Callback<()>) -> Element {
                 button { "data-testid": "first-run-create", style: "{row}",
                     onclick: move |_| choose.call(crate::vaults::create()),
                     span { style: label, "Create a new vault" }
-                    span { style: "{about}", "An empty vault in Documents › Architect." }
+                    span { style: "{about}", "An empty vault in Documents › {name}." }
                 }
                 button { "data-testid": "first-run-demo", style: "{row}",
                     onclick: move |_| choose.call(crate::vaults::demo()),
@@ -109,7 +112,7 @@ pub fn FirstRun(on_open: Callback<()>) -> Element {
                     p { style: "margin: 4px 0 0 0; font-size: 12.5px; color: {t.danger};", "{e}" }
                 }
                 p { style: "margin: 6px 0 0 0; font-size: 12px; color: {t.ink_3};",
-                    "After that, Architect offers its tour. ⌘K › Take the tour plays it any time."
+                    "After that, {name} offers its tour. ⌘K › Take the tour plays it any time."
                 }
             }
         }

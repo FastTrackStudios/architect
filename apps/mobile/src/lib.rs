@@ -106,6 +106,9 @@ pub fn run(distribution: Distribution) -> ExitCode {
     scene::register();
     // The keyboard's height from UIKit, for the bar that rides it.
     architect_shell::install_keyboard();
+    // What the deck plays is heard: decoded in the app, on the device's
+    // output, on with the screen locked (`UIBackgroundModes` `audio`).
+    architect_playhead::native::start(std::sync::Arc::new(architect_app::vault_file));
     let window = WindowAttributes::default().with_title(dist.name());
     launch_cfg(
         App,

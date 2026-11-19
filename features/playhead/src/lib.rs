@@ -10,11 +10,14 @@
 //! - [`model`]: a source's items and the rules each meets.
 //! - [`deck`]: the sources, the active one, who may move which.
 //! - [`clock`]: the seam to what is heard ([`clock::Clock`]): the web
-//!   app's audio element, a native app's silent clock, later an engine.
+//!   app's audio element, a native app's player ([`native`]) or its
+//!   silent clock, later an engine.
 //! - [`ask`]: one door for every runtime. A linked or process extension's
 //!   service call (`architect.playhead`, method `m` is `PLAYHEAD_<M>`) and
 //!   a web bundle's ask in the web app's frame host both come here, as
 //!   their extension (the host names it, never the arguments).
+//! - `native` (feature `native-audio`): a native app's clock, the media
+//!   decoded in the app and played on the device, iOS's lock screen.
 //! - `ui` (feature `ui`): `ui::use_playhead` and the bar,
 //!   `ui::NowPlayingBar`, in the shell's `now_playing` slot.
 //! - `extension` (feature `extension`): `Playhead`, its
@@ -28,6 +31,8 @@
 pub mod clock;
 pub mod deck;
 pub mod model;
+#[cfg(all(feature = "native-audio", not(target_family = "wasm")))]
+pub mod native;
 #[cfg(feature = "ui")]
 pub mod ui;
 

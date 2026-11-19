@@ -17,7 +17,8 @@
 # ios` runs this so; docs/content/guide/your-own-architect.md). Its binary
 # goes into the bundle as `architect-mobile`, the Info.plist's executable;
 # the Info.plist is this folder's (Architect's identity) unless
-# INFO_PLIST names another. Its target dir is CARGO_TARGET_DIR, else the
+# INFO_PLIST names another, and the asset catalog (the icon `AppIcon`, the
+# colour `LaunchBackground`) this folder's unless ASSETS names another. Its target dir is CARGO_TARGET_DIR, else the
 # crate's own `target/` beside its manifest.
 #
 # By default the bundle is for the Simulator (aarch64-apple-ios-sim),
@@ -140,7 +141,7 @@ fi
 # names it) into Assets.car; actool's partial plist adds CFBundleIcons.
 icon_dev="${ACTOOL_DEVELOPER_DIR:-$dev}"
 partial="$xcode_bin/icon.plist"
-DEVELOPER_DIR="$icon_dev" /usr/bin/xcrun actool "$here/Assets.xcassets" --compile "$app" \
+DEVELOPER_DIR="$icon_dev" /usr/bin/xcrun actool "${ASSETS:-$here/Assets.xcassets}" --compile "$app" \
     --platform "$sdk_name" --minimum-deployment-target "$min_ios" \
     --target-device iphone --target-device ipad --app-icon AppIcon \
     --output-partial-info-plist "$partial" >"$xcode_bin/actool.log" 2>&1 \

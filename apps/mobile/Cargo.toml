@@ -25,6 +25,9 @@ architect-shell = { workspace = true, features = ["ui"] }
 dioxus = { workspace = true }
 dioxus-native = { workspace = true, features = ["vello", "hot-reload"] }
 tracing = { workspace = true }
+# What the phone hears (#589): the playhead's media decoded in the app
+# (iOS has no Ogg Vorbis decoder) and the lock screen's card and buttons.
+architect-playhead = { workspace = true, features = ["native-audio"] }
 
 [target.'cfg(target_os = "ios")'.dependencies]
 objc2 = { workspace = true }
