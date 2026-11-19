@@ -5,11 +5,13 @@
 //! The web app's own set is what it can open today: the Vault (the note
 //! on show), Files (the navigator), Search (quick open), and New note as
 //! the round button. While the note on show has a `type` some extension
-//! of the node declares favourites for (`/_ext/favourites.json`,
-//! `crate::favourites`), its tabs take the slots: `page` the note, an
-//! island's view (a view its own island lists, by name or as `<its id>/<view>`)
-//! that view in a frame of its own (`super::frames`, a tab of the
-//! workspace beside the note), a command its extension may run, or a note
+//! declares favourites for (a linked extension's, read in this page, then
+//! the node's `/_ext/favourites.json`: `crate::favourites::merged`), its
+//! tabs take the slots: `page` the note, its extension's own view (by
+//! name or as `<its id>/<view>`) as a tab of the workspace beside the
+//! note, in the app's document when its code is compiled in
+//! (`vault::open_linked`) and else in a frame of its own from its island
+//! (`super::frames`), a command its extension may run, or a note
 //! beside it; a tab the browser cannot open, or that names what its
 //! extension may not, is left out. The tab current is the one whose place
 //! is on show; a `{place}` keeps the set while its note is on show. Its
@@ -87,6 +89,14 @@ pub fn use_web_favourites(
     let _ = what_plays();
     let declared_list = use_resource(frames::favourites);
     let islands = use_resource(frames::island_views);
+    // The linked extensions' own, read in this page.
+    let ext_ui = try_use_context::<architect_extensions::interface::ExtensionUi>();
+    let own_declared = ext_ui
+        .map(super::extensions::linked_favourites)
+        .unwrap_or_default();
+    let linked_views = ext_ui
+        .map(super::extensions::linked_view_ids)
+        .unwrap_or_default();
     // A place a tab opened, the note whose set it keeps and that note's
     // type.
     let mut opened = use_signal(|| None::<(PlaceOpened, Option<String>)>);
@@ -140,7 +150,8 @@ pub fn use_web_favourites(
     let Some(ty) = ty else {
         return vault_slots(default);
     };
-    let list: Rc<Vec<_>> = declared_list.read().clone().unwrap_or_default();
+    let listed: Rc<Vec<_>> = declared_list.read().clone().unwrap_or_default();
+    let list = crate::favourites::merged(&own_declared, &listed);
     let islands = islands.read().clone().unwrap_or_default();
     let decls: Vec<&Listed> = list.iter().filter(|d| d.favourites.is_for(&ty)).collect();
     if decls.is_empty() {
@@ -155,6 +166,7 @@ pub fn use_web_favourites(
     let files: BTreeSet<String> = source.files().into_iter().map(|f| f.path).collect();
     let exists = |p: &str| files.contains(p);
     let reach = Reach {
+        linked: &linked_views,
         islands: &islands,
         actions: &actions,
         note: &path,
@@ -272,6 +284,11 @@ fn shows(what: &Opens, note: &str) -> Shows {
             view: view.clone(),
             note: note.to_owned(),
         },
+        Opens::Linked { extension, view } => Shows::View {
+            extension: extension.clone(),
+            view: view.clone(),
+            note: note.to_owned(),
+        },
         Opens::QuickOpen | Opens::Files | Opens::Action(_) => Shows::Elsewhere,
     }
 }
@@ -344,5 +361,8 @@ fn run(
             }
         }
         Opens::View { island, view } => vault::open_frame(workspace, island, view, note, label),
+        Opens::Linked { extension, view } => {
+            vault::open_linked(workspace, extension, view, note, label);
+        }
     }
 }

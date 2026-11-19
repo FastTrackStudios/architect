@@ -485,6 +485,17 @@ app-guest-content-test:
     devenv shell -- bash scripts/web-bundle.sh target/web-bundle
     ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-guest-content.test.mjs
 
+# A distribution's linked views for a share link's guest (#805): a node
+# sharing notes of the view probe's type, the probe's linked view drawing
+# them in the app's document (no island, no frame), handed what the link
+# admits and its manifest reads, its tab, NOTE_OPEN and the guest's host
+# refusing the vault; Firefox headless over BiDi off the audio graph, at
+# 390 px; `SHOTS=<dir>` keeps screenshots.
+app-guest-linked-test:
+    devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
+    devenv shell -- bash scripts/web-bundle.sh target/web-bundle
+    ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-guest-linked.test.mjs
+
 # A share link opens the web app as its guest (#646): `/s/<code>/` is the
 # app's page from the node, the link's notes in their sets, a note and its
 # picture, the files and "Download all", at 390 px and a desk's width;
@@ -510,7 +521,8 @@ app-media-list-test:
 # A distribution's linked extensions in the web app (#495, W1): the
 # Architect app's in `/app/?demo`, their actions on ⌘K, the Calendar's and
 # Projects' views as panes, their settings sections; light and dark at
-# 390 px and 1280 px. Firefox headless over BiDi off the audio graph;
+# 390 px and 1280 px. And the view probe's linked views (`probe=views`): a
+# note drawn by its type, a favourite's tab, NOTE_OPEN, the home. Firefox headless over BiDi off the audio graph;
 # `SHOTS=<dir>` keeps screenshots.
 app-linked-extensions-test:
     devenv shell -- bash scripts/web-bundle.sh target/web-bundle

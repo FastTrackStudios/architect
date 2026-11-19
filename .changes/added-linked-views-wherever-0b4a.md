@@ -1,0 +1,7 @@
+---
+"architect-distribution" = "minor"
+"architect-extensions" = "minor"
+"architect-web" = "minor"
+---
+
+Added linked views wherever the web app draws an extension's view, so a distribution's web client needs no island and no /_ext tree for its own views: a note type claimed by a linked extension's [[embeds]] (new `fill` key: the view is the note's page), handed `use_embed()` `source` the note's text and `props` `{note}` in the shape an island's view gets (text only with `reads = ["documents"]`, files only with `files` too); `Distribution::home(extension, view)` names a linked view as the signed-in home (`props` `{home}`); a linked extension's `[[favourites]]` and `{view}` targets; a linked view's `open` (NOTE_OPEN); for a member and a share link's guest. A linked claim wins over an island's of the same type. Added `Embeds::linked_note_views`, `LinkedNoteView`, `Host::linked_favourites`, `Host::linked_view_ids`, `Host::open_with_app`, `Host::for_guest`, `Host::is_guest`, `hostcall::guest_check` and `GUEST`. Changed the guest policy: `GuestEmbedView` no longer refuses linked views outright; whether the app's own linked extensions draw a share link's guest's content is now the embedding app's choice (`embeds::GuestEmbedPolicy`). The default, `pages_only`, keeps the desktop as before; the web app sets `own_linked`, and runs the distribution's linked extensions for a guest on a guest's host, which refuses every vault, data, file, device and app-action request whatever an extension's capabilities say.

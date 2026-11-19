@@ -1,7 +1,12 @@
-//! The app's home for a signed-in member: a view an extension's island
-//! declares (`SiteIsland::home`), filling the page before a note is open.
+//! The app's home for a signed-in member, filling the page before a note
+//! is open: the linked view the distribution names
+//! (`architect_distribution::Distribution::home`), else a view an
+//! extension's island declares (`SiteIsland::home`).
 //!
-//! It is an extension's view like any other: drawn in the frame host from
+//! It is an extension's view like any other. A linked one is the
+//! distribution's own code in the app's document, and reads what it is
+//! handed with `linked::use_embed` (its `props`); it shows in the demo
+//! too, on the demo's vault. An island's is drawn in the frame host from
 //! the island's web bundle, handed data and asking back. What it is
 //! handed is the member's vaults as rows, one a note that has a `type`:
 //! its path and its properties, never its text (`home` in its `note`
@@ -32,6 +37,17 @@ const MAX_RECENT: usize = 12;
 thread_local! {
     /// The notes opened from the home, newest first, for this page's life.
     static RECENT: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Note `path` was opened from a view: the newest of the notes the home
+/// is told were opened recently.
+pub fn remember(path: &str) {
+    RECENT.with(|r| {
+        let mut r = r.borrow_mut();
+        r.retain(|p| p != path);
+        r.insert(0, path.to_owned());
+        r.truncate(MAX_RECENT);
+    });
 }
 
 fn value(p: &PropertyValue) -> Value {
@@ -74,13 +90,43 @@ fn rows(vault: &WebVault) -> Vec<Value> {
         .collect()
 }
 
-/// The island that declares a home view, with the view's id.
-pub fn use_home() -> Memo<Option<(crate::ext_host::Island, String)>> {
+/// What draws the home.
+#[derive(Clone, PartialEq, Eq)]
+pub enum Home {
+    /// The distribution's own linked view: the extension's id and the
+    /// view's.
+    Linked { extension: String, view: String },
+    /// An island's view, in a frame.
+    Island(crate::ext_host::Island, String),
+}
+
+impl Home {
+    /// Whether it is the distribution's own linked view.
+    #[must_use]
+    pub const fn is_linked(&self) -> bool {
+        matches!(self, Self::Linked { .. })
+    }
+}
+
+/// What draws the home: the linked view the distribution names, when its
+/// extension runs here as the app's own, else the first island that
+/// declares a home view.
+pub fn use_home() -> Memo<Option<Home>> {
     let listing = super::frames::use_listing();
+    let ui = try_use_context::<architect_extensions::interface::ExtensionUi>();
     use_memo(move || {
+        let linked = super::extensions::home_decl().filter(|(extension, view)| {
+            ui.is_some_and(|ui| {
+                let _ = ui.revision();
+                ui.host().linked_view(extension, view).is_some()
+            })
+        });
+        if let Some((extension, view)) = linked {
+            return Some(Home::Linked { extension, view });
+        }
         listing.read().as_ref().and_then(|l| {
             l.iter()
-                .find_map(|i| i.home.clone().map(|view| (i.clone(), view)))
+                .find_map(|i| i.home.clone().map(|view| Home::Island(i.clone(), view)))
         })
     })
 }
@@ -127,24 +173,10 @@ pub fn HomePage(person: String, org: String) -> Element {
         use_hook(move || {
             super::frames::set_note_opener(Some(Rc::new(move |path: &str| {
                 // By the app's path, or by the note's own in its vault.
-                let files = vault.source.files();
-                let found = files
-                    .iter()
-                    .find(|f| f.path == path)
-                    .or_else(|| {
-                        files
-                            .iter()
-                            .find(|f| f.path.split_once('/').is_some_and(|(_, own)| own == path))
-                    })
-                    .map(|f| f.path.clone());
+                let found = super::vault::note_named(&vault, path);
                 let known = found.is_some();
                 if let Some(path) = found.as_deref() {
-                    RECENT.with(|r| {
-                        let mut r = r.borrow_mut();
-                        r.retain(|p| p != path);
-                        r.insert(0, path.to_owned());
-                        r.truncate(MAX_RECENT);
-                    });
+                    remember(path);
                     runtime.in_scope(scope, || {
                         super::vault::show(workspace, path);
                         *HOME.write() = false;
@@ -154,13 +186,25 @@ pub fn HomePage(person: String, org: String) -> Element {
             })));
         });
     }
-    let Some((island, view)) = home() else {
-        return rsx! {};
-    };
-    rsx! {
-        div { "data-testid": "home-page",
-            style: "flex: 1 1 0; min-height: 0; display: flex; flex-direction: column;",
-            super::embed::Claimed { key: "{island.folder}/{view}", island, view, note: data(), pane: true }
-        }
+    match home() {
+        None => rsx! {},
+        Some(Home::Linked { extension, view }) => rsx! {
+            div { "data-testid": "home-page",
+                style: "flex: 1 1 0; min-height: 0; display: flex; flex-direction: column;",
+                super::embed::LinkedView {
+                    key: "{extension}/{view}",
+                    extension, view,
+                    claim: super::embed::HOME_CLAIM.to_owned(),
+                    props: data(),
+                    pane: true,
+                }
+            }
+        },
+        Some(Home::Island(island, view)) => rsx! {
+            div { "data-testid": "home-page",
+                style: "flex: 1 1 0; min-height: 0; display: flex; flex-direction: column;",
+                super::embed::Claimed { key: "{island.folder}/{view}", island, view, note: data(), pane: true }
+            }
+        },
     }
 }
