@@ -65,8 +65,9 @@ pub struct WebVault {
 
 /// A note its extension's view draws shows that view and nothing else of
 /// its page.
-const VIEW_ONLY: &str =
-    ".web-note[data-view-only] > :not([data-testid=\"note-view\"]) { display: none !important; }";
+const VIEW_ONLY: &str = ".web-note[data-view-only] { height: 100%; } \
+     .web-note[data-view-only] > :not([data-testid=\"note-view\"]) { display: none !important; } \
+     [data-switcher=\"grip\"] > div { display: none; }";
 
 /// Whether the note on show is one an extension's view draws (its type
 /// is claimed by an island): set by the app's root, read by the note's
@@ -1103,11 +1104,8 @@ fn NoteText(path: String, text: String) -> Element {
     // area is the live copy.
     let body = body0.to_owned();
     let view_only = VIEW_ON_SHOW();
-    let pad = if view_only {
-        "8px 16px 96px"
-    } else {
-        "24px 28px 96px"
-    };
+    // The view to the foot of the page: the bar under it is the next thing.
+    let pad = if view_only { "0 4px" } else { "24px 28px 96px" };
     rsx! {
         document::Style { {LAYOUT} }
         document::Style { {VIEW_ONLY} }
@@ -1125,7 +1123,7 @@ fn NoteText(path: String, text: String) -> Element {
                     // page, its height; the rest of the note's page (its
                     // heading, its properties, its text to edit) is out of
                     // the way (`LAYOUT`: `[data-view-only]`).
-                    div { "data-testid": "note-view", style: if view_only { "display: flex; flex-direction: column; height: calc(100dvh - 250px); min-height: 320px;" } else { "display: contents;" },
+                    div { "data-testid": "note-view", style: if view_only { "display: flex; flex-direction: column; height: 100%; min-height: 320px;" } else { "display: contents;" },
                         super::embed::NoteEmbed {
                             // The signed-in person's own vault, or the demo; a
                             // share's guest is `Audience::Guest` (#629, #648).
