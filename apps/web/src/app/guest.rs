@@ -571,7 +571,8 @@ pub fn GuestPage(code: String, rest: String) -> Element {
                     // link's notes to open, under their own heading.
                     Open::Note(path) if claimed_list && guest_view::root_note(&o.link).is_some_and(|r| r.path == path) => rsx! {
                         div { style: "display: flex; flex-direction: column; gap: 20px;",
-                            GuestNoteView { key: "{path}-{revision}", code: code.clone(), path: path.clone() }
+                            // The link is named for this note: its title is the page's heading already.
+                            GuestNoteView { key: "{path}-{revision}", code: code.clone(), path: path.clone(), untitled: true }
                             section { "data-testid": "guest-notes", style: "display: flex; flex-direction: column; gap: 4px;",
                                 h2 { style: "margin: 8px 0 0; font-size: 13px; font-weight: 650; letter-spacing: .01em; color: {t.ink_3};",
                                     "Notes on this link"
@@ -887,7 +888,15 @@ fn FilesView(opened: Opened) -> Element {
 /// Note `path` of link `code`: the view its type's island claims, handed
 /// what the node gave a guest, then its page's words and images.
 #[component]
-fn GuestNoteView(code: String, path: String, #[props(default)] core_list: bool) -> Element {
+fn GuestNoteView(
+    code: String,
+    path: String,
+    #[props(default)] core_list: bool,
+    /// The note's title is on the page already (the link's root, under the
+    /// link's own heading): not drawn a second time.
+    #[props(default)]
+    untitled: bool,
+) -> Element {
     // Read again when the note asked for changes (props are not signals).
     let note = use_resource(use_reactive!(|(code, path)| {
         {
@@ -912,7 +921,9 @@ fn GuestNoteView(code: String, path: String, #[props(default)] core_list: bool) 
                 article { "data-testid": "guest-note", "data-files": "{count}",
                     "data-text": "{note.source.is_some()}",
                     style: "display: flex; flex-direction: column; gap: 10px;",
-                    h2 { style: "margin: 0; font-size: 20px;", "{note.title}" }
+                    if !untitled {
+                        h2 { style: "margin: 0; font-size: 20px;", "{note.title}" }
+                    }
                     if !kind.is_empty() {
                         super::embed::NoteEmbed {
                             audience: Audience::Guest,

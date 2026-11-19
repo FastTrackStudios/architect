@@ -54,6 +54,7 @@ pub mod guest_view;
 pub mod keys;
 pub mod live_text;
 pub mod ogg;
+pub mod permits;
 #[cfg(any(target_arch = "wasm32", test))]
 mod read_only;
 pub mod reading;
