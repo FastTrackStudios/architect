@@ -1227,6 +1227,7 @@ dependencies = [
  "dioxus-native",
  "facet",
  "facet-json",
+ "flate2",
  "futures",
  "iroh",
  "reqwest 0.12.28",
