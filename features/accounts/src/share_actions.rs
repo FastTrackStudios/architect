@@ -398,6 +398,7 @@ impl ShareRow {
             expires_at: share.expires_at,
             state: match share.state(now()) {
                 architect_spaces::ShareState::Live => "live",
+                architect_spaces::ShareState::Paused => "paused",
                 architect_spaces::ShareState::Expired => "expired",
                 architect_spaces::ShareState::Revoked => "revoked",
             }
