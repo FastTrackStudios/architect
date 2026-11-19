@@ -814,12 +814,25 @@ and signers it trusts, are the link's owner-signed or node-held needs
 file. The guest host scopes the documents and the vault query engine to
 the share: `GUEST_READS`' `documents` is the generic capability.
 
-**Known gap.** The hosts don't load extensions for a guest yet: the web
-app skips them in guest mode and redraws the palette itself
-(`apps/web/src/app/mod.rs` `own_palette`), and on the desktop only a
-page embed draws a guest's note, on `features/pages/src/host.rs`
-`AppHost::guest`. That is a second implementation to remove, not the
-design (#805).
+**The web app's guest runs the distribution's linked extensions** (#805):
+the same compiled-in extensions as a member's, on a host built for a
+guest (`features/extensions/src/hostapi.rs` `Host::for_guest`). That
+host has no documents, no vault query service and no data store, and it
+refuses every host call that reaches a vault, kept data, files, the
+device or an app action, whatever the manifest says
+(`features/extensions/src/hostcall.rs` `guest_check`, refusals named
+`guest`). A note a linked view asks to open goes to the app's own opener
+alone (`Host::open_with_app`), which opens only a note the link lists.
+Its views draw a guest's note because the app says so
+(`features/extensions/src/embeds.rs` `GuestEmbedPolicy::own_linked`):
+they are the app's own code, and what each is handed is still what the
+link admits and its manifest reads ([A share link is the
+app](@/guide/shares.md)).
+
+**Known gap.** A guest runs no fetched extension yet (#495 G1). On the
+desktop only a page embed draws a guest's note, on
+`features/pages/src/host.rs` `AppHost::guest` (`GuestEmbedPolicy`'s
+default, `pages_only`), and the Shared tab is its own renderer (#807).
 
 ## Processes over vox
 
@@ -1855,11 +1868,31 @@ title = "Keyflow chart"
 page = "pages/kf.tsx"         # or view = "chart": one of its [[views]]
 claims = { fence = ["kf"] }   # also note_type = ["song"], embed_type = ["setlist"]
 max_height = 420              # points; past it, it scrolls (480 when unset)
+fill = false                  # true: a note it claims by type is the view
 ```
 
 (`features/extensions/src/contrib.rs` `EmbedDecl`, `EmbedClaims`,
 `Claim`; checked by `Contribution::check`: one view or one page in its
 package, at least one claim.)
+
+`fill` matters for a note claimed by its `type:`. Unset, the view is a
+card at the note's head, over its text. Set, the view is the note's
+page: in the web app the note's own heading, properties and text are out
+of its way, as for a setlist or a song a view draws whole.
+
+**A linked view as a note's view in the web app.** The web app draws a
+note of a type a linked extension claims with that extension's view, in
+its own document, before any island that claims the same type
+(`apps/web/src/ext_host.rs` `drawn`; `apps/web/src/app/embed.rs`
+`NoteEmbed`, `LinkedView`). The view reads `linked::use_embed()`:
+`claim` is `note_type:<type>`, `source` the note's text and `props`
+`{note}`, the note in exactly the shape an island's view is handed
+(`ext_host::linked_note_props`, `note_props`: `{path, title, type,
+properties, body, files}`, a guest's without `path` or properties). The
+same read rule applies, from its manifest's `[capabilities] reads`
+(`ext_host::linked_reads`): the text only with `documents`, the files
+only with `files` too, `null` with neither. A member and a share link's
+guest get the same view.
 
 **The host's side.** An app asks
 `features/extensions/src/embeds.rs` `Embeds::resolve` (`Host::embeds`)

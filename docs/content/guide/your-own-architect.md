@@ -254,6 +254,71 @@ pub fn start() {
 - **A crate with no `web` feature** gets the Architect app's wasm, which
   shows only its name and its list (`dist` says so).
 
+### Your views need no island
+
+A distribution's web app is one Dioxus app with its views compiled in.
+Its linked extensions' views are drawn in the app's own document
+everywhere the app draws an extension's view, for a signed-in member and
+for a share link's guest, so a distribution needs no island and no
+`/_ext` tree for its own views:
+
+- **A note by its type.** Claim the type with `[[embeds]]` and one of its
+  views; `fill = true` makes the view the note's page (else it is a card
+  at the note's head). The view reads `linked::use_embed()`: `source` is
+  the note's text and `props` is `{"note": {path, title, type,
+  properties, body, files}}`, the shape an island's view gets
+  (`apps/web/src/ext_host.rs` `linked_note_props`). It gets the text only
+  when its manifest's `[capabilities] reads` has `documents`, the files
+  only with `files` too; a guest's note has no `path` and no
+  properties.
+- **The home.** `Distribution::home(extension, view)` names the view a
+  signed-in member sees before a note is open
+  (`apps/distribution/src/lib.rs` `Distribution::home`). Its
+  `use_embed()` `props` are `{"home": {person, orgs: [{slug, rows}],
+  recent}}` and its `claim` is `embed_type:home`
+  (`apps/web/src/app/home.rs` `use_home`). The app's home is chosen by
+  whoever builds the app, so it is set here and not in a manifest.
+- **Favourites.** A linked extension's `[[favourites]]` are read in the
+  app's process (`Host::linked_favourites`), before the node's listing,
+  and a `{view}` target opens its linked view as a pane, handed the open
+  note (`apps/web/src/favourites.rs` `opens`, `Opens::Linked`).
+- **Opening a note.** A view's `HostRequest::Open {path}` opens the note
+  in the member's workspace, or for a guest only a note the link lists
+  (`apps/web/src/app/extensions.rs` `set_note_opener`).
+- **The playhead.** A view sets and drives its own source with
+  `architect_playhead::ask(&Caller::Extension(<its id>), …)` and reads
+  `architect_playhead::ui::use_playhead()`, for a member and a guest.
+
+Where a linked extension and an island claim the same type, the linked
+one draws and no bundle is fetched (`apps/web/src/ext_host.rs` `drawn`).
+
+```rust
+// One linked extension with every view the web client draws.
+architect_web::run(
+    architect_distribution::architect()
+        .named("Studio")
+        .linked(&studio_web::Views)
+        .home("studio.web", "home"),
+);
+```
+
+```toml
+# studio.web's extension.toml (parts)
+[capabilities]
+reads = ["documents", "files"]
+
+[[views]]
+id = "setlist"
+[[views]]
+id = "home"
+
+[[embeds]]
+id = "setlist"
+view = "setlist"
+claims = { note_type = ["setlist"] }
+fill = true
+```
+
 The app is its node: its window runs the node in-process, and a
 deployment runs the same binary with `serve`, the node with no window.
 Either way its share links and Sites draw the blocks those extensions
