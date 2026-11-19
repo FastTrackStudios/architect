@@ -67,7 +67,7 @@ impl Production {
 /// address. Empty when all is well.
 #[must_use]
 pub fn check_settings(vars: &[(String, String)], production: &Production) -> Vec<Refusal> {
-    let mut refused = Vec::new();
+    let mut refused = check_auto_sign_in(vars, production);
     for (key, value) in vars {
         if value.to_ascii_lowercase().contains(PRODUCTION_DOMAIN) {
             refused.push(Refusal {
@@ -115,6 +115,78 @@ pub fn check_inherited<'a>(vars: impl IntoIterator<Item = (&'a str, &'a str)>) -
                 .to_owned(),
         })
         .collect()
+}
+
+/// The dev stack's auto sign-in settings, each with the issuer settings
+/// of its process that must be loopback for it to start: the auth
+/// server's (`AUTH_DEV_AUTO_SIGN_IN`, `apps/auth-server/src/dev.rs`) and
+/// the window's (`ARCHITECT_DEV_SIGN_IN`, `apps/desktop/src/dev.rs`).
+pub const AUTO_SIGN_IN: [(&str, &[&str]); 2] = [
+    (
+        "AUTH_DEV_AUTO_SIGN_IN",
+        &["AUTH_BASE_URL", "AUTH_BIND_ADDR"],
+    ),
+    ("ARCHITECT_DEV_SIGN_IN", &["ARCHITECT_AUTH_ISSUER"]),
+];
+
+/// The domain of the demo seed's accounts: the only ones an auto sign-in
+/// may name (never a real address, never a mirrored one).
+pub const DEMO_DOMAIN: &str = "local.test";
+
+/// Whether `email` is one of the demo seed's (`…@local.test`).
+#[must_use]
+pub fn is_demo_account(email: &str) -> bool {
+    email
+        .trim()
+        .rsplit_once('@')
+        .is_some_and(|(name, domain)| !name.is_empty() && domain.eq_ignore_ascii_case(DEMO_DOMAIN))
+}
+
+/// An auto sign-in only with a demo account and an issuer on this machine
+/// (loopback, never merely a private address, never production), set
+/// beside it.
+fn check_auto_sign_in(vars: &[(String, String)], production: &Production) -> Vec<Refusal> {
+    let get = |key: &str| vars.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
+    let mut refused = Vec::new();
+    for (key, issuers) in AUTO_SIGN_IN {
+        let Some(email) = get(key).filter(|v| !v.trim().is_empty()) else {
+            continue;
+        };
+        if !is_demo_account(email) {
+            refused.push(Refusal {
+                key: key.to_owned(),
+                why: format!(
+                    "`{email}` is not a demo account (…@{DEMO_DOMAIN}): an auto sign-in is the demo \
+                     seed's account, never a real one"
+                ),
+            });
+        }
+        for issuer in issuers {
+            let Some(value) = get(issuer) else {
+                refused.push(Refusal {
+                    key: key.to_owned(),
+                    why: format!(
+                        "{issuer} is unset: an auto sign-in needs an issuer on this machine"
+                    ),
+                });
+                continue;
+            };
+            let authority = if is_bind_key(issuer) {
+                value.to_ascii_lowercase()
+            } else {
+                authorities(value).into_iter().next().unwrap_or_default()
+            };
+            if production.is(&authority) || !is_loopback(split_host(&authority).0) {
+                refused.push(Refusal {
+                    key: key.to_owned(),
+                    why: format!(
+                        "{issuer}=`{value}` is not loopback: an auto sign-in signs in on this machine only"
+                    ),
+                });
+            }
+        }
+    }
+    refused
 }
 
 fn is_bind_key(key: &str) -> bool {
@@ -305,6 +377,95 @@ mod tests {
         ];
         let keys: Vec<_> = check_inherited(shell).into_iter().map(|r| r.key).collect();
         assert_eq!(keys, ["AUTH_SECRET", "ARCHITECT_BLOB_S3_ACCESS_KEY_ID"]);
+    }
+
+    #[test]
+    fn an_auto_sign_in_with_the_demo_account_on_loopback_passes() {
+        assert!(
+            refused(&[
+                ("AUTH_DEV_AUTO_SIGN_IN", "ada@local.test"),
+                ("AUTH_BASE_URL", "http://127.0.0.1:7411"),
+                ("AUTH_BIND_ADDR", "127.0.0.1:7411"),
+            ])
+            .is_empty()
+        );
+        assert!(
+            refused(&[
+                ("ARCHITECT_DEV_SIGN_IN", "ada@local.test"),
+                ("ARCHITECT_AUTH_ISSUER", "http://localhost:7411/"),
+            ])
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn an_auto_sign_in_off_loopback_or_at_production_is_refused() {
+        // A private dev address passes the guard for anything else, but
+        // never for an auto sign-in.
+        assert_eq!(
+            refused(&[
+                ("ARCHITECT_DEV_SIGN_IN", "ada@local.test"),
+                ("ARCHITECT_AUTH_ISSUER", "http://192.168.1.20:7411"),
+            ]),
+            ["ARCHITECT_DEV_SIGN_IN"]
+        );
+        assert_eq!(
+            refused(&[
+                ("AUTH_DEV_AUTO_SIGN_IN", "ada@local.test"),
+                ("AUTH_BASE_URL", "http://127.0.0.1:7411"),
+                ("AUTH_BIND_ADDR", "0.0.0.0:7411"),
+            ]),
+            ["AUTH_DEV_AUTO_SIGN_IN", "AUTH_BIND_ADDR"]
+        );
+        // Production by name, and a loopback port standing in for it.
+        let named = refused(&[
+            ("ARCHITECT_DEV_SIGN_IN", "ada@local.test"),
+            ("ARCHITECT_AUTH_ISSUER", "https://auth.fasttrackstudio.app"),
+        ]);
+        assert!(
+            named
+                .iter()
+                .filter(|k| *k == "ARCHITECT_DEV_SIGN_IN")
+                .count()
+                == 1,
+            "{named:?}"
+        );
+        let production = Production::with_extra(vec!["127.0.0.1:7999".to_owned()]);
+        let stand_in = check_settings(
+            &vars(&[
+                ("ARCHITECT_DEV_SIGN_IN", "ada@local.test"),
+                ("ARCHITECT_AUTH_ISSUER", "http://127.0.0.1:7999"),
+            ]),
+            &production,
+        );
+        assert!(
+            stand_in.iter().any(|r| r.key == "ARCHITECT_DEV_SIGN_IN"),
+            "{stand_in:?}"
+        );
+        // No issuer beside it.
+        assert_eq!(
+            refused(&[("ARCHITECT_DEV_SIGN_IN", "ada@local.test")]),
+            ["ARCHITECT_DEV_SIGN_IN"]
+        );
+    }
+
+    #[test]
+    fn an_auto_sign_in_names_only_a_demo_account() {
+        for email in [
+            "cody@example.com",
+            "user-7@local.invalid",
+            "ada@local.test.evil.com",
+        ] {
+            assert_eq!(
+                refused(&[
+                    ("ARCHITECT_DEV_SIGN_IN", email),
+                    ("ARCHITECT_AUTH_ISSUER", "http://127.0.0.1:7411"),
+                ]),
+                ["ARCHITECT_DEV_SIGN_IN"],
+                "{email}"
+            );
+        }
+        assert!(is_demo_account(" ada@LOCAL.test "));
     }
 
     #[test]

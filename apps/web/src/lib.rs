@@ -100,6 +100,58 @@ pub struct Config {
     /// The public client the issuer knows this app as.
     #[serde(default = "default_client")]
     pub client_id: String,
+    /// Sign in by itself: opened signed out, not on a share link, the app
+    /// starts the issuer's sign-in at once instead of showing its Sign in
+    /// button ([`auto_sign_in`]). Only the local dev stack sets it
+    /// (`cargo xtask dev run web` writes it, its issuer approving the demo
+    /// account without a form: `AUTH_DEV_AUTO_SIGN_IN`); a deployment's
+    /// `config.json` leaves it out, and it is off.
+    #[serde(default)]
+    pub auto_sign_in: bool,
+}
+
+/// How long an automatic sign-in counts as tried in this tab: opened
+/// signed out again within it (the sign-in came back without a session),
+/// the app says so instead of trying again, so it never loops.
+pub const AUTO_SIGN_IN_RETRY_SECS: i64 = 120;
+
+/// What the app does, opened signed out, about signing in by itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AutoSignIn {
+    /// Show the Sign in button, as always.
+    No,
+    /// Start the issuer's sign-in now.
+    Start,
+    /// It was tried a moment ago and came back signed out: show the button
+    /// with why.
+    Failed(String),
+}
+
+/// Whether the app, opened at `route` signed out, signs in by itself.
+///
+/// Only when its config asks ([`Config::auto_sign_in`]), on the app's own
+/// page (never a share link, the demo or the issuer's callback), not after
+/// the person signed out in this tab (`signed_out`), and once: `tried_at`
+/// is when this tab last tried (Unix seconds), within
+/// [`AUTO_SIGN_IN_RETRY_SECS`] of `now` a failure, not another try.
+#[must_use]
+pub fn auto_sign_in(
+    config: &Config,
+    route: &Route,
+    signed_out: bool,
+    tried_at: Option<i64>,
+    now: i64,
+) -> AutoSignIn {
+    if !config.auto_sign_in || *route != Route::App || signed_out {
+        return AutoSignIn::No;
+    }
+    match tried_at {
+        Some(at) if now.saturating_sub(at) < AUTO_SIGN_IN_RETRY_SECS => AutoSignIn::Failed(
+            "Signing in by itself did not finish: sign in below, or check the local issuer."
+                .to_owned(),
+        ),
+        _ => AutoSignIn::Start,
+    }
 }
 
 fn default_client() -> String {
@@ -558,6 +610,52 @@ mod tests {
         assert_eq!(
             Config::redirect_uri("https://architect.example/"),
             "https://architect.example/auth/callback"
+        );
+    }
+
+    #[test]
+    fn the_app_signs_in_by_itself_only_when_asked_on_its_own_page_and_once() {
+        let off = Config::parse(r#"{"issuer":"http://127.0.0.1:7411"}"#).unwrap();
+        assert!(!off.auto_sign_in, "a deployment's config leaves it off");
+        let on =
+            Config::parse(r#"{"issuer":"http://127.0.0.1:7411","auto_sign_in":true}"#).unwrap();
+        assert!(on.auto_sign_in);
+        let now = 10_000;
+        assert_eq!(
+            auto_sign_in(&off, &Route::App, false, None, now),
+            AutoSignIn::No
+        );
+        assert_eq!(
+            auto_sign_in(&on, &Route::App, false, None, now),
+            AutoSignIn::Start
+        );
+        // Never on a share link, the demo or the callback (whose own
+        // failure is shown as it is).
+        let share = route("/s/merrybrightstack/", "");
+        for other in [share, Route::Demo, Route::Refused("no".into())] {
+            assert_eq!(auto_sign_in(&on, &other, false, None, now), AutoSignIn::No);
+        }
+        let back = route("/auth/callback", "code=c&state=s");
+        assert_eq!(auto_sign_in(&on, &back, false, None, now), AutoSignIn::No);
+        // Not after the person signed out here.
+        assert_eq!(
+            auto_sign_in(&on, &Route::App, true, None, now),
+            AutoSignIn::No
+        );
+        // Tried a moment ago and signed out again: said, not tried again.
+        assert!(matches!(
+            auto_sign_in(&on, &Route::App, false, Some(now - 5), now),
+            AutoSignIn::Failed(_)
+        ));
+        assert_eq!(
+            auto_sign_in(
+                &on,
+                &Route::App,
+                false,
+                Some(now - AUTO_SIGN_IN_RETRY_SECS),
+                now
+            ),
+            AutoSignIn::Start
         );
     }
 

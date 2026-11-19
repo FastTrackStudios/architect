@@ -92,6 +92,17 @@ pub struct ServerConfig {
     /// published constant.
     #[architect(default = false)]
     pub dev_seed: bool,
+    /// Sign this account in by itself at `/oauth2/authorize` instead of
+    /// showing the sign-in form: the local dev stack's demo account
+    /// (`ada@local.test`), so the stack's web app comes up signed in.
+    /// `AUTH_DEV_AUTO_SIGN_IN=<email>`.
+    ///
+    /// Refused at boot ([`crate::dev::auto_sign_in`]) unless this is a
+    /// debug build bound to loopback, its public origin is this machine,
+    /// the account is a demo one (`@local.test`) and the database is the
+    /// dev stack's own (`<state>/auth/auth.db` beside its `fill.json`).
+    #[architect(env = "AUTH_DEV_AUTO_SIGN_IN")]
+    pub dev_auto_sign_in: Option<String>,
     /// Outgoing mail. Without `AUTH_SMTP_HOST` the mailer only logs, and
     /// every flow that has to reach a person — verification, password
     /// reset — completes as far as minting a token and no further.
@@ -431,6 +442,7 @@ impl ServerConfig {
             iroh_key_path: None,
             iroh_id_path: None,
             dev_seed: false,
+            dev_auto_sign_in: None,
             social: SocialConfig::disabled(),
             mail: crate::mail::MailConfig {
                 host: None,

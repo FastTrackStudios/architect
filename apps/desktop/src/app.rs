@@ -335,6 +335,9 @@ pub fn run(distribution: Distribution) -> ExitCode {
         .is_none_or(|a| a.starts_with("--") && a != "--headless")
     {
         crate::dev::from_env(dist);
+        // A development window signs in by itself (the dev stack's demo
+        // account), decided when its accounts open (src/dev.rs).
+        architect_app::set_dev_sign_in(crate::dev::sign_in_from_env);
     }
     match first.as_deref() {
         Some("actions") => return cli().main(std::env::args_os().skip(1)),

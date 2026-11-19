@@ -63,6 +63,10 @@ pub struct HttpState<S> {
     /// is something else, which the route reports rather than
     /// pretending an empty database.
     pub db: Option<sea_orm::DatabaseConnection>,
+    /// The dev stack's demo account, signed in by itself at
+    /// `/oauth2/authorize` instead of the form (`AUTH_DEV_AUTO_SIGN_IN`,
+    /// allowed only by [`crate::dev::auto_sign_in`]). `None` everywhere else.
+    pub dev_auto_sign_in: Option<String>,
 }
 
 /// Everything the social routes need beyond the engine.
@@ -239,7 +243,16 @@ impl<S> HttpState<S> {
             mail: std::sync::Arc::new(mail),
             social: Arc::new(SocialState::disabled()),
             db: None,
+            dev_auto_sign_in: None,
         }
+    }
+
+    /// Sign `email` in by itself at `/oauth2/authorize` (the dev stack's
+    /// demo account; [`crate::dev::auto_sign_in`] decides whether it may).
+    #[must_use]
+    pub fn with_dev_auto_sign_in(mut self, email: Option<String>) -> Self {
+        self.dev_auto_sign_in = email;
+        self
     }
 
     /// Attach the database, enabling `GET /admin/snapshot`.
@@ -418,12 +431,22 @@ where
     // A program presents a bearer; a browser presents the cookie. The
     // distinction decides what a dead credential gets below.
     let from_browser = !headers.contains_key(header::AUTHORIZATION);
+    // A session the dev stack's auto sign-in made for this request: its
+    // cookie goes back with the redirect.
+    let mut signed_in_here = None;
     let session_token = match session_token_from_headers(&headers, &state.cookie) {
         Some(token) => token,
         None if !from_browser => {
             return Err(ApiError::from(AuthFlowError::InvalidCredentials));
         }
-        None => return Ok(Redirect::to(&sign_in_url(&uri)).into_response()),
+        None => match dev_auto_sign_in(&state, &headers, &params).await {
+            Some(bundle) => {
+                let token = bundle.token.clone();
+                signed_in_here = Some(bundle);
+                token
+            }
+            None => return Ok(Redirect::to(&sign_in_url(&uri)).into_response()),
+        },
     };
 
     // A browser whose cookie names a session that is gone — expired,
@@ -442,7 +465,8 @@ where
     // endless loop through the login page — the person signs in, is
     // sent back here, is refused, is sent to sign in again. An unknown
     // client with a live session must stay the 401 it always was.
-    if from_browser
+    let session_token = if from_browser
+        && signed_in_here.is_none()
         && state
             .auth
             .current_session(CurrentSession {
@@ -451,19 +475,111 @@ where
             .await
             .is_err()
     {
-        return Ok((
-            StatusCode::SEE_OTHER,
-            [
-                (header::LOCATION, sign_in_url(&uri)),
-                (
-                    header::SET_COOKIE,
-                    state.cookie.removal_cookie().to_string(),
-                ),
-            ],
-        )
-            .into_response());
-    }
+        // The dev stack signs its account in again, as for no cookie.
+        let Some(bundle) = dev_auto_sign_in(&state, &headers, &params).await else {
+            return Ok(dead_cookie(&state.cookie, &uri));
+        };
+        let token = bundle.token.clone();
+        signed_in_here = Some(bundle);
+        token
+    } else {
+        session_token
+    };
 
+    let mut response = authorize_with(&state, session_token, params).await?;
+    if let Some(bundle) = &signed_in_here {
+        if let Ok(cookie) = state
+            .cookie
+            .session_cookie(bundle.token.clone())
+            .to_string()
+            .parse()
+        {
+            response.headers_mut().append(header::SET_COOKIE, cookie);
+        }
+    }
+    Ok(response)
+}
+
+/// The sign-in page for a browser whose cookie names a session that is
+/// gone, and a removal for that cookie.
+fn dead_cookie(cookie: &AuthCookieConfig, uri: &Uri) -> Response {
+    (
+        StatusCode::SEE_OTHER,
+        [
+            (header::LOCATION, sign_in_url(uri)),
+            (header::SET_COOKIE, cookie.removal_cookie().to_string()),
+        ],
+    )
+        .into_response()
+}
+
+/// The dev stack's auto sign-in (`AUTH_DEV_AUTO_SIGN_IN`): its demo
+/// account signed in with the development password, so a browser with no
+/// session is approved without the form. `None` when the mode is off, the
+/// client asked to see the form (`prompt=login` or `select_account`), or
+/// the sign-in failed (one warning; the form then).
+async fn dev_auto_sign_in<S>(
+    state: &HttpState<S>,
+    headers: &HeaderMap,
+    params: &AuthorizeParams,
+) -> Option<AuthSessionBundle>
+where
+    S: AuthStorage,
+{
+    use architect_telemetry::wide;
+    let email = state.dev_auto_sign_in.as_deref()?;
+    let asks_for_form = params.prompt.as_deref().is_some_and(|p| {
+        p.split(' ')
+            .any(|p| matches!(p, "login" | "select_account"))
+    });
+    if asks_for_form {
+        wide::set("auth.dev_auto_sign_in", "prompted");
+        return None;
+    }
+    let signed = state
+        .auth
+        .sign_in_email_password(auth_proto::SignInEmailPassword {
+            email: email.to_owned(),
+            password: crate::dev::DEV_PASSWORD.to_owned(),
+            ip_address: client_ip(headers),
+            user_agent: user_agent(headers),
+        })
+        .await;
+    match signed {
+        Ok(bundle) if bundle.session.active => {
+            wide::set("auth.dev_auto_sign_in", "signed_in");
+            Some(bundle)
+        }
+        Ok(_) => {
+            wide::set("auth.dev_auto_sign_in", "two_factor");
+            tracing::warn!(
+                target: "auth_server::dev",
+                "dev auto sign-in: the demo account has two-factor on; the sign-in form instead"
+            );
+            None
+        }
+        Err(error) => {
+            wide::set("auth.dev_auto_sign_in", "failed");
+            tracing::warn!(
+                target: "auth_server::dev",
+                %error,
+                "dev auto sign-in failed (is the stack filled with the demo seed?); the sign-in form instead"
+            );
+            None
+        }
+    }
+}
+
+/// `/oauth2/authorize` with a live session: the engine's grant, a consent
+/// page, or its refusal.
+async fn authorize_with<S>(
+    state: &HttpState<S>,
+    session_token: String,
+    params: AuthorizeParams,
+) -> Result<Response, ApiError>
+where
+    S: AuthStorage,
+{
     let authorization = state
         .auth
         .authorize_oidc(AuthorizeOidc {
