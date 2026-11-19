@@ -539,6 +539,20 @@ impl ShellTheme {
 
 static DRAWER_OPEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Whether a phone's row of buttons over its bottom tabs is put away: the
+/// row is for working on a note (its editing actions, the app's own), and
+/// a page that is for looking and listening has none of it
+/// ([`quiet_actions`]).
+pub static ACTIONS_QUIET: GlobalSignal<bool> = Signal::global(|| false);
+
+/// Puts a phone's row of buttons over its bottom tabs away (`true`) or
+/// back. The keyboard's own bar, while typing, is not this row.
+pub fn quiet_actions(quiet: bool) {
+    if *ACTIONS_QUIET.peek() != quiet {
+        *ACTIONS_QUIET.write() = quiet;
+    }
+}
+
 /// Whether a side is open over the page (a phone's drawer), as the shell
 /// last drew it: readable from any thread.
 #[must_use]
@@ -1733,8 +1747,8 @@ pub fn AppShell(
 
     // Whether a view of someone else's fills the title slot, and the row
     // it gets: the title row's height, past the window's buttons.
-    let title_filled = try_use_context::<Signal<Chrome>>()
-        .is_some_and(|c| c.read().filler(Slot::Title).is_some());
+    let title_filled =
+        try_use_context::<Signal<Chrome>>().is_some_and(|c| c.read().filler(Slot::Title).is_some());
     // Clear of the window's buttons and the sidebar button on the left, and
     // of the app's own buttons on the right, as the title row's content is.
     let title_h = shell.title_row();
