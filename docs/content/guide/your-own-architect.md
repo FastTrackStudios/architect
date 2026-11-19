@@ -106,6 +106,27 @@ Copy the `[patch]` tables from architect's root `Cargo.toml` too: they pin
 the forks it builds against (Blitz, dioxus-native, vox), and a patch only
 applies from the workspace root.
 
+### What ships beside the binary
+
+A process extension is a program of its own and cannot be linked in. A
+distribution that needs one in every copy (Studio's engine) ships its
+package in a folder beside its binary and names the folder:
+
+```rust
+architect_desktop::run(distribution().shipped("extensions"))
+```
+
+When the app starts, each `<the binary's folder>/extensions/<id>/` that
+holds an `extension.toml` is loaded as a built-in, as a compiled-in
+extension is: it asks for no grant, and an installed or development copy of
+the same id runs in its place (`apps/distribution/src/lib.rs`
+`Distribution::shipped`, `shipped_packages`; loaded in
+`apps/ui/src/extensions.rs`). The package's `[entry] path` is relative to
+its own folder. The folder is part of the app as shipped, inside its
+bundle, never a vault's or a person's. A package that does not read is left
+out with a warning; a build run from `target/` with no such folder ships
+none.
+
 ## Building one
 
 `cargo xtask dist` builds every face of a distribution the way the release

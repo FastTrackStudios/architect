@@ -136,6 +136,29 @@ fn drew_tile(frame: &Frame) -> bool {
         .any(|e| matches!(e, Edit::CreateText { value } if value == "tile"))
 }
 
+/// A process extension an app ships beside its binary (`Distribution::
+/// shipped`): read from its folder and given to the app as a built-in, it
+/// is started as one, its program run from its own folder, and draws.
+#[test]
+fn a_process_extension_shipped_as_a_built_in_is_started_and_draws() {
+    use architect_extensions::extensions::Extensions;
+    use architect_extensions::install::Installs;
+
+    let dir = tempfile::tempdir().unwrap();
+    let (host, processes) = host(dir.path());
+    let shipped = dir.path().join("shipped").join(ID);
+    std::fs::create_dir_all(&shipped).unwrap();
+    let ext = Extensions::new(host, Installs::new(dir.path().join("installed")))
+        .with_builtin(package(&shipped));
+    let _ = ext.sync();
+    assert_eq!(ext.host().get(ID).unwrap().origin, Origin::Builtin);
+    let process = running(&processes);
+    let views = open_drawn(&process, 1);
+    assert_eq!(process.open_views(), 1);
+    drop(views);
+    drained(&process);
+}
+
 #[test]
 fn more_than_64_views_at_once_closed_ones_given_back_and_a_clear_limit() {
     assert_eq!((VIEWS_WIRE, WIRE), (6, 8));

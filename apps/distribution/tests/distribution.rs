@@ -203,3 +203,44 @@ fn every_distribution_installs_from_the_store_unless_it_says_otherwise() {
     let closed = architect().without_installs();
     assert!(closed.registries().is_empty() && !closed.installs());
 }
+
+/// A distribution ships packages beside its binary (a process extension,
+/// which cannot be linked in): each folder with a manifest is read, a
+/// broken one is reported with where it is, and a folder that is not there
+/// ships nothing.
+#[test]
+fn a_distribution_reads_the_packages_it_ships_beside_its_binary() {
+    let tmp = tempfile::tempdir().unwrap();
+    let beside = tmp.path();
+    let put = |id: &str, manifest: &str| {
+        let dir = beside.join("shipped").join(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("extension.toml"), manifest).unwrap();
+    };
+    put(
+        "engine",
+        "id = \"engine\"\nname = \"Engine\"\nversion = \"0.1.0\"\nkind = \"process\"\napi = \"0.1\"\n\n[entry]\npath = \"engine-bin\"\n",
+    );
+    put("broken", "id = ");
+    // Not a package: no manifest.
+    std::fs::create_dir_all(beside.join("shipped/notes")).unwrap();
+
+    let d = Distribution::new("Mine")
+        .shipped("shipped")
+        .shipped("absent");
+    assert_eq!(d.shipped_folders(), ["shipped", "absent"]);
+    let found = d.shipped_packages(beside);
+    assert_eq!(found.len(), 2, "the package and the broken one");
+    let (bad_dir, why) = found[0].as_ref().unwrap_err();
+    assert!(bad_dir.ends_with("shipped/broken"), "{}", bad_dir.display());
+    assert!(!why.is_empty());
+    let engine = found[1].as_ref().unwrap();
+    assert_eq!(engine.manifest.id, "engine");
+    assert_eq!(engine.dir(), Some(beside.join("shipped/engine").as_path()));
+
+    assert!(
+        Distribution::new("Plain")
+            .shipped_packages(beside)
+            .is_empty()
+    );
+}

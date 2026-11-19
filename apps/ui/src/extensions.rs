@@ -1203,6 +1203,26 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         if dist.installs() {
             extensions = extensions.with_registries(app_registries(&root, dist));
         }
+        // What the distribution ships beside its binary (`Distribution::
+        // shipped`: a process extension, a program of its own), as
+        // built-ins.
+        #[cfg(not(target_family = "wasm"))]
+        if let Some(beside) = std::env::current_exe()
+            .ok()
+            .as_deref()
+            .and_then(Path::parent)
+        {
+            for shipped in dist.shipped_packages(beside) {
+                match shipped {
+                    Ok(package) => extensions = extensions.with_builtin(package),
+                    Err((dir, why)) => tracing::warn!(
+                        extension.dir = %dir.display(),
+                        extension.reason = %why,
+                        "a shipped extension does not read; left out"
+                    ),
+                }
+            }
+        }
         let found = registry().filter(|_| sandbox);
         match &found {
             Some(dir) => extensions = extensions.with_source(FolderRegistry::new(dir)),
