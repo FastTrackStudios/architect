@@ -27,6 +27,7 @@
 
 pub mod clock;
 pub mod deck;
+pub mod engine;
 pub mod model;
 #[cfg(feature = "ui")]
 pub mod ui;
@@ -40,6 +41,7 @@ use serde_json::{Value, json};
 
 pub use crate::clock::{Clock, Follower, Reading, Silent};
 pub use crate::deck::{Caller, Control, Deck, Pick, Source};
+pub use crate::engine::EngineClock;
 #[cfg(feature = "extension")]
 pub use crate::extension::Playhead;
 #[cfg(feature = "host")]
