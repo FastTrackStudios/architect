@@ -374,3 +374,117 @@ async fn a_library_s_assets_browse_search_and_draw_from_a_laptop_that_holds_none
         .unwrap();
     assert!(peaks.length > 0 && peaks.data.iter().copied().max() == Some(20000));
 }
+
+/// #904: a device with a holding rule takes the light part of a root and
+/// leaves the multitracks out. They stay listed, are never fetched, and
+/// are not among the hashes it copies to its bucket; the root still
+/// reads as synced, with what was left out counted apart from missing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_holding_rule_takes_the_light_part_and_leaves_the_multitracks_listed() {
+    use architect_files::HoldRule;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let tree = tmp.path().join("starcommand");
+    let held = project(&tree);
+    std::fs::create_dir_all(held.join("Right Here/reference")).unwrap();
+    std::fs::write(held.join("Right Here/reference/mix.mp3"), vec![3u8; 9_000]).unwrap();
+    std::fs::write(held.join("Right Here/chart.kf"), "| D | G |").unwrap();
+    let storage = device("storage", tmp.path(), tree.clone(), true, None);
+
+    // The hosted node: no audio folders, nothing over 100 kB.
+    let rule = HoldRule {
+        skip: vec!["**/Audio Files/**".to_owned()],
+        max: Some(100_000),
+        ..HoldRule::default()
+    };
+    let hosted = {
+        let docs: DocMap = Arc::default();
+        let local = LocalFs::new(tmp.path().join("hosted/blobs"));
+        let fetcher = Fetcher::new(local.clone());
+        fetcher.add_remote(Arc::new(storage.engine.store.clone()));
+        let source = docs.clone();
+        let engine = Engine::new(
+            EngineConfig {
+                settle: Duration::ZERO,
+                hold: rule.clone(),
+                ..EngineConfig::new(
+                    "hosted",
+                    tmp.path().join("hosted/data"),
+                    tmp.path().join("hosted-files"),
+                    false,
+                )
+            },
+            TreeStore::new(local),
+            fetcher,
+            Arc::new(move |id| {
+                let doc = source.lock().unwrap().entry(id).or_default().clone();
+                Box::pin(async move { Some(doc) })
+            }),
+        );
+        Device { engine, docs }
+    };
+
+    passes(&storage).await;
+    let root = storage.engine.status().await;
+    let doc_id: Uuid = root[0].doc_id.parse().unwrap();
+    assert_eq!(root[0].files, 4);
+    assert_eq!(root[0].left_out, 0, "the storage server holds it all");
+
+    exchange(&storage, &hosted);
+    let copy = hosted.engine.pin(doc_id, None).await.unwrap();
+    hosted.engine.pass_all().await;
+    assert_eq!(read(&copy.join("Right Here/chart.kf")), "| D | G |");
+    assert_eq!(
+        read(&copy.join("Right Here/Right Here.RPP")),
+        "<REAPER_PROJECT 0.1\n>\n"
+    );
+    assert!(copy.join("Right Here/reference/mix.mp3").is_file());
+    assert!(
+        !copy.join("Right Here/Audio Files/Bass_1.wav").exists(),
+        "the multitrack is never fetched"
+    );
+    let status = hosted.engine.root_status(doc_id).await.unwrap();
+    assert_eq!(status.files, 4, "all four are listed: {status:?}");
+    assert_eq!(status.left_out, 1, "{status:?}");
+    assert_eq!(status.missing, 0, "left out is not missing: {status:?}");
+    assert!(status.synced, "{status:?}");
+    assert_eq!(hosted.engine.left_out(), 1);
+
+    // What it would copy to its bucket: the three light files' hashes,
+    // not the multitrack's; a bucket rule narrows it further.
+    let named = hosted.engine.named().len();
+    let kept = hosted.engine.named_keeping(&HoldRule::default()).await;
+    assert_eq!((named, kept.len()), (4, 3));
+    let tiny = HoldRule {
+        max: Some(1_000),
+        ..HoldRule::default()
+    };
+    assert_eq!(hosted.engine.named_keeping(&tiny).await.len(), 2);
+    // The storage server, with a bucket rule alone, would send the same
+    // light part and keep the multitrack to itself.
+    assert_eq!(storage.engine.named_keeping(&rule).await.len(), 3);
+    assert_eq!(
+        storage
+            .engine
+            .named_keeping(&HoldRule::default())
+            .await
+            .len(),
+        4
+    );
+
+    // A multitrack added later is left out too; a chart still arrives.
+    tick().await;
+    std::fs::write(
+        held.join("Right Here/Audio Files/Kick_1.wav"),
+        vec![1u8; 200_000],
+    )
+    .unwrap();
+    std::fs::write(held.join("Right Here/chart.kf"), "| D | G | A |").unwrap();
+    passes(&storage).await;
+    exchange(&storage, &hosted);
+    hosted.engine.pass_all().await;
+    assert_eq!(read(&copy.join("Right Here/chart.kf")), "| D | G | A |");
+    assert!(!copy.join("Right Here/Audio Files/Kick_1.wav").exists());
+    let status = hosted.engine.root_status(doc_id).await.unwrap();
+    assert_eq!((status.left_out, status.missing), (2, 0), "{status:?}");
+}

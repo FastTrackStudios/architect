@@ -78,6 +78,9 @@ pub struct EngineConfig {
     pub scrub_budget: u64,
     /// Peers' copies challenged per pass.
     pub challenges: u32,
+    /// Which files of its roots this device holds (#904); the default
+    /// holds everything. A file it leaves out is listed, never fetched.
+    pub hold: crate::hold::HoldRule,
 }
 
 /// How long evidence of a copy counts by default: 30 days.
@@ -104,6 +107,7 @@ impl EngineConfig {
             verify_window: VERIFY_WINDOW,
             scrub_budget: 32 << 20,
             challenges: 2,
+            hold: crate::hold::HoldRule::default(),
         }
     }
 }
@@ -256,6 +260,8 @@ struct Waiting {
     /// Replacements and deletes waiting because the kept versions are at
     /// their bound.
     history_full: u32,
+    /// Not waiting at all: files the holding rule leaves out here.
+    left_out: u32,
 }
 
 impl Waiting {
@@ -821,6 +827,15 @@ impl Engine {
             .unwrap_or_else(PoisonError::into_inner) = why;
     }
 
+    /// Files this device's holding rule leaves out, over every root.
+    #[must_use]
+    pub fn left_out(&self) -> u32 {
+        self.lock()
+            .values()
+            .map(|s| s.waiting.left_out)
+            .fold(0, u32::saturating_add)
+    }
+
     /// Files more than the store's whole limit, over every root: they
     /// cannot arrive until the limit is raised.
     #[must_use]
@@ -1024,6 +1039,12 @@ impl Engine {
                         ..k.clone()
                     },
                 );
+                continue;
+            }
+            // Left out by this device's rule (#904): listed, never
+            // fetched. Its bytes stay on the holders that keep it.
+            if !self.config.hold.keeps(&path, target.size) {
+                waiting.left_out = waiting.left_out.saturating_add(1);
                 continue;
             }
             // The bytes this file is replacing are kept (`write_file`);
@@ -1683,9 +1704,13 @@ impl Engine {
         let live = manifest.tree().live();
         let dir = self.working_dir(doc_id);
         let pinned = self.pins().roots.contains_key(&doc_id.to_string());
+        // A file the rule leaves out is not one to be at.
+        let hold = &self.config.hold;
         let at_head = |index: &Index| {
-            live.iter()
-                .all(|(p, v)| index.files.get(p).is_some_and(|i| i.version == Some(v.id)))
+            live.iter().all(|(p, v)| {
+                index.files.get(p).is_some_and(|i| i.version == Some(v.id))
+                    || !hold.keeps(p, v.size)
+            })
         };
         let seen = self.lock().get(&doc_id).map(|s| {
             (
@@ -1715,6 +1740,7 @@ impl Engine {
             no_history: waiting.no_history,
             history_full: waiting.history_full,
             history_error: waiting.history_error,
+            left_out: waiting.left_out,
             strays,
             synced,
             stubs,

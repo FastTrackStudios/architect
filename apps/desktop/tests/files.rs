@@ -115,6 +115,11 @@ struct Pair {
 
 /// The always-on node holding a project, a laptop that knows it.
 async fn pair() -> Pair {
+    pair_with(|_| {}).await
+}
+
+/// [`pair`], the second node's configuration changed by `tweak` first.
+async fn pair_with(tweak: impl FnOnce(&mut Config)) -> Pair {
     let origin = issuer().await;
     let tmp = tempfile::tempdir().unwrap();
     let tree = tmp.path().join("starcommand");
@@ -156,6 +161,7 @@ async fn pair() -> Pair {
         &laptop_bind,
     );
     laptop_cfg.peers = vec![always.dial().unwrap()];
+    tweak(&mut laptop_cfg);
     let laptop = node::start(laptop_cfg).await.unwrap();
     // The always-on node dials the laptop too (with n0 it finds it by id).
     let laptop_dial = laptop.dial().unwrap();
@@ -449,4 +455,65 @@ async fn a_pin_is_a_second_verified_copy_that_the_node_counts_and_challenges() {
         ),
         "{refused:?}"
     );
+}
+
+/// #904 over the wire: a node with a holding rule (the hosted one) pins
+/// a project the storage server holds whole. Its light part arrives; the
+/// multitrack is listed and never fetched, and the node's status counts
+/// it as left out, not missing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_node_with_a_holding_rule_never_fetches_the_multitracks() {
+    use architect_desktop::node::service::Node as _;
+
+    let Pair {
+        always,
+        laptop: hosted,
+        held,
+        doc_id,
+        _tmp,
+    } = pair_with(|config| {
+        config.name = "hosted".to_owned();
+        config.files_skip_paths = vec!["**/Audio Files/**".to_owned()];
+        config.files_hold_max = Some(Size::Bytes(1 << 20));
+    })
+    .await;
+
+    let copy = engine(&hosted).pin(doc_id, None).await.unwrap();
+    let session_file = copy.join("Right Here/Right Here.RPP");
+    until("the hosted node has the session file", async || {
+        read(&session_file) == "<REAPER_PROJECT\n>\n"
+    })
+    .await;
+    let synced = async || {
+        engine(&hosted)
+            .root_status(doc_id)
+            .await
+            .is_some_and(|s| s.synced && s.left_out == 1 && s.missing == 0)
+    };
+    until("it is synced with the multitrack left out", synced).await;
+    assert!(!copy.join("Right Here/Audio Files/Bass_1.wav").exists());
+    let status = hosted.state.status().await.unwrap();
+    assert_eq!(status.files_store.map(|s| s.left_out), Some(1));
+
+    // A light file added on the storage server arrives; a large one that
+    // is not under the skipped folder is left out by its size.
+    std::fs::write(held.join("Right Here/chart.kf"), "| D | G |").unwrap();
+    std::fs::write(held.join("Right Here/film.mov"), vec![2u8; (1 << 20) + 1]).unwrap();
+    until("the chart arrives", async || {
+        read(&copy.join("Right Here/chart.kf")) == "| D | G |"
+    })
+    .await;
+    until("the film is listed and left out", async || {
+        engine(&hosted)
+            .root_status(doc_id)
+            .await
+            .is_some_and(|s| s.files == 4 && s.left_out == 2 && s.missing == 0)
+    })
+    .await;
+    assert!(!copy.join("Right Here/film.mov").exists());
+    // The storage server holds everything, and leaves nothing out.
+    assert_eq!(engine(&always).left_out(), 0);
+
+    hosted.stop().await;
+    always.stop().await;
 }

@@ -124,6 +124,11 @@ pub struct RootStatus {
     /// Of those, replacements and deletes waiting because the kept
     /// versions are at their bound (`files_history_max` or the floor).
     pub history_full: u32,
+    /// Files this device's holding rule leaves out (`HoldRule`, #904):
+    /// listed here, their bytes on the holders that keep them. Not
+    /// missing: nothing is waited for.
+    #[facet(default)]
+    pub left_out: u32,
     /// Files named like the engine's temp files that it did not write:
     /// never synced, never removed, listed here.
     pub strays: Vec<String>,
