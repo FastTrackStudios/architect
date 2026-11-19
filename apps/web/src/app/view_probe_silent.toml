@@ -1,0 +1,74 @@
+# The web app's view probe as it is with no read declared
+# (`probe=views,silent`, apps/web/src/app/view_probe.rs): the same views
+# and claims as view_probe.toml, and nothing in `reads`, so the app hands
+# its views no note at all.
+id = "web.views"
+name = "Web view probe"
+version = "0.1.0"
+# Linked in (its Rust is apps/web/src/app/view_probe.rs): a process
+# copy's kind, as every linked extension declares.
+kind = "process"
+api = "0.1"
+description = "The web app's test probe for linked views: a note drawn by its type, the home, a favourite's view, for a member and a share link's guest."
+authors = ["FastTrackStudios"]
+
+[entry]
+path = "web-views"
+
+[capabilities]
+# Its round button plays and pauses its own source.
+actions = ["PLAYHEAD_"]
+
+[[views]]
+id = "note"
+title = "Probe note"
+
+[[views]]
+id = "card"
+title = "Probe card"
+
+[[views]]
+id = "home"
+title = "Probe home"
+
+[[views]]
+id = "more"
+title = "Probe more"
+
+# The note's page.
+[[embeds]]
+id = "note"
+title = "Probe note"
+view = "note"
+claims = { note_type = ["probe-note"] }
+fill = true
+
+# A card at the note's head, over its text.
+[[embeds]]
+id = "card"
+title = "Probe card"
+view = "card"
+claims = { note_type = ["probe-card"] }
+
+[[favourites]]
+note_type = "probe-note"
+
+[[favourites.tabs]]
+id = "note"
+label = "Probe"
+icon = "notebook-text"
+target = { view = "note" }
+
+[[favourites.tabs]]
+id = "more"
+label = "More"
+icon = "list"
+target = { view = "more" }
+
+[favourites.primary]
+id = "play"
+label = "Play"
+icon = "play"
+target = { action = "PLAYHEAD_TOGGLE" }
+state = "playing"
+on = { label = "Pause", icon = "pause" }

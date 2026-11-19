@@ -35,6 +35,12 @@ const NOTE: &str = "vault.note";
 /// its pane's state is `crate::favourites::frame_state`.
 const FRAME: &str = "ext.frame";
 
+/// The view a linked extension's view on a note is (a favourite's
+/// `{view}` of an extension compiled into the app); its pane's state is
+/// `crate::favourites::frame_state` too (the extension, its view, the
+/// note).
+const LINKED: &str = "ext.linked";
+
 /// Whether a note of the demo was edited or made since the page loaded:
 /// leaving the demo then asks first (`super::sign_in`).
 static EDITED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -69,9 +75,10 @@ const VIEW_ONLY: &str = ".web-note[data-view-only] { height: 100%; } \
      .web-note[data-view-only] > :not([data-testid=\"note-view\"]) { display: none !important; } \
      [data-switcher=\"grip\"] > div { display: none; }";
 
-/// Whether the note on show is one an extension's view draws (its type
-/// is claimed by an island): set by the app's root, read by the note's
-/// page and the shell's row of editing buttons.
+/// Whether the note on show is one an extension's view draws as its page
+/// (its type is claimed by an island, or by a linked extension whose
+/// embed says `fill`: `ext_host::Drawn::is_page`): set by the app's root,
+/// read by the note's page and the shell's row of editing buttons.
 pub static VIEW_ON_SHOW: GlobalSignal<bool> = Signal::global(|| false);
 
 /// Unix milliseconds now.
@@ -144,7 +151,7 @@ pub fn note_on_show(w: &Workspace, vault: &MemorySource) -> Option<(String, Opti
     let pane = w.current_document().and_then(|id| w.pane(id))?;
     let path = match pane.view.0.as_str() {
         NOTE => pane.state.clone(),
-        FRAME => crate::favourites::read_frame_state(&pane.state)?
+        FRAME | LINKED => crate::favourites::read_frame_state(&pane.state)?
             .2
             .to_owned(),
         _ => return None,
@@ -177,12 +184,13 @@ pub fn type_of(vault: &MemorySource, path: &str) -> Option<Option<String>> {
     )
 }
 
-/// The island view on show, when the document on show is one:
-/// `(island, view, note)`.
+/// The extension view on show (an island's in its frame, or a linked
+/// extension's), when the document on show is one: `(extension, view,
+/// note)`.
 #[must_use]
 pub fn frame_on_show(w: &Workspace) -> Option<(String, String, String)> {
     let pane = w.current_document().and_then(|id| w.pane(id))?;
-    (pane.view.0 == FRAME)
+    (pane.view.0 == FRAME || pane.view.0 == LINKED)
         .then(|| crate::favourites::read_frame_state(&pane.state))
         .flatten()
         .map(|(i, v, n)| (i.to_owned(), v.to_owned(), n.to_owned()))
@@ -190,21 +198,41 @@ pub fn frame_on_show(w: &Workspace) -> Option<(String, String, String)> {
 
 /// Island `island`'s view `view` on note `note`, titled `title`: its pane
 /// forward when one is open, else a new tab beside the note.
-pub fn open_frame(
+pub fn open_frame(workspace: Signal<Workspace>, island: &str, view: &str, note: &str, title: &str) {
+    open_view_pane(workspace, FRAME, island, view, note, title);
+}
+
+/// Linked extension `extension`'s view `view` on note `note`, titled
+/// `title`, as a pane in the app's own document: its pane forward when
+/// one is open, else a new tab beside the note.
+pub fn open_linked(
+    workspace: Signal<Workspace>,
+    extension: &str,
+    view: &str,
+    note: &str,
+    title: &str,
+) {
+    open_view_pane(workspace, LINKED, extension, view, note, title);
+}
+
+/// A pane of kind `kind` ([`FRAME`], [`LINKED`]) for `extension`'s view
+/// `view` on note `note`.
+fn open_view_pane(
     mut workspace: Signal<Workspace>,
-    island: &str,
+    kind: &'static str,
+    extension: &str,
     view: &str,
     note: &str,
     title: &str,
 ) {
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(1);
-    let state = crate::favourites::frame_state(island, view, note);
+    let state = crate::favourites::frame_state(extension, view, note);
     let open = workspace
         .read()
         .panes
         .iter()
-        .find(|p| p.view.0 == FRAME && p.state == state)
+        .find(|p| p.view.0 == kind && p.state == state)
         .map(|p| p.id.clone());
     if let Some(id) = open {
         let _ = workspace.write().activate(&id);
@@ -213,11 +241,28 @@ pub fn open_frame(
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
     let mut pane = Pane::new(
         format!("frame-{n}"),
-        FRAME,
+        kind,
         format!("{title} · {}", title_of(note)),
     );
     pane.state = state;
     open_in_main(workspace, pane, Target::Tab);
+}
+
+/// The note of `vault` a view names by `path`: by the app's path, or by
+/// the note's own in its vault (an org's notes are listed under a folder
+/// a vault, and a note names its neighbours without it).
+#[must_use]
+pub fn note_named(vault: &WebVault, path: &str) -> Option<String> {
+    let files = vault.source.files();
+    files
+        .iter()
+        .find(|f| f.path == path)
+        .or_else(|| {
+            files
+                .iter()
+                .find(|f| f.path.split_once('/').is_some_and(|(_, own)| own == path))
+        })
+        .map(|f| f.path.clone())
 }
 
 /// Note `path` on show (a favourite's `page` or `{place}`).
@@ -392,6 +437,9 @@ fn views(extra: Vec<View>) -> Views {
         )
         .view(View::new(NOTE, "Note", |_| rsx! { NoteView {} }).icon(icon!(FileText)))
         .view(View::new(FRAME, "Extension view", |_| rsx! { FrameView {} }).icon(icon!(Puzzle)))
+        .view(
+            View::new(LINKED, "Extension view", |_| rsx! { LinkedPaneView {} }).icon(icon!(Puzzle)),
+        )
 }
 
 fn screen_class(screen: &Screen) -> FormClass {
@@ -668,6 +716,84 @@ fn FrameView() -> Element {
     }
 }
 
+/// A linked extension's view on a note (a favourite's `{view}` of an
+/// extension compiled into the app), filling its pane in the app's own
+/// document. It is handed the note as a claimed view is
+/// (`super::embed::NoteEmbed`): only when its extension claims the note's
+/// type, and then what its manifest declares it reads
+/// (`ext_host::linked_note_props`); otherwise no note.
+#[component]
+fn LinkedPaneView() -> Element {
+    let pane = use_pane();
+    let state = pane.state();
+    let vault = use_context::<WebVault>();
+    let claims = super::extensions::use_linked_claims();
+    let t = use_shell().theme;
+    let Some((extension, view, note)) = crate::favourites::read_frame_state(&state) else {
+        return rsx! {};
+    };
+    let Some(text) = vault.source.read_text(note) else {
+        return rsx! {
+            div { style: "flex: 1; padding: 32px; color: {t.ink_3};", p { "{title_of(note)} is no longer in the vault." } }
+        };
+    };
+    let (_, body) = architect_navigator::markdown::split_block(&text);
+    let properties: Vec<(String, String)> = note_from_markdown(note, &text, 0, 0)
+        .properties
+        .iter()
+        .map(|(k, v)| (k.clone(), shown(v)))
+        .collect();
+    let prop = |name: &str| {
+        properties
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.clone())
+    };
+    let note_type = prop("type").unwrap_or_default();
+    let title = prop("title").unwrap_or_else(|| title_of(note));
+    let claims = claims();
+    let handed = claims
+        .iter()
+        .find(|c| c.extension == extension && c.claims(&note_type))
+        .map_or(serde_json::Value::Null, |claim| {
+            let files = super::embed::member_files(&vault, claim.note_reads().files, note);
+            crate::ext_host::linked_note_props(
+                crate::ext_host::Audience::Member,
+                claim,
+                &crate::ext_host::Note {
+                    path: note,
+                    title: &title,
+                    note_type: &note_type,
+                    properties: &properties,
+                    body,
+                    files: &files,
+                },
+            )
+        });
+    let source = handed
+        .get("body")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let claim = if note_type.trim().is_empty() {
+        super::embed::PAGE_CLAIM.to_owned()
+    } else {
+        format!("note_type:{}", note_type.trim())
+    };
+    rsx! {
+        div { key: "{state}", style: "flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; color: {t.ink};",
+            super::embed::LinkedView {
+                extension: extension.to_owned(),
+                view: view.to_owned(),
+                claim,
+                source,
+                props: serde_json::json!({ "note": handed }),
+                pane: true,
+            }
+        }
+    }
+}
+
 /// Island `island`'s view `view`, once its bundle is checked and only when
 /// the island lists it; a word in its place otherwise. The note reaches it
 /// through the gate (`ext_host::note_props`) for `audience`.
@@ -691,7 +817,7 @@ fn FramePane(
         Some(Ok(b)) if b.island.views().contains(&view) => {
             let files = match audience {
                 crate::ext_host::Audience::Member => {
-                    super::embed::member_files(&vault, &b.island, &note_type, &path)
+                    super::embed::member_files(&vault, b.island.reads_files_of(&note_type), &path)
                 }
                 crate::ext_host::Audience::Guest => Vec::new(),
             };
@@ -1102,10 +1228,13 @@ fn NoteText(path: String, text: String) -> Element {
     // or an island claims it, the note never shows them raw.
     let fields = architect_media::front::fields(&text);
     let listing = super::frames::use_listing();
-    let claimed = listing
-        .read()
-        .as_ref()
-        .is_some_and(|l| crate::ext_host::claimed(l, &note_type).is_some());
+    let linked = super::extensions::use_linked_claims();
+    let claimed = crate::ext_host::drawn(
+        &linked.read(),
+        listing.read().as_ref().map_or(&[][..], |l| l.as_slice()),
+        &note_type,
+    )
+    .is_some();
     let collection = super::collection::is_collection(&fields);
     let core_list = !claimed && collection;
     let listed_keys = if collection {

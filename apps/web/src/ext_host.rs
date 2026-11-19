@@ -366,12 +366,31 @@ pub fn note_props(audience: Audience, island: &Island, note: &Note<'_>) -> Value
     let Some(claim) = island.claim_for(note.note_type) else {
         return Value::Null;
     };
-    if !claim.reads_note || !island.declares_reading_notes() {
+    let reads = NoteReads {
+        text: claim.reads_note && island.declares_reading_notes(),
+        files: island.reads_files_of(note.note_type),
+    };
+    note_props_as(audience, reads, &claim.properties, note)
+}
+
+/// What a view that `reads` is handed of `note` for `audience`: the shape
+/// every note view gets, whichever way it is drawn (an island's frame,
+/// [`note_props`]; a linked extension's view, [`linked_note_props`]).
+///
+/// `null` unless it reads the note's text. `declared` are the properties
+/// a guest's view is given (a member's gets them all).
+fn note_props_as(
+    audience: Audience,
+    reads: NoteReads,
+    declared: &[String],
+    note: &Note<'_>,
+) -> Value {
+    if !reads.text {
         return Value::Null;
     }
     let mut properties = serde_json::Map::new();
     for (k, v) in note.properties {
-        if audience == Audience::Member || claim.properties.iter().any(|p| p == k) {
+        if audience == Audience::Member || declared.iter().any(|p| p == k) {
             properties.insert(k.clone(), Value::String(v.clone()));
         }
     }
@@ -390,7 +409,7 @@ pub fn note_props(audience: Audience, island: &Island, note: &Note<'_>) -> Value
             "body": without_comments(note.body),
         }),
     };
-    if island.reads_files_of(note.note_type)
+    if reads.files
         && let Some(o) = props.as_object_mut()
     {
         let files = architect_spaces::view::within_caps(
@@ -407,6 +426,145 @@ pub fn note_props(audience: Audience, island: &Island, note: &Note<'_>) -> Value
         );
     }
     props
+}
+
+/// A note type's view of an extension compiled into the app.
+///
+/// A linked extension's `[[embeds]]` claim of a note type, with one of
+/// its views: what the app's host says of it
+/// (`architect_extensions::embeds`' `LinkedNoteView`), as plain data.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkedClaim {
+    /// The extension's id.
+    pub extension: String,
+    /// Its view that draws the note.
+    pub view: String,
+    /// The note types it claims, as declared.
+    pub note_types: Vec<String>,
+    /// Whether the view is the note's page (its embed's `fill`), not a
+    /// card at the note's head.
+    pub fill: bool,
+    /// The most it grows to at a note's head, px.
+    pub max_height: u32,
+    /// What its extension may read (its manifest's `[capabilities]
+    /// reads`).
+    pub reads: Vec<String>,
+}
+
+impl LinkedClaim {
+    /// Whether it claims notes of type `note_type` (without regard to
+    /// case; a blank type is no type).
+    #[must_use]
+    pub fn claims(&self, note_type: &str) -> bool {
+        let t = note_type.trim();
+        !t.is_empty()
+            && self
+                .note_types
+                .iter()
+                .any(|n| n.trim().eq_ignore_ascii_case(t))
+    }
+
+    /// What its view is handed of a note ([`linked_reads`]).
+    #[must_use]
+    pub fn note_reads(&self) -> NoteReads {
+        linked_reads(&self.reads)
+    }
+}
+
+/// What a linked extension's note view is handed, from what its manifest
+/// declares it reads: the note's text only with [`READS_NOTE`], the
+/// note's files only with [`READS_FILES`] too.
+///
+/// The same rule an island is held to ([`note_reads`]), read from the
+/// manifest itself: a linked extension has no listing, and its claim
+/// names no read of its own.
+#[must_use]
+pub fn linked_reads(reads: &[String]) -> NoteReads {
+    let text = reads.iter().any(|r| r == READS_NOTE);
+    NoteReads {
+        text,
+        files: text && reads.iter().any(|r| r == READS_FILES),
+    }
+}
+
+/// What draws a note of a type ([`drawn`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Drawn<'a> {
+    /// A view compiled into the app, in the app's own document.
+    Linked(&'a LinkedClaim),
+    /// An island's view, in a frame.
+    Island(&'a Island, &'a Embed),
+}
+
+impl Drawn<'_> {
+    /// Whether the view is the note's page: the note's own heading,
+    /// properties and text are out of its way. An island's view always
+    /// is; a linked view when its embed says `fill`, else it is drawn at
+    /// the note's head, over the note's text.
+    #[must_use]
+    pub const fn is_page(&self) -> bool {
+        match self {
+            Self::Linked(claim) => claim.fill,
+            Self::Island(..) => true,
+        }
+    }
+
+    /// What the view is handed of the note.
+    #[must_use]
+    pub fn note_reads(&self) -> NoteReads {
+        match self {
+            Self::Linked(claim) => claim.note_reads(),
+            Self::Island(island, claim) => NoteReads {
+                text: claim.reads_note && island.declares_reading_notes(),
+                files: claim.reads_note
+                    && island.declares_reading_notes()
+                    && island.reads.iter().any(|r| r == READS_FILES),
+            },
+        }
+    }
+}
+
+/// The view that draws a note of type `note_type`.
+///
+/// A linked extension's claim wins over an island's: the first of
+/// `linked` that claims the type, else the first island listed that does
+/// ([`claimed`]). A distribution whose views are compiled in needs no
+/// island; where it ships both, its own code draws and no bundle is
+/// fetched.
+#[must_use]
+pub fn drawn<'a>(
+    linked: &'a [LinkedClaim],
+    islands: &'a [Island],
+    note_type: &str,
+) -> Option<Drawn<'a>> {
+    linked
+        .iter()
+        .find(|c| c.claims(note_type))
+        .map(Drawn::Linked)
+        .or_else(|| claimed(islands, note_type).map(|(i, e)| Drawn::Island(i, e)))
+}
+
+/// What the view that draws a note of type `note_type` is handed of it,
+/// linked or an island's ([`drawn`]): nothing when none claims the type.
+#[must_use]
+pub fn reads_of(linked: &[LinkedClaim], islands: &[Island], note_type: &str) -> NoteReads {
+    drawn(linked, islands, note_type).map_or_else(NoteReads::default, |d| d.note_reads())
+}
+
+/// What `claim`'s linked view is handed of `note` for `audience`: exactly
+/// the shape an island's view gets ([`note_props`]), so one component
+/// reads both.
+///
+/// `null` unless it claims the note's type and its extension declares
+/// reading notes; `files` only when it declares reading files too. A
+/// guest's has no vault path and no property (a linked claim declares
+/// none for a guest).
+#[must_use]
+pub fn linked_note_props(audience: Audience, claim: &LinkedClaim, note: &Note<'_>) -> Value {
+    if !claim.claims(note.note_type) {
+        return Value::Null;
+    }
+    note_props_as(audience, claim.note_reads(), &[], note)
 }
 
 /// `body` without its `%%comments%%`: the one rule, shared with the node
@@ -1242,6 +1400,152 @@ mod tests {
             note_reads(&[first, second], "playlist"),
             NoteReads::default()
         );
+    }
+
+    fn linked(reads: &[&str], types: &[&str]) -> LinkedClaim {
+        LinkedClaim {
+            extension: "studio.setlists".to_owned(),
+            view: "setlist".to_owned(),
+            note_types: types.iter().map(|t| (*t).to_owned()).collect(),
+            fill: false,
+            max_height: 480,
+            reads: reads.iter().map(|r| (*r).to_owned()).collect(),
+        }
+    }
+
+    /// The read rule from a linked extension's manifest: text only with
+    /// `documents`, files only with `files` too.
+    #[test]
+    fn a_linked_view_reads_what_its_manifest_declares() {
+        for (reads, text, files) in [
+            (&[][..], false, false),
+            (&["selection"][..], false, false),
+            (&["files"][..], false, false),
+            (&["documents"][..], true, false),
+            (&["documents", "files"][..], true, true),
+            (&["files", "org", "documents"][..], true, true),
+        ] {
+            let reads: Vec<String> = reads.iter().map(|r| (*r).to_owned()).collect();
+            assert_eq!(linked_reads(&reads), NoteReads { text, files }, "{reads:?}");
+        }
+    }
+
+    /// A linked extension's claim wins over an island's of the same type;
+    /// what the winner declares is what is read.
+    #[test]
+    fn a_linked_claim_wins_over_an_islands() {
+        let reading = json!({"view": "list", "note_type": ["playlist"], "reads": ["documents"]});
+        let islands = vec![note_world(&["documents", "files"], reading)];
+        // No linked claim: the island draws, as before.
+        assert!(matches!(
+            drawn(&[], &islands, "playlist"),
+            Some(Drawn::Island(i, e)) if i.id == "studio.transport" && e.view == "list"
+        ));
+        assert_eq!(
+            reads_of(&[], &islands, "playlist"),
+            note_reads(&islands, "playlist")
+        );
+        // Both claim it: the linked one, with its own read rule (none
+        // here, though the island reads text and files).
+        let silent = [linked(&[], &["Playlist"])];
+        assert_eq!(
+            drawn(&silent, &islands, "playlist"),
+            Some(Drawn::Linked(&silent[0]))
+        );
+        assert_eq!(
+            reads_of(&silent, &islands, " PLAYLIST "),
+            NoteReads::default()
+        );
+        // Among linked claims, the first that claims the type.
+        let two = [linked(&["documents"], &["poem"]), {
+            let mut second = linked(&["documents", "files"], &["playlist", "poem"]);
+            second.view = "other".to_owned();
+            second
+        }];
+        assert!(
+            matches!(drawn(&two, &islands, "poem"), Some(Drawn::Linked(c)) if c.view == "setlist")
+        );
+        assert!(
+            matches!(drawn(&two, &islands, "playlist"), Some(Drawn::Linked(c)) if c.view == "other")
+        );
+        // An island's view is the note's page; a linked one only when
+        // its embed says so (else a card at the note's head).
+        assert!(drawn(&[], &islands, "playlist").is_some_and(|d| d.is_page()));
+        assert!(drawn(&silent, &islands, "playlist").is_some_and(|d| !d.is_page()));
+        let page = [LinkedClaim {
+            fill: true,
+            ..linked(&["documents"], &["playlist"])
+        }];
+        assert!(drawn(&page, &islands, "playlist").is_some_and(|d| d.is_page()));
+        // A type only the island claims is the island's; one nobody
+        // claims, and a blank one, nobody's.
+        let other = [linked(&["documents"], &["poem"])];
+        assert!(matches!(
+            drawn(&other, &islands, "playlist"),
+            Some(Drawn::Island(..))
+        ));
+        assert_eq!(drawn(&other, &islands, "song"), None);
+        assert_eq!(drawn(&other, &islands, " "), None);
+        assert_eq!(reads_of(&other, &[], "song"), NoteReads::default());
+    }
+
+    /// A linked view is handed the same shape as an island's, by the same
+    /// rule: one component reads both.
+    #[test]
+    fn a_linked_view_is_handed_the_shape_an_islands_is() {
+        let properties: Vec<(String, String)> = PROPS
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect();
+        let files = vec![
+            ViewFile::of("Art/Joy.png", b"\x89PNG").unwrap(),
+            ViewFile::of("Songs/Joy.lrc", b"[00:01.00]Joy").unwrap(),
+        ];
+        let note = Note {
+            files: &files,
+            ..the_note(&properties)
+        };
+        // The island that reads the same: all a member's properties, and
+        // for a guest those it declares (none here).
+        let island = note_world(
+            &["documents", "files"],
+            json!({"view": "list", "note_type": ["playlist"], "reads": ["documents"]}),
+        );
+        let claim = linked(&["documents", "files"], &["Playlist"]);
+        for audience in [Audience::Member, Audience::Guest] {
+            assert_eq!(
+                linked_note_props(audience, &claim, &note),
+                note_props(audience, &island, &note),
+                "{audience:?}"
+            );
+        }
+        let member = linked_note_props(Audience::Member, &claim, &note);
+        assert_eq!(member["path"], "Private/Folders/Merry.md");
+        assert_eq!(member["body"], "One  two\nthree ");
+        assert_eq!(member["files"].as_array().map(Vec::len), Some(2));
+        // A guest's: never a vault path, no property.
+        let guest = linked_note_props(Audience::Guest, &claim, &note);
+        assert!(guest.get("path").is_none());
+        assert_eq!(guest["properties"], json!({}));
+        assert_eq!(guest["files"].as_array().map(Vec::len), Some(2));
+        // `documents` alone: the text, no files, though some were given.
+        let text_only = linked_note_props(
+            Audience::Guest,
+            &linked(&["documents"], &["playlist"]),
+            &note,
+        );
+        assert_eq!(text_only["body"], "One  two\nthree ");
+        assert!(text_only.get("files").is_none());
+        // No read declared, `files` alone, or another type: nothing.
+        for claim in [
+            linked(&[], &["playlist"]),
+            linked(&["files"], &["playlist"]),
+            linked(&["documents", "files"], &["poem"]),
+        ] {
+            for audience in [Audience::Member, Audience::Guest] {
+                assert_eq!(linked_note_props(audience, &claim, &note), Value::Null);
+            }
+        }
     }
 
     #[test]

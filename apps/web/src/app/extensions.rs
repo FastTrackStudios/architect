@@ -18,6 +18,18 @@
 //! the app's document. Luau does not run in a browser yet (#812): those
 //! are listed as "Can't run here", with why.
 //!
+//! A share link's guest runs them too (#805): the same linked extensions,
+//! on a host built for a guest (`Host::for_guest`), with no session, no
+//! documents, no vault index and no kept data. A linked view that asks it
+//! for any of those is refused; what it is handed of a note is the
+//! app's to decide (`super::embed`), by what its manifest reads.
+//!
+//! The views they add beyond panes: the view a linked extension claims a
+//! note's type with ([`linked_claims`]), the distribution's home
+//! ([`home_decl`]), a favourite's view ([`linked_view_ids`],
+//! [`linked_favourites`]); and a note they ask to open (`open`) goes to
+//! the app's own note opening ([`set_note_opener`]).
+//!
 //! What a browser does not do here: nothing is installed from a folder
 //! (there is none), no thread runs the host's clock or hears its events
 //! (hooks fire from the app's events only where something raises them),
@@ -52,7 +64,14 @@ fn core() -> Vec<&'static dyn Extension> {
 /// linked extensions and the core loaded, and puts what they add into
 /// the window. Call it once in the app's root, under the theme and the
 /// settings providers.
-pub fn use_web_extensions(app: &Arc<ActionList>) -> ExtensionUi {
+///
+/// `guest` is a share link's guest: the host is a guest's
+/// (`Host::for_guest`), given no documents, no vault index and no data
+/// store, and nothing is kept in this browser.
+// One hook that wires the whole host: its steps are in the order they
+// must run.
+#[allow(clippy::too_many_lines)]
+pub fn use_web_extensions(app: &Arc<ActionList>, guest: bool) -> ExtensionUi {
     let sections = use_extension_sections();
     // The extensions' own list, in ⌘K (as on a desk:
     // `apps/ui/src/extensions.rs`), each action forwarded onto the app's
@@ -63,7 +82,9 @@ pub fn use_web_extensions(app: &Arc<ActionList>) -> ExtensionUi {
     // Extensions' settings, as the settings page has them (kept in this
     // browser by the page).
     let values = architect_extensions::ui::use_page_setting_values();
-    let web = try_use_context::<super::vault::WebVault>();
+    // A guest has no vault: the page's own (`Mode::Guest`'s empty one) is
+    // never the extensions' documents.
+    let web = try_use_context::<super::vault::WebVault>().filter(|_| !guest);
     // Pages in Web Workers: the installed extensions' TSX pages and
     // TypeScript actions, in the app's theme.
     let pages = use_hook(|| {
@@ -82,6 +103,14 @@ pub fn use_web_extensions(app: &Arc<ActionList>) -> ExtensionUi {
             // task of the app's runtime: what it runs may read and write
             // the app's signals.
             .with_spawn(spawn_in_app);
+        // A share link's guest: nothing of a vault is answered, whatever
+        // an extension may reach (`hostcall::guest_check`).
+        if guest {
+            host = host.for_guest();
+        }
+        // A note an extension asks to open: the app's own note opening,
+        // which opens only what the viewer may ([`set_note_opener`]).
+        host.set_path_opener(open_for_view);
         if let Some(store) = &themes {
             host = host.with_themes(store.clone());
         }
@@ -114,7 +143,7 @@ pub fn use_web_extensions(app: &Arc<ActionList>) -> ExtensionUi {
         // nothing past the tab, as it says.
         if let Some(org) = web.as_ref().and_then(|w| w.org.as_ref()) {
             host = host.with_data_store(LocalData { scope: org.slug() });
-        } else if probe_asked() {
+        } else if !guest && probe_asked() {
             // The demo's probe keeps it too, under a scope of its own, so
             // a browser test sees the same store survive a reload.
             host = host.with_data_store(LocalData {
@@ -136,6 +165,11 @@ pub fn use_web_extensions(app: &Arc<ActionList>) -> ExtensionUi {
         // The demo's test probe, asked for (`?demo&probe`).
         if web.as_ref().is_some_and(|w| w.org.is_none()) && probe_asked() {
             linked.push(&Probe);
+        }
+        // The view probe (`probe=views`), in the demo and on a share
+        // link, never signed in.
+        if let Some(probe) = view_probe(guest, web.as_ref()) {
+            linked.push(probe);
         }
         for extension in linked.into_iter().chain(core()) {
             match extensions.clone().with_linked(extension) {
@@ -265,6 +299,16 @@ pub fn use_web_extensions(app: &Arc<ActionList>) -> ExtensionUi {
             super::index_sync::install_probe();
         }
     });
+    use_hook(|| {
+        if view_probe(guest, web.as_ref()).is_some() {
+            super::view_probe::install();
+            // The demo's notes of the types it draws (a guest's come from
+            // the link's node).
+            if let Some(web) = web.as_ref().filter(|_| !guest) {
+                super::view_probe::seed(&web.source);
+            }
+        }
+    });
     // Each linked extension's root context, for its views below.
     use_hook(|| {
         for (_, built) in extensions.host().linked() {
@@ -272,6 +316,99 @@ pub fn use_web_extensions(app: &Arc<ActionList>) -> ExtensionUi {
         }
     });
     use_extension_ui(extensions.host().clone(), Arc::clone(app))
+}
+
+thread_local! {
+    /// What opens a note a linked view asks for: the page showing notes
+    /// now, which says whether it did.
+    static NOTE_OPENER: std::cell::RefCell<Option<std::rc::Rc<dyn Fn(&str) -> bool>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The page that opens a note a linked extension's view asks for with the
+/// host's `open` (none: every such ask is refused).
+///
+/// It opens only what its viewer may open, and says whether it did: a
+/// member's workspace any note of their vault, a share link's guest page
+/// only a note the link lists (the rule a frame's `NOTE_OPEN` is held to,
+/// `super::frames::set_note_opener`).
+pub fn set_note_opener(opener: Option<std::rc::Rc<dyn Fn(&str) -> bool>>) {
+    NOTE_OPENER.with(|o| *o.borrow_mut() = opener);
+}
+
+/// The host's path opener: `path` as a note's vault path
+/// (`ext_host::note_ask`), opened by the page ([`set_note_opener`]).
+fn open_for_view(path: &str) -> Result<serde_json::Value, String> {
+    let refused = || "not a note the viewer can open here".to_owned();
+    let path =
+        crate::ext_host::note_ask(&serde_json::json!({ "path": path })).ok_or_else(refused)?;
+    let opener = NOTE_OPENER.with(|o| o.borrow().clone());
+    if opener.is_some_and(|open| open(&path)) {
+        Ok(serde_json::json!({ "opened": path }))
+    } else {
+        Err(refused())
+    }
+}
+
+/// The note types the linked extensions draw, as the frame host's
+/// decisions read them (`ext_host::drawn`): each claim with its view and
+/// what its extension may read. Read again when an extension loads or
+/// goes.
+#[must_use]
+pub fn linked_claims(ui: ExtensionUi) -> Vec<crate::ext_host::LinkedClaim> {
+    let _ = ui.revision();
+    ui.host()
+        .embeds()
+        .linked_note_views()
+        .into_iter()
+        .map(|v| crate::ext_host::LinkedClaim {
+            extension: v.extension,
+            view: v.view,
+            note_types: v.note_types,
+            fill: v.fill,
+            max_height: v.max_height,
+            reads: v.reads,
+        })
+        .collect()
+}
+
+/// [`linked_claims`] of the app's extensions, kept: none where the app
+/// runs none.
+pub fn use_linked_claims() -> Memo<std::rc::Rc<Vec<crate::ext_host::LinkedClaim>>> {
+    let ui = try_use_context::<ExtensionUi>();
+    use_memo(move || std::rc::Rc::new(ui.map(linked_claims).unwrap_or_default()))
+}
+
+/// The linked extensions and the views their code draws (`(id, views)`):
+/// what a favourite's `{view}` may open in the app's own document.
+#[must_use]
+pub fn linked_view_ids(ui: ExtensionUi) -> Vec<(String, Vec<String>)> {
+    let _ = ui.revision();
+    ui.host().linked_view_ids()
+}
+
+/// The linked extensions' `[[favourites]]`, read in this page.
+#[must_use]
+pub fn linked_favourites(ui: ExtensionUi) -> Vec<architect_favourites::Listed> {
+    let _ = ui.revision();
+    ui.host().linked_favourites()
+}
+
+/// The linked view the distribution names as its home
+/// (`architect_distribution::Distribution::home`): the extension's id and
+/// the view's. The view probe's, when a test asked for it
+/// (`probe=views,home`, the demo only).
+#[must_use]
+pub fn home_decl() -> Option<(String, String)> {
+    if crate::demo::is_open() && probe_word("views") && probe_word("home") {
+        return Some((
+            super::view_probe::ID.to_owned(),
+            super::view_probe::HOME.to_owned(),
+        ));
+    }
+    architect_distribution::current()
+        .and_then(architect_distribution::Distribution::home_view)
+        .map(|(extension, view)| (extension.to_owned(), view.to_owned()))
 }
 
 /// Where luau-web's `index.js` is: the bundle's folder of the app's code
@@ -396,6 +533,34 @@ fn probe_asked() -> bool {
     web_sys::window()
         .and_then(|w| w.location().search().ok())
         .is_some_and(|q| q.trim_start_matches('?').split('&').any(|p| p == "probe"))
+}
+
+/// Whether the page's `probe=` names `word` (`?probe=views,home`).
+fn probe_word(word: &str) -> bool {
+    web_sys::window()
+        .and_then(|w| w.location().search().ok())
+        .is_some_and(|q| {
+            q.trim_start_matches('?')
+                .split('&')
+                .filter_map(|p| p.strip_prefix("probe="))
+                .flat_map(|words| words.split(','))
+                .any(|w| w == word)
+        })
+}
+
+/// The view probe to load (`super::view_probe`), when the page asked for
+/// it (`probe=views`; `probe=views,silent` for the one that declares no
+/// read): in the demo and for a share link's guest, never signed in.
+fn view_probe(guest: bool, web: Option<&super::vault::WebVault>) -> Option<&'static dyn Extension> {
+    let demo = web.is_some_and(|w| w.org.is_none()) && crate::demo::is_open();
+    if !(guest || demo) || !probe_word("views") {
+        return None;
+    }
+    Some(if probe_word("silent") {
+        &super::view_probe::SILENT
+    } else {
+        &super::view_probe::READING
+    })
 }
 
 /// `window.architectProbe(id, request)`: one host-service call
