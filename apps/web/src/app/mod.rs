@@ -219,8 +219,26 @@ fn WebApp() -> Element {
     // web app's own.
     let slots = favourites::use_web_favourites(workspace, &web_vault.source, &commands);
     let set = slots.set.clone();
-    let tabs = set.slots().to_vec();
-    let separate = set.primary.clone();
+    // What the viewer may do here, and so which of the shell's controls
+    // are drawn (`crate::permits`): a link's guest has no vault and writes
+    // nothing. A permission on the same shell, never another one.
+    let permits = if guest {
+        crate::permits::Permits::GUEST
+    } else {
+        crate::permits::Permits::MEMBER
+    };
+    let tabs: Vec<_> = set
+        .slots()
+        .iter()
+        .filter(|t| permits.allows(crate::permits::own_tab(t.id)))
+        .cloned()
+        .collect();
+    // The round button beside them: the app's own is "New note" (a note
+    // type's declared primary, a player's Play, is everyone's).
+    let separate = set
+        .primary
+        .clone()
+        .filter(|a| a.label != "New note" || permits.allows(crate::permits::Needs::Write));
     let current = slots.current;
     let foot = vec![shell::Action::new(
         "Settings",
@@ -352,15 +370,20 @@ fn WebApp() -> Element {
                         status,
                         // A phone's navigator: the shell's left side (the
                         // workspace's left dock is the shell's on a desk).
-                        left: phone.then(|| rsx! { vault::FilesView {} }),
-                        actions: vec![
-                            shell::BarAction::new(vault::FILES, "Files", icon!(Files)),
-                            shell::BarAction::new(architect_command_palette::OPEN_ANYTHING_ACTION, "Open…", icon!(Search)),
-                            shell::BarAction::new(vault::NEW_NOTE, "New note", icon!(SquarePen)),
-                            shell::BarAction::new(architect_command_palette::OPEN_ACTION, "Commands", icon!(CommandIcon)),
-                            shell::BarAction::new("APP_SETTINGS", "Settings", icon!(Settings2)),
-                        ]
+                        left: (phone && permits.allows(crate::permits::Needs::Vault)).then(|| rsx! { vault::FilesView {} }),
+                        actions: {
+                            use crate::permits::Needs;
+                            [
+                                (Needs::Vault, shell::BarAction::new(vault::FILES, "Files", icon!(Files))),
+                                (Needs::Vault, shell::BarAction::new(architect_command_palette::OPEN_ANYTHING_ACTION, "Open…", icon!(Search))),
+                                (Needs::Write, shell::BarAction::new(vault::NEW_NOTE, "New note", icon!(SquarePen))),
+                                (Needs::Nothing, shell::BarAction::new(architect_command_palette::OPEN_ACTION, "Commands", icon!(CommandIcon))),
+                                (Needs::Nothing, shell::BarAction::new("APP_SETTINGS", "Settings", icon!(Settings2))),
+                            ]
+                        }
                         .into_iter()
+                        .filter(|(needs, _)| permits.allows(*needs))
+                        .map(|(_, action)| action)
                         .chain(demo.then(|| shell::BarAction::new("WEB_SIGN_IN", "Sign in", icon!(LogIn))))
                         .collect::<Vec<_>>(),
                         now_playing: rsx! { architect_playhead::ui::NowPlayingBar { art } },
