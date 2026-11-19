@@ -1,26 +1,9 @@
-//! End-to-end coverage of the hand-written HTTP surface — the OIDC
-//! provider, the pages, CORS, the probes — against a real engine over
-//! in-memory `SQLite`. The generated session/organization face is
-//! covered by `surfaces.rs`, once per transport.
+//! End-to-end coverage of the HTTP surface against a real engine over
+//! in-memory SQLite.
 //!
 //! These drive the actual `app_router`, so they exercise routing,
 //! extraction, cookie shaping and error mapping together — the parts a
 //! compile check cannot vouch for.
-
-// This is an integration-test crate. `clippy.toml`'s
-// `allow-*-in-tests` only reaches `#[test]` fns and `#[cfg(test)]`
-// modules, so the fixture and helper code below — where an `unwrap()`
-// IS the assertion — still trips the panic lints. Allow them
-// crate-wide here rather than dotting the file with attributes.
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::arithmetic_side_effects,
-    clippy::as_conversions,
-    clippy::cast_possible_truncation,
-    clippy::panic
-)]
 
 use architect_auth::db::{AuthSeaOrmStorage, Migrator};
 use auth_server::{ServerConfig, server};
@@ -33,9 +16,17 @@ use tower::ServiceExt;
 fn test_config() -> ServerConfig {
     ServerConfig {
         bind_addr: "127.0.0.1:0".into(),
+        database_url: "sqlite::memory:".into(),
+        secret: "a-secret-at-least-32-bytes-long!!".into(),
         base_url: "https://auth.fasttrackstudio.app".into(),
+        oidc_issuer: None,
         session_ttl_seconds: 3600,
-        ..ServerConfig::local()
+        require_email_verification: false,
+        passkey_rp_id: None,
+        cors_origins: Vec::new(),
+        oidc_clients: Vec::new(),
+        oidc_allow_dynamic_client_registration: false,
+        run_migrations: true,
     }
 }
 
@@ -48,7 +39,7 @@ async fn app_with(mutate: impl FnOnce(&mut ServerConfig)) -> axum::Router {
     let mut config = test_config();
     mutate(&mut config);
     let auth = server::build_engine(&config, AuthSeaOrmStorage::new(db)).expect("build engine");
-    server::app_router(&config, auth).expect("router builds with no social providers")
+    server::app_router(&config, auth)
 }
 
 async fn app() -> axum::Router {
@@ -58,7 +49,7 @@ async fn app() -> axum::Router {
     Migrator::up(&db, None).await.expect("migrate");
     let config = test_config();
     let auth = server::build_engine(&config, AuthSeaOrmStorage::new(db)).expect("build engine");
-    server::app_router(&config, auth).expect("router builds with no social providers")
+    server::app_router(&config, auth)
 }
 
 async fn json_body(response: axum::response::Response) -> serde_json::Value {
@@ -115,8 +106,142 @@ async fn advertised_jwks_uri_is_routed_and_leaks_no_key_material() {
     );
 }
 
-// The session lifecycle itself — sign-up, session, refresh, sign-out,
-// wrong password — is covered once for every transport in `surfaces.rs`.
+#[tokio::test]
+async fn sign_up_then_session_round_trips_a_bearer_token() {
+    let app = app().await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/auth/sign-up/email")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{"email":"cody@fasttrackstudio.app","password":"correct-horse-battery-staple"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .expect("sign up");
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    // The browser path: a session cookie is set on the response.
+    let cookie = response
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("session cookie is set")
+        .to_str()
+        .expect("cookie is ascii")
+        .to_owned();
+    assert!(cookie.contains("architect-auth.session="));
+    assert!(
+        cookie.contains("HttpOnly"),
+        "session cookie must be HttpOnly"
+    );
+    assert!(
+        cookie.contains("Secure"),
+        "an https base_url must yield a Secure cookie"
+    );
+
+    let body = json_body(response).await;
+    let token = body["token"].as_str().expect("token in body").to_owned();
+    assert_eq!(body["user"]["email"], "cody@fasttrackstudio.app");
+    // The stored verifier must never be serialized.
+    assert!(body["session"].get("token_hash").is_none());
+
+    // The native path: the same token as a bearer resolves the session.
+    let response = app
+        .oneshot(
+            Request::get("/auth/session")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("session");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["user"]["email"], "cody@fasttrackstudio.app");
+}
+
+#[tokio::test]
+async fn session_without_credentials_is_401_not_500() {
+    let response = app()
+        .await
+        .oneshot(Request::get("/auth/session").body(Body::empty()).unwrap())
+        .await
+        .expect("request");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn wrong_password_is_indistinguishable_from_unknown_account() {
+    let app = app().await;
+
+    app.clone()
+        .oneshot(
+            Request::post("/auth/sign-up/email")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{"email":"real@fasttrackstudio.app","password":"correct-horse-battery-staple"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .expect("sign up");
+
+    let wrong_password = app
+        .clone()
+        .oneshot(
+            Request::post("/auth/sign-in/email")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{"email":"real@fasttrackstudio.app","password":"not-the-password"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .expect("sign in");
+
+    let unknown_account = app
+        .oneshot(
+            Request::post("/auth/sign-in/email")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{"email":"ghost@fasttrackstudio.app","password":"not-the-password"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .expect("sign in");
+
+    assert_eq!(wrong_password.status(), unknown_account.status());
+    assert_eq!(
+        json_body(wrong_password).await,
+        json_body(unknown_account).await,
+        "a differing response would let an attacker enumerate accounts"
+    );
+}
+
+#[tokio::test]
+async fn sign_out_is_idempotent_and_clears_the_cookie() {
+    let response = app()
+        .await
+        .oneshot(Request::post("/auth/sign-out").body(Body::empty()).unwrap())
+        .await
+        .expect("request");
+
+    // No token supplied: already signed out, so this is a success.
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    let cookie = response
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("cookie cleared")
+        .to_str()
+        .unwrap();
+    assert!(cookie.contains("architect-auth.session="));
+}
 
 #[tokio::test]
 async fn health_probes_answer() {
@@ -253,52 +378,6 @@ async fn authorize_without_a_session_sends_a_browser_to_the_login_page() {
 /// A program is not a person: it cannot render a login page, and a 303
 /// to HTML would read as a baffling success. Bearer callers keep the
 /// old 401.
-/// A browser can hold a session cookie the server no longer recognises —
-/// the session expired, or was revoked, or the server was reset under
-/// it. That browser must land on the sign-in page like one with no
-/// cookie at all, and be told to drop the cookie, or every visit to
-/// `/oauth2/authorize` from every site answers `invalid_credentials`
-/// as JSON and there is no way through short of clearing site data.
-#[tokio::test]
-async fn authorize_with_a_stale_cookie_clears_it_and_sends_the_browser_to_sign_in() {
-    let response = app()
-        .await
-        .oneshot(
-            Request::get(
-                "/oauth2/authorize?client_id=task\
-                 &redirect_uri=https://task.fasttrackstudio.app/auth/callback\
-                 &response_type=code&scope=openid&state=xyz",
-            )
-            .header(header::COOKIE, "architect-auth.session=no-such-session")
-            .body(Body::empty())
-            .unwrap(),
-        )
-        .await
-        .expect("request");
-
-    assert_eq!(response.status(), StatusCode::SEE_OTHER);
-    let location = response
-        .headers()
-        .get(header::LOCATION)
-        .expect("a Location header")
-        .to_str()
-        .expect("ascii");
-    assert!(
-        location.starts_with("/login?return_to="),
-        "expected the login page, got {location}"
-    );
-    let set_cookie = response
-        .headers()
-        .get(header::SET_COOKIE)
-        .expect("the dead cookie is removed")
-        .to_str()
-        .expect("ascii");
-    assert!(
-        set_cookie.starts_with("architect-auth.session=;") && set_cookie.contains("Max-Age=0"),
-        "expected a removal cookie, got {set_cookie}"
-    );
-}
-
 #[tokio::test]
 async fn authorize_with_a_bearer_token_still_gets_401() {
     let response = app()
@@ -325,61 +404,6 @@ async fn authorize_with_a_bearer_token_still_gets_401() {
 
 /// The pages have to actually be mounted — the whole redirect is a dead
 /// end if `/login` 404s.
-/// The other half of the stale-cookie rule. The engine answers an
-/// unknown `client_id` with the same `InvalidCredentials` a dead session
-/// gets, and if the handler read that as "dead cookie" a misconfigured
-/// client would send a signed-in person round the login page forever:
-/// sign in, come back here, be refused, sign in again. A live session
-/// with an unknown client is the 401 it always was, and the cookie
-/// stays.
-#[tokio::test]
-async fn authorize_with_a_live_session_and_an_unknown_client_is_401_not_a_login_loop() {
-    let app = app().await;
-    let token = signed_up(&app, "bee@example.test").await;
-    let response = app
-        .oneshot(
-            Request::get(
-                "/oauth2/authorize?client_id=no-such-client\
-                 &redirect_uri=https://nowhere.example/cb\
-                 &response_type=code&scope=openid&state=xyz",
-            )
-            .header(header::COOKIE, format!("architect-auth.session={token}"))
-            .body(Body::empty())
-            .unwrap(),
-        )
-        .await
-        .expect("request");
-
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    assert!(
-        response.headers().get(header::SET_COOKIE).is_none(),
-        "a live session must not be cleared over somebody else's misconfiguration"
-    );
-}
-
-async fn signed_up(app: &axum::Router, email: &str) -> String {
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/auth/sign-up/email")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(format!(
-                    r#"{{"input":{{"email":"{email}","password":"correct horse battery staple"}}}}"#
-                )))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    json["token"].as_str().unwrap().to_owned()
-}
-
 #[tokio::test]
 async fn the_sign_in_and_sign_up_pages_are_served() {
     for path in ["/login", "/sign-up"] {
@@ -401,84 +425,4 @@ async fn the_sign_in_and_sign_up_pages_are_served() {
             "{path} should serve HTML, got {content_type}"
         );
     }
-}
-
-/// The reset and verification pages exist at all. Before there was a
-/// mailer these routes did not exist: the engine could mint a reset token
-/// and the server had nowhere to send it, so a forgotten password meant an
-/// operator editing the database by hand.
-#[tokio::test]
-async fn the_password_reset_and_verification_pages_are_served() {
-    for path in ["/forgot-password", "/reset-password", "/verify-email"] {
-        let response = app()
-            .await
-            .oneshot(Request::get(path).body(Body::empty()).unwrap())
-            .await
-            .expect("request");
-
-        assert_eq!(response.status(), StatusCode::OK, "{path}");
-    }
-}
-
-/// Asking for a reset must answer identically whether or not the address
-/// is known. Anything else is an account-enumeration oracle: a stranger
-/// learns exactly which of your users exist by trying addresses.
-#[tokio::test]
-async fn a_reset_request_does_not_reveal_whether_the_account_exists() {
-    let mut bodies = Vec::new();
-
-    for email in [
-        "definitely-not-registered@example.com",
-        "also-not-there@example.com",
-    ] {
-        let response = app()
-            .await
-            .oneshot(
-                Request::post("/forgot-password")
-                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                    .body(Body::from(format!("email={email}")))
-                    .unwrap(),
-            )
-            .await
-            .expect("request");
-
-        assert_eq!(response.status(), StatusCode::OK, "{email}");
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .expect("body");
-        bodies.push(String::from_utf8_lossy(&body).into_owned());
-    }
-
-    assert_eq!(
-        bodies[0], bodies[1],
-        "the answer differed between addresses"
-    );
-    assert!(
-        !bodies[0].to_lowercase().contains("no such")
-            && !bodies[0].to_lowercase().contains("not found"),
-        "the page hints at whether the account exists: {}",
-        bodies[0]
-    );
-}
-
-/// A verification link with a nonsense token must not verify anything, and
-/// must not 500 either — a malformed uuid is a bored stranger, not a bug.
-#[tokio::test]
-async fn a_bad_verification_link_is_refused_politely() {
-    let response = app()
-        .await
-        .oneshot(
-            Request::get("/verify-email?user_id=not-a-uuid&token=nonsense")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .expect("request");
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("body");
-    let body = String::from_utf8_lossy(&body);
-    assert!(body.contains("did not work"), "unexpected page: {body}");
 }
