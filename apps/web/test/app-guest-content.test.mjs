@@ -277,8 +277,9 @@ async function asGuest(reads, shot) {
   try {
     await b.go(`${f.origin}/s/${CODE}/set/`);
     await until(() => b.eval(`!!document.querySelector('[data-testid=guest-note]')`), 60000, 'the guest note');
-    // The setlist's page opens the setlist.
-    await until(() => b.eval(`(document.querySelector('[data-testid=guest-note] h2') || {}).textContent === 'Merry and Bright'`), 15000, 'the setlist note');
+    // The setlist's page opens the setlist. Its title is the link's line:
+    // a note its type's view draws has no heading of its own.
+    await until(() => b.eval(`(document.querySelector('[data-testid=guest-title]') || {}).textContent === 'Merry and Bright'`), 15000, 'the setlist note');
     const got = await until(async () => { const r = await report(b); return r === undefined ? null : { r }; }, 30000, 'the view\'s report').catch(async (e) => {
       const why = await b.eval(`JSON.stringify({ frames: [...document.querySelectorAll('[data-testid=ext-frame]')].map((x) => ({ view: x.dataset.extView, state: x.dataset.extState, why: x.dataset.extWhy })), embed: !!document.querySelector('[data-testid=note-embed]'), note: (document.querySelector('[data-testid=guest-note]') || {}).outerHTML?.slice(0, 600) })`).catch((x) => x.message);
       if (SHOTS) { mkdirSync(SHOTS, { recursive: true }); await b.shot(join(SHOTS, `failed-${shot}`)); }
