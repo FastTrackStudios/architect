@@ -62,6 +62,11 @@ pub struct NodeStatus {
     /// first is [`Self::hosts`].
     #[facet(default)]
     pub hosted: Vec<String>,
+    /// The same, each with the issuer's id for it: what a device that
+    /// holds an org's files with no session of its own (a storage server
+    /// authorised by its key) names the org by.
+    #[facet(default)]
+    pub hosted_orgs: Vec<HostedOrg>,
     /// Whether its last account pass went through.
     pub signed_in: bool,
     /// How many vaults it holds, and their notes.
@@ -84,6 +89,15 @@ pub struct NodeStatus {
     /// reinstall lowered; one line each, naming nothing of the vault.
     /// Details: `SHARE_LAYERS_KEPT`.
     pub share_layers: Vec<String>,
+}
+
+/// An org a node hosts ([`NodeStatus::hosted_orgs`]).
+#[architect::wire]
+#[derive(Eq)]
+pub struct HostedOrg {
+    pub slug: String,
+    /// The issuer's id for it.
+    pub id: String,
 }
 
 /// The files engine's blob store against its budget (#525).
@@ -295,6 +309,16 @@ impl NodeState {
             org: account.org,
             hosts: self.hosted.first().cloned(),
             hosted: self.hosted.clone(),
+            hosted_orgs: self
+                .orgs
+                .orgs()
+                .iter()
+                .filter(|org| self.hosted.contains(&org.slug))
+                .map(|org| HostedOrg {
+                    slug: org.slug.clone(),
+                    id: org.id.0.clone(),
+                })
+                .collect(),
             signed_in: account.signed_in,
             vaults: count(self.backend.vault_ids().len()),
             notes: count(self.catalog().notes().len()),

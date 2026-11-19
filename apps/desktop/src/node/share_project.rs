@@ -279,8 +279,9 @@ pub async fn listed(
                     sha256: file.hash.to_hex(),
                     size: file.size,
                     url: url(&file.hash.to_hex(), path),
-                    save: edit
-                        .then(|| format!("{base}/{SAVE}/{n}/{}", architect_sites::encode_path(path))),
+                    save: edit.then(|| {
+                        format!("{base}/{SAVE}/{n}/{}", architect_sites::encode_path(path))
+                    }),
                     references: if at >= MEDIA {
                         references
                             .iter()
@@ -365,12 +366,24 @@ mod tests {
             .map(|(p, a)| (a.hash.to_hex(), p.as_str()))
             .collect();
         let named = |s: &str| names(s, "songs/joy", &files, &by_hash);
-        assert_eq!(named("Samples/kick.wav"), Some("songs/joy/Samples/kick.wav"));
-        assert_eq!(named("./Media/Reference.wav"), Some("songs/joy/Media/Reference.wav"));
-        assert_eq!(named("Samples\\kick.wav"), Some("songs/joy/Samples/kick.wav"));
+        assert_eq!(
+            named("Samples/kick.wav"),
+            Some("songs/joy/Samples/kick.wav")
+        );
+        assert_eq!(
+            named("./Media/Reference.wav"),
+            Some("songs/joy/Media/Reference.wav")
+        );
+        assert_eq!(
+            named("Samples\\kick.wav"),
+            Some("songs/joy/Samples/kick.wav")
+        );
         assert_eq!(named("../../shared/click.wav"), Some("shared/click.wav"));
         assert_eq!(named("shared/click.wav"), Some("shared/click.wav"));
-        assert_eq!(named(&at(4).hash.to_hex()), Some("songs/other/Samples/kick.wav"));
+        assert_eq!(
+            named(&at(4).hash.to_hex()),
+            Some("songs/other/Samples/kick.wav")
+        );
         // Not a file of the root, a path out of it, or some machine's own.
         assert_eq!(named("Samples/snare.wav"), None);
         assert_eq!(named("../../../etc/passwd"), None);

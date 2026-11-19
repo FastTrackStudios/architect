@@ -184,7 +184,11 @@ impl Accounts {
                 continue;
             };
             if let Ok(devices) = client.enrolments().await {
-                out.extend(devices.into_iter().map(|d| (org.slug.clone(), host.clone(), d)));
+                out.extend(
+                    devices
+                        .into_iter()
+                        .map(|d| (org.slug.clone(), host.clone(), d)),
+                );
             }
         }
         out

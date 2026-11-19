@@ -154,6 +154,7 @@ impl Vault {
     /// does not hold (their bytes are with another holder). A note's
     /// link to one resolves as to any attachment. One already found on
     /// disk is left as it is.
+    #[must_use]
     pub fn with_attachments_elsewhere<'a>(
         mut self,
         paths: impl IntoIterator<Item = &'a str>,

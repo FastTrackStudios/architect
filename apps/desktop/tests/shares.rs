@@ -5060,7 +5060,16 @@ async fn a_link_keeps_its_url_and_plays_what_it_does_not_offer_to_keep() {
     );
     page_with(&format!("{base}/01-joy/"), None, "Second take.").await;
     assert_eq!(plays().await.2, audio[10..=19]);
-    assert_eq!(links.shares().await.unwrap().iter().filter(|s| s.code == share.code).count(), 1);
+    assert_eq!(
+        links
+            .shares()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|s| s.code == share.code)
+            .count(),
+        1
+    );
 
     // Everything is offered, until the link says recordings only play.
     let listed = json_at(&format!("{base}/_files.json")).await;
@@ -5083,20 +5092,33 @@ async fn a_link_keeps_its_url_and_plays_what_it_does_not_offer_to_keep() {
     );
 
     let changed = links
-        .update(share.code.clone(), ShareChange::Download(Download::NotMedia))
+        .update(
+            share.code.clone(),
+            ShareChange::Download(Download::NotMedia),
+        )
         .await
         .unwrap();
-    assert_eq!(changed.code, share.code, "what it permits changes, not its URL");
+    assert_eq!(
+        changed.code, share.code,
+        "what it permits changes, not its URL"
+    );
     assert_eq!(changed.download, Download::NotMedia);
     let listed = json_at(&format!("{base}/_files.json")).await;
-    assert_eq!(offered(&listed, "Gig/media/joy.mp3"), Some(false), "{listed}");
+    assert_eq!(
+        offered(&listed, "Gig/media/joy.mp3"),
+        Some(false),
+        "{listed}"
+    );
     assert_eq!(offered(&listed, "Gig/media/chart.pdf"), Some(true));
     let names = zipped(zip_at(&format!("{base}/_archive.zip")).await);
     assert!(names.iter().any(|n| n.ends_with("chart.pdf")), "{names:?}");
     assert!(!names.iter().any(|n| n.ends_with("joy.mp3")), "{names:?}");
     // It still plays: the link's layer serves it, by range.
     let (status, _, bytes) = plays().await;
-    assert_eq!((status, bytes.as_slice()), (StatusCode::PARTIAL_CONTENT, &audio[10..=19]));
+    assert_eq!(
+        (status, bytes.as_slice()),
+        (StatusCode::PARTIAL_CONTENT, &audio[10..=19])
+    );
 
     // Nothing offered: no archive at all, and the recording plays on.
     links
@@ -5107,9 +5129,7 @@ async fn a_link_keeps_its_url_and_plays_what_it_does_not_offer_to_keep() {
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(plays().await.0, StatusCode::PARTIAL_CONTENT);
     // The setting is in the share's note, so it survives the node.
-    let note = std::fs::read_to_string(
-        vault.join(format!("_architect/shares/{}.md", share.code)),
-    )
-    .unwrap();
+    let note = std::fs::read_to_string(vault.join(format!("_architect/shares/{}.md", share.code)))
+        .unwrap();
     assert!(note.contains("\"download\":\"Nothing\""), "{note}");
 }

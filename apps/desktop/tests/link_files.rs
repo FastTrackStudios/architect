@@ -10,7 +10,14 @@
     clippy::indexing_slicing,
     clippy::future_not_send,
     clippy::missing_const_for_fn,
-    clippy::too_many_lines
+    clippy::too_many_lines,
+    clippy::arithmetic_side_effects,
+    clippy::format_push_string,
+    clippy::option_if_let_else,
+    clippy::string_slice,
+    clippy::items_after_statements,
+    clippy::map_unwrap_or,
+    clippy::redundant_closure_for_method_calls
 )]
 
 use std::path::{Path, PathBuf};
@@ -184,7 +191,11 @@ async fn session_doc(references: &[&str]) -> Vec<u8> {
 async fn world(setup: Setup) -> World {
     let origin = issuer().await;
     let tmp = tempfile::tempdir().unwrap();
-    let len = if setup.track_len == 0 { 300_000 } else { setup.track_len };
+    let len = if setup.track_len == 0 {
+        300_000
+    } else {
+        setup.track_len
+    };
     let endpoint = if setup.bucket {
         Some(bucket(&tmp.path().join("s3")).await)
     } else {
@@ -208,7 +219,11 @@ async fn world(setup: Setup) -> World {
     if setup.vault_tracks > 0 {
         let mut note = std::fs::read_to_string(vault.join("Songs/Joy/Joy.md")).unwrap();
         for n in 0..setup.vault_tracks {
-            big(&vault.join(format!("Songs/Joy/Media/track-{n:03}.wav")), n, len);
+            big(
+                &vault.join(format!("Songs/Joy/Media/track-{n:03}.wav")),
+                n,
+                len,
+            );
             note.push_str(&format!("\n[[track-{n:03}.wav]]\n"));
         }
         std::fs::write(vault.join("Songs/Joy/Joy.md"), note).unwrap();
@@ -220,7 +235,10 @@ async fn world(setup: Setup) -> World {
     std::fs::write(project.join("songs/joy/Samples/bass.wav"), audio(4, len)).unwrap();
     std::fs::write(project.join("songs/joy/Samples/unused.wav"), audio(5, len)).unwrap();
     std::fs::write(project.join("songs/joy/notes.txt"), "private").unwrap();
-    let mut references = vec!["Samples/bass.wav".to_owned(), "Samples/missing.wav".to_owned()];
+    let mut references = vec![
+        "Samples/bass.wav".to_owned(),
+        "Samples/missing.wav".to_owned(),
+    ];
     for n in 0..setup.tracks {
         let name = format!("Samples/track-{n:03}.wav");
         std::fs::write(
@@ -349,12 +367,13 @@ impl World {
     async fn listed(&self, share: &Share, file: &str) -> serde_json::Value {
         let mut found = serde_json::Value::Null;
         until(&format!("the link lists {file}"), async || {
-            let json: serde_json::Value = reqwest::get(self.url(&format!("/s/{}/_files.json", share.code)))
-                .await
-                .unwrap()
-                .json()
-                .await
-                .unwrap_or_default();
+            let json: serde_json::Value =
+                reqwest::get(self.url(&format!("/s/{}/_files.json", share.code)))
+                    .await
+                    .unwrap()
+                    .json()
+                    .await
+                    .unwrap_or_default();
             let hit = json["files"]
                 .as_array()
                 .and_then(|files| files.iter().find(|f| f["path"] == file).cloned());
@@ -439,7 +458,10 @@ async fn a_link_streams_a_recording_its_node_does_not_hold_from_the_storage_serv
     assert_eq!(headers["content-type"], "audio/wav");
     assert_eq!(bytes, whole[100_000..=100_999]);
     let (status, _, bytes) = get(&url, Some((0, 15))).await;
-    assert_eq!((status, bytes.as_slice()), (StatusCode::PARTIAL_CONTENT, &whole[..16]));
+    assert_eq!(
+        (status, bytes.as_slice()),
+        (StatusCode::PARTIAL_CONTENT, &whole[..16])
+    );
     let (status, _, bytes) = get(&url, None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(bytes, whole);
@@ -469,19 +491,30 @@ async fn a_link_streams_a_recording_its_node_does_not_hold_from_the_storage_serv
     // The light files it holds are read from its own vault, and none is
     // copied into the link's build.
     until("the cover has synced to the hosted node", async || {
-        std::fs::metadata(w.hosted_vault.join("Songs/Joy/cover.png")).is_ok_and(|m| m.len() == 3_000)
+        std::fs::metadata(w.hosted_vault.join("Songs/Joy/cover.png"))
+            .is_ok_and(|m| m.len() == 3_000)
     })
     .await;
     let (status, headers, bytes) = get(&w.url(&format!("{base}/Songs/Joy/cover.png")), None).await;
     assert_eq!((status, bytes.len()), (StatusCode::OK, 3_000));
     assert_eq!(from(&headers), "");
-    let built = w.hosted_dir.join("data/shares").join(&share.code).join("site");
-    assert!(built.join("index.html").is_file() || built.join("songs").is_dir(), "built");
+    let built = w
+        .hosted_dir
+        .join("data/shares")
+        .join(&share.code)
+        .join("site");
+    assert!(
+        built.join("index.html").is_file() || built.join("songs").is_dir(),
+        "built"
+    );
     assert!(!built.join("Songs/Joy/cover.png").exists());
     assert!(!built.join("Songs/Joy/Media/kick.wav").exists());
 
     // A file the link does not name is nowhere, held or not.
-    for nowhere in ["Songs/Joy/Media/snare.wav", "Songs/Joy/Media/../../../../etc/passwd"] {
+    for nowhere in [
+        "Songs/Joy/Media/snare.wav",
+        "Songs/Joy/Media/../../../../etc/passwd",
+    ] {
         let (status, _, _) = get(&w.url(&format!("{base}/{nowhere}")), None).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "{nowhere}");
     }
@@ -491,7 +524,10 @@ async fn a_link_streams_a_recording_its_node_does_not_hold_from_the_storage_serv
     let started = Instant::now();
     let (status, _, _) = get(&url, Some((0, 15))).await;
     assert!(
-        matches!(status, StatusCode::NOT_FOUND | StatusCode::BAD_GATEWAY | StatusCode::GATEWAY_TIMEOUT),
+        matches!(
+            status,
+            StatusCode::NOT_FOUND | StatusCode::BAD_GATEWAY | StatusCode::GATEWAY_TIMEOUT
+        ),
         "{status}"
     );
     assert!(started.elapsed() < Duration::from_secs(20));
@@ -526,7 +562,10 @@ async fn a_link_sends_the_browser_to_the_bucket_for_a_file_that_is_there() {
         }
     })
     .await;
-    assert!(location.contains(&sha), "the one object, by its hash: {location}");
+    assert!(
+        location.contains(&sha),
+        "the one object, by its hash: {location}"
+    );
     assert!(location.contains("X-Amz-Expires=600"), "{location}");
     assert!(location.contains("X-Amz-Signature="), "{location}");
     assert!(!location.contains(SK), "never the secret");
@@ -539,11 +578,19 @@ async fn a_link_sends_the_browser_to_the_bucket_for_a_file_that_is_there() {
     // write with its signature is refused.
     let other = w.listed(&share, "Songs/Joy/reference.mp3").await;
     let other_sha = other["sha256"].as_str().unwrap();
-    let forged = location.replace(&sha, other_sha).replace(&sha[..2], &other_sha[..2]);
+    let forged = location
+        .replace(&sha, other_sha)
+        .replace(&sha[..2], &other_sha[..2]);
     assert_ne!(forged, location);
     let (status, _, _) = get(&forged, None).await;
     assert!(status.is_client_error(), "another object: {status}");
-    let listing = location.split('?').next().unwrap().rsplit_once("/sha256/").unwrap().0;
+    let listing = location
+        .split('?')
+        .next()
+        .unwrap()
+        .rsplit_once("/sha256/")
+        .unwrap()
+        .0;
     let query = location.split_once('?').unwrap().1;
     let (status, _, _) = get(&format!("{listing}/?{query}"), None).await;
     assert!(status.is_client_error(), "a listing: {status}");
@@ -551,7 +598,11 @@ async fn a_link_sends_the_browser_to_the_bucket_for_a_file_that_is_there() {
     assert!(put.status().is_client_error(), "a write: {}", put.status());
 
     // The link is what a guest keeps: revoked, it redirects nowhere.
-    w.links(&w.ada).await.revoke(share.code.clone()).await.unwrap();
+    w.links(&w.ada)
+        .await
+        .revoke(share.code.clone())
+        .await
+        .unwrap();
     let (status, _, _) = get(&url, Some((0, 15))).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     w.storage.stop().await;
@@ -581,14 +632,23 @@ async fn a_project_link_carries_its_sessions_and_exactly_the_files_they_referenc
         )
         .await
         .unwrap();
-    assert_eq!(carried.code, share.code, "the same link, now with a project");
+    assert_eq!(
+        carried.code, share.code,
+        "the same link, now with a project"
+    );
     // Not a project's root, or not a session: refused.
     for bad in [
-        ShareProject { root: "acme/Assets/Tracks".to_owned(), ..project(&[], ProjectAccess::Read) },
+        ShareProject {
+            root: "acme/Assets/Tracks".to_owned(),
+            ..project(&[], ProjectAccess::Read)
+        },
         project(&["songs/joy/Samples/bass.wav"], ProjectAccess::Read),
     ] {
         assert!(
-            links.update(share.code.clone(), ShareChange::Projects(vec![bad])).await.is_err()
+            links
+                .update(share.code.clone(), ShareChange::Projects(vec![bad]))
+                .await
+                .is_err()
         );
     }
 
@@ -603,14 +663,24 @@ async fn a_project_link_carries_its_sessions_and_exactly_the_files_they_referenc
     })
     .await;
     let listed = found.unwrap();
-    assert_eq!((listed.listen.as_str(), listed.max.as_str()), ("full", "full"));
+    assert_eq!(
+        (listed.listen.as_str(), listed.max.as_str()),
+        ("full", "full")
+    );
     let album = &listed.projects[0];
-    assert_eq!((album.root.as_str(), album.name.as_str()), (PROJECT, "Album"));
+    assert_eq!(
+        (album.root.as_str(), album.name.as_str()),
+        (PROJECT, "Album")
+    );
     assert_eq!(album.access, "read");
     let sessions: Vec<&str> = album.sessions.iter().map(|s| s.path.as_str()).collect();
     assert_eq!(sessions, [joy]);
     let files: Vec<&str> = album.files.iter().map(|f| f.path.as_str()).collect();
-    assert_eq!(files, ["songs/joy/Samples/bass.wav"], "what the session names, no more");
+    assert_eq!(
+        files,
+        ["songs/joy/Samples/bass.wav"],
+        "what the session names, no more"
+    );
     let session = &album.sessions[0];
     assert_eq!(session.save, None, "read-only");
     let named: Vec<(&str, &str)> = session
@@ -651,9 +721,17 @@ async fn a_project_link_carries_its_sessions_and_exactly_the_files_they_referenc
         assert!(body.len() < 200, "{rel}: no bytes of it");
     }
     // Nor by the name of one it does serve, or a path in the root.
-    let (status, _, _) = get(&blob(&hash_of("songs/joy/Samples/unused.wav"), "bass.wav"), None).await;
+    let (status, _, _) = get(
+        &blob(&hash_of("songs/joy/Samples/unused.wav"), "bass.wav"),
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
-    for path in ["_blob/", "_blob/songs/joy/Samples/unused.wav", "_project/0/songs/joy/notes.txt"] {
+    for path in [
+        "_blob/",
+        "_blob/songs/joy/Samples/unused.wav",
+        "_project/0/songs/joy/notes.txt",
+    ] {
         let (status, _, _) = get(&w.url(&format!("/s/{}/{path}", share.code)), None).await;
         assert!(status.is_client_error(), "{path}: {status}");
     }
@@ -665,18 +743,38 @@ async fn a_project_link_carries_its_sessions_and_exactly_the_files_they_referenc
     assert_eq!(reference.projects[0].sessions.len(), 1);
     assert!(reference.projects[0].files.is_empty());
     assert!(reference.projects[0].sessions[0].references.is_empty());
-    assert!(w.projects(&share, "?listen=page").await.projects[0].sessions.is_empty());
-    links.update(share.code.clone(), ShareChange::Listen(Listen::Reference)).await.unwrap();
+    assert!(
+        w.projects(&share, "?listen=page").await.projects[0]
+            .sessions
+            .is_empty()
+    );
+    links
+        .update(share.code.clone(), ShareChange::Listen(Listen::Reference))
+        .await
+        .unwrap();
     let lowered = w.projects(&share, "").await;
     assert_eq!(lowered.max, "reference");
     assert!(lowered.projects[0].files.is_empty());
     let (status, _, _) = get(&w.url(&bass.url), Some((0, 15))).await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "a stem on a link lowered to Reference");
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "a stem on a link lowered to Reference"
+    );
     assert_eq!(get(&w.url(&session.url), None).await.0, StatusCode::OK);
-    links.update(share.code.clone(), ShareChange::Listen(Listen::Full)).await.unwrap();
+    links
+        .update(share.code.clone(), ShareChange::Listen(Listen::Full))
+        .await
+        .unwrap();
 
     // Played, not offered: the multitrack is marked and sent inline.
-    links.update(share.code.clone(), ShareChange::Download(Download::NotMedia)).await.unwrap();
+    links
+        .update(
+            share.code.clone(),
+            ShareChange::Download(Download::NotMedia),
+        )
+        .await
+        .unwrap();
     let playing = w.projects(&share, "").await;
     assert!(playing.projects[0].files[0].stream_only);
     let (status, headers, _) = get(&w.url(&bass.url), Some((0, 15))).await;
@@ -693,7 +791,10 @@ async fn a_project_link_carries_its_sessions_and_exactly_the_files_they_referenc
         }
         async move { request.send().await.unwrap().status() }
     };
-    assert_eq!(put(Some(&w.grace), &save, edited.clone()).await, StatusCode::FORBIDDEN);
+    assert_eq!(
+        put(Some(&w.grace), &save, edited.clone()).await,
+        StatusCode::FORBIDDEN
+    );
 
     // With edit: a signed-in person the link lets in saves it; nobody
     // anonymous does, and only a session the link shares.
@@ -710,13 +811,34 @@ async fn a_project_link_carries_its_sessions_and_exactly_the_files_they_referenc
         editable.projects[0].sessions[0].save.as_deref(),
         Some(format!("/s/{}/_project/0/songs/joy/Joy.fts-session", share.code).as_str())
     );
-    assert_eq!(put(None, &save, edited.clone()).await, StatusCode::UNAUTHORIZED);
-    assert_eq!(put(Some("not-a-session"), &save, edited.clone()).await, StatusCode::UNAUTHORIZED);
-    let other = w.url(&format!("/s/{}/_project/0/songs/other/Other.fts-session", share.code));
-    assert_eq!(put(Some(&w.grace), &other, edited.clone()).await, StatusCode::NOT_FOUND);
-    let stem = w.url(&format!("/s/{}/_project/0/songs/joy/Samples/bass.wav", share.code));
-    assert_eq!(put(Some(&w.grace), &stem, edited.clone()).await, StatusCode::NOT_FOUND);
-    assert_eq!(put(Some(&w.grace), &save, edited.clone()).await, StatusCode::OK);
+    assert_eq!(
+        put(None, &save, edited.clone()).await,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        put(Some("not-a-session"), &save, edited.clone()).await,
+        StatusCode::UNAUTHORIZED
+    );
+    let other = w.url(&format!(
+        "/s/{}/_project/0/songs/other/Other.fts-session",
+        share.code
+    ));
+    assert_eq!(
+        put(Some(&w.grace), &other, edited.clone()).await,
+        StatusCode::NOT_FOUND
+    );
+    let stem = w.url(&format!(
+        "/s/{}/_project/0/songs/joy/Samples/bass.wav",
+        share.code
+    ));
+    assert_eq!(
+        put(Some(&w.grace), &stem, edited.clone()).await,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        put(Some(&w.grace), &save, edited.clone()).await,
+        StatusCode::OK
+    );
 
     // The saved session is the project's now, on the storage server too,
     // and what it references is what the link serves: the URL the same.
@@ -729,21 +851,43 @@ async fn a_project_link_carries_its_sessions_and_exactly_the_files_they_referenc
     })
     .await;
     let after = w.projects(&share, "").await;
-    let files: Vec<&str> = after.projects[0].files.iter().map(|f| f.path.as_str()).collect();
-    assert_eq!(files, ["songs/joy/Samples/bass.wav", "songs/joy/Samples/unused.wav"]);
+    let files: Vec<&str> = after.projects[0]
+        .files
+        .iter()
+        .map(|f| f.path.as_str())
+        .collect();
+    assert_eq!(
+        files,
+        ["songs/joy/Samples/bass.wav", "songs/joy/Samples/unused.wav"]
+    );
     assert_ne!(after.projects[0].sessions[0].sha256, session.sha256);
-    let (status, _, _) = get(&blob(&hash_of("songs/joy/Samples/unused.wav"), "unused.wav"), Some((0, 9))).await;
-    assert_eq!(status, StatusCode::PARTIAL_CONTENT, "named now, so served now");
+    let (status, _, _) = get(
+        &blob(&hash_of("songs/joy/Samples/unused.wav"), "unused.wav"),
+        Some((0, 9)),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::PARTIAL_CONTENT,
+        "named now, so served now"
+    );
     assert_eq!(links.shares().await.unwrap().len(), 1);
     assert_eq!(links.shares().await.unwrap()[0].code, share.code);
 
     // No session named: every session document of the root.
     links
-        .update(share.code.clone(), ShareChange::Projects(vec![project(&[], ProjectAccess::Read)]))
+        .update(
+            share.code.clone(),
+            ShareChange::Projects(vec![project(&[], ProjectAccess::Read)]),
+        )
         .await
         .unwrap();
     let all = w.projects(&share, "").await;
-    let sessions: Vec<&str> = all.projects[0].sessions.iter().map(|s| s.path.as_str()).collect();
+    let sessions: Vec<&str> = all.projects[0]
+        .sessions
+        .iter()
+        .map(|s| s.path.as_str())
+        .collect();
     assert_eq!(sessions, [joy, "songs/other/Other.fts-session"]);
     // An audience's link is a slice of the notes: it carries no project.
     w.storage.stop().await;

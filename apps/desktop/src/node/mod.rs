@@ -108,7 +108,7 @@ use vault_live::Backend;
 
 pub use catalog::VaultCatalog;
 pub use config::{Config, ConfigError, IrohMode, Placement, Size};
-pub use service::{FilesStore, NodeError, NodeState, NodeStatus};
+pub use service::{FilesStore, HostedOrg, NodeError, NodeState, NodeStatus};
 
 /// The principal this node's own sweeps attach to its registry as.
 const SELF: &str = "doc-peer";
@@ -636,7 +636,18 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
     // document its link serves while its session lasts (#847).
     let opens: Arc<dyn Fn(Option<&Principal>, uuid::Uuid) -> bool + Send + Sync> = {
         let (access, lanes, doc_org) = (access.clone(), lanes.clone(), doc_org.clone());
+        let storage = {
+            let (admission, catalog, vault_orgs) =
+                (admission.clone(), catalog.clone(), vault_orgs.clone());
+            move |who: Option<&Principal>, doc_id| {
+                storage_opens(&admission, &catalog, &vault_orgs, who, doc_id)
+            }
+        };
         Arc::new(move |who, doc_id| {
+            // A storage device opens its orgs' file roots and no note.
+            if storage(who, doc_id) == Some(false) {
+                return false;
+            }
             access.admits(who, doc_id)
                 || matches!(who, Some(Principal::Service { name }) if name == SELF)
                 || who.is_some_and(|who| {
@@ -666,22 +677,52 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
     let endpoint_id = architect_devices::endpoint_key(&endpoint.id().to_string());
     let mut tasks = Vec::new();
     tasks.push(tokio::spawn({
-        let (endpoint, registry, catalog, access, admission, files) = (
+        let (endpoint, registry, catalog, access, admission, files, vault_orgs) = (
             endpoint.clone(),
             registry.clone(),
             catalog.clone(),
             access.clone(),
             admission.clone(),
             files.clone(),
+            vault_orgs.clone(),
         );
         async move {
+            let let_in = admission.clone();
             architect_devices::serve(&endpoint, admission, move |remote| {
+                let remote = remote.to_string();
+                // A device of some orgs (not one of the owner's own) is
+                // sent only what those orgs' manifests name.
+                let held_to = {
+                    let (let_in, vault_orgs, remote) =
+                        (let_in.clone(), vault_orgs.clone(), remote.clone());
+                    move || {
+                        let peer = let_in.get(&remote)?;
+                        if peer.is_account() {
+                            return None;
+                        }
+                        Some(
+                            peer.orgs()
+                                .iter()
+                                .filter_map(|(id, _)| {
+                                    vault_orgs
+                                        .orgs()
+                                        .iter()
+                                        .find(|org| &org.id == id)
+                                        .map(|org| org.slug.clone())
+                                })
+                                .collect(),
+                        )
+                    }
+                };
                 node_router_with(
                     registry.clone(),
                     catalog.clone(),
                     access.clone(),
-                    &remote.to_string(),
-                    files.as_ref().map(files::more).unwrap_or_default(),
+                    &remote,
+                    files
+                        .as_ref()
+                        .map(|engine| files::more(engine, held_to))
+                        .unwrap_or_default(),
                 )
             })
             .await;
@@ -737,6 +778,24 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
         )));
     } else {
         tracing::info!("no issuer or session: the node is on no account, and lets nobody in");
+    }
+
+    // ── Holding files for a node that authorised this one's key ──────
+    // No session: it signs in nowhere. The node it serves let its key in
+    // (`ACCOUNT_DEVICE_AUTHORISE`); it lets that node in, and syncs.
+    if let (Some(at), None) = (&config.enrol_at, &account) {
+        tracing::info!(
+            public_key = %endpoint_id,
+            at = %at,
+            orgs = ?config.enrolling(),
+            "no session: holding files for the node that authorised this key"
+        );
+        tasks.push(tokio::spawn(serve_declared(
+            at.clone(),
+            config.enrolling(),
+            admission.clone(),
+            every,
+        )));
     }
 
     // ── Enrolling itself in the orgs another node hosts ──────────────
@@ -1143,6 +1202,21 @@ pub fn main(
                     }
                 };
             }
+            Some("key") => {
+                return match Config::load(file.as_deref(), |var| std::env::var(var).ok())
+                    .map_err(|e| e.to_string())
+                    .and_then(|config| public_key(&config))
+                {
+                    Ok(key) => {
+                        let _ = writeln!(std::io::stdout(), "{key}");
+                        ExitCode::SUCCESS
+                    }
+                    Err(error) => {
+                        let _ = writeln!(std::io::stderr(), "architect-desktop serve key: {error}");
+                        ExitCode::from(78)
+                    }
+                };
+            }
             Some("register") => {
                 let rest: Vec<String> = args.map(|a| a.to_string_lossy().into_owned()).collect();
                 return match Config::load(file.as_deref(), |var| std::env::var(var).ok()) {
@@ -1156,9 +1230,11 @@ pub fn main(
             Some("--help" | "-h") => {
                 let _ = writeln!(
                     std::io::stdout(),
-                    "architect-desktop serve [--config <file>] [register …] [s3-key <issue|list|revoke> …]\n\n\
+                    "architect-desktop serve [--config <file>] [key] [register …] [s3-key <issue|list|revoke> …]\n\n\
                      The Architect app's node with no window (a server).\n\
-                     `register` signs this machine in to your account with a code.\n\
+                     `key` prints this machine's public key, to authorise it from a\n\
+                     signed-in app (ACCOUNT_DEVICE_AUTHORISE); `register` signs it in\n\
+                     to your account with a code instead.\n\
                      Configured by the file and ARCHITECT_* variables; see\n\
                      docs/content/guide/deploy.md."
                 );
@@ -1236,7 +1312,7 @@ async fn stopped() {
 }
 
 async fn bind_iroh(config: &Config) -> Result<iroh::Endpoint, StartError> {
-    let key = iroh_link::load_or_create_secret_key(&config.data_dir.join("iroh.key"))
+    let key = iroh_link::load_or_create_secret_key(&config.iroh_key())
         .map_err(|e| StartError::Iroh(format!("its key: {e}")))?;
     let builder = match config.iroh {
         IrohMode::N0 => iroh_link::endpoint_builder(PeerLookup::N0),
@@ -1262,6 +1338,99 @@ async fn bind_iroh(config: &Config) -> Result<iroh::Endpoint, StartError> {
         .bind()
         .await
         .map_err(|e| StartError::Iroh(e.to_string()))
+}
+
+/// Whether a storage device may open `doc_id`: `None` when `who` is not
+/// one (the other rules decide).
+///
+/// A storage device (`org::is_storage`: let in by its key, `storage` in
+/// every org it is of) holds and serves files. It opens a root's
+/// manifest and a ledger of an org it is of, and nothing else: no note,
+/// no document of another org.
+fn storage_opens(
+    admission: &Admission,
+    catalog: &VaultCatalog,
+    vault_orgs: &org::VaultOrgs,
+    who: Option<&Principal>,
+    doc_id: uuid::Uuid,
+) -> Option<bool> {
+    let Some(Principal::Host { endpoint }) = who else {
+        return None;
+    };
+    let peer = admission.get(endpoint)?;
+    if !org::is_storage(&peer) {
+        return None;
+    }
+    let Some(name) = catalog.name_of(doc_id) else {
+        return Some(false);
+    };
+    let of_files = name.starts_with("files/") || name.starts_with("ledger/");
+    let org = vault_orgs.of_name(&name);
+    Some(of_files && org.is_some_and(|org| peer.orgs().iter().any(|(id, _)| *id == org.id)))
+}
+
+/// Let the node at `at` in as the host of `orgs` (slugs), with no
+/// session: what a storage server authorised by its key does.
+///
+/// It asks `at` (over HTTPS, so it is that origin's node) which endpoint
+/// it is and which orgs it hosts, and admits that endpoint as each
+/// org's. Asked again every few minutes, so a host whose key changed is
+/// followed. Whether this node's own key is let in there is the host's
+/// call (`ACCOUNT_DEVICE_AUTHORISE`): until it is, its calls are refused
+/// and it holds nothing new.
+async fn serve_declared(at: String, orgs: Vec<String>, admission: Admission, retry: Duration) {
+    let origin = at.trim_end_matches('/').to_owned();
+    loop {
+        let status = service::node::NodeHttpClient::at(origin.clone())
+            .status()
+            .await;
+        let found = match status {
+            Ok(host) => {
+                let mut found = false;
+                for hosted in host
+                    .hosted_orgs
+                    .iter()
+                    .filter(|h| orgs.is_empty() || orgs.contains(&h.slug))
+                {
+                    admission.admit(
+                        architect_devices::Peer::new(&host.endpoint, host.name.clone(), "server")
+                            .granted(architect_devices::Grant::Org {
+                                org: architect_orgs::OrgId::new(hosted.id.clone()),
+                                role: architect_orgs::Role::Member,
+                                by: format!("host:{origin}"),
+                            }),
+                    );
+                    found = true;
+                }
+                if !found {
+                    tracing::warn!(at = %origin, ?orgs, hosted = ?host.hosted, "the node hosts none of the orgs this one holds files for");
+                }
+                found
+            }
+            Err(error) => {
+                tracing::warn!(at = %origin, %error, "the node this one holds files for did not answer");
+                false
+            }
+        };
+        tokio::time::sleep(if found { ACCOUNT_EVERY } else { retry }).await;
+    }
+}
+
+/// The public key of the device `config` describes: its iroh endpoint
+/// id, made (with its key) if it has none yet. What `serve key` prints,
+/// and what `ACCOUNT_DEVICE_AUTHORISE` is given. Not a secret.
+///
+/// # Errors
+///
+/// The key file cannot be read or made.
+pub fn public_key(config: &Config) -> Result<String, String> {
+    let path = config.iroh_key();
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    iroh_link::load_or_create_secret_key(&path)
+        .map(|key| architect_devices::endpoint_key(&key.public().to_string()))
+        .map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// The node's orgs: the ones it hosts and the ones it enrols in, asked

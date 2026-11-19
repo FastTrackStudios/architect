@@ -313,8 +313,9 @@ pub struct Engine {
     pub(super) served: Arc<std::sync::RwLock<std::collections::HashSet<Sha256>>>,
     /// Which orgs' manifests name each hash (their folder names): what a
     /// device of one org may be sent ([`Self::blob_host_for`]).
-    pub(super) named_by:
-        Arc<std::sync::RwLock<std::collections::HashMap<Sha256, std::collections::BTreeSet<String>>>>,
+    pub(super) named_by: Arc<
+        std::sync::RwLock<std::collections::HashMap<Sha256, std::collections::BTreeSet<String>>>,
+    >,
     /// The manifests as the peer lane lists them.
     pub(super) held: Arc<std::sync::RwLock<Vec<super::lane::HeldManifest>>>,
     /// The drive's mount, and whether a peer answers: what `Files::drive` reports.

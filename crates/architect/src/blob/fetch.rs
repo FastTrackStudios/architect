@@ -239,7 +239,12 @@ impl Fetcher {
     /// # Errors
     ///
     /// As [`Self::relay`].
-    pub async fn relay_range(&self, hash: Sha256, offset: u64, len: u64) -> Result<Blob, BlobError> {
+    pub async fn relay_range(
+        &self,
+        hash: Sha256,
+        offset: u64,
+        len: u64,
+    ) -> Result<Blob, BlobError> {
         let remotes = self
             .inner
             .remotes

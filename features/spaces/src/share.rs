@@ -885,7 +885,10 @@ mod tests {
             project("indie/Projects/Album", &["../other/Joy.session"]),
             project("indie/Projects/Album", &["/abs/Joy.session"]),
         ] {
-            assert!(validate_projects(std::slice::from_ref(&bad)).is_err(), "{bad:?}");
+            assert!(
+                validate_projects(std::slice::from_ref(&bad)).is_err(),
+                "{bad:?}"
+            );
         }
         assert!(validate_projects(&[good.clone(), good]).is_err(), "twice");
         assert!(is_session_document("a/b.SESSION") && !is_session_document("a/b.session-wal"));
@@ -893,7 +896,10 @@ mod tests {
 
     #[test]
     fn sharing_the_same_thing_with_the_same_people_is_the_same_link() {
-        let mut s = share(Audience::Invited(vec!["b@x.test".into(), "a@x.test".into()]));
+        let mut s = share(Audience::Invited(vec![
+            "b@x.test".into(),
+            "a@x.test".into(),
+        ]));
         s.audience = s.audience.clone().normalised();
         let again = |audience: Audience, scope: ShareScope| NewShare {
             vault: s.vault.clone(),
@@ -918,7 +924,10 @@ mod tests {
         assert!(!s.is_the_link_of(&comments, 1));
         let mut gone = s.clone();
         gone.revoked_at = Some(1);
-        assert!(!gone.is_the_link_of(&again(same, s.scope.clone()), 2), "revoked");
+        assert!(
+            !gone.is_the_link_of(&again(same, s.scope.clone()), 2),
+            "revoked"
+        );
     }
 
     fn person(email: &str, member: bool) -> Viewer {

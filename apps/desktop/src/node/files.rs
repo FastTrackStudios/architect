@@ -196,7 +196,7 @@ pub(super) fn engine(
     engine.set_history_off(history_off);
     // Its attestations are signed with its iroh key: its holder id is its endpoint id.
     Ok(
-        match iroh_link::load_or_create_secret_key(&config.data_dir.join("iroh.key")) {
+        match iroh_link::load_or_create_secret_key(&config.iroh_key()) {
             Ok(key) => engine.with_identity(key.to_bytes()),
             Err(error) => {
                 tracing::warn!(%error, "files: the iroh key is not readable; attestations use a key of their own");
@@ -295,14 +295,20 @@ pub(super) fn mount_drive(
     }
 }
 
-/// `BlobTransfer` on the node's peer lane, behind its gate.
-pub(super) fn more(engine: &Engine) -> More {
+/// `BlobTransfer` on the node's peer lane, behind its gate, for one
+/// connection. `orgs` says which orgs' files the device on it is held to
+/// (their folders), or `None` for one of the owner's own devices: a
+/// device of one org is sent only bytes a manifest of that org names.
+pub(super) fn more(
+    engine: &Engine,
+    orgs: impl Fn() -> Option<Vec<String>> + Send + Sync + 'static,
+) -> More {
     More {
         router: Some(
             LayerRouter::new()
                 .with(
                     blob_transfer_service_descriptor(),
-                    BlobTransferDispatcher::new(engine.blob_host()),
+                    BlobTransferDispatcher::new(engine.blob_host_for(orgs)),
                 )
                 .with(
                     possession_service_descriptor(),

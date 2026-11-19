@@ -414,9 +414,76 @@ on a pin (`FILES_PIN`), and a rule the org sets for every holder.
 
 ### A storage server
 
-A storage server is the app run with `serve` on the machine that holds the
-files, signed in to the person's account like their other devices. A
-machine with no browser is signed in with a code:
+A storage server is the app run with `serve` on the machine that holds
+the files. It gets in one of two ways.
+
+**By its own key, with nobody at the machine** (the SSH `authorized_keys`
+shape). Every node has a key of its own, made on first start: its iroh
+endpoint id is the public half. The machine prints it, a signed-in app
+declares it for the orgs it serves, and from then on the machine is let
+in by proving that key on every connection. It has no session, signs in
+nowhere, and nothing secret is passed to it.
+
+```sh
+# 1. On the machine (or wherever its key file is): its public key.
+architect-desktop serve key            # ARCHITECT_IROH_KEY_FILE, else <data dir>/iroh.key
+
+# 2. From any signed-in app (its action list: CLI or MCP), once:
+architect-desktop actions run ACCOUNT_DEVICE_AUTHORISE '{
+  "public_key": "<what step 1 printed>", "name": "starcommand",
+  "orgs": ["fasttrackaudio", "tombrooksmusic"],
+  "host": "https://fasttrackstudio.app"}'
+```
+
+```sh
+# 3. The machine's configuration: no issuer, no session.
+ARCHITECT_PLATFORM=storage
+ARCHITECT_IROH_KEY_FILE=/run/secrets/architect/iroh.key   # a secret file keeps a rebuilt machine the same device
+ARCHITECT_ENROL_AT=https://fasttrackstudio.app            # the node whose orgs' files it holds
+ARCHITECT_ENROL_ORGS=fasttrackaudio,tombrooksmusic
+ARCHITECT_FILES_DIR=/mnt/starcommand/Task
+ARCHITECT_FILES_HOLD=true
+```
+
+- **What the declaration is.** `ACCOUNT_DEVICE_AUTHORISE`
+  (`features/accounts/src/actions.rs`, `Accounts::authorise_device`)
+  enrols the key in each org at the node that hosts it, as the role
+  `storage` (`apps/desktop/src/node/org.rs` `storage_role`), by the
+  person's own session. The public key is not a secret, so it can sit in
+  a nix file. Declaring the same key again makes no second device.
+- **What the machine does on start.** With `ARCHITECT_ENROL_AT` and no
+  session it asks that origin (over HTTPS) which endpoint it is and which
+  orgs it hosts (`/node/status` `hosted_orgs`), lets that node in as
+  those orgs', and syncs with it (`apps/desktop/src/node/mod.rs`
+  `serve_declared`). Until its key is declared its calls are refused and
+  it waits; once it is, nothing more is needed. The same key after a
+  restart or a rebuild is the same device.
+- **What a storage device gets.** Its orgs' file roots and their ledgers
+  (`files/<org>/…`, `ledger/<org>/…`), to read and write, and the bytes a
+  manifest of those orgs names. No note of any vault, no document or
+  bytes of another org, and nothing at all as the person: it holds no
+  session (`storage_opens`, `apps/desktop/src/node/files.rs` `more`,
+  `architect_files::sync::Engine::blob_host_for`).
+- **Listing and revoking.** `ACCOUNT_DEVICES` lists it under `authorised`
+  (its key, name, platform `storage`, orgs, and "its key, by <who> at
+  <node>"); `ORG_DEVICES` lists it in each org. `ACCOUNT_DEVICE_REVOKE
+  {public_key}` from any signed-in app withdraws it: its next call is
+  refused and its connections close.
+- **If the key leaks.** Whoever holds the machine's key file can be that
+  storage device: read and write those orgs' file roots, until it is
+  revoked. They cannot read notes, reach another org, or act as the
+  person. Revoke the key, make a new one (delete the file; `serve key`),
+  declare it.
+
+Test: `apps/desktop/tests/node.rs`
+`a_machine_is_authorised_by_its_key_and_holds_only_its_orgs_files`.
+
+Not yet: the account's own devices reach a key-authorised storage server
+through the node that hosts the org, not directly (the issuer does not
+carry authorised keys, so a laptop does not learn to dial it).
+
+**By signing in with a code**, for a person who wants the machine on
+their account like their other devices:
 
 ```sh
 architect-desktop serve register --issuer https://auth.fasttrackstudio.app \
@@ -429,14 +496,9 @@ by its owner alone (`apps/desktop/src/node/register.rs` `sign_in`,
 `write_session`). Then it runs with `ARCHITECT_ISSUER`,
 `ARCHITECT_SESSION_FILE`, `ARCHITECT_PLATFORM=storage`, `ARCHITECT_FILES_DIR`
 and `ARCHITECT_FILES_HOLD=true`. On the account, the person's other devices
-and nodes let it in, sync their documents with it and fetch bytes from it.
-It is listed with the account's devices (`ACCOUNT_DEVICES`, platform
-`storage`) and among the files' holders (`FILES_HOLDERS`: a `node` at its
-`ARCHITECT_FILES_SITE`, with its copies and whether it is reachable). For an
-org's other members it enrols at the node that hosts the org
-(`ARCHITECT_ENROL_AT`, `ARCHITECT_ENROL_ORGS`).
-
-Test: `apps/desktop/tests/node.rs`
+and nodes let it in and sync everything with it: it is one of their
+devices, with all that a device of theirs reads. Test:
+`apps/desktop/tests/node.rs`
 `a_machine_registers_on_the_account_with_a_code_and_is_listed_as_storage`.
 
 ### A vault's attachments

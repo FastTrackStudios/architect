@@ -104,8 +104,8 @@ use vault_proto::{IfMatch, VaultSync as _};
 
 use super::holders::Holders;
 use super::org::{IssuerLane, NodeOrg, VaultOrgs};
-use super::share_project;
 use super::share_layers::{LayerRules, same_file, within};
+use super::share_project;
 use super::share_shell;
 
 /// The cookie a signed-in viewer's issuer session is kept in.
@@ -2030,9 +2030,7 @@ async fn serve(
         "/_live" => live(shares, code),
         "/_files.json" => private(&share, files_json(shares, &link, &query).await),
         // The projects it carries, and their files by hash (#490).
-        "/_project.json" if !domain => {
-            private(&share, project_json(shares, &link, &query).await)
-        }
+        "/_project.json" if !domain => private(&share, project_json(shares, &link, &query).await),
         _ if !domain && rest.starts_with(BLOB_PREFIX) => {
             private(&share, blob(shares, &link, rest, &headers).await)
         }
@@ -2174,7 +2172,11 @@ impl Shares {
                 .flatten()
         };
         if let Some(file) = opened {
-            return Some(serve_open(headers, file, kind).await.unwrap_or_else(|_| gone()));
+            return Some(
+                serve_open(headers, file, kind)
+                    .await
+                    .unwrap_or_else(|_| gone()),
+            );
         }
         let elsewhere = self
             .holders()
@@ -2202,7 +2204,10 @@ async fn project_json(shares: &Shares, link: &Link<'_>, query: &str) -> Response
     let base = link.mount.trim_end_matches('/');
     let listed =
         share_project::listed(shares.holders(), link.share, base, link.listen, asked).await;
-    let mut response = (StatusCode::OK, facet_json::to_string(&listed).unwrap_or_default())
+    let mut response = (
+        StatusCode::OK,
+        facet_json::to_string(&listed).unwrap_or_default(),
+    )
         .into_response();
     response.headers_mut().insert(
         header::CONTENT_TYPE,
@@ -2231,9 +2236,10 @@ async fn blob(shares: &Shares, link: &Link<'_>, rest: &str, headers: &HeaderMap)
     let mut response = inert(holders.respond(file.at, kind, headers).await);
     if file.stream_only {
         // Played in the page, not handed over as a file to keep.
-        response
-            .headers_mut()
-            .insert(header::CONTENT_DISPOSITION, HeaderValue::from_static("inline"));
+        response.headers_mut().insert(
+            header::CONTENT_DISPOSITION,
+            HeaderValue::from_static("inline"),
+        );
     }
     response
 }
@@ -2286,15 +2292,18 @@ async fn save_session(shares: &Shares, link: &Link<'_>, rest: &str, request: Req
     if !matches!(who, Viewer::Person { .. }) || link.share.admits(&who) != Verdict::Open {
         return refuse(StatusCode::UNAUTHORIZED, "Sign in to save to this project.");
     }
-    let shared = share_project::resolve(holders, project)
+    let is_shared = share_project::resolve(holders, project)
         .await
         .is_some_and(|r| r.sessions.iter().any(|(p, _, _)| p == path));
-    if !shared {
+    if !is_shared {
         return gone();
     }
     let Ok(bytes) = architect::http::axum::body::to_bytes(request.into_body(), SAVE_MAX).await
     else {
-        return refuse(StatusCode::PAYLOAD_TOO_LARGE, "A session of at most 64 MiB.");
+        return refuse(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "A session of at most 64 MiB.",
+        );
     };
     match holders.save(&project.root, path, &bytes).await {
         Ok(at) => {
@@ -2311,7 +2320,10 @@ async fn save_session(shares: &Shares, link: &Link<'_>, rest: &str, request: Req
         }
         Err(why) => {
             tracing::warn!(code = %link.share.code, %why, "a session was not saved through its link");
-            refuse(StatusCode::SERVICE_UNAVAILABLE, "The project is not here to save to now.")
+            refuse(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "The project is not here to save to now.",
+            )
         }
     }
 }

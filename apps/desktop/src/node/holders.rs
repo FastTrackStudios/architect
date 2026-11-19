@@ -121,7 +121,11 @@ impl Holders {
     /// fetcher reads from) and the node's `bucket`, with each vault's
     /// attachments root.
     #[must_use]
-    pub fn new(engine: Engine, bucket: Option<S3Store>, vault_roots: HashMap<String, Uuid>) -> Self {
+    pub fn new(
+        engine: Engine,
+        bucket: Option<S3Store>,
+        vault_roots: HashMap<String, Uuid>,
+    ) -> Self {
         Self(Arc::new(Inner {
             engine,
             bucket,
