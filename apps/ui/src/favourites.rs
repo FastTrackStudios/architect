@@ -254,6 +254,10 @@ pub fn opens(declaring: &str, target: &Target, reach: &Reach<'_>) -> Option<Open
                 None
             }
         }
+        // A tab that opens a menu above itself (a phone's More) is the
+        // web app's so far: the native bar has no menu to open, so the
+        // tab is left out rather than drawn dead.
+        Target::Menu(_) => None,
     }
 }
 
