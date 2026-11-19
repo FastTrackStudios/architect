@@ -515,8 +515,30 @@ pub fn VaultPage() -> Element {
         })
         .with_label(),
     );
+    // A note its view draws, opened from the home: the bar leads back
+    // there (its title then sits in the bar, small), and the bottom tabs
+    // are the note's own.
+    let has_home = super::home::use_home()().is_some();
+    // One handler for the page's life (the bar keeps the one it was
+    // given), and the home after the press: it takes this page's place.
+    let go_home = use_callback(move |()| {
+        let runtime = dioxus::core::Runtime::current();
+        runtime.in_scope(dioxus::core::ScopeId::ROOT, || {
+            spawn(async move {
+                *super::home::HOME.write() = true;
+            });
+        });
+    });
+    let back_home = has_home && VIEW_ON_SHOW();
     rsx! {
-        if phone {
+        if phone && back_home {
+            PageBar { title: pane_title, toolbar: panes,
+                // After the press: the home takes this page's place, and a
+                // page that goes inside its own press takes its handler
+                // with it.
+                on_back: go_home,
+            }
+        } else if phone {
             PageBar { title: pane_title, toolbar: panes }
         } else if title_row.is_none() {
             PageBar { title: "Vault" }

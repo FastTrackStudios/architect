@@ -128,6 +128,17 @@ pub fn press(action: &str, args: &Value) {
     let _ = crate::ask(&Caller::App, action, args);
 }
 
+/// Whether the bar's detail (the position, previous and next, the
+/// sources) is open.
+pub static DETAIL_OPEN: GlobalSignal<bool> = Signal::global(|| false);
+
+/// Opens the bar's detail, or closes it: the bar's own `^`, and any
+/// button that stands for it (a note type's round button).
+pub fn toggle_detail() {
+    let open = *DETAIL_OPEN.peek();
+    *DETAIL_OPEN.write() = !open;
+}
+
 /// `m:ss`.
 #[must_use]
 pub fn clock_text(t: f64) -> String {
@@ -176,7 +187,9 @@ pub fn NowPlayingBar(#[props(default)] art: Option<Callback<String, Option<Strin
     let t = shell.theme.clone();
     let phone = shell.screen.form() == FormFactor::Phone;
     let now = use_playhead();
-    let mut open = use_signal(|| false);
+    // Open or not is the app's (`DETAIL_OPEN`): a button elsewhere may
+    // open it ([`toggle_detail`]).
+    let open = || DETAIL_OPEN();
     let mut menu = use_signal(|| false);
     let mut click = use_signal(crate::click);
     let mut line_w = use_signal(|| 0.0_f64);
@@ -311,8 +324,7 @@ pub fn NowPlayingBar(#[props(default)] art: Option<Callback<String, Option<Strin
                 style: "{round} opacity: 0.8;",
                 onclick: move |e: MouseEvent| {
                     e.stop_propagation();
-                    let o = *open.peek();
-                    open.set(!o);
+                    toggle_detail();
                 },
                 if open() {
                     ChevronDown { size: 22, color: ink.clone() }
@@ -493,7 +505,7 @@ pub fn NowPlayingBar(#[props(default)] art: Option<Callback<String, Option<Strin
                     style: "display: flex; align-items: center; min-height: 60px; padding: 8px 4px 8px 8px; cursor: pointer;",
                     // A press on the song (anywhere but its buttons) opens
                     // the detail, as a share card opens its view.
-                    onclick: move |_| { let o = *open.peek(); open.set(!o); },
+                    onclick: move |_| toggle_detail(),
                     {art_box}
                     {words}
                     for b in slot_buttons { {b} }

@@ -82,6 +82,8 @@ pub struct SiteIsland {
     lyrics: Option<String>,
     /// Its home view ([`Self::home`]).
     home: Option<String>,
+    /// Its views that fill a page ([`Self::page_view`]).
+    pages: Vec<String>,
     /// Its note embeds ([`Self::embed`], [`Self::embed_note`]).
     embeds: Vec<NoteClaim>,
     /// What its extension declares it reads ([`Self::reads`]).
@@ -156,6 +158,7 @@ impl SiteIsland {
             transport: None,
             lyrics: None,
             home: None,
+            pages: Vec::new(),
             embeds: Vec::new(),
             reads: Vec::new(),
             stylesheet: None,
@@ -263,6 +266,19 @@ impl SiteIsland {
     #[must_use]
     pub fn home(mut self, view: impl Into<String>) -> Self {
         self.home = Some(view.into()).filter(|v| name_ok(v));
+        self
+    }
+
+    /// A view `view` of its own that fills a page: what a favourite's tab
+    /// or menu entry opens (`{ view = … }`) when it is neither a claimed
+    /// note's view nor one of the named ones. Listed, so the app opens only
+    /// a view the island has. Drawn from its web bundle only; at most 16.
+    #[must_use]
+    pub fn page_view(mut self, view: impl Into<String>) -> Self {
+        let view = view.into();
+        if name_ok(&view) && self.pages.len() < 16 && !self.pages.contains(&view) {
+            self.pages.push(view);
+        }
         self
     }
 
@@ -872,6 +888,8 @@ pub fn page_json(islands: &[SiteIsland]) -> serde_json::Value {
                 "lyrics": i.web.as_ref().and(i.lyrics.as_ref()),
                 // Its home view: a web bundle's only.
                 "home": i.web.as_ref().and(i.home.as_ref()),
+                // Its page views: a web bundle's only.
+                "views": if i.web.is_some() { i.pages.clone() } else { Vec::new() },
                 // Its note embeds, each with what it reads: a web bundle's
                 // only.
                 "embeds": i

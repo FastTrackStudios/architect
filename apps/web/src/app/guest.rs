@@ -781,7 +781,7 @@ thread_local! {
     static NAMES: RefCell<HashMap<String, &'static str>> = RefCell::new(HashMap::new());
 }
 
-fn kept(name: &str) -> &'static str {
+pub(super) fn kept(name: &str) -> &'static str {
     NAMES.with(|n| {
         *n.borrow_mut()
             .entry(name.to_owned())
