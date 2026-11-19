@@ -2875,6 +2875,7 @@ dependencies = [
  "ipnet",
  "iroh-base",
  "iroh-metrics",
+ "itertools 0.12.1",
  "keyboard-types 0.8.3",
  "konst",
  "konst_macro_rules",

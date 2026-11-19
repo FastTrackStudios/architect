@@ -7,6 +7,22 @@
 //! second or two ahead of what is heard. Pure Rust: symphonia's Ogg
 //! reader and Vorbis decoder.
 
+// Sample arithmetic: frame counts and indices of buffers a few MB long
+// (far under 2^52, so exact in an f64), positions between two samples, and
+// interleaved stereo read by index after its length is checked.
+#![allow(
+    clippy::as_conversions,
+    clippy::arithmetic_side_effects,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::indexing_slicing,
+    clippy::suboptimal_flops,
+    clippy::while_float,
+    clippy::chunks_exact_to_as_chunks
+)]
+
 use std::io::Cursor;
 
 use symphonia_codec_vorbis::VorbisDecoder;
@@ -14,7 +30,7 @@ use symphonia_core::audio::SampleBuffer;
 use symphonia_core::codecs::{Decoder as _, DecoderOptions};
 use symphonia_core::errors::Error as SymphoniaError;
 use symphonia_core::formats::{FormatOptions, FormatReader as _, SeekMode, SeekTo};
-use symphonia_core::io::MediaSourceStream;
+use symphonia_core::io::{MediaSourceStream, MediaSourceStreamOptions};
 use symphonia_format_ogg::OggReader;
 
 /// How far before a sought frame the reader goes: Vorbis's largest block.
@@ -40,7 +56,10 @@ impl Stream {
     ///
     /// Not Ogg, not Vorbis, or no rate or channels.
     pub fn open(bytes: Vec<u8>) -> Result<Self, String> {
-        let source = MediaSourceStream::new(Box::new(Cursor::new(bytes)), Default::default());
+        let source = MediaSourceStream::new(
+            Box::new(Cursor::new(bytes)),
+            MediaSourceStreamOptions::default(),
+        );
         let reader = OggReader::try_new(source, &FormatOptions::default())
             .map_err(|e| format!("not an Ogg stream: {e}"))?;
         let track = reader
