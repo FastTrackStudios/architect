@@ -87,9 +87,10 @@ pub const MAX_MESSAGE: usize = 64 * 1024;
 /// its source's state, so it reads nothing.
 pub use architect_playhead::FRAME_ASKS as INTENTS;
 
-/// A view's ask to open a note beside the one it is drawn on: `{path}`,
-/// the note's vault path, as the note's own text names it (a setlist's
-/// row names its song's note). The app opens it only where the viewer may
+/// A view's ask to open a note beside the one it is drawn on.
+///
+/// `{path}` is the note's vault path, as the note's own text names it (a
+/// setlist's row names its song's note). The app opens it only where the viewer may
 /// already open it: for a share link's guest, a note the link lists
 /// ([`note_ask`] checks the path's shape; the app's opener checks the
 /// rest). It reads nothing and moves no file: it is the press the viewer
@@ -100,6 +101,8 @@ pub const NOTE_OPEN: &str = "NOTE_OPEN";
 /// a note (`architect_playhead::model::vault_path`: no scheme, no `..`,
 /// at most 1024 bytes) ending in `.md`; a `#heading` after it is left off.
 #[must_use]
+// A note's file is `.md`, lower case, as the vault writes it.
+#[allow(clippy::case_sensitive_file_extension_comparisons)]
 pub fn note_ask(args: &Value) -> Option<String> {
     let path = args.get("path")?.as_str()?;
     let path = path.split_once('#').map_or(path, |(p, _)| p);
