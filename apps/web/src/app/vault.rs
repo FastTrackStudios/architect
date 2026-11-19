@@ -1127,11 +1127,16 @@ fn NoteText(path: String, text: String) -> Element {
     let body = body0.to_owned();
     let view_only = VIEW_ON_SHOW();
     // The view to the foot of the page: the bar under it is the next thing.
-    let pad = if view_only { "0 4px" } else { "24px 28px 96px" };
+    let pad = if view_only { "0" } else { "24px 28px 96px" };
+    let track = if view_only {
+        "scrollbar-width: none;"
+    } else {
+        ""
+    };
     rsx! {
         document::Style { {LAYOUT} }
         document::Style { {VIEW_ONLY} }
-        div { style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: {pad}; color: {t.ink};",
+        div { style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: {pad}; color: {t.ink}; {track}",
             div { class: "web-note", "data-note": "{path}", "data-view-only": if view_only { "" },
                 if core_list {
                     super::collection::CollectionHead {
