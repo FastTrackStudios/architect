@@ -518,9 +518,12 @@ const FLOAT_AT: Rect = Rect {
 /// pop-out's root, which draws them over its title row.
 #[derive(Clone, Copy, PartialEq)]
 pub struct PopoutButtons {
-    pub on_close: Callback<()>,
-    pub on_minimize: Callback<()>,
-    pub on_zoom: Callback<()>,
+    /// Closes the window.
+    pub close: Callback<()>,
+    /// Minimizes it.
+    pub minimize: Callback<()>,
+    /// Maximizes it, or puts it back.
+    pub zoom: Callback<()>,
 }
 
 /// The window's title row, for a workspace that reaches the window's top.

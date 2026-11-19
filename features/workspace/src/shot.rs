@@ -207,8 +207,13 @@ pub fn use_app_shot(list: &Arc<ActionList>) {
                             None => None,
                         };
                         let (answer, answered) = futures_channel::oneshot::channel();
-                        tx.unbounded_send(Job { path, window, crop, answer })
-                            .map_err(|_| "the window is gone".to_owned())?;
+                        tx.unbounded_send(Job {
+                            path,
+                            window,
+                            crop,
+                            answer,
+                        })
+                        .map_err(|_| "the window is gone".to_owned())?;
                         answered
                             .await
                             .map_err(|_| "the window is gone".to_owned())?

@@ -835,15 +835,16 @@ impl Commands {
     /// Runs a plain key bound everywhere, once a press: the window hears
     /// every key and a focused view hears its own, so the same press can
     /// arrive both ways. True either way (the key was used).
+    #[must_use]
     pub fn run_plain_once(&self, chord: &str) -> bool {
         thread_local! {
-            static LAST: std::cell::Cell<Option<architect::Instant>> = const { std::cell::Cell::new(None) };
+            static LAST: std::cell::Cell<Option<f64>> = const { std::cell::Cell::new(None) };
         }
-        let now = architect::Instant::now();
+        // The shell's clock, in seconds: there on every platform the
+        // window runs on, and a film's or a test's virtual one.
+        let now = architect_shell::motion::now();
         let again = LAST.with(|last| {
-            let again = last
-                .get()
-                .is_some_and(|at| now.duration_since(at) < std::time::Duration::from_millis(120));
+            let again = last.get().is_some_and(|at| now - at < 0.12);
             last.set(Some(now));
             again
         });

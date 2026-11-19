@@ -1733,8 +1733,8 @@ pub fn AppShell(
 
     // Whether a view of someone else's fills the title slot, and the row
     // it gets: the title row's height, past the window's buttons.
-    let title_filled = try_use_context::<Signal<Chrome>>()
-        .is_some_and(|c| c.read().filler(Slot::Title).is_some());
+    let title_filled =
+        try_use_context::<Signal<Chrome>>().is_some_and(|c| c.read().filler(Slot::Title).is_some());
     // Clear of the window's buttons and the sidebar button on the left, and
     // of the app's own buttons on the right, as the title row's content is.
     let title_h = shell.title_row();

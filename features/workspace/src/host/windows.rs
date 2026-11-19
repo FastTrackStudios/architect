@@ -569,17 +569,17 @@ fn PopoutView(props: PopoutProps) -> Element {
                     button {
                         "aria-label": "Close",
                         style: "width:12px; height:12px; padding:0; border:none; border-radius:50%; background:#ff5f57;",
-                        onclick: move |_| buttons.on_close.call(()),
+                        onclick: move |_| buttons.close.call(()),
                     }
                     button {
                         "aria-label": "Minimize",
                         style: "width:12px; height:12px; padding:0; border:none; border-radius:50%; background:#febc2e;",
-                        onclick: move |_| buttons.on_minimize.call(()),
+                        onclick: move |_| buttons.minimize.call(()),
                     }
                     button {
                         "aria-label": "Maximize",
                         style: "width:12px; height:12px; padding:0; border:none; border-radius:50%; background:#28c840;",
-                        onclick: move |_| buttons.on_zoom.call(()),
+                        onclick: move |_| buttons.zoom.call(()),
                     }
                 }
             }

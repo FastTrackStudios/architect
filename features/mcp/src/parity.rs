@@ -213,7 +213,7 @@ impl Both {
         let over_socket = said_by_socket(&mut self.client, method, &params);
         // Each face's call asks a person on its own: the tickets differ.
         let (over_mcp, over_socket) = (unticketed(over_mcp), unticketed(over_socket));
-        if over_mcp != over_socket {
+        if over_mcp != over_socket && !same_until_cut(&over_mcp, &over_socket) {
             self.problems.push(format!(
                 "{} {params}: MCP said {over_mcp:?}, the CLI {over_socket:?}",
                 method.name()
@@ -279,6 +279,20 @@ fn said_by_mcp(server: &Server, method: Method, params: &Value) -> Said {
         }
         Err(ToolError::NoTool(name)) => (json!({"code": "no_method", "error": name}), true),
     }
+}
+
+/// Whether MCP's answer is the socket's, cut: a model is told at most
+/// [`crate::MAX_TEXT`] bytes of a result and the socket has no such limit,
+/// so a long answer (every action's schema, `SCRIPT_DESCRIBE`) agrees when
+/// what MCP kept is how the socket's begins.
+fn same_until_cut(over_mcp: &Said, over_socket: &Said) -> bool {
+    let (Value::String(text), failed) = over_mcp else {
+        return false;
+    };
+    let Some((kept, _)) = text.rsplit_once("… [cut at ") else {
+        return false;
+    };
+    *failed == over_socket.1 && over_socket.0.to_string().starts_with(kept)
 }
 
 /// What the socket said.

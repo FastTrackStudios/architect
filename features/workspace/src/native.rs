@@ -575,7 +575,9 @@ fn popout_title_row(window: &Arc<dyn OsWindow>) -> Option<crate::TitleRow> {
             on_drag: Some(Callback::new(move |()| {
                 let _ = drag.drag_window();
             })),
-            on_zoom: Some(Callback::new(move |()| zoom.set_maximized(!zoom.is_maximized()))),
+            on_zoom: Some(Callback::new(move |()| {
+                zoom.set_maximized(!zoom.is_maximized());
+            })),
         });
     }
     let (drag, zoom) = (Arc::clone(window), Arc::clone(window));
@@ -765,11 +767,11 @@ impl App {
                 let (mini, zoom) = (Arc::clone(&os_window), Arc::clone(&os_window));
                 let (closer, closing) = (close_proxy, os_window.id());
                 provide_context(crate::host::PopoutButtons {
-                    on_close: Callback::new(move |()| {
+                    close: Callback::new(move |()| {
                         closer.send_event(BlitzShellEvent::CloseWindow { window_id: closing });
                     }),
-                    on_minimize: Callback::new(move |()| mini.set_minimized(true)),
-                    on_zoom: Callback::new(move |()| zoom.set_maximized(!zoom.is_maximized())),
+                    minimize: Callback::new(move |()| mini.set_minimized(true)),
+                    zoom: Callback::new(move |()| zoom.set_maximized(!zoom.is_maximized())),
                 });
             }
             let head: Rc<dyn dioxus::document::Document> = Rc::new(head);

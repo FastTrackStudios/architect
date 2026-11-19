@@ -472,7 +472,10 @@ impl PaintMount {
     /// a value shows or moves are then drawn at the level the engine last
     /// wrote; without a table they draw as if every value were full.
     #[must_use]
-    pub fn with_engine(mut self, table: std::sync::Arc<architect_scene::engine::EngineTable>) -> Self {
+    pub fn with_engine(
+        mut self,
+        table: std::sync::Arc<architect_scene::engine::EngineTable>,
+    ) -> Self {
         self.engine = Some(table);
         self
     }
