@@ -1,5 +1,7 @@
-//! What the web app hears (#589): one `<audio>` element the app owns
-//! (never a frame), following the deck's active source
+//! What the web app hears (#589): one player the app owns (never a
+//! frame), an `<audio>` element or, for a recording a browser may not play
+//! (Ogg Vorbis on an iPhone), the app's own decoder (`super::decoded`),
+//! following the deck's active source
 //! (`architect_playhead::Follower`) and telling it back where it really
 //! is, its media's length and its end (`architect_playhead::Clock`).
 //!
@@ -74,9 +76,24 @@ pub fn media_url(path: &str) -> Option<String> {
     super::guest::file_url(path).filter(|_| crate::guest_view::plays(path))
 }
 
-/// The audio element, as a clock.
+/// What plays the current item's media.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Via {
+    /// The browser's own player: what its codecs play.
+    Element,
+    /// The app's decoder (`super::decoded`): Ogg Vorbis, on every browser.
+    Decoded,
+}
+
+/// The app's player, as a clock: the audio element, or the app's own
+/// decoder for a recording a browser may not play (`decoded::handles`).
 struct AudioClock {
     el: HtmlAudioElement,
+    decoded: super::decoded::Decoded,
+    via: Via,
+    /// Play is wanted: what a recording that turns out not to decode is
+    /// started with on the element.
+    wanted: bool,
     src: Option<String>,
     /// The browser refused to play it (its autoplay rule, a file it
     /// cannot play): the silent clock goes on until the next item or press.
@@ -97,17 +114,40 @@ impl Clock for AudioClock {
         if url == self.src {
             return;
         }
-        if let Some(u) = &url {
-            self.el.set_src(u);
+        self.via = if url.as_deref().is_some_and(super::decoded::handles) {
+            Via::Decoded
         } else {
-            let _ = self.el.pause();
-            self.el.remove_attribute("src").ok();
+            Via::Element
+        };
+        match (&url, self.via) {
+            (Some(u), Via::Element) => {
+                self.decoded.load(None);
+                self.el.set_src(u);
+            }
+            (Some(u), Via::Decoded) => {
+                let _ = self.el.pause();
+                self.el.remove_attribute("src").ok();
+                self.decoded.load(Some(u));
+            }
+            (None, _) => {
+                self.decoded.load(None);
+                let _ = self.el.pause();
+                self.el.remove_attribute("src").ok();
+            }
         }
         self.el.load();
         self.src = url;
+        self.mark();
     }
 
     fn play(&mut self) {
+        self.wanted = true;
+        if self.via == Via::Decoded {
+            if self.src.is_some() {
+                self.decoded.play();
+            }
+            return;
+        }
         if self.src.is_some() {
             // Refused (no gesture, no file): the silent clock goes on.
             self.refused.set(false);
@@ -118,12 +158,17 @@ impl Clock for AudioClock {
     }
 
     fn pause(&mut self) {
+        self.wanted = false;
+        self.decoded.pause();
         let _ = self.el.pause();
     }
 
     fn seek(&mut self, t: f64) {
         if self.src.is_some() && t.is_finite() {
-            self.el.set_current_time(t);
+            match self.via {
+                Via::Decoded => self.decoded.seek(t),
+                Via::Element => self.el.set_current_time(t),
+            }
         }
     }
 
@@ -135,6 +180,9 @@ impl Clock for AudioClock {
                 ..Reading::default()
             });
         }
+        if self.via == Via::Decoded {
+            return Some(self.decoded.read());
+        }
         let d = self.el.duration();
         Some(Reading {
             time: self.el.current_time(),
@@ -145,6 +193,41 @@ impl Clock for AudioClock {
             // `src` is set only from `media_url`: the app resolved it.
             resolved: true,
         })
+    }
+}
+
+impl AudioClock {
+    /// A recording the app could not decode goes to the browser's own
+    /// player, from where the deck is (heard on the next sync).
+    fn fall_back(&mut self) {
+        if self.via != Via::Decoded || !self.decoded.failed() {
+            return;
+        }
+        self.via = Via::Element;
+        self.decoded.load(None);
+        if let Some(u) = &self.src {
+            self.el.set_src(u);
+            self.el.load();
+            if self.wanted
+                && let Ok(p) = self.el.play()
+            {
+                let _ = p.catch(&self.on_refused);
+            }
+        }
+        self.mark();
+    }
+
+    /// What plays, on the element, for a test to read: `data-clock`
+    /// (`decoded` or `element`) and `data-media` (the URL).
+    fn mark(&self) {
+        let clock = match self.via {
+            Via::Decoded => "decoded",
+            Via::Element => "element",
+        };
+        let _ = self.el.set_attribute("data-clock", clock);
+        let _ = self
+            .el
+            .set_attribute("data-media", self.src.as_deref().unwrap_or(""));
     }
 }
 
@@ -168,6 +251,7 @@ fn sync() {
         };
         let Some(p) = p.as_mut() else { return };
         let now = now_ms();
+        p.clock.fall_back();
         architect_playhead::with(|d| {
             p.follower.follow(d, &mut p.clock, now);
             p.follower.report(d, &p.clock, now);
@@ -182,6 +266,10 @@ fn sync() {
         if key != p.shown {
             session(state.as_ref());
             p.shown = key;
+        }
+        position(state.as_ref());
+        if let Some(Reading { time, .. }) = p.clock.read() {
+            let _ = p.clock.el.set_attribute("data-time", &format!("{time:.2}"));
         }
     });
 }
@@ -216,6 +304,13 @@ fn session(state: Option<&Value>) {
     let _ = js_sys::Reflect::set(&init, &"title".into(), &text("title").into());
     let _ = js_sys::Reflect::set(&init, &"artist".into(), &text("subtitle").into());
     let _ = js_sys::Reflect::set(&init, &"album".into(), &text("name").into());
+    // The cover, where the app has a URL for the item's art (a link's own
+    // file): what a lock screen and a headset's display draw.
+    if let Some(src) = s["item"]["art"].as_str().and_then(art_url) {
+        let image = js_sys::Object::new();
+        let _ = js_sys::Reflect::set(&image, &"src".into(), &src.into());
+        let _ = js_sys::Reflect::set(&init, &"artwork".into(), &js_sys::Array::of1(&image));
+    }
     if let Some(ctor) = web_sys::window()
         .and_then(|w| get(&w, "MediaMetadata"))
         .and_then(|c| c.dyn_into::<js_sys::Function>().ok())
@@ -229,6 +324,38 @@ fn session(state: Option<&Value>) {
         "paused"
     };
     let _ = js_sys::Reflect::set(&ms, &"playbackState".into(), &playing.into());
+}
+
+/// This origin's URL for an item's art at vault path `path`: a share
+/// link's own file, checked by the node as every request for it.
+fn art_url(path: &str) -> Option<String> {
+    architect_playhead::model::vault_path(path)
+        .then(|| super::guest::file_url(path))
+        .flatten()
+}
+
+/// Where the item is and how long, for the lock screen's scrubber: told
+/// on every sync (a few times a second), so a seek or a pause shows at once.
+fn position(state: Option<&Value>) {
+    let Some(ms) = media_session() else { return };
+    let Some(set) =
+        get(&ms, "setPositionState").and_then(|f| f.dyn_into::<js_sys::Function>().ok())
+    else {
+        return;
+    };
+    let Some(s) = state else { return };
+    let (Some(duration), Some(time)) = (s["duration"].as_f64(), s["time"].as_f64()) else {
+        return;
+    };
+    if !(duration.is_finite() && duration > 0.0) {
+        return;
+    }
+    let at = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(&at, &"duration".into(), &duration.into());
+    let _ = js_sys::Reflect::set(&at, &"position".into(), &time.clamp(0.0, duration).into());
+    let _ = js_sys::Reflect::set(&at, &"playbackRate".into(), &1.0.into());
+    // A browser that refuses a value throws: the scrubber is then its own.
+    let _ = set.call1(&ms, &at);
 }
 
 /// The Media Session's buttons: the app's own presses.
@@ -304,6 +431,9 @@ pub fn start() {
         *p.borrow_mut() = Some(Player {
             clock: AudioClock {
                 el,
+                decoded: super::decoded::Decoded::new(sync_later),
+                via: Via::Element,
+                wanted: false,
                 src: None,
                 refused,
                 on_refused,
