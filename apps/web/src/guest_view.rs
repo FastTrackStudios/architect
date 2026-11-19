@@ -21,6 +21,9 @@ pub enum Open {
     Note(String),
     /// The link's files (`_files/`).
     Files,
+    /// A view of an extension's that fills the page (a favourite's tab
+    /// whose view claims no note type): the extension's id and the view's.
+    View(String, String),
     /// Nothing the link lists now (a page it no longer has).
     Nothing,
 }

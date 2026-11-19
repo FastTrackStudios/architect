@@ -168,6 +168,9 @@ pub struct Distribution {
     blocks: Vec<Arc<dyn BlockRenderer>>,
     #[cfg(not(target_family = "wasm"))]
     islands: Vec<architect_sites::SiteIsland>,
+    /// Favourites declared by a manifest that is not a compiled-in
+    /// extension's (an island's): [`Self::favourites_of`].
+    listed_favourites: Vec<architect_extensions::favourites::Listed>,
     adopts: Option<Adopted>,
     registries: Vec<Registry>,
     dev_installs: bool,
@@ -244,6 +247,7 @@ impl Distribution {
             blocks: Vec::new(),
             #[cfg(not(target_family = "wasm"))]
             islands: Vec::new(),
+            listed_favourites: Vec::new(),
             adopts: None,
             registries: vec![store()],
             dev_installs: true,
@@ -648,6 +652,27 @@ impl Distribution {
             .collect()
     }
 
+    /// The `[[favourites]]` of `manifest`, an extension manifest that is
+    /// not one of its compiled-in extensions': its island's
+    /// ([`island`](Self::island)), whose views those tabs open. Listed with
+    /// its compiled-in extensions' ([`favourites`](Self::favourites)), by
+    /// the manifest's own declarer. A manifest that does not parse adds
+    /// nothing.
+    #[must_use]
+    pub fn favourites_of(mut self, manifest: &str) -> Self {
+        if let Ok(m) = Manifest::parse(manifest) {
+            let by = m.declarer();
+            self.listed_favourites
+                .extend(m.favourites.into_iter().map(|favourites| {
+                    architect_extensions::favourites::Listed {
+                        by: by.clone(),
+                        favourites,
+                    }
+                }));
+        }
+        self
+    }
+
     /// Its compiled-in extensions' `[[favourites]]`, each with the
     /// extension that declared it and what its capabilities let it run:
     /// the tabs a share page's phone shell (and the app's shell) shows
@@ -666,6 +691,7 @@ impl Distribution {
                     }
                 })
             })
+            .chain(self.listed_favourites.iter().cloned())
             .collect()
     }
 
