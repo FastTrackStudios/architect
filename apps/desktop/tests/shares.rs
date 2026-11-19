@@ -3612,7 +3612,14 @@ async fn a_guest_reads_a_link_as_its_notes_and_a_note_as_its_pages_words() {
         .unwrap();
     assert_eq!(note.title, "Track");
     assert_eq!(note.page, format!("/s/{}/track/", share.code));
-    assert!(note.source.is_none(), "a guest never gets the note's text");
+    // Its text too, as the build wrote it for this link: the link admits
+    // it, whatever draws the note (no island here).
+    assert_eq!(
+        note.source.as_deref().map(str::trim),
+        Some("# Track\n\nMix notes."),
+        "{:?}",
+        note.source
+    );
     assert!(
         note.blocks
             .iter()
@@ -3630,7 +3637,7 @@ async fn a_guest_reads_a_link_as_its_notes_and_a_note_as_its_pages_words() {
         )
         .await
         .unwrap();
-    let said = format!("{:?}", index.blocks);
+    let said = format!("{:?} {:?} {:?}", index.blocks, index.source, index.files);
     assert!(said.contains("the plan"), "{said}");
     assert!(
         !said.contains("secret") && !said.contains("cover.png") && !said.contains("Private/"),
@@ -3998,12 +4005,22 @@ async fn a_guests_view_reads_the_shared_text_and_files_and_nothing_past_the_link
         assert_eq!(sha, hex_sha256(&bytes), "{}", f.path);
     }
 
-    // A note of the link whose type no island reads: its words only.
+    // A note of the link whose type no island claims: the link admits
+    // its text and its own files all the same (which view is handed them
+    // is the app's to keep), and nothing of another note's.
     let song = client
         .read(code.clone(), String::new(), "Gig/joy.md".to_owned())
         .await
         .unwrap();
-    assert!(song.source.is_none() && song.files.is_empty(), "{song:?}");
+    let words = song.source.clone().expect("the link admits its text");
+    assert!(words.contains("Joy to the world."), "{words}");
+    assert!(
+        song.files
+            .iter()
+            .all(|f| f.path.starts_with("Gig/") && f.note == "Gig/joy.md" && f.sha256.is_some()),
+        "{:?}",
+        song.files
+    );
 
     // A note outside the link, and every path trick on it: one answer,
     // the same as for a note that is nowhere.
@@ -4028,7 +4045,7 @@ async fn a_guests_view_reads_the_shared_text_and_files_and_nothing_past_the_link
     }
 
     // The build's guest data is read only through the guest service,
-    // which asks the islands first: it is written beside the served
+    // which admits the caller as the link does: it is written beside the served
     // folder, never in it, so no spelling of a URL reaches it, not even
     // on a filesystem that folds case (`ſ`) or trailing dots and spaces.
     let served = w.tmp.path().join(format!("host/data/shares/{code}/site"));
@@ -4107,37 +4124,56 @@ async fn a_guests_view_reads_the_shared_text_and_files_and_nothing_past_the_link
     w.host.stop().await;
 }
 
-/// The node hands a guest's view only what its extension declared: the
-/// text only to a claim that reads the note of an extension that
-/// declares `documents`, the files only with `files` too.
+/// What a guest is given is the link's permission alone: the node hands
+/// the same text and files whatever its islands declare, and with no
+/// island at all. Which view is handed either is the app's rule
+/// (`architect_sites::island::note_reads`, kept by the web app): the text
+/// only to a claim that reads the note of an extension that declares
+/// `documents`, the files only with `files` too.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_view_that_did_not_declare_the_read_gets_nothing() {
-    // (reads the note in its claim, declares, text?, files?)
-    for (reads_note, reads, text, files) in [
-        (true, &["documents"][..], true, false),
-        (true, &["files"][..], false, false),
-        (true, &[][..], false, false),
-        (false, &["documents", "files"][..], false, false),
-        (true, &["documents", "files"][..], true, true),
-    ] {
-        let w = world_full(
-            architect_sites::Blocks::new(),
-            vec![setlist_island(reads_note, reads)],
-            seed_gig,
-        )
-        .await;
+async fn what_a_guest_reads_is_the_links_permission_whatever_the_islands_declare() {
+    // (reads the note in its claim, declares, a view's text?, its files?)
+    let rows: [(bool, &[&str], bool, bool); 5] = [
+        (true, &["documents"], true, false),
+        (true, &["files"], false, false),
+        (true, &[], false, false),
+        (false, &["documents", "files"], false, false),
+        (true, &["documents", "files"], true, true),
+    ];
+    let mut given: Vec<(Option<String>, Vec<String>)> = Vec::new();
+    let worlds = rows
+        .iter()
+        .map(|(reads_note, reads, text, files)| {
+            let island = setlist_island(*reads_note, reads);
+            // The rule the app keeps, as the island's own crate says it.
+            let view =
+                architect_sites::island::note_reads(std::slice::from_ref(&island), "setlist");
+            assert_eq!((view.text, view.files), (*text, *files), "{reads:?}");
+            vec![island]
+        })
+        .chain([Vec::new()]);
+    for islands in worlds {
+        let row = format!("{} island(s)", islands.len());
+        let w = world_full(architect_sites::Blocks::new(), islands, seed_gig).await;
         let share = gig_link(&w).await;
         let set = guest(&w)
             .read(share.code.clone(), String::new(), "Gig/set.md".to_owned())
             .await
             .unwrap();
-        let row = format!("claim reads: {reads_note}, declares {reads:?}");
-        assert_eq!(set.source.is_some(), text, "{row}");
-        assert_eq!(!set.files.is_empty(), files, "{row}");
-        // Its page's words, whatever the view may read.
+        // The text as the build wrote it for this link, and the link's
+        // images and lyrics: never less for what an island declares.
+        let text = set.source.clone().expect("the link admits its text");
+        assert!(text.contains("1. [[Gig/joy|Joy]]"), "{row}: {text}");
+        assert!(!text.contains("a private note"), "{row}: {text}");
+        let paths: Vec<String> = set.files.iter().map(|f| f.path.clone()).collect();
+        assert_eq!(paths, ["Gig/art/joy.png", "Gig/joy.lrc"], "{row}");
+        // Its page's words, whatever a view may read.
         assert!(!set.blocks.is_empty(), "{row}");
+        given.push((set.source, paths));
         w.host.stop().await;
     }
+    // One answer, island or none.
+    assert!(given.windows(2).all(|w| w[0] == w[1]), "{given:?}");
 }
 
 // ── Symlinks ─────────────────────────────────────────────────────────

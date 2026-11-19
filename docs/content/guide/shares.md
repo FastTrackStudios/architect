@@ -41,6 +41,22 @@ guest can't do is a **permission**, never a different app:
   through the link's guest service (`features/spaces/src/guest.rs`
   `ShareGuest`), checked by the node. The app never decides what a guest
   may see.
+- **What a guest may read is the link's permission; what a view is
+  handed is the app's.** The node gives a guest a note's text and the
+  link's files whenever the link's scope, audience and layer admit them
+  (`apps/desktop/src/node/shares.rs` `GuestLane`), and knows nothing of
+  the client: not its views, not its extensions. The app hands a view
+  only what that view's extension declares it reads
+  (`apps/web/src/ext_host.rs` `note_reads`, `note_props`: text only with
+  `reads = ["documents"]`, files only with `files` too, nothing with no
+  read). That is a rule about extensions inside the app, the same for a
+  member, never a second gate on the guest: a guest's browser already
+  holds whatever the link admits.
+- **The client's code is the web app's.** The islands a view is drawn
+  with, their runtime and their frame documents (`/_ext/`) are fixed by
+  the distribution's build, not by a node's data. A node still answers
+  them; a static server can instead
+  ([Deploy, Routing](@/guide/deploy.md#routing): `<app> web-ext`).
 - **A share with a domain of its own** (`ShareChange::Domain`) is a
   publication, a [Site](@/features/sites.md), not a link. Its
   `/s/<code>/` link is still the app.
@@ -50,6 +66,14 @@ How the node serves a link, its audiences, files and players:
 gets as a guest: [Extensions, A share link's guests](@/architecture/extensions.md#a-share-link-s-guests).
 
 ## Known gaps
+
+The server still knows about the client in two places: a node answers
+`/_ext/` (islands, runtime, frame documents, the two listings) from what
+its distribution links in, and a share's page build draws blocks with
+the node's own extension set (#806). The static tree (`<app> web-ext`,
+`features/sites/src/island.rs` `export`) lets a deployment serve `/_ext`
+without the node; no deployment in this repo (the chart, `just dev`)
+does so yet, and the node keeps its routes until one does.
 
 The code still has second implementations from before #646. Each is a
 bug against this rule, with an issue saying what to remove and which

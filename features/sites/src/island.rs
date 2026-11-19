@@ -758,6 +758,196 @@ pub fn serve<'a>(islands: &'a [SiteIsland], path: &str) -> Option<(Cow<'a, [u8]>
     None
 }
 
+/// Where the web app reads the islands' listing ([`listing_json`]).
+pub const LISTING_PATH: &str = "/_ext/islands.json";
+
+/// Where the web app reads the note types' favourites
+/// ([`favourites_json`]).
+pub const FAVOURITES_PATH: &str = "/_ext/favourites.json";
+
+/// Where a written tree keeps each path's headers ([`headers_json`]): a
+/// file of the static tree only, a node answers `404` there.
+pub const HEADERS_PATH: &str = "/_ext/headers.json";
+
+/// The body of [`LISTING_PATH`]: [`page_json`] of `islands`, as text.
+#[must_use]
+pub fn listing_json(islands: &[SiteIsland]) -> String {
+    page_json(islands).to_string()
+}
+
+/// The body of [`FAVOURITES_PATH`].
+///
+/// Every declaration of `favourites` that keeps the manifest's rules
+/// (`TypeFavourites::check`), each with the extension that declared it,
+/// as `{"favourites": [{"by": …, "favourites": …}]}`.
+#[must_use]
+pub fn favourites_json(favourites: &[architect_favourites::Listed]) -> String {
+    let list: Vec<&architect_favourites::Listed> = favourites
+        .iter()
+        .filter(|f| f.favourites.check().is_ok())
+        .collect();
+    serde_json::json!({ "favourites": list }).to_string()
+}
+
+/// The headers of a listing ([`LISTING_PATH`], [`FAVOURITES_PATH`]).
+///
+/// JSON, never cached (the paths it names change with a new build, its
+/// own name does not), `nosniff`, and the pages' policy
+/// (`crate::ui::content_security_policy`) should one be opened.
+#[must_use]
+pub fn listing_headers() -> Vec<(&'static str, String)> {
+    vec![
+        ("content-type", "application/json".to_owned()),
+        ("cache-control", "no-cache".to_owned()),
+        ("x-content-type-options", "nosniff".to_owned()),
+        (
+            "content-security-policy",
+            crate::ui::content_security_policy(),
+        ),
+    ]
+}
+
+/// The headers of the file at `path` under [`ISLANDS_PATH`], of content
+/// type `kind` ([`serve`]).
+///
+/// A frame's document (the sandbox, a web view) carries its own policy,
+/// every header of [`document_headers`]. Anything else (a module, a
+/// component, a sheet) is its type, `nosniff`, cached for good (its path
+/// is named by its content) and under the pages' policy. Either varies by
+/// `accept-encoding`: a node sends it gzipped to a browser that takes it.
+#[must_use]
+pub fn file_headers(path: &str, kind: &'static str) -> Vec<(&'static str, String)> {
+    let mut headers = vec![("vary", "accept-encoding".to_owned())];
+    if let Some(own) = document_headers(path) {
+        headers.extend(own);
+        return headers;
+    }
+    headers.extend([
+        ("content-type", kind.to_owned()),
+        ("x-content-type-options", "nosniff".to_owned()),
+        (
+            "cache-control",
+            "public, max-age=31536000, immutable".to_owned(),
+        ),
+        (
+            "content-security-policy",
+            crate::ui::content_security_policy(),
+        ),
+    ]);
+    headers
+}
+
+/// One file of the static `/_ext/` tree ([`export`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Exported {
+    /// Its URL path (`/_ext/…`).
+    pub path: String,
+    /// Its body, as a node answers it unencoded.
+    pub body: Vec<u8>,
+    /// Its content type (in [`Self::headers`] too).
+    pub content_type: &'static str,
+    /// Every header a node answers it with, names in lower case: what a
+    /// static server must send with it.
+    pub headers: Vec<(&'static str, String)>,
+}
+
+/// Whether an island's file `name` can be a file of a written tree: a
+/// path of plain segments (letters, digits, `.`, `_`, `-`; none `.`, `..`
+/// or empty), so the URL and the file on disk are spelled the same.
+fn export_name_ok(name: &str) -> bool {
+    !name.is_empty()
+        && name.split('/').all(|seg| {
+            !seg.is_empty()
+                && seg != "."
+                && seg != ".."
+                && seg
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        })
+}
+
+/// Everything a node answers under [`ISLANDS_PATH`] for `islands` and
+/// `favourites`, as files a static server can serve instead.
+///
+/// The two listings ([`LISTING_PATH`], [`FAVOURITES_PATH`]), the sandbox
+/// document, the web view document (and the one that allows WebRTC only
+/// when some island is granted it, as [`serve`] has it), the runtime's
+/// files and every island's files: each with the body [`serve`] gives for
+/// its path and the headers a node sends with it ([`listing_headers`],
+/// [`file_headers`]). Each path once, in a fixed order.
+///
+/// An island's file whose name is not plain (see `export_name_ok`: a
+/// character a URL would escape, a `..`) is left out: a node answers it
+/// only at that exact spelling, which no file on disk can keep.
+#[must_use]
+pub fn export(
+    islands: &[SiteIsland],
+    favourites: &[architect_favourites::Listed],
+) -> Vec<Exported> {
+    let listing = |path: &str, body: String| Exported {
+        path: path.to_owned(),
+        body: body.into_bytes(),
+        content_type: "application/json",
+        headers: listing_headers(),
+    };
+    let mut out = vec![
+        listing(LISTING_PATH, listing_json(islands)),
+        listing(FAVOURITES_PATH, favourites_json(favourites)),
+    ];
+    let mut paths: Vec<String> = vec![
+        sandbox_path().to_owned(),
+        webview_path_for(WebRtc::Blocked).to_owned(),
+        webview_path_for(WebRtc::Granted).to_owned(),
+    ];
+    paths.extend(
+        runtime_files()
+            .iter()
+            .map(|(name, _)| format!("{}{name}", runtime_path())),
+    );
+    for island in islands.iter().filter(|i| i.id_ok()) {
+        paths.extend(
+            island
+                .files
+                .iter()
+                .filter(|(name, _)| export_name_ok(name))
+                .map(|(name, _)| format!("{}{name}", island.folder())),
+        );
+    }
+    for path in paths {
+        if out.iter().any(|e| e.path == path) {
+            continue;
+        }
+        // What the node answers there, or nothing (the WebRTC document
+        // where no island is granted it).
+        if let Some((body, kind)) = serve(islands, &path) {
+            out.push(Exported {
+                headers: file_headers(&path, kind),
+                body: body.into_owned(),
+                content_type: kind,
+                path,
+            });
+        }
+    }
+    out
+}
+
+/// `exported` as a written tree's [`HEADERS_PATH`]: each path and the
+/// headers a static server must send with it, `{"/_ext/…": {"<header>":
+/// "<value>", …}, …}`, paths and header names sorted.
+#[must_use]
+pub fn headers_json(exported: &[Exported]) -> serde_json::Value {
+    let all: std::collections::BTreeMap<&str, std::collections::BTreeMap<&str, &str>> = exported
+        .iter()
+        .map(|e| {
+            (
+                e.path.as_str(),
+                e.headers.iter().map(|(k, v)| (*k, v.as_str())).collect(),
+            )
+        })
+        .collect();
+    serde_json::to_value(all).unwrap_or_default()
+}
+
 fn content_type(path: &str) -> &'static str {
     match path
         .rsplit('.')
@@ -784,8 +974,8 @@ pub const READS_NOTE: &str = "documents";
 /// (`architect_spaces::view`).
 pub const READS_FILES: &str = "files";
 
-/// What the view that draws a note of a type may read of it, as the node
-/// decides it for a share link's guest ([`note_reads`]).
+/// What the view that draws a note of a type may read of it
+/// ([`note_reads`]).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NoteReads {
     /// Its text (`GuestNote::source`): the claim names [`READS_NOTE`] and
@@ -797,6 +987,11 @@ pub struct NoteReads {
 }
 
 /// What the view `islands` draw a note of type `note_type` with may read.
+///
+/// The rule the app keeps when it hands a view a note
+/// (`apps/web/src/ext_host.rs` `note_reads`, `note_props`). A node does
+/// not ask it: what a share link's guest may read is the link's
+/// permission alone (`apps/desktop/src/node/shares.rs` `GuestLane`).
 ///
 /// The island is the one the app chooses (`apps/web/src/ext_host.rs`
 /// `claimed`): the first listed with a web bundle that claims the type,
@@ -1311,5 +1506,106 @@ mod tests {
         // Worked out once.
         assert!(std::ptr::eq(sheet.folder(), sheet.folder()));
         assert_eq!(json["sandbox"], sandbox_path());
+    }
+
+    /// The static tree is what `serve` answers, path by path: the
+    /// listings, the documents with their own policy, the runtime and
+    /// each island's plainly named files; the WebRTC document only where
+    /// it is granted.
+    #[test]
+    fn the_export_is_every_path_serve_answers_with_its_headers() {
+        let island = SiteIsland::new(
+            "demo.counter",
+            vec![
+                ("web-x.js".to_owned(), Cow::Borrowed(b"export 1".as_slice())),
+                (
+                    "web-x_bg.wasm".to_owned(),
+                    Cow::Borrowed(b"\0asm".as_slice()),
+                ),
+                ("dist/a.css".to_owned(), Cow::Borrowed(b".a{}".as_slice())),
+                ("web-x.js".to_owned(), Cow::Borrowed(b"second".as_slice())),
+                ("../out.js".to_owned(), Cow::Borrowed(b"x".as_slice())),
+                ("a b.js".to_owned(), Cow::Borrowed(b"x".as_slice())),
+            ],
+        );
+        let bad = SiteIsland::new(
+            "../x",
+            vec![("a".to_owned(), Cow::Borrowed(b"a".as_slice()))],
+        );
+        let islands = [island.clone(), bad];
+        let all = export(&islands, &[]);
+        let paths: Vec<&str> = all.iter().map(|e| e.path.as_str()).collect();
+        let mut once = paths.clone();
+        once.sort_unstable();
+        once.dedup();
+        assert_eq!(once.len(), paths.len(), "each path once");
+        for e in &all {
+            assert!(e.path.starts_with(ISLANDS_PATH), "{}", e.path);
+            assert!(!e.path.contains(".."), "{}", e.path);
+            assert!(
+                e.headers
+                    .contains(&("content-type", e.content_type.to_owned())),
+                "{}",
+                e.path
+            );
+            assert!(
+                e.headers
+                    .contains(&("x-content-type-options", "nosniff".to_owned())),
+                "{}",
+                e.path
+            );
+            if e.path == LISTING_PATH || e.path == FAVOURITES_PATH {
+                continue;
+            }
+            let (body, kind) = serve(&islands, &e.path).unwrap();
+            assert_eq!((body.as_ref(), kind), (e.body.as_slice(), e.content_type));
+        }
+        let at = |p: &str| all.iter().find(|e| e.path == p);
+        assert_eq!(
+            at(LISTING_PATH).unwrap().body,
+            page_json(&islands).to_string().into_bytes()
+        );
+        assert_eq!(at(FAVOURITES_PATH).unwrap().body, br#"{"favourites":[]}"#);
+        // A document's own policy, never the pages'.
+        let csp = |p: &str| {
+            let e = at(p).unwrap();
+            e.headers
+                .iter()
+                .find(|(k, _)| *k == "content-security-policy")
+                .unwrap()
+                .1
+                .clone()
+        };
+        assert!(csp(sandbox_path()).starts_with("sandbox allow-scripts;"));
+        assert!(csp(webview_path()).contains("webrtc 'block'"));
+        assert!(csp(LISTING_PATH).starts_with("default-src 'self'"));
+        let file = format!("{}web-x.js", island.folder());
+        assert!(csp(&file).starts_with("default-src 'self'"));
+        assert_eq!(at(&file).unwrap().body, b"export 1", "the first of a name");
+        assert!(at(&format!("{}dist/a.css", island.folder())).is_some());
+        assert!(at(&format!("{}index.js", runtime_path())).is_some());
+        assert!(at(&format!("{}dist/instance-source.js", runtime_path())).is_some());
+        // Not plain, not a path-safe island, not granted: left out.
+        assert_eq!(
+            paths
+                .iter()
+                .filter(|p| p.starts_with("/_ext/island/"))
+                .count(),
+            3
+        );
+        assert!(at(webview_path_for(WebRtc::Granted)).is_none());
+        // The headers file: every path, its headers by name.
+        let headers = headers_json(&all);
+        assert_eq!(headers.as_object().unwrap().len(), all.len());
+        assert_eq!(headers[LISTING_PATH]["cache-control"], "no-cache");
+        assert_eq!(headers[file.as_str()]["vary"], "accept-encoding");
+        assert_eq!(
+            headers[sandbox_path()]["content-security-policy"],
+            csp(sandbox_path())
+        );
+        // No island: the listings, the documents and the runtime still.
+        let bare = export(&[], &[]);
+        assert!(bare.iter().any(|e| e.path == sandbox_path()));
+        assert!(!bare.iter().any(|e| e.path.starts_with("/_ext/island/")));
     }
 }

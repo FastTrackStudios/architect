@@ -371,7 +371,7 @@ It then clears `writes`, `actions`, `folders`, `ports`, `languages` and `webrtc`
 
 Only a page embed draws guest content (`features/extensions/src/embeds.rs` `GuestEmbedView`). A linked or process view would run with the person's session, so it shows its fallback instead.
 
-**What the node hands a guest's view** is decided by `features/sites/src/island.rs` `note_reads`. The view gets the note's text only when its claim was made with `SiteIsland::embed_note` (properties declared) and its extension declares `reads = ["documents"]` (`READS_NOTE`). It also gets the link's referenced files only if it declares `reads = ["files"]` (`READS_FILES`).
+**What a guest's view is handed** is decided in the app, not by the node. The node gives a guest the note's text and the link's referenced files whenever the link's scope, audience and layer admit them (`apps/desktop/src/node/shares.rs` `GuestLane`). The web app then hands a view only what its island declares (`apps/web/src/ext_host.rs` `note_reads`, `note_props`; the same rule as `features/sites/src/island.rs` `note_reads`). The view gets the note's text only when its claim was made with `SiteIsland::embed_note` (properties declared) and its extension declares `reads = ["documents"]` (`READS_NOTE`). It also gets the files, which the app fetches only then, if it declares `reads = ["files"]` (`READS_FILES`). A view that declares no read gets no note.
 
 **Consent is the guest's own**, per person. Nothing from the owner's grants carries over.
 

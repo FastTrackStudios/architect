@@ -1659,70 +1659,62 @@ fn guest_headers(mut response: Response) -> Response {
 /// Where the web app (`/app/`, #495) reads the node's islands: what a
 /// share page carries embedded (`architect_sites::island::page_json`),
 /// the same for everyone who asks.
-pub const ISLANDS_LISTING: &str = "/_ext/islands.json";
-
-/// [`ISLANDS_LISTING`]: the islands, their folders, views and each web
-/// file's digest, as JSON. Never cached (`no-cache`): the paths it names
-/// are content-addressed and change with a new island, the listing keeps
-/// its name. The app pins each file it fetches by the digest it reads
-/// here; nothing in it is a secret.
-fn islands_listing(shares: &Shares) -> Response {
-    let body = architect_sites::island::page_json(shares.islands()).to_string();
-    let mut response = Response::new(Body::from(body));
-    let headers = response.headers_mut();
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("application/json"),
-    );
-    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
-    headers.insert(
-        header::X_CONTENT_TYPE_OPTIONS,
-        HeaderValue::from_static("nosniff"),
-    );
-    // Data, never a page: the share's policy, should one be opened.
-    headers.insert(header::CONTENT_SECURITY_POLICY, content_security_policy());
-    response
-}
+pub const ISLANDS_LISTING: &str = architect_sites::island::LISTING_PATH;
 
 /// Where the web app (`/app/`, #607) reads the note types' favourites:
 /// the distribution's extensions' `[[favourites]]`, the same for everyone
 /// who asks.
-pub const FAVOURITES_LISTING: &str = "/_ext/favourites.json";
+pub const FAVOURITES_LISTING: &str = architect_sites::island::FAVOURITES_PATH;
 
-/// [`FAVOURITES_LISTING`]: every `[[favourites]]` declaration that keeps
-/// the manifest's rules (`TypeFavourites::check`), each with the
-/// extension that declared it and what its capabilities let it run
-/// (`architect_favourites::Listed`: the app drops a target it may not
-/// name), as JSON (`{"favourites": [{"by": …, "favourites": …}]}`), and
-/// nothing else: no vault, no share, no extension's other parts. Never
-/// cached (`no-cache`): a new release declares again under the same name.
-fn favourites_listing(shares: &Shares) -> Response {
-    let list: Vec<&architect_favourites::Listed> = shares
-        .listed_favourites()
-        .iter()
-        .filter(|f| f.favourites.check().is_ok())
-        .collect();
-    let body = serde_json::json!({ "favourites": list }).to_string();
-    let mut response = Response::new(Body::from(body));
-    let headers = response.headers_mut();
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("application/json"),
-    );
-    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
-    headers.insert(
-        header::X_CONTENT_TYPE_OPTIONS,
-        HeaderValue::from_static("nosniff"),
-    );
-    headers.insert(header::CONTENT_SECURITY_POLICY, content_security_policy());
+/// A listing ([`ISLANDS_LISTING`], [`FAVOURITES_LISTING`]) of `body`, as
+/// JSON. Never cached (`no-cache`): the paths the islands' listing names are
+/// content-addressed and change with a new island, a new release declares
+/// favourites again, and each listing keeps its name. The app pins each
+/// file it fetches by the digest it reads there; nothing in either is a
+/// secret. Data, never a page: the share's policy, should one be opened
+/// (`architect_sites::island::listing_headers`).
+fn listing_response(body: String) -> Response {
+    with_headers(
+        Response::new(Body::from(body)),
+        architect_sites::island::listing_headers(),
+    )
+}
+
+/// `response` with `headers`, every one of them or no answer at all: a
+/// frame's document served without its policy would run with this
+/// origin's.
+fn with_headers(mut response: Response, headers: Vec<(&'static str, String)>) -> Response {
+    for (name, value) in headers {
+        let (Ok(header_name), Ok(header_value)) = (
+            header::HeaderName::from_bytes(name.as_bytes()),
+            HeaderValue::from_str(&value),
+        ) else {
+            tracing::error!(
+                header = name,
+                "an island file's header does not read: not served"
+            );
+            return page(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Not available",
+                "<p>No such file.</p>",
+            );
+        };
+        response.headers_mut().insert(header_name, header_value);
+    }
     response
 }
 
-/// What the node answers under `/_ext/`: an island's file, the runtime or
-/// the sandbox document (`architect_sites::island::serve`), `404` for
-/// anything else. Every answer is `nosniff` and cached for good (each
-/// path is named by its content); the sandbox document carries its own
-/// policy (`sandbox_headers`), and a `.js` or `.wasm` the share's.
+/// What the node answers under `/_ext/`: the two listings
+/// (`architect_sites::island::listing_json`, `favourites_json`), an
+/// island's file, the runtime or a frame's document
+/// (`architect_sites::island::serve`), `404` for anything else. Every
+/// answer is `nosniff`; a file is cached for good (each path is named by
+/// its content); a frame's document carries its own policy, and a `.js`
+/// or `.wasm` the share's (`architect_sites::island::file_headers`).
+///
+/// All of it is fixed by the islands and favourites the node was given:
+/// `architect_sites::island::export` is the same answers as files, for a
+/// static server to serve instead (`<app> web-ext`).
 ///
 /// A script, a module or a sheet is sent gzipped to a browser that takes
 /// it (#602): an island's web bundle is megabytes of wasm, about half
@@ -1730,10 +1722,12 @@ fn favourites_listing(shares: &Shares) -> Response {
 /// compressed once for the node's life ([`gzipped`]).
 fn islands(shares: &Shares, path: &str, gzip: bool) -> Response {
     if path == ISLANDS_LISTING {
-        return islands_listing(shares);
+        return listing_response(architect_sites::island::listing_json(shares.islands()));
     }
     if path == FAVOURITES_LISTING {
-        return favourites_listing(shares);
+        return listing_response(architect_sites::island::favourites_json(
+            shares.listed_favourites(),
+        ));
     }
     let Some((body, kind)) = architect_sites::island::serve(shares.islands(), path) else {
         let mut response = page(StatusCode::NOT_FOUND, "Not found", "<p>No such file.</p>");
@@ -1751,48 +1745,12 @@ fn islands(shares: &Shares, path: &str, gzip: bool) -> Response {
     let encoded = packed.is_some();
     let mut response =
         Response::new(packed.map_or_else(|| Body::from(body.into_owned()), Body::from));
-    let headers = response.headers_mut();
     if encoded {
-        headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static("gzip"));
+        response
+            .headers_mut()
+            .insert(header::CONTENT_ENCODING, HeaderValue::from_static("gzip"));
     }
-    // Either form, by what the browser said it takes.
-    headers.insert(header::VARY, HeaderValue::from_static("accept-encoding"));
-    if let Some(own) = architect_sites::island::document_headers(path) {
-        // A frame's document (the sandbox, a web view): its own policy,
-        // every header of it, or no document at all: served without its
-        // policy it would run with this origin's.
-        for (name, value) in own {
-            let (Ok(header_name), Ok(header_value)) = (
-                header::HeaderName::from_bytes(name.as_bytes()),
-                HeaderValue::from_str(&value),
-            ) else {
-                tracing::error!(
-                    header = name,
-                    "the island sandbox's header does not read: no sandbox served"
-                );
-                return page(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Not available",
-                    "<p>No such file.</p>",
-                );
-            };
-            headers.insert(header_name, header_value);
-        }
-        return response;
-    }
-    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(kind));
-    headers.insert(
-        header::X_CONTENT_TYPE_OPTIONS,
-        HeaderValue::from_static("nosniff"),
-    );
-    headers.insert(
-        header::CACHE_CONTROL,
-        HeaderValue::from_static("public, max-age=31536000, immutable"),
-    );
-    // A module or a component is fetched, never a page: the share's
-    // policy, should one be opened.
-    headers.insert(header::CONTENT_SECURITY_POLICY, content_security_policy());
-    response
+    with_headers(response, architect_sites::island::file_headers(path, kind))
 }
 
 /// The smallest file worth compressing.
@@ -1905,11 +1863,9 @@ pub fn content_security_policy() -> HeaderValue {
     static POLICY: std::sync::OnceLock<HeaderValue> = std::sync::OnceLock::new();
     POLICY
         .get_or_init(|| {
-            let policy = format!(
-                "default-src 'self'; script-src 'self' {}; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'; img-src 'self' data: https:; media-src 'self'; style-src 'self' 'unsafe-inline'",
-                architect_sites::ui::THEME_BOOT_HASH
-            );
-            HeaderValue::from_str(&policy).unwrap_or_else(|_| HeaderValue::from_static("default-src 'self'"))
+            let policy = architect_sites::ui::content_security_policy();
+            HeaderValue::from_str(&policy)
+                .unwrap_or_else(|_| HeaderValue::from_static("default-src 'self'"))
         })
         .clone()
 }
@@ -3115,23 +3071,12 @@ impl ShareGuest for GuestLane {
         .ok_or(GuestFault::Building)?;
         let mut note: GuestNote = facet_json::from_str(&text).map_err(|_| GuestFault::Building)?;
         within_listing(&mut note, &|p| readable.contains(p));
-        // What the view that draws its type may read of it (#648, #669),
-        // decided here, by this node's islands, never by the caller: its
-        // text (as the build wrote it for this link) only to a view that
-        // reads the note, and the link's files only to one that reads
-        // files too.
-        let reads = architect_sites::island::note_reads(
-            self.0.islands(),
-            listed.kind.as_deref().unwrap_or_default(),
-        );
-        if !reads.text {
-            note.source = None;
-        }
-        note.files = if reads.files {
-            view_files(&listed, files)
-        } else {
-            Vec::new()
-        };
+        // What the link admits, and nothing about who draws it (#648,
+        // #669): its text as the build wrote it for this link, and the
+        // link's files a view on it may read, at this layer. Which view is
+        // handed either is the app's to keep, by what its island declares
+        // (`architect_sites::island::note_reads` is that rule).
+        note.files = view_files(&listed, files);
         note.path = listed.path;
         note.kind = listed.kind;
         note.page = page;
