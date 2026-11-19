@@ -311,12 +311,27 @@ async fn an_unpinned_project_browses_over_webdav_and_a_file_opens_on_demand() {
         &laptop,
         &format!("{project}/Right Here/Audio Files/Bass_1.wav"),
     );
-    let part = http
+    // The first open is as soon as the laptop has a lane to the always-on
+    // node: until then the bytes are nowhere it can reach (a 502), so the
+    // read is asked again for a few seconds, as a file manager's retry is.
+    let mut part = http
         .get(&wav)
         .header("range", "bytes=10-19")
         .send()
         .await
         .unwrap();
+    for _ in 0..100 {
+        if part.status().as_u16() != 502 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        part = http
+            .get(&wav)
+            .header("range", "bytes=10-19")
+            .send()
+            .await
+            .unwrap();
+    }
     assert_eq!(part.status().as_u16(), 206);
     assert_eq!(part.bytes().await.unwrap().as_ref(), &[1u8; 10]);
     let whole = http.get(&wav).send().await.unwrap().bytes().await.unwrap();
