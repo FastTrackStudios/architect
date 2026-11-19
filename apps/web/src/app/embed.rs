@@ -226,7 +226,12 @@ pub fn NoteEmbed(
 
 /// `island`'s view `view`, once its bundle is fetched and checked.
 #[component]
-fn Claimed(island: Island, view: String, note: Value, #[props(default)] pane: bool) -> Element {
+pub(super) fn Claimed(
+    island: Island,
+    view: String,
+    note: Value,
+    #[props(default)] pane: bool,
+) -> Element {
     let bundle = use_bundle(island);
     let checked: Option<Rc<Bundle>> = bundle
         .read()
