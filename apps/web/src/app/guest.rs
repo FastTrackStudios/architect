@@ -594,7 +594,14 @@ pub fn GuestPage(code: String, rest: String) -> Element {
                 LinkHead { opened: o.clone(), at: at.clone(), on_open: choose }
                 match at.clone() {
                     Open::Files => rsx! { FilesView { opened: o.clone() } },
-                    Open::View(extension, view) => rsx! { super::embed::IslandView { key: "{extension}/{view}", extension, view } },
+                    // A view the distribution compiled in under this id
+                    // (`crate::provided`): drawn in the page, where its
+                    // engine can stream and play, while it has something
+                    // to draw; else the island's frame.
+                    Open::View(extension, view) => match crate::provided::view(&extension, &view) {
+                        Some(provided) => rsx! { ProvidedView { key: "{extension}/{view}", extension, view, provided: PartialEqProvided(provided) } },
+                        None => rsx! { super::embed::IslandView { key: "{extension}/{view}", extension, view } },
+                    },
                     // The root note: its list first (what a setlist is
                     // opened for), then its words; any other, its words.
                     Open::Note(path) if core_list && guest_view::root_note(&o.link).is_some_and(|r| r.path == path) => rsx! {
@@ -795,6 +802,48 @@ fn choose_on_page(next: Open) {
     let chooser = CHOOSER.with(|c| c.borrow().clone());
     if let Some(choose) = chooser {
         choose(next);
+    }
+}
+
+/// A view the distribution compiled in (`crate::provided`), where the app
+/// would mount the island's frame for the same id: its own root while it
+/// says it has something to draw, the island's frame while it does not.
+#[component]
+fn ProvidedView(extension: String, view: String, provided: PartialEqProvided) -> Element {
+    let when = provided.0.when;
+    let mut shown = use_signal(when);
+    use_future(move || async move {
+        loop {
+            futures_timer::Delay::new(std::time::Duration::from_millis(250)).await;
+            let now = when();
+            if *shown.peek() != now {
+                shown.set(now);
+            }
+        }
+    });
+    let Root = provided.0.root;
+    if shown() {
+        rsx! {
+            div {
+                "data-provided-view": "{extension}/{view}",
+                style: "position: relative; flex: 1 1 auto; min-height: 60vh; width: 100%;",
+                Root {}
+            }
+        }
+    } else {
+        rsx! { super::embed::IslandView { extension, view } }
+    }
+}
+
+/// A [`crate::provided::Provided`] as a prop: two are the same when they
+/// are the same functions.
+#[derive(Clone, Copy)]
+struct PartialEqProvided(crate::provided::Provided);
+
+impl PartialEq for PartialEqProvided {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::fn_addr_eq(self.0.root, other.0.root)
+            && std::ptr::fn_addr_eq(self.0.when, other.0.when)
     }
 }
 

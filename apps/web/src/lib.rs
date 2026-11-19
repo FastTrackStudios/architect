@@ -55,6 +55,7 @@ pub mod keys;
 pub mod live_text;
 pub mod ogg;
 pub mod permits;
+pub mod provided;
 #[cfg(any(target_arch = "wasm32", test))]
 mod read_only;
 pub mod reading;
@@ -64,6 +65,7 @@ pub mod view_files;
 pub use browser::run;
 #[cfg(all(target_arch = "wasm32", feature = "start"))]
 pub use browser::start;
+pub use provided::{EngineClock, Provided, provide_engine, provide_view};
 
 use std::fmt::Write as _;
 
