@@ -1511,7 +1511,8 @@ pub async fn gate(State(shares): State<Shares>, request: Request, next: Next) ->
             );
             return response;
         }
-        return islands(&shares, request.uri().path());
+        let gzip = accepts_gzip(request.headers());
+        return islands(&shares, request.uri().path(), gzip);
     }
     let guest = is_guest_path(request.uri().path());
     // A web app on another origin calls a link's guest service too: the
@@ -1665,7 +1666,12 @@ fn favourites_listing(shares: &Shares) -> Response {
 /// anything else. Every answer is `nosniff` and cached for good (each
 /// path is named by its content); the sandbox document carries its own
 /// policy (`sandbox_headers`), and a `.js` or `.wasm` the share's.
-fn islands(shares: &Shares, path: &str) -> Response {
+///
+/// A script, a module or a sheet is sent gzipped to a browser that takes
+/// it (#602): an island's web bundle is megabytes of wasm, about half
+/// that compressed, and each path is named by its content, so it is
+/// compressed once for the node's life ([`gzipped`]).
+fn islands(shares: &Shares, path: &str, gzip: bool) -> Response {
     if path == ISLANDS_LISTING {
         return islands_listing(shares);
     }
@@ -1682,8 +1688,18 @@ fn islands(shares: &Shares, path: &str) -> Response {
         );
         return response;
     };
-    let mut response = Response::new(Body::from(body.into_owned()));
+    let packed = (gzip && compresses(kind) && body.len() >= GZIP_FROM)
+        .then(|| gzipped(path, &body))
+        .flatten();
+    let encoded = packed.is_some();
+    let mut response =
+        Response::new(packed.map_or_else(|| Body::from(body.into_owned()), Body::from));
     let headers = response.headers_mut();
+    if encoded {
+        headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static("gzip"));
+    }
+    // Either form, by what the browser said it takes.
+    headers.insert(header::VARY, HeaderValue::from_static("accept-encoding"));
     if let Some(own) = architect_sites::island::document_headers(path) {
         // A frame's document (the sandbox, a web view): its own policy,
         // every header of it, or no document at all: served without its
@@ -1720,6 +1736,62 @@ fn islands(shares: &Shares, path: &str) -> Response {
     // policy, should one be opened.
     headers.insert(header::CONTENT_SECURITY_POLICY, content_security_policy());
     response
+}
+
+/// The smallest file worth compressing.
+const GZIP_FROM: usize = 1024;
+
+/// Whether the request says its browser takes gzip.
+fn accepts_gzip(headers: &HeaderMap) -> bool {
+    headers
+        .get(header::ACCEPT_ENCODING)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| {
+            v.split(',').any(|part| {
+                let mut it = part.trim().split(';');
+                let name = it.next().unwrap_or("").trim();
+                let off = it.any(|q| matches!(q.trim(), "q=0" | "q=0.0" | "q=0.00" | "q=0.000"));
+                (name.eq_ignore_ascii_case("gzip") || name == "*") && !off
+            })
+        })
+}
+
+/// Whether a file of this type gets smaller: text and wasm, never what
+/// is compressed already.
+fn compresses(kind: &str) -> bool {
+    let kind = kind.split(';').next().unwrap_or(kind).trim();
+    kind.starts_with("text/")
+        || matches!(
+            kind,
+            "application/wasm" | "application/javascript" | "application/json" | "image/svg+xml"
+        )
+}
+
+/// `body` gzipped, kept by its path: an `/_ext/` path is named by its
+/// content, so what it compresses to never changes while the node runs.
+/// None when it does not compress (the file is sent as it is).
+fn gzipped(path: &str, body: &[u8]) -> Option<architect::http::axum::body::Bytes> {
+    use std::io::Write as _;
+    static KEPT: std::sync::OnceLock<
+        std::sync::Mutex<HashMap<String, architect::http::axum::body::Bytes>>,
+    > = std::sync::OnceLock::new();
+    let kept = KEPT.get_or_init(Default::default);
+    if let Some(have) = kept.lock().ok().and_then(|k| k.get(path).cloned()) {
+        return Some(have);
+    }
+    let mut encoder = flate2::write::GzEncoder::new(
+        Vec::with_capacity(body.len() / 2),
+        flate2::Compression::new(6),
+    );
+    encoder.write_all(body).ok()?;
+    let packed = architect::http::axum::body::Bytes::from(encoder.finish().ok()?);
+    if packed.len() >= body.len() {
+        return None;
+    }
+    if let Ok(mut k) = kept.lock() {
+        k.insert(path.to_owned(), packed.clone());
+    }
+    Some(packed)
 }
 
 /// `/.well-known/apple-app-site-association` (#629), from the node's
@@ -3057,17 +3129,26 @@ fn within_listing(note: &mut GuestNote, readable: &dyn Fn(&str) -> bool) {
 }
 
 /// The files of the link a view on `note` may read
-/// ([`GuestNote::files`]): the note's own first, then the rest of the
-/// link's in list order (a setlist's view draws its songs' art), only
+/// ([`GuestNote::files`]): the note's own first, then those of the notes
+/// it lists, in list order (a setlist's view draws its songs' art), only
 /// images and synced lyrics, within the caps of
 /// [`architect_spaces::view::within_caps`]. `files` is the link's listing
 /// at its layer: nothing past what the link serves its guest. A file the
 /// vault has not hashed yet is left out: the app checks every file it is
 /// handed against its `sha256`, and takes none without one.
 fn view_files(note: &ListedNote, files: Vec<ListedFile>) -> Vec<ListedFile> {
+    // The notes this one lists (a setlist's songs): their files are the
+    // rest. A note that lists none (a song) is handed its own files only:
+    // opening one song does not fetch every other song's cover (#908).
+    let lists: std::collections::HashSet<&str> = note
+        .sets
+        .iter()
+        .flat_map(|s| s.notes.iter().map(String::as_str))
+        .collect();
     let (own, rest): (Vec<ListedFile>, Vec<ListedFile>) = files
         .into_iter()
         .filter(|f| f.sha256.is_some())
+        .filter(|f| note.files.contains(&f.path) || lists.contains(f.note.as_str()))
         .partition(|f| note.files.contains(&f.path));
     architect_spaces::view::within_caps(
         own.into_iter().chain(rest),
