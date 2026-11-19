@@ -1,0 +1,32 @@
+//! Dioxus view layer for the editor. Renders an
+//! [`editor_state::EditorState`] into a contenteditable element
+//! and translates user input into transactions.
+//!
+//! v1 scope: plain-text editing. Decorations come next.
+
+pub use editor_state;
+
+mod bridge;
+mod editor;
+mod event;
+pub mod hover;
+#[cfg(feature = "native")]
+pub mod native;
+pub mod palette;
+pub mod tile;
+pub mod trigger;
+#[cfg(feature = "native")]
+mod virtual_lines;
+
+pub use editor::{DecorationSource, Editor, coarse_pointer};
+pub use event::{TransactionEvent, dispatch_spec, dispatch_with_history};
+pub use hover::{HoverPopup, HoverTooltipView};
+pub use tile::render_dx::WidgetMounts;
+pub use trigger::{Candidate, CompletionKind, CompletionSource, CompletionState};
+
+/// The editor's stylesheet, as text.
+///
+/// For a host that injects styles
+/// itself (a Blitz window, which does not load `<link>`ed sheets). The
+/// umbrella crate serves the same file as an `asset!` for web and desktop.
+pub const EDITOR_CSS: &str = include_str!("../../editor/assets/editor.css");

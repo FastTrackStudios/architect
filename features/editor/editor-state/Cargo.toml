@@ -1,0 +1,60 @@
+[package]
+name = "editor-state"
+description = "Document, transactions, selections, and decorations for the Editor."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+editor-syntax = { workspace = true }
+# The extension surface as data (`ext`): what sandboxed and out-of-process
+# extensions send and receive.
+editor-ext = { workspace = true }
+# The ```typst / ```mermaid fence renderers — heavy (a Typst compiler, a
+# Mermaid layout engine), so each is a feature. Off, a fence of that kind
+# shows its source, which is what a failed render already does.
+editor-typst = { workspace = true, optional = true }
+editor-mermaid = { workspace = true, optional = true }
+ropey = { workspace = true }
+serde = { workspace = true, optional = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# Block-id generator. `v7` gives time-prefixed IDs (Logseq's
+# `squuid` model — refs naturally sort by creation order,
+# stays friendly to any future b-tree index for version
+# tracking). `js` routes through `crypto.getRandomValues` on
+# `wasm32-unknown-unknown` for the random tail.
+uuid = { version = "1", features = ["v7", "js"] }
+
+# Keyflow chart → SVG for ```` ```kf ```` fences. All targets:
+# editor-keyflow wraps engraver's CPU-only `svg` tier (kurbo/peniko/
+# skrifa — default-features off drops the wgpu/vello GPU stack and the
+# PDF deps), which compiles cleanly to wasm32-unknown-unknown. (The
+# old native-only gate predated engraver's `svg` feature split.)
+
+# wasm-only: `performance.now()` for the live-preview perf
+# trace (native uses `Instant`, which traps on wasm32-unknown-
+# unknown).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", features = ["Window", "Performance"] }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+# The conformance oracle. See `tests/conformance.rs`.
+# The CommonMark oracle `tests/conformance.rs` diffs the markdown pass
+# against; its own line (0.10), not the workspace's renderer.
+pulldown-cmark = { version = "0.10", default-features = false }
+
+[features]
+default = ["typst", "mermaid"]
+serde = ["dep:serde"]
+typst = ["dep:editor-typst"]
+mermaid = ["dep:editor-mermaid"]
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../../workspace-hack" }

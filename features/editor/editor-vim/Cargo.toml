@@ -1,0 +1,18 @@
+[package]
+name = "editor-vim"
+description = "Pure-Rust vim modal state machine for the Editor. No DOM, no Dioxus, no async."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+editor-state = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../../workspace-hack" }

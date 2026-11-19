@@ -96,6 +96,21 @@ members = [
     "features/tags/tag-proto",
     # ── sites: a vault published as a static site (#364) ─────────────
     "features/sites",
+    # The editor (#512): moved in from FastTrackStudios/editor. These
+    # depend on Dioxus and crates.io only, never on the rest of architect
+    # (`standalone` rows in boundaries.toml).
+    "features/editor/editor",
+    "features/editor/editor-ext",
+    "features/editor/editor-state",
+    "features/editor/editor-view",
+    "features/editor/editor-vim",
+    "features/editor/editor-syntax",
+    "features/editor/editor-lsp",
+    "features/editor/editor-crdt",
+    "features/editor/editor-typst",
+    "features/editor/editor-mermaid",
+    "features/editor/mermaid-rs-renderer",
+    "features/editor/dioxus-test",
     "apps/cli",
     # ── the Architect app (apps/ui, its desktop, mobile and web) ──────
     "apps/ui",
@@ -147,14 +162,37 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/FastTrackStudios/architect"
 
 [workspace.dependencies]
-# The editor's extension surface as data (FastTrackStudios/editor's
-# crates/editor-ext): what `architect-extensions`' editor calls carry, at
-# FastTrackStudios/editor#30's head (main after #28, with a task's
-# checkbox and a link pressed on Blitz), like the rest of the editor below.
-editor-ext = { git = "https://github.com/FastTrackStudios/editor", rev = "81451ea7d72069195ca28f66274411e525c11ae0" }
-# The editor's view, for the lab's note editor (native, on Blitz). Its
-# source is patched to the pinned editor below, like Keyflow's.
-editor-view = { git = "https://github.com/FastTrackStudios/editor", rev = "81451ea7d72069195ca28f66274411e525c11ae0", default-features = false }
+# ── The editor (features/editor, #512) ────────────────────────────────
+# Architect's own since #512: moved in from FastTrackStudios/editor at
+# 81451ea7 (that repo's #30 head). The crates keep their package names and
+# their rule: Dioxus and crates.io only, nothing else of architect.
+# `editor` is the facade (state + view + vim and an `EditorApp`).
+editor = { path = "features/editor/editor" }
+# The extension surface as data: what `architect-extensions`' editor calls carry.
+editor-ext = { path = "features/editor/editor-ext" }
+# The document model and the markdown pass. `default-features = false`: the
+# Typst and Mermaid fence renderers are opt-in (`typst`, `mermaid`).
+editor-state = { path = "features/editor/editor-state", default-features = false }
+# The Dioxus view. `default-features = false`: a consumer names `native` or `web`.
+editor-view = { path = "features/editor/editor-view", default-features = false }
+editor-vim = { path = "features/editor/editor-vim" }
+editor-syntax = { path = "features/editor/editor-syntax" }
+editor-lsp = { path = "features/editor/editor-lsp" }
+editor-crdt = { path = "features/editor/editor-crdt" }
+editor-typst = { path = "features/editor/editor-typst" }
+editor-mermaid = { path = "features/editor/editor-mermaid" }
+# Vendored mermaid-rs (upstream's code). Its CLI and PNG stack stay off:
+# the editor only needs the SVG pipeline.
+mermaid-rs-renderer = { path = "features/editor/mermaid-rs-renderer", default-features = false }
+# Headless component tests on blitz-dom (dev-only, unpublished): vendored
+# DioxusLabs/dioxus-test ported to the Dioxus and Blitz pins below. The
+# editor view's tests use it.
+dioxus-test = { path = "features/editor/dioxus-test" }
+# The editor's externals: tree-sitter grammars and themes, the rope.
+arborium = { version = "2.16.0", default-features = false }
+arborium-theme = "2.16.0"
+arborium-tree-sitter = "2.16.0"
+ropey = "1.6"
 # SMTP for the auth server's verification and password-reset mail.
 # rustls, not native-tls, so the build carries no OpenSSL dependency.
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-rustls-tls", "builder", "hostname"] }
@@ -182,9 +220,6 @@ links = { path = "features/links/links" }
 links-proto = { path = "features/links/links-proto", default-features = false }
 tag = { path = "features/tags/tag" }
 tag-proto = { path = "features/tags/tag-proto" }
-# The editor's markdown model (frontmatter, the vault lookup the editor
-# resolves links through), at the editor pin above.
-editor-state = { git = "https://github.com/FastTrackStudios/editor", rev = "81451ea7d72069195ca28f66274411e525c11ae0", default-features = false }
 walkdir = "2"
 futures = "0.3"
 serde_yaml = "0.9"
@@ -306,6 +341,9 @@ webauthn-rs = { version = "0.5", features = [
 dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["lib"] }
 dioxus-native = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["prelude", "system-fonts", "svg", "autofocus", "data-uri"] }
 dioxus-native-dom = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41" }
+# dioxus-test (features/editor/dioxus-test) drives the virtual dom itself.
+dioxus-vdom = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41" }
+dioxus-html = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41" }
 # Server-side rendering, for pages that must exist before the viewer has
 # run any script — the auth server's sign-in and sign-up screens. Same
 # pinned rev as the rest of the line.
@@ -519,21 +557,17 @@ dioxus-native = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.
 dioxus-native-dom = { git = "https://www.github.com/FastTrackStudios/vendor", rev = "25bf4bcdfd0b6acb268ca91a93bc8ff8da683a96" }
 dioxus-vdom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
 
-# The editor, through Keyflow (the lab's Keyflow chart and source editor,
-# `keyflow-lab`), at FastTrackStudios/editor#30's head (#28, the extension
-# surface, architect#312, and #442's native task toggle and link press),
-# which has #26's: #25 (a click past
-# the end of a line puts the caret at its end on Blitz), and the editor's
-# own Blitz/vendor pins moved to the IME revs architect pins below (its
-# native_ime tests, and its dev shell on macOS). Keyflow pins the editor at
-# 554b713; `www.` is the same repository under another source, as a patch
-# needs. Drop this once Keyflow pins a merged editor that has it.
+# Keyflow's crates (the lab's `keyflow-lab`: `editor-keyflow`, `keyflow-ui`)
+# still name the editor by its old repository. The editor is architect's
+# now (features/editor, #512), so those names resolve to the workspace's
+# crates and the lock holds one editor. This table goes when Keyflow depends
+# on architect's editor (#512 step e).
 [patch."https://github.com/FastTrackStudios/editor"]
-editor-ext = { git = "https://www.github.com/FastTrackStudios/editor", rev = "81451ea7d72069195ca28f66274411e525c11ae0" }
-editor-state = { git = "https://www.github.com/FastTrackStudios/editor", rev = "81451ea7d72069195ca28f66274411e525c11ae0" }
-editor-syntax = { git = "https://www.github.com/FastTrackStudios/editor", rev = "81451ea7d72069195ca28f66274411e525c11ae0" }
-editor-view = { git = "https://www.github.com/FastTrackStudios/editor", rev = "81451ea7d72069195ca28f66274411e525c11ae0" }
-editor-vim = { git = "https://www.github.com/FastTrackStudios/editor", rev = "81451ea7d72069195ca28f66274411e525c11ae0" }
+editor-ext = { path = "features/editor/editor-ext" }
+editor-state = { path = "features/editor/editor-state" }
+editor-syntax = { path = "features/editor/editor-syntax" }
+editor-view = { path = "features/editor/editor-view" }
+editor-vim = { path = "features/editor/editor-vim" }
 
 # ── Lints ─────────────────────────────────────────────────────────────
 [workspace.lints.rust]

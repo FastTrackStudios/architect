@@ -29,6 +29,8 @@ workspace = true
 aead = { version = "0.5.2", default-features = false, features = ["alloc", "getrandom"] }
 allocator-api2 = { version = "0.2.21" }
 anstyle = { version = "1.0.14" }
+approx = { version = "0.5.1", default-features = false, features = ["std"] }
+arborium = { version = "2.18.2", default-features = false, features = ["lang-bash", "lang-javascript", "lang-json", "lang-markdown", "lang-python", "lang-rust", "lang-typescript"] }
 arrayvec = { version = "0.7.8" }
 base16ct = { version = "1.0.0", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22.1" }
@@ -40,6 +42,7 @@ blake3 = { version = "1.8.7" }
 blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101", features = ["autofocus"] }
 blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101", features = ["apple-font-embolden", "custom-widget"] }
 blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101", features = ["data-uri"] }
+bumpalo = { version = "3.20.3", features = ["boxed", "collections"] }
 bytemuck = { version = "1.25.2", default-features = false, features = ["aarch64_simd", "derive", "extern_crate_alloc", "min_const_generics", "wasm_simd"] }
 byteorder = { version = "1.5.0" }
 bytes = { version = "1.12.1", features = ["serde"] }
@@ -64,7 +67,7 @@ digest-a6292c17cd707f01 = { package = "digest", version = "0.11.3", features = [
 dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["desktop", "router", "web"] }
 dioxus-asset-resolver = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["native", "web"] }
 dioxus-cli-config = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["web"] }
-dioxus-html = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["serialize"] }
+dioxus-html = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41" }
 dioxus-interpreter-js = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["binary-protocol", "minimal_bindings", "serialize", "webonly"] }
 dioxus-native = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1", features = ["autofocus", "data-uri", "prelude", "vello"] }
 dioxus-primitives = { git = "https://github.com/FastTrackStudios/dioxus-components", tag = "fts-upstream-2026-11", default-features = false, features = ["router"] }
@@ -102,13 +105,16 @@ hyper = { version = "1.11.1", features = ["client", "http1", "http2", "server"] 
 hyper-util = { version = "0.1.20", features = ["server-auto", "service", "tokio"] }
 icu_collections = { version = "2.4.0", default-features = false, features = ["alloc"] }
 icu_locale_core = { version = "2.4.0", default-features = false, features = ["alloc", "zerovec"] }
+icu_locid = { version = "1.5.0", default-features = false, features = ["zerovec"] }
 icu_provider = { version = "2.4.0", default-features = false, features = ["alloc", "baked"] }
 icu_segmenter = { version = "2.4.0", default-features = false, features = ["auto", "compiled_data"] }
 idna = { version = "1.1.0" }
 image = { version = "0.25.6" }
 indexmap = { version = "2.14.2", features = ["serde"] }
 keyboard-types = { version = "0.8.3", features = ["serde"] }
-litemap = { version = "0.8.3", default-features = false, features = ["alloc"] }
+kurbo = { version = "0.11.3" }
+litemap-c38e5c1d305a1b54 = { package = "litemap", version = "0.8.3", default-features = false, features = ["alloc"] }
+litemap-ca01ad9e24f5d932 = { package = "litemap", version = "0.7.5", default-features = false, features = ["alloc", "serde"] }
 lock_api = { version = "0.4.14", features = ["arc_lock"] }
 log = { version = "0.4.34", default-features = false, features = ["std"] }
 manganis-core = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["dioxus"] }
@@ -122,6 +128,8 @@ num-traits = { version = "0.2.19", features = ["i128", "libm"] }
 once_cell = { version = "1.21.4" }
 opentelemetry = { version = "0.30.0", features = ["testing"] }
 opentelemetry_sdk = { version = "0.30.0", features = ["testing"] }
+palette = { version = "0.7.7", features = ["libm"] }
+palette_math = { version = "0.7.7", default-features = false, features = ["libm", "std"] }
 parking_lot = { version = "0.12.5", features = ["arc_lock"] }
 parlance = { version = "0.1.1", default-features = false, features = ["bytemuck", "std"] }
 parley = { version = "0.12.0", default-features = false, features = ["bytemuck", "system"] }
@@ -129,28 +137,34 @@ parley_engine = { version = "0.12.0", default-features = false, features = ["byt
 peniko = { version = "0.6.1", features = ["bytemuck"] }
 percent-encoding = { version = "2.3.2" }
 phf = { version = "0.14.0", features = ["macros"] }
-phf_shared = { version = "0.14.0" }
+phf_shared-582f2526e08bb6a0 = { package = "phf_shared", version = "0.14.0" }
+phf_shared-a6292c17cd707f01 = { package = "phf_shared", version = "0.11.3", default-features = false, features = ["std"] }
 pkcs8 = { version = "0.11.0", default-features = false, features = ["pem", "std"] }
+portable-atomic = { version = "1.15.0", features = ["serde"] }
 postcard = { version = "1.1.3", features = ["experimental-derive", "use-std"] }
 potential_utf = { version = "0.1.6", default-features = false, features = ["alloc", "zerovec"] }
 ppv-lite86 = { version = "0.2.21", default-features = false, features = ["simd", "std"] }
 proc-macro2 = { version = "1.0.107" }
 profiling = { version = "1.0.18" }
+quick-xml = { version = "0.41.0", features = ["overlapped-lists", "serialize"] }
 rand-274715c4dabd11b0 = { package = "rand", version = "0.9.5" }
 rand-93f6ce9d446188ac = { package = "rand", version = "0.10.2" }
 rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.8", features = ["small_rng"] }
-rand_chacha = { version = "0.9.0" }
+rand_chacha-274715c4dabd11b0 = { package = "rand_chacha", version = "0.9.0" }
+rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1" }
 rand_core = { version = "0.6.4", default-features = false, features = ["std"] }
 raw-window-handle = { version = "0.6.2", default-features = false, features = ["std"] }
 regex = { version = "1.13.1" }
-regex-automata = { version = "0.4.18", default-features = false, features = ["dfa-build", "dfa-onepass", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "std", "unicode"] }
+regex-automata = { version = "0.4.18", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "std", "unicode"] }
 regex-syntax = { version = "0.8.11" }
 reqwest-594e8ee84c453af0 = { package = "reqwest", version = "0.13.5", default-features = false, features = ["charset", "form", "http2", "native-tls", "rustls", "rustls-no-provider", "stream"] }
 reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", default-features = false, features = ["json", "rustls-tls", "stream"] }
 rgb = { version = "0.8.53" }
+rust_decimal = { version = "1.43.0", default-features = false, features = ["maths", "serde", "std"] }
 rustc-hash = { version = "1.1.0" }
 rustls = { version = "0.23.46", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 rustls-pki-types = { version = "1.15.1", features = ["std"] }
+send_wrapper = { version = "0.6.0", default-features = false, features = ["futures"] }
 serde = { version = "1.0.229", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1.0.229", features = ["alloc", "rc"] }
 serde_json = { version = "1.0.151", features = ["alloc", "raw_value"] }
@@ -164,18 +178,23 @@ slab = { version = "0.4.12" }
 sledgehammer_bindgen = { version = "0.6.0", default-features = false, features = ["web"] }
 slotmap = { version = "1.1.1", features = ["serde"] }
 smallvec = { version = "1.16.4", default-features = false, features = ["const_new", "serde", "union"] }
+spin-274715c4dabd11b0 = { package = "spin", version = "0.9.9", features = ["std"] }
 spki = { version = "0.8.0", default-features = false, features = ["pem", "std"] }
 stable_deref_trait = { version = "1.2.1" }
 strum-1f5adca70f036a62 = { package = "strum", version = "0.28.0", features = ["derive"] }
+strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 subtle = { version = "2.6.1", features = ["const-generics"] }
 sync_wrapper = { version = "1.0.2", default-features = false, features = ["futures"] }
+thin-vec = { version = "0.2.21", features = ["serde"] }
 thiserror = { version = "2.0.20" }
 time = { version = "0.3.55", features = ["formatting", "local-offset", "macros", "parsing", "serde"] }
-tinystr = { version = "0.8.5", default-features = false, features = ["alloc", "zerovec"] }
+tinystr-c38e5c1d305a1b54 = { package = "tinystr", version = "0.8.5", features = ["zerovec"] }
+tinystr-ca01ad9e24f5d932 = { package = "tinystr", version = "0.7.6", default-features = false, features = ["alloc", "serde", "zerovec"] }
 tokio = { version = "1.53.1", features = ["full", "test-util"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["logging", "ring", "tls12"] }
 tokio-stream = { version = "0.1.19", features = ["fs", "sync"] }
 tokio-util = { version = "0.7.19", features = ["codec", "io-util", "rt"] }
+toml = { version = "0.8.2" }
 tower-http = { version = "0.6.11", features = ["cors", "fs", "set-header", "trace"] }
 tracing = { version = "0.1.44", features = ["log"] }
 tracing-core = { version = "0.1.36" }
@@ -183,20 +202,25 @@ tracing-log = { version = "0.2.0", default-features = false, features = ["log-tr
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 twox-hash = { version = "2.1.4", default-features = false, features = ["xxhash32", "xxhash64"] }
 typenum = { version = "1.20.1", default-features = false, features = ["const-generics"] }
+ucd-trie = { version = "0.1.7" }
+unicode-properties = { version = "0.1.4" }
 url = { version = "2.5.8", features = ["serde"] }
 uuid = { version = "1.26.1", features = ["js", "serde", "v1", "v3", "v4", "v5", "v6", "v7", "v8"] }
 web-sys = { version = "0.3.104", features = ["AbortSignal", "AnimationEvent", "BlobPropertyBag", "ClipboardEvent", "CloseEvent", "Comment", "CompositionEvent", "CssStyleDeclaration", "CustomEvent", "DataTransfer", "DataTransferItem", "DataTransferItemList", "Document", "DomRect", "DragEvent", "File", "FileList", "FileReader", "FocusEvent", "FormData", "Headers", "History", "HtmlFormElement", "HtmlHeadElement", "HtmlInputElement", "HtmlSelectElement", "HtmlTextAreaElement", "InputEvent", "IntersectionObserverEntry", "KeyboardEvent", "Location", "MessageEvent", "NodeList", "PointerEvent", "QueuingStrategy", "ReadableByteStreamController", "ReadableStream", "ReadableStreamByobReader", "ReadableStreamByobRequest", "ReadableStreamDefaultController", "ReadableStreamDefaultReader", "ReadableStreamGetReaderOptions", "ReadableStreamReadResult", "ReadableStreamReaderMode", "ReadableStreamType", "ReadableWritablePair", "Request", "RequestInit", "ResizeObserverEntry", "ResizeObserverSize", "Response", "ScrollBehavior", "ScrollIntoViewOptions", "ScrollLogicalPosition", "ScrollRestoration", "ScrollToOptions", "Selection", "StreamPipeOptions", "Text", "Touch", "TouchEvent", "TouchList", "TransformStream", "TransformStreamDefaultController", "Transformer", "TransitionEvent", "UnderlyingSink", "UnderlyingSource", "Url", "WebSocket", "WheelEvent", "Window", "Worker", "WorkerOptions", "WorkerType", "WritableStream", "WritableStreamDefaultController", "WritableStreamDefaultWriter", "console"] }
 writeable = { version = "0.6.4", default-features = false, features = ["alloc"] }
 xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64", "std", "xxh3", "xxh32", "xxh64"] }
-yoke = { version = "0.8.4", default-features = false, features = ["alloc", "derive"] }
+yoke-c38e5c1d305a1b54 = { package = "yoke", version = "0.8.4", default-features = false, features = ["alloc", "derive"] }
+yoke-ca01ad9e24f5d932 = { package = "yoke", version = "0.7.5", features = ["derive", "serde"] }
 zerocopy = { version = "0.8.57", default-features = false, features = ["derive", "simd"] }
 zerofrom = { version = "0.1.8", default-features = false, features = ["alloc", "derive"] }
 zeroize = { version = "1.9.0", features = ["derive"] }
 zerotrie = { version = "0.2.5", default-features = false, features = ["alloc", "yoke", "zerofrom"] }
-zerovec = { version = "0.11.9", default-features = false, features = ["alloc", "derive", "yoke"] }
+zerovec-93f6ce9d446188ac = { package = "zerovec", version = "0.10.4", default-features = false, features = ["derive", "serde", "yoke"] }
+zerovec-a6292c17cd707f01 = { package = "zerovec", version = "0.11.9", default-features = false, features = ["alloc", "derive", "yoke"] }
 
 [build-dependencies]
 anstyle = { version = "1.0.14" }
+bumpalo = { version = "3.20.3" }
 bytes = { version = "1.12.1" }
 clap = { version = "4.6.7", features = ["derive"] }
 clap_builder = { version = "4.6.7", default-features = false, features = ["color", "help", "std", "suggestions", "usage"] }
@@ -222,10 +246,12 @@ num-traits = { version = "0.2.19", features = ["libm"] }
 once_cell = { version = "1.21.4" }
 parking_lot = { version = "0.12.5" }
 phf = { version = "0.14.0" }
-phf_shared = { version = "0.14.0" }
+phf_shared-582f2526e08bb6a0 = { package = "phf_shared", version = "0.14.0" }
+phf_shared-a6292c17cd707f01 = { package = "phf_shared", version = "0.11.3" }
 proc-macro2 = { version = "1.0.107", features = ["span-locations"] }
 proc-macro2-diagnostics = { version = "0.10.1" }
 quote = { version = "1.0.47" }
+rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.8", default-features = false, features = ["small_rng"] }
 regex = { version = "1.13.1" }
 regex-automata = { version = "0.4.18" }
 regex-syntax = { version = "0.8.11" }
@@ -236,7 +262,7 @@ sha2-93f6ce9d446188ac = { package = "sha2", version = "0.10.9" }
 slab = { version = "0.4.12" }
 sledgehammer_bindgen_macro = { version = "0.6.5", features = ["web"] }
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3.0.6", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
-syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.119", features = ["extra-traits", "full", "visit", "visit-mut"] }
+syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.119", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 thiserror = { version = "2.0.20" }
 time = { version = "0.3.55", features = ["formatting"] }
 time-macros = { version = "0.2.32", default-features = false, features = ["formatting", "parsing", "serde"] }
@@ -248,6 +274,7 @@ tracing-core = { version = "0.1.36" }
 tracing-log = { version = "0.2.0", default-features = false, features = ["log-tracer", "std"] }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "time"] }
 twox-hash = { version = "2.1.4", default-features = false, features = ["xxhash64"] }
+ucd-trie = { version = "0.1.7", default-features = false, features = ["std"] }
 winnow = { version = "1.0.4" }
 xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64"] }
 zerocopy = { version = "0.8.57", default-features = false, features = ["derive", "simd"] }
@@ -258,9 +285,9 @@ ahash = { version = "0.8.12" }
 bigdecimal = { version = "0.4.11", features = ["serde"] }
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
 block-padding = { version = "0.3.3", default-features = false, features = ["std"] }
-bumpalo = { version = "3.20.3", features = ["collections"] }
 cipher = { version = "0.4.4", default-features = false, features = ["alloc", "block-padding"] }
 crossbeam-epoch = { version = "0.9.21" }
+downcast-rs = { version = "1.2.1" }
 event-listener-strategy = { version = "0.5.4" }
 futures-lite = { version = "2.6.1" }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["std"] }
@@ -283,10 +310,9 @@ mio = { version = "1.2.3", features = ["net", "os-ext"] }
 naga = { version = "30.0.1", features = ["glsl-out", "hlsl-out", "spv-out", "wgsl-in"] }
 native-tls = { version = "0.2.18", features = ["alpn"] }
 nom = { version = "7.1.3" }
+object = { version = "0.39.1" }
 once_cell = { version = "1.21.4", default-features = false, features = ["critical-section"] }
 parking_lot = { version = "0.12.5", default-features = false, features = ["send_guard"] }
-portable-atomic = { version = "1.15.0", features = ["serde"] }
-quick-xml = { version = "0.41.0", features = ["overlapped-lists", "serialize"] }
 quote = { version = "1.0.47" }
 reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", default-features = false, features = ["blocking"] }
 rfd = { version = "0.17.2" }
@@ -295,14 +321,13 @@ rustix = { version = "1.1.5", features = ["io_uring", "pipe", "process", "shm", 
 rustls = { version = "0.23.46", default-features = false, features = ["aws-lc-rs", "aws_lc_rs"] }
 rustls-webpki = { version = "0.103.15", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 simdutf8 = { version = "0.1.5" }
-spin = { version = "0.10.1", default-features = false, features = ["once", "rwlock", "spin_mutex"] }
-strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
+spin-93f6ce9d446188ac = { package = "spin", version = "0.10.1", default-features = false, features = ["once", "rwlock", "spin_mutex"] }
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3.0.6", features = ["extra-traits", "full"] }
 tokio = { version = "1.53.1", default-features = false, features = ["tracing"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-lc-rs", "early-data"] }
-toml = { version = "0.8.2" }
 tower = { version = "0.5.3", default-features = false, features = ["log", "make", "retry", "timeout"] }
 tower-http = { version = "0.6.11", default-features = false, features = ["follow-redirect"] }
+ttf-parser = { version = "0.25.1", features = ["gvar-alloc", "no-std-float"] }
 tungstenite = { version = "0.29.0", features = ["native-tls"] }
 twox-hash = { version = "2.1.4" }
 wayland-backend = { version = "0.3.17", default-features = false, features = ["client_system", "dlopen"] }
@@ -312,13 +337,13 @@ winnow = { version = "1.0.4" }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
-bumpalo = { version = "3.20.3" }
 cc = { version = "1.8.0", default-features = false, features = ["parallel"] }
 either = { version = "1.18.0" }
 libc = { version = "0.2.189" }
 mio = { version = "1.2.3", default-features = false, features = ["net", "os-ext"] }
 naga = { version = "30.0.1", default-features = false, features = ["glsl-out", "wgsl-in", "wgsl-out"] }
 nom = { version = "7.1.3", default-features = false, features = ["std"] }
+object = { version = "0.39.1" }
 quick-xml = { version = "0.41.0" }
 rustc-hash = { version = "1.1.0" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109" }
@@ -330,7 +355,6 @@ ahash = { version = "0.8.12" }
 bigdecimal = { version = "0.4.11", features = ["serde"] }
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
 block2 = { version = "0.6.2" }
-bumpalo = { version = "3.20.3", features = ["collections"] }
 crossbeam-epoch = { version = "0.9.21" }
 dispatch2 = { version = "0.3.1" }
 errno = { version = "0.3.14" }
@@ -356,10 +380,9 @@ objc2-core-foundation = { version = "0.3.2", features = ["CFBase"] }
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["CGColor", "CGColorSpace", "CGContext", "CGDirectDisplay", "CGDisplayConfiguration", "CGDisplayFade", "CGError", "CGPath", "CGRemoteOperation", "CGWindowLevel", "libc", "objc2", "std"] }
 objc2-foundation-468e82937335b1c9 = { package = "objc2-foundation", version = "0.3.2", default-features = false, features = ["NSAffineTransform", "NSAppleEventDescriptor", "NSArray", "NSAttributedString", "NSAutoreleasePool", "NSBundle", "NSCoder", "NSData", "NSDate", "NSDictionary", "NSDistributedNotificationCenter", "NSEnumerator", "NSError", "NSException", "NSFileManager", "NSFileWrapper", "NSFormatter", "NSGeometry", "NSHTTPCookie", "NSItemProvider", "NSJSONSerialization", "NSKeyValueCoding", "NSKeyValueObserving", "NSLocale", "NSNotification", "NSNull", "NSObjCRuntime", "NSObject", "NSOperation", "NSOrthography", "NSPathUtilities", "NSProcessInfo", "NSProgress", "NSRange", "NSRunLoop", "NSScriptCommand", "NSScriptStandardSuiteCommands", "NSSet", "NSStream", "NSString", "NSTextCheckingResult", "NSThread", "NSURL", "NSURLAuthenticationChallenge", "NSURLCredential", "NSURLRequest", "NSURLResponse", "NSURLSession", "NSUUID", "NSUndoManager", "NSUserActivity", "NSValue", "NSZone", "block2", "objc2-core-foundation", "std"] }
 objc2-foundation-6f8ce4dd05d13bba = { package = "objc2-foundation", version = "0.2.2", features = ["NSArray", "NSAttributedString", "NSBundle", "NSCoder", "NSData", "NSDate", "NSDictionary", "NSEnumerator", "NSError", "NSGeometry", "NSNotification", "NSObjCRuntime", "NSObject", "NSPathUtilities", "NSRange", "NSString", "NSThread", "NSURL", "NSUndoManager", "NSValue"] }
+object = { version = "0.39.1" }
 once_cell = { version = "1.21.4", default-features = false, features = ["critical-section"] }
 parking_lot = { version = "0.12.5", default-features = false, features = ["send_guard"] }
-portable-atomic = { version = "1.15.0", features = ["serde"] }
-quick-xml = { version = "0.41.0", features = ["overlapped-lists", "serialize"] }
 reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", default-features = false, features = ["blocking"] }
 rfd = { version = "0.17.2" }
 ring = { version = "0.17.14", features = ["std"] }
@@ -367,8 +390,7 @@ rustix = { version = "1.1.5", features = ["io_uring", "pipe", "process", "time"]
 rustls = { version = "0.23.46", default-features = false, features = ["aws-lc-rs", "aws_lc_rs"] }
 rustls-webpki = { version = "0.103.15", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 simdutf8 = { version = "0.1.5" }
-spin = { version = "0.10.1", default-features = false, features = ["once", "rwlock", "spin_mutex"] }
-strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
+spin-93f6ce9d446188ac = { package = "spin", version = "0.10.1", default-features = false, features = ["once", "rwlock", "spin_mutex"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-lc-rs", "early-data"] }
 tower = { version = "0.5.3", default-features = false, features = ["log", "make", "retry", "timeout"] }
 tower-http = { version = "0.6.11", default-features = false, features = ["follow-redirect"] }
@@ -377,7 +399,6 @@ twox-hash = { version = "2.1.4" }
 
 [target.aarch64-apple-darwin.build-dependencies]
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
-bumpalo = { version = "3.20.3" }
 cc = { version = "1.8.0", default-features = false, features = ["parallel"] }
 either = { version = "1.18.0" }
 errno = { version = "0.3.14" }
@@ -386,6 +407,7 @@ naga = { version = "30.0.1", default-features = false, features = ["glsl-out", "
 nom = { version = "7.1.3", default-features = false, features = ["std"] }
 objc2 = { version = "0.6.5", default-features = false, features = ["std"] }
 objc2-foundation-468e82937335b1c9 = { package = "objc2-foundation", version = "0.3.2", default-features = false, features = ["NSProcessInfo", "std"] }
+object = { version = "0.39.1" }
 rustc-hash = { version = "1.1.0" }
 
 [target.x86_64-apple-darwin.dependencies]
@@ -394,7 +416,6 @@ ahash = { version = "0.8.12" }
 bigdecimal = { version = "0.4.11", features = ["serde"] }
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
 block2 = { version = "0.6.2" }
-bumpalo = { version = "3.20.3", features = ["collections"] }
 crossbeam-epoch = { version = "0.9.21" }
 dispatch2 = { version = "0.3.1" }
 errno = { version = "0.3.14" }
@@ -420,10 +441,9 @@ objc2-core-foundation = { version = "0.3.2", features = ["CFBase"] }
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["CGColor", "CGColorSpace", "CGContext", "CGDirectDisplay", "CGDisplayConfiguration", "CGDisplayFade", "CGError", "CGPath", "CGRemoteOperation", "CGWindowLevel", "libc", "objc2", "std"] }
 objc2-foundation-468e82937335b1c9 = { package = "objc2-foundation", version = "0.3.2", default-features = false, features = ["NSAffineTransform", "NSAppleEventDescriptor", "NSArray", "NSAttributedString", "NSAutoreleasePool", "NSBundle", "NSCoder", "NSData", "NSDate", "NSDictionary", "NSDistributedNotificationCenter", "NSEnumerator", "NSError", "NSException", "NSFileManager", "NSFileWrapper", "NSFormatter", "NSGeometry", "NSHTTPCookie", "NSItemProvider", "NSJSONSerialization", "NSKeyValueCoding", "NSKeyValueObserving", "NSLocale", "NSNotification", "NSNull", "NSObjCRuntime", "NSObject", "NSOperation", "NSOrthography", "NSPathUtilities", "NSProcessInfo", "NSProgress", "NSRange", "NSRunLoop", "NSScriptCommand", "NSScriptStandardSuiteCommands", "NSSet", "NSStream", "NSString", "NSTextCheckingResult", "NSThread", "NSURL", "NSURLAuthenticationChallenge", "NSURLCredential", "NSURLRequest", "NSURLResponse", "NSURLSession", "NSUUID", "NSUndoManager", "NSUserActivity", "NSValue", "NSZone", "block2", "objc2-core-foundation", "std"] }
 objc2-foundation-6f8ce4dd05d13bba = { package = "objc2-foundation", version = "0.2.2", features = ["NSArray", "NSAttributedString", "NSBundle", "NSCoder", "NSData", "NSDate", "NSDictionary", "NSEnumerator", "NSError", "NSGeometry", "NSNotification", "NSObjCRuntime", "NSObject", "NSPathUtilities", "NSRange", "NSString", "NSThread", "NSURL", "NSUndoManager", "NSValue"] }
+object = { version = "0.39.1" }
 once_cell = { version = "1.21.4", default-features = false, features = ["critical-section"] }
 parking_lot = { version = "0.12.5", default-features = false, features = ["send_guard"] }
-portable-atomic = { version = "1.15.0", features = ["serde"] }
-quick-xml = { version = "0.41.0", features = ["overlapped-lists", "serialize"] }
 reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", default-features = false, features = ["blocking"] }
 rfd = { version = "0.17.2" }
 ring = { version = "0.17.14", features = ["std"] }
@@ -431,8 +451,7 @@ rustix = { version = "1.1.5", features = ["io_uring", "pipe", "process", "time"]
 rustls = { version = "0.23.46", default-features = false, features = ["aws-lc-rs", "aws_lc_rs"] }
 rustls-webpki = { version = "0.103.15", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 simdutf8 = { version = "0.1.5" }
-spin = { version = "0.10.1", default-features = false, features = ["once", "rwlock", "spin_mutex"] }
-strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
+spin-93f6ce9d446188ac = { package = "spin", version = "0.10.1", default-features = false, features = ["once", "rwlock", "spin_mutex"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-lc-rs", "early-data"] }
 tower = { version = "0.5.3", default-features = false, features = ["log", "make", "retry", "timeout"] }
 tower-http = { version = "0.6.11", default-features = false, features = ["follow-redirect"] }
@@ -441,7 +460,6 @@ twox-hash = { version = "2.1.4" }
 
 [target.x86_64-apple-darwin.build-dependencies]
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
-bumpalo = { version = "3.20.3" }
 cc = { version = "1.8.0", default-features = false, features = ["parallel"] }
 either = { version = "1.18.0" }
 errno = { version = "0.3.14" }
@@ -450,6 +468,7 @@ naga = { version = "30.0.1", default-features = false, features = ["glsl-out", "
 nom = { version = "7.1.3", default-features = false, features = ["std"] }
 objc2 = { version = "0.6.5", default-features = false, features = ["std"] }
 objc2-foundation-468e82937335b1c9 = { package = "objc2-foundation", version = "0.3.2", default-features = false, features = ["NSProcessInfo", "std"] }
+object = { version = "0.39.1" }
 rustc-hash = { version = "1.1.0" }
 
 [target.aarch64-apple-ios.dependencies]
@@ -457,7 +476,6 @@ aes-gcm = { version = "0.10.3" }
 ahash = { version = "0.8.12" }
 bigdecimal = { version = "0.4.11", features = ["serde"] }
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
-bumpalo = { version = "3.20.3", features = ["collections"] }
 crossbeam-epoch = { version = "0.9.21" }
 dispatch2 = { version = "0.3.1" }
 errno = { version = "0.3.14" }
@@ -485,10 +503,9 @@ objc2-core-text = { version = "0.3.2", default-features = false, features = ["CT
 objc2-foundation-468e82937335b1c9 = { package = "objc2-foundation", version = "0.3.2", default-features = false, features = ["NSArray", "NSAttributedString", "NSBundle", "NSCalendar", "NSCharacterSet", "NSCoder", "NSData", "NSDate", "NSDateInterval", "NSDictionary", "NSEnumerator", "NSError", "NSExtensionContext", "NSExtensionRequestHandling", "NSFilePresenter", "NSFileWrapper", "NSGeometry", "NSHTTPCookie", "NSIndexPath", "NSIndexSet", "NSItemProvider", "NSJSONSerialization", "NSKeyValueCoding", "NSKeyValueObserving", "NSLocale", "NSLock", "NSNotification", "NSNull", "NSObjCRuntime", "NSObject", "NSOperation", "NSOrderedCollectionDifference", "NSOrderedSet", "NSPathUtilities", "NSPersonNameComponents", "NSPredicate", "NSProcessInfo", "NSProgress", "NSRange", "NSRunLoop", "NSSet", "NSStream", "NSString", "NSThread", "NSTimeZone", "NSURL", "NSURLAuthenticationChallenge", "NSURLCredential", "NSURLRequest", "NSURLResponse", "NSURLSession", "NSUUID", "NSUndoManager", "NSUserActivity", "NSValue", "block2", "objc2-core-foundation", "std"] }
 objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["CADisplayLink", "CAFrameRateRange", "CALayer", "CAMediaTiming", "CAMetalLayer", "CATransform3D", "objc2-core-foundation", "objc2-core-graphics", "objc2-metal", "std"] }
 objc2-ui-kit = { version = "0.3.2" }
+object = { version = "0.39.1" }
 once_cell = { version = "1.21.4", default-features = false, features = ["critical-section"] }
 parking_lot = { version = "0.12.5", default-features = false, features = ["send_guard"] }
-portable-atomic = { version = "1.15.0", features = ["serde"] }
-quick-xml = { version = "0.41.0", features = ["overlapped-lists", "serialize"] }
 reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", default-features = false, features = ["blocking"] }
 ring = { version = "0.17.14", features = ["std"] }
 rustix = { version = "1.1.5", features = ["io_uring", "pipe", "process", "time"] }
@@ -496,8 +513,7 @@ rustls = { version = "0.23.46", default-features = false, features = ["aws-lc-rs
 rustls-webpki = { version = "0.103.15", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 security-framework-sys = { version = "2.17.0", features = ["OSX_10_10", "OSX_10_11", "OSX_10_12", "OSX_10_9"] }
 simdutf8 = { version = "0.1.5" }
-spin = { version = "0.10.1", default-features = false, features = ["once", "rwlock", "spin_mutex"] }
-strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
+spin-93f6ce9d446188ac = { package = "spin", version = "0.10.1", default-features = false, features = ["once", "rwlock", "spin_mutex"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-lc-rs", "early-data"] }
 tower = { version = "0.5.3", default-features = false, features = ["log", "make", "retry", "timeout"] }
 tower-http = { version = "0.6.11", default-features = false, features = ["follow-redirect"] }
@@ -506,7 +522,6 @@ twox-hash = { version = "2.1.4" }
 
 [target.aarch64-apple-ios.build-dependencies]
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
-bumpalo = { version = "3.20.3" }
 cc = { version = "1.8.0", default-features = false, features = ["parallel"] }
 either = { version = "1.18.0" }
 errno = { version = "0.3.14" }
@@ -516,6 +531,7 @@ naga = { version = "30.0.1", default-features = false, features = ["glsl-out", "
 nom = { version = "7.1.3", default-features = false, features = ["std"] }
 objc2 = { version = "0.6.5", default-features = false, features = ["std"] }
 objc2-foundation-468e82937335b1c9 = { package = "objc2-foundation", version = "0.3.2", default-features = false, features = ["NSProcessInfo", "std"] }
+object = { version = "0.39.1" }
 rustc-hash = { version = "1.1.0" }
 
 ### END HAKARI SECTION
@@ -649,7 +665,7 @@ kurbo-0_13 = { package = "kurbo", version = "0.13.1", features = ["serde", "std"
 libc = { version = "0.2.189", features = ["extra_traits", "std"] }
 libsqlite3-sys = { version = "0.30.1", features = ["bundled", "bundled_bindings", "cc", "min_sqlite_version_3_14_0", "pkg-config", "unlock_notify", "vcpkg"] }
 linebender_resource_handle = { version = "0.1.1", features = ["std"] }
-litemap-0_7 = { package = "litemap", version = "0.7.5", default-features = false, features = ["alloc", "serde"] }
+litemap-ca01ad9e24f5d932 = { package = "litemap", version = "0.7.5", default-features = false, features = ["alloc", "serde"] }
 lock_api = { version = "0.4.14", features = ["arc_lock", "atomic_usize"] }
 log = { version = "0.4.34", default-features = false, features = ["alloc", "kv", "kv_unstable", "std", "value-bag"] }
 loro = { version = "1.16.0", features = ["counter"] }
@@ -710,8 +726,8 @@ pulp = { version = "0.22.3", features = ["relaxed-simd", "std", "x86-v3"] }
 pulp-wasm-simd-flag = { version = "0.1.1", default-features = false, features = ["relaxed-simd"] }
 quick-xml = { version = "0.41.0", features = ["serde", "serialize"] }
 rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
-rand_chacha-0_3 = { package = "rand_chacha", version = "0.3.1", features = ["std"] }
-rand_chacha = { version = "0.9.0", features = ["std"] }
+rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", features = ["std"] }
+rand_chacha-274715c4dabd11b0 = { package = "rand_chacha", version = "0.9.0", features = ["std"] }
 rand_distr = { version = "0.5.1", features = ["alloc", "std"] }
 regex-automata = { version = "0.4.18", default-features = false, features = ["alloc", "dfa", "dfa-build", "dfa-onepass", "dfa-search", "hybrid", "meta", "nfa", "nfa-backtrack", "nfa-pikevm", "nfa-thompson", "perf", "perf-inline", "perf-literal", "perf-literal-multisubstring", "perf-literal-substring", "std", "syntax", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment", "unicode-word-boundary"] }
 reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", features = ["__rustls", "__rustls-ring", "__tls", "blocking", "charset", "default-tls", "gzip", "h2", "http2", "json", "macos-system-configuration", "multipart", "rustls-tls", "rustls-tls-native-roots", "rustls-tls-native-roots-no-provider", "rustls-tls-webpki-roots", "rustls-tls-webpki-roots-no-provider", "stream", "system-proxy"] }
@@ -740,8 +756,8 @@ signature = { version = "3.0.0", default-features = false, features = ["alloc", 
 skrifa = { version = "0.44.0", features = ["autohint_shaping", "std"] }
 sledgehammer_bindgen = { version = "0.6.0", default-features = false, features = ["wasm-bindgen", "web"] }
 smallvec = { version = "1.16.4", default-features = false, features = ["const_generics", "const_new", "serde", "union", "write"] }
-spin = { version = "0.10.1", features = ["barrier", "lazy", "lock_api", "mutex", "once", "rwlock", "spin_mutex"] }
-spin-0_9 = { package = "spin", version = "0.9.9", features = ["barrier", "lazy", "lock_api", "lock_api_crate", "mutex", "once", "rwlock", "spin_mutex", "std"] }
+spin-93f6ce9d446188ac = { package = "spin", version = "0.10.1", features = ["barrier", "lazy", "lock_api", "mutex", "once", "rwlock", "spin_mutex"] }
+spin-274715c4dabd11b0 = { package = "spin", version = "0.9.9", features = ["barrier", "lazy", "lock_api", "lock_api_crate", "mutex", "once", "rwlock", "spin_mutex", "std"] }
 spki = { version = "0.8.0", default-features = false, features = ["alloc", "pem", "std"] }
 sqlx = { version = "0.8.6", default-features = false, features = ["_rt-tokio", "_sqlite", "bigdecimal", "chrono", "json", "postgres", "runtime-tokio", "runtime-tokio-rustls", "rust_decimal", "sqlite", "sqlx-postgres", "sqlx-sqlite", "time", "tls-rustls-ring", "tls-rustls-ring-webpki", "uuid"] }
 stable_deref_trait = { version = "1.2.1", features = ["alloc", "std"] }
@@ -749,8 +765,8 @@ strip-ansi-escapes = { version = "0.2.1", default-features = false }
 strum-1f5adca70f036a62 = { package = "strum", version = "0.28.0", features = ["derive", "std", "strum_macros"] }
 terminal-light = { version = "1.9.1", default-features = false }
 time = { version = "0.3.55", features = ["alloc", "formatting", "local-offset", "macros", "parsing", "serde", "serde-human-readable", "serde-well-known", "std"] }
-tinystr-0_7 = { package = "tinystr", version = "0.7.6", default-features = false, features = ["alloc", "serde", "zerovec"] }
-tinystr = { version = "0.8.5", features = ["alloc", "zerovec"] }
+tinystr-ca01ad9e24f5d932 = { package = "tinystr", version = "0.7.6", default-features = false, features = ["alloc", "serde", "zerovec"] }
+tinystr-c38e5c1d305a1b54 = { package = "tinystr", version = "0.8.5", features = ["alloc", "zerovec"] }
 tinyvec = { version = "1.13.3", features = ["alloc", "rustc_1_57", "std"] }
 tokio = { version = "1.53.1", features = ["bytes", "fs", "full", "io-std", "io-util", "libc", "macros", "mio", "net", "parking_lot", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "sync", "test-util", "time", "tokio-macros", "tracing"] }
 tokio-rustls = { version = "0.26.4", features = ["aws-lc-rs", "aws_lc_rs", "early-data", "logging", "ring", "tls12"] }
@@ -782,10 +798,10 @@ web-sys = { version = "0.3.104", features = ["AbortController", "AbortSignal", "
 web-time = { version = "1.1.0", default-features = false, features = ["serde"] }
 xterm-query = { version = "0.6.1", default-features = false }
 xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64", "xxh3", "xxh32"] }
-yoke-0_7 = { package = "yoke", version = "0.7.5", features = ["alloc", "derive", "serde", "zerofrom"] }
-yoke = { version = "0.8.4", features = ["alloc", "derive", "zerofrom"] }
+yoke-ca01ad9e24f5d932 = { package = "yoke", version = "0.7.5", features = ["alloc", "derive", "serde", "zerofrom"] }
+yoke-c38e5c1d305a1b54 = { package = "yoke", version = "0.8.4", features = ["alloc", "derive", "zerofrom"] }
 zeroize = { version = "1.9.0", features = ["alloc", "derive", "zeroize_derive"] }
-zerovec-0_10 = { package = "zerovec", version = "0.10.4", default-features = false, features = ["derive", "serde", "yoke"] }
+zerovec-93f6ce9d446188ac = { package = "zerovec", version = "0.10.4", default-features = false, features = ["derive", "serde", "yoke"] }
 zlib-rs = { version = "0.6.8", features = ["c-allocator", "rust-allocator", "std"] }
 
 [target.'cfg(all(target_arch = "aarch64", target_os = "ios"))'.dependencies]
@@ -911,7 +927,7 @@ kurbo-0_13 = { package = "kurbo", version = "0.13.1", features = ["serde", "std"
 libc = { version = "0.2.189", features = ["extra_traits", "std"] }
 libsqlite3-sys = { version = "0.30.1", features = ["bundled", "bundled_bindings", "cc", "min_sqlite_version_3_14_0", "pkg-config", "unlock_notify", "vcpkg"] }
 linebender_resource_handle = { version = "0.1.1", features = ["std"] }
-litemap-0_7 = { package = "litemap", version = "0.7.5", default-features = false, features = ["alloc", "serde"] }
+litemap-ca01ad9e24f5d932 = { package = "litemap", version = "0.7.5", default-features = false, features = ["alloc", "serde"] }
 lock_api = { version = "0.4.14", features = ["arc_lock", "atomic_usize"] }
 log = { version = "0.4.34", default-features = false, features = ["alloc", "kv", "kv_unstable", "std", "value-bag"] }
 loro = { version = "1.16.0", features = ["counter"] }
@@ -967,8 +983,8 @@ pulp = { version = "0.22.3", features = ["relaxed-simd", "std", "x86-v3"] }
 pulp-wasm-simd-flag = { version = "0.1.1", default-features = false, features = ["relaxed-simd"] }
 quick-xml = { version = "0.41.0", features = ["serde", "serialize"] }
 rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
-rand_chacha-0_3 = { package = "rand_chacha", version = "0.3.1", features = ["std"] }
-rand_chacha = { version = "0.9.0", features = ["std"] }
+rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", features = ["std"] }
+rand_chacha-274715c4dabd11b0 = { package = "rand_chacha", version = "0.9.0", features = ["std"] }
 rand_distr = { version = "0.5.1", features = ["alloc", "std"] }
 regex-automata = { version = "0.4.18", default-features = false, features = ["alloc", "dfa", "dfa-build", "dfa-onepass", "dfa-search", "hybrid", "meta", "nfa", "nfa-backtrack", "nfa-pikevm", "nfa-thompson", "perf", "perf-inline", "perf-literal", "perf-literal-multisubstring", "perf-literal-substring", "std", "syntax", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment", "unicode-word-boundary"] }
 reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", features = ["__rustls", "__rustls-ring", "__tls", "blocking", "charset", "default-tls", "gzip", "h2", "http2", "json", "macos-system-configuration", "multipart", "rustls-tls", "rustls-tls-native-roots", "rustls-tls-native-roots-no-provider", "rustls-tls-webpki-roots", "rustls-tls-webpki-roots-no-provider", "stream", "system-proxy"] }
@@ -997,8 +1013,8 @@ signature = { version = "3.0.0", default-features = false, features = ["alloc", 
 skrifa = { version = "0.44.0", features = ["autohint_shaping", "std"] }
 sledgehammer_bindgen = { version = "0.6.0", default-features = false, features = ["wasm-bindgen", "web"] }
 smallvec = { version = "1.16.4", default-features = false, features = ["const_generics", "const_new", "serde", "union", "write"] }
-spin = { version = "0.10.1", features = ["barrier", "lazy", "lock_api", "mutex", "once", "rwlock", "spin_mutex"] }
-spin-0_9 = { package = "spin", version = "0.9.9", features = ["barrier", "lazy", "lock_api", "lock_api_crate", "mutex", "once", "rwlock", "spin_mutex", "std"] }
+spin-93f6ce9d446188ac = { package = "spin", version = "0.10.1", features = ["barrier", "lazy", "lock_api", "mutex", "once", "rwlock", "spin_mutex"] }
+spin-274715c4dabd11b0 = { package = "spin", version = "0.9.9", features = ["barrier", "lazy", "lock_api", "lock_api_crate", "mutex", "once", "rwlock", "spin_mutex", "std"] }
 spki = { version = "0.8.0", default-features = false, features = ["alloc", "pem", "std"] }
 sqlx = { version = "0.8.6", default-features = false, features = ["_rt-tokio", "_sqlite", "bigdecimal", "chrono", "json", "postgres", "runtime-tokio", "runtime-tokio-rustls", "rust_decimal", "sqlite", "sqlx-postgres", "sqlx-sqlite", "time", "tls-rustls-ring", "tls-rustls-ring-webpki", "uuid"] }
 stable_deref_trait = { version = "1.2.1", features = ["alloc", "std"] }
@@ -1006,8 +1022,8 @@ strip-ansi-escapes = { version = "0.2.1", default-features = false }
 strum-1f5adca70f036a62 = { package = "strum", version = "0.28.0", features = ["derive", "std", "strum_macros"] }
 terminal-light = { version = "1.9.1", default-features = false }
 time = { version = "0.3.55", features = ["alloc", "formatting", "local-offset", "macros", "parsing", "serde", "serde-human-readable", "serde-well-known", "std"] }
-tinystr-0_7 = { package = "tinystr", version = "0.7.6", default-features = false, features = ["alloc", "serde", "zerovec"] }
-tinystr = { version = "0.8.5", features = ["alloc", "zerovec"] }
+tinystr-ca01ad9e24f5d932 = { package = "tinystr", version = "0.7.6", default-features = false, features = ["alloc", "serde", "zerovec"] }
+tinystr-c38e5c1d305a1b54 = { package = "tinystr", version = "0.8.5", features = ["alloc", "zerovec"] }
 tinyvec = { version = "1.13.3", features = ["alloc", "rustc_1_57", "std"] }
 tokio = { version = "1.53.1", features = ["bytes", "fs", "full", "io-std", "io-util", "libc", "macros", "mio", "net", "parking_lot", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "sync", "test-util", "time", "tokio-macros", "tracing"] }
 tokio-rustls = { version = "0.26.4", features = ["aws-lc-rs", "aws_lc_rs", "early-data", "logging", "ring", "tls12"] }
@@ -1039,10 +1055,10 @@ web-sys = { version = "0.3.104", features = ["AbortController", "AbortSignal", "
 web-time = { version = "1.1.0", default-features = false, features = ["serde"] }
 xterm-query = { version = "0.6.1", default-features = false }
 xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64", "xxh3", "xxh32"] }
-yoke-0_7 = { package = "yoke", version = "0.7.5", features = ["alloc", "derive", "serde", "zerofrom"] }
-yoke = { version = "0.8.4", features = ["alloc", "derive", "zerofrom"] }
+yoke-ca01ad9e24f5d932 = { package = "yoke", version = "0.7.5", features = ["alloc", "derive", "serde", "zerofrom"] }
+yoke-c38e5c1d305a1b54 = { package = "yoke", version = "0.8.4", features = ["alloc", "derive", "zerofrom"] }
 zeroize = { version = "1.9.0", features = ["alloc", "derive", "zeroize_derive"] }
-zerovec-0_10 = { package = "zerovec", version = "0.10.4", default-features = false, features = ["derive", "serde", "yoke"] }
+zerovec-93f6ce9d446188ac = { package = "zerovec", version = "0.10.4", default-features = false, features = ["derive", "serde", "yoke"] }
 zlib-rs = { version = "0.6.8", features = ["c-allocator", "rust-allocator", "std"] }
 
 [target.'cfg(all(target_arch = "x86_64", target_os = "macos"))'.dependencies]
@@ -1168,7 +1184,7 @@ kurbo-0_13 = { package = "kurbo", version = "0.13.1", features = ["serde", "std"
 libc = { version = "0.2.189", features = ["extra_traits", "std"] }
 libsqlite3-sys = { version = "0.30.1", features = ["bundled", "bundled_bindings", "cc", "min_sqlite_version_3_14_0", "pkg-config", "unlock_notify", "vcpkg"] }
 linebender_resource_handle = { version = "0.1.1", features = ["std"] }
-litemap-0_7 = { package = "litemap", version = "0.7.5", default-features = false, features = ["alloc", "serde"] }
+litemap-ca01ad9e24f5d932 = { package = "litemap", version = "0.7.5", default-features = false, features = ["alloc", "serde"] }
 lock_api = { version = "0.4.14", features = ["arc_lock", "atomic_usize"] }
 log = { version = "0.4.34", default-features = false, features = ["alloc", "kv", "kv_unstable", "std", "value-bag"] }
 loro = { version = "1.16.0", features = ["counter"] }
@@ -1229,8 +1245,8 @@ pulp = { version = "0.22.3", features = ["relaxed-simd", "std", "x86-v3"] }
 pulp-wasm-simd-flag = { version = "0.1.1", default-features = false, features = ["relaxed-simd"] }
 quick-xml = { version = "0.41.0", features = ["serde", "serialize"] }
 rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
-rand_chacha-0_3 = { package = "rand_chacha", version = "0.3.1", features = ["std"] }
-rand_chacha = { version = "0.9.0", features = ["std"] }
+rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", features = ["std"] }
+rand_chacha-274715c4dabd11b0 = { package = "rand_chacha", version = "0.9.0", features = ["std"] }
 rand_distr = { version = "0.5.1", features = ["alloc", "std"] }
 regex-automata = { version = "0.4.18", default-features = false, features = ["alloc", "dfa", "dfa-build", "dfa-onepass", "dfa-search", "hybrid", "meta", "nfa", "nfa-backtrack", "nfa-pikevm", "nfa-thompson", "perf", "perf-inline", "perf-literal", "perf-literal-multisubstring", "perf-literal-substring", "std", "syntax", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment", "unicode-word-boundary"] }
 reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", features = ["__rustls", "__rustls-ring", "__tls", "blocking", "charset", "default-tls", "gzip", "h2", "http2", "json", "macos-system-configuration", "multipart", "rustls-tls", "rustls-tls-native-roots", "rustls-tls-native-roots-no-provider", "rustls-tls-webpki-roots", "rustls-tls-webpki-roots-no-provider", "stream", "system-proxy"] }
@@ -1259,8 +1275,8 @@ signature = { version = "3.0.0", default-features = false, features = ["alloc", 
 skrifa = { version = "0.44.0", features = ["autohint_shaping", "std"] }
 sledgehammer_bindgen = { version = "0.6.0", default-features = false, features = ["wasm-bindgen", "web"] }
 smallvec = { version = "1.16.4", default-features = false, features = ["const_generics", "const_new", "serde", "union", "write"] }
-spin = { version = "0.10.1", features = ["barrier", "lazy", "lock_api", "mutex", "once", "rwlock", "spin_mutex"] }
-spin-0_9 = { package = "spin", version = "0.9.9", features = ["barrier", "lazy", "lock_api", "lock_api_crate", "mutex", "once", "rwlock", "spin_mutex", "std"] }
+spin-93f6ce9d446188ac = { package = "spin", version = "0.10.1", features = ["barrier", "lazy", "lock_api", "mutex", "once", "rwlock", "spin_mutex"] }
+spin-274715c4dabd11b0 = { package = "spin", version = "0.9.9", features = ["barrier", "lazy", "lock_api", "lock_api_crate", "mutex", "once", "rwlock", "spin_mutex", "std"] }
 spki = { version = "0.8.0", default-features = false, features = ["alloc", "pem", "std"] }
 sqlx = { version = "0.8.6", default-features = false, features = ["_rt-tokio", "_sqlite", "bigdecimal", "chrono", "json", "postgres", "runtime-tokio", "runtime-tokio-rustls", "rust_decimal", "sqlite", "sqlx-postgres", "sqlx-sqlite", "time", "tls-rustls-ring", "tls-rustls-ring-webpki", "uuid"] }
 stable_deref_trait = { version = "1.2.1", features = ["alloc", "std"] }
@@ -1268,8 +1284,8 @@ strip-ansi-escapes = { version = "0.2.1", default-features = false }
 strum-1f5adca70f036a62 = { package = "strum", version = "0.28.0", features = ["derive", "std", "strum_macros"] }
 terminal-light = { version = "1.9.1", default-features = false }
 time = { version = "0.3.55", features = ["alloc", "formatting", "local-offset", "macros", "parsing", "serde", "serde-human-readable", "serde-well-known", "std"] }
-tinystr-0_7 = { package = "tinystr", version = "0.7.6", default-features = false, features = ["alloc", "serde", "zerovec"] }
-tinystr = { version = "0.8.5", features = ["alloc", "zerovec"] }
+tinystr-ca01ad9e24f5d932 = { package = "tinystr", version = "0.7.6", default-features = false, features = ["alloc", "serde", "zerovec"] }
+tinystr-c38e5c1d305a1b54 = { package = "tinystr", version = "0.8.5", features = ["alloc", "zerovec"] }
 tinyvec = { version = "1.13.3", features = ["alloc", "rustc_1_57", "std"] }
 tokio = { version = "1.53.1", features = ["bytes", "fs", "full", "io-std", "io-util", "libc", "macros", "mio", "net", "parking_lot", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "sync", "test-util", "time", "tokio-macros", "tracing"] }
 tokio-rustls = { version = "0.26.4", features = ["aws-lc-rs", "aws_lc_rs", "early-data", "logging", "ring", "tls12"] }
@@ -1301,10 +1317,10 @@ web-sys = { version = "0.3.104", features = ["AbortController", "AbortSignal", "
 web-time = { version = "1.1.0", default-features = false, features = ["serde"] }
 xterm-query = { version = "0.6.1", default-features = false }
 xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64", "xxh3", "xxh32"] }
-yoke-0_7 = { package = "yoke", version = "0.7.5", features = ["alloc", "derive", "serde", "zerofrom"] }
-yoke = { version = "0.8.4", features = ["alloc", "derive", "zerofrom"] }
+yoke-ca01ad9e24f5d932 = { package = "yoke", version = "0.7.5", features = ["alloc", "derive", "serde", "zerofrom"] }
+yoke-c38e5c1d305a1b54 = { package = "yoke", version = "0.8.4", features = ["alloc", "derive", "zerofrom"] }
 zeroize = { version = "1.9.0", features = ["alloc", "derive", "zeroize_derive"] }
-zerovec-0_10 = { package = "zerovec", version = "0.10.4", default-features = false, features = ["derive", "serde", "yoke"] }
+zerovec-93f6ce9d446188ac = { package = "zerovec", version = "0.10.4", default-features = false, features = ["derive", "serde", "yoke"] }
 zlib-rs = { version = "0.6.8", features = ["c-allocator", "rust-allocator", "std"] }
 
 [target.'cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))'.dependencies]
@@ -1430,7 +1446,7 @@ libc = { version = "0.2.189", features = ["extra_traits", "std"] }
 libsqlite3-sys = { version = "0.30.1", features = ["bundled", "bundled_bindings", "cc", "min_sqlite_version_3_14_0", "pkg-config", "unlock_notify", "vcpkg"] }
 linebender_resource_handle = { version = "0.1.1", features = ["std"] }
 linux-raw-sys = { version = "0.12.1", default-features = false, features = ["auxvec", "elf", "errno", "general", "if_ether", "io_uring", "ioctl", "net", "netlink", "no_std", "prctl", "system", "xdp"] }
-litemap-0_7 = { package = "litemap", version = "0.7.5", default-features = false, features = ["alloc", "serde"] }
+litemap-ca01ad9e24f5d932 = { package = "litemap", version = "0.7.5", default-features = false, features = ["alloc", "serde"] }
 lock_api = { version = "0.4.14", features = ["arc_lock", "atomic_usize"] }
 log = { version = "0.4.34", default-features = false, features = ["alloc", "kv", "kv_unstable", "std", "value-bag"] }
 loro = { version = "1.16.0", features = ["counter"] }
@@ -1473,8 +1489,8 @@ publicsuffix = { version = "2.3.0", features = ["idna", "punycode"] }
 pulp = { version = "0.22.3", features = ["relaxed-simd", "std", "x86-v3"] }
 pulp-wasm-simd-flag = { version = "0.1.1", default-features = false, features = ["relaxed-simd"] }
 rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
-rand_chacha-0_3 = { package = "rand_chacha", version = "0.3.1", features = ["std"] }
-rand_chacha = { version = "0.9.0", features = ["std"] }
+rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", features = ["std"] }
+rand_chacha-274715c4dabd11b0 = { package = "rand_chacha", version = "0.9.0", features = ["std"] }
 rand_distr = { version = "0.5.1", features = ["alloc", "std"] }
 regex-automata = { version = "0.4.18", default-features = false, features = ["alloc", "dfa", "dfa-build", "dfa-onepass", "dfa-search", "hybrid", "meta", "nfa", "nfa-backtrack", "nfa-pikevm", "nfa-thompson", "perf", "perf-inline", "perf-literal", "perf-literal-multisubstring", "perf-literal-substring", "std", "syntax", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment", "unicode-word-boundary"] }
 reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", features = ["__rustls", "__rustls-ring", "__tls", "blocking", "charset", "default-tls", "gzip", "h2", "http2", "json", "macos-system-configuration", "multipart", "rustls-tls", "rustls-tls-native-roots", "rustls-tls-native-roots-no-provider", "rustls-tls-webpki-roots", "rustls-tls-webpki-roots-no-provider", "stream", "system-proxy"] }
@@ -1502,8 +1518,8 @@ signature = { version = "3.0.0", default-features = false, features = ["alloc", 
 skrifa = { version = "0.44.0", features = ["autohint_shaping", "std"] }
 sledgehammer_bindgen = { version = "0.6.0", default-features = false, features = ["wasm-bindgen", "web"] }
 smallvec = { version = "1.16.4", default-features = false, features = ["const_generics", "const_new", "serde", "union", "write"] }
-spin = { version = "0.10.1", features = ["barrier", "lazy", "lock_api", "mutex", "once", "rwlock", "spin_mutex"] }
-spin-0_9 = { package = "spin", version = "0.9.9", features = ["barrier", "lazy", "lock_api", "lock_api_crate", "mutex", "once", "rwlock", "spin_mutex", "std"] }
+spin-93f6ce9d446188ac = { package = "spin", version = "0.10.1", features = ["barrier", "lazy", "lock_api", "mutex", "once", "rwlock", "spin_mutex"] }
+spin-274715c4dabd11b0 = { package = "spin", version = "0.9.9", features = ["barrier", "lazy", "lock_api", "lock_api_crate", "mutex", "once", "rwlock", "spin_mutex", "std"] }
 spki = { version = "0.8.0", default-features = false, features = ["alloc", "pem", "std"] }
 sqlx = { version = "0.8.6", default-features = false, features = ["_rt-tokio", "_sqlite", "bigdecimal", "chrono", "json", "postgres", "runtime-tokio", "runtime-tokio-rustls", "rust_decimal", "sqlite", "sqlx-postgres", "sqlx-sqlite", "time", "tls-rustls-ring", "tls-rustls-ring-webpki", "uuid"] }
 stable_deref_trait = { version = "1.2.1", features = ["alloc", "std"] }
@@ -1512,8 +1528,8 @@ strum-1f5adca70f036a62 = { package = "strum", version = "0.28.0", features = ["d
 terminal-light = { version = "1.9.1", default-features = false }
 time = { version = "0.3.55", features = ["alloc", "formatting", "local-offset", "macros", "parsing", "serde", "serde-human-readable", "serde-well-known", "std"] }
 tiny-skia = { version = "0.12.0", features = ["png-format", "simd", "std"] }
-tinystr-0_7 = { package = "tinystr", version = "0.7.6", default-features = false, features = ["alloc", "serde", "zerovec"] }
-tinystr = { version = "0.8.5", features = ["alloc", "zerovec"] }
+tinystr-ca01ad9e24f5d932 = { package = "tinystr", version = "0.7.6", default-features = false, features = ["alloc", "serde", "zerovec"] }
+tinystr-c38e5c1d305a1b54 = { package = "tinystr", version = "0.8.5", features = ["alloc", "zerovec"] }
 tinyvec = { version = "1.13.3", features = ["alloc", "rustc_1_57", "std"] }
 tokio = { version = "1.53.1", features = ["bytes", "fs", "full", "io-std", "io-util", "libc", "macros", "mio", "net", "parking_lot", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "sync", "test-util", "time", "tokio-macros", "tracing"] }
 tokio-rustls = { version = "0.26.4", features = ["aws-lc-rs", "aws_lc_rs", "early-data", "logging", "ring", "tls12"] }
@@ -1549,11 +1565,11 @@ x11rb-protocol = { version = "0.13.2", default-features = false, features = ["ra
 xterm-query = { version = "0.6.1", default-features = false }
 xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64", "xxh3", "xxh32"] }
 yeslogic-fontconfig-sys = { version = "6.0.1", default-features = false, features = ["dlopen"] }
-yoke-0_7 = { package = "yoke", version = "0.7.5", features = ["alloc", "derive", "serde", "zerofrom"] }
-yoke = { version = "0.8.4", features = ["alloc", "derive", "zerofrom"] }
+yoke-ca01ad9e24f5d932 = { package = "yoke", version = "0.7.5", features = ["alloc", "derive", "serde", "zerofrom"] }
+yoke-c38e5c1d305a1b54 = { package = "yoke", version = "0.8.4", features = ["alloc", "derive", "zerofrom"] }
 zbus = { version = "5.19.0", default-features = false, features = ["p2p", "tokio"] }
 zeroize = { version = "1.9.0", features = ["alloc", "derive", "zeroize_derive"] }
-zerovec-0_10 = { package = "zerovec", version = "0.10.4", default-features = false, features = ["derive", "serde", "yoke"] }
+zerovec-93f6ce9d446188ac = { package = "zerovec", version = "0.10.4", default-features = false, features = ["derive", "serde", "yoke"] }
 zlib-rs = { version = "0.6.8", features = ["c-allocator", "rust-allocator", "std"] }
 
 [target.'cfg(all(target_arch = "aarch64", target_os = "macos"))'.build-dependencies]
@@ -1619,7 +1635,7 @@ proc-macro-error-attr = { version = "0.4.12", default-features = false }
 proc-macro-hack = { version = "0.5.20", default-features = false }
 proc-macro2-diagnostics = { version = "0.10.1", features = ["colors", "yansi"] }
 rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
-rand_chacha-0_3 = { package = "rand_chacha", version = "0.3.1", default-features = false, features = ["std"] }
+rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", default-features = false, features = ["std"] }
 rand_core = { version = "0.6.4", default-features = false, features = ["alloc", "getrandom", "std"] }
 rayon = { version = "1.12.0", default-features = false }
 rayon-core = { version = "1.13.0", default-features = false }
@@ -1718,7 +1734,7 @@ proc-macro-error-attr = { version = "0.4.12", default-features = false }
 proc-macro-hack = { version = "0.5.20", default-features = false }
 proc-macro2-diagnostics = { version = "0.10.1", features = ["colors", "yansi"] }
 rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
-rand_chacha-0_3 = { package = "rand_chacha", version = "0.3.1", default-features = false, features = ["std"] }
+rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", default-features = false, features = ["std"] }
 rand_core = { version = "0.6.4", default-features = false, features = ["alloc", "getrandom", "std"] }
 rayon = { version = "1.12.0", default-features = false }
 rayon-core = { version = "1.13.0", default-features = false }
