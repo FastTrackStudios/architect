@@ -111,7 +111,7 @@ pub fn demo_vault() -> MemorySource {
 /// is drawn in the shell's sidebar, outside the page): what the navigator
 /// opens notes into.
 #[derive(Clone, Copy)]
-pub struct VaultWorkspace(Signal<Workspace>);
+pub struct VaultWorkspace(pub(super) Signal<Workspace>);
 
 /// The Vault's workspace over `vault`, in context; call above the shell.
 pub fn use_vault_workspace(vault: &MemorySource) -> VaultWorkspace {
