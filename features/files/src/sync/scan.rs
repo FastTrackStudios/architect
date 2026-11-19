@@ -193,11 +193,31 @@ impl Scanner {
         now: SystemTime,
         settle: Duration,
     ) -> Result<Vec<Seen>, ScanError> {
+        self.scan_but(dir, index, now, settle, &|_| false)
+    }
+
+    /// [`Self::scan`], leaving out every path `skip` holds for: files of
+    /// the folder that are not this root's (a vault's notes, which are
+    /// documents). A path it skips is never a change and never a delete:
+    /// one the index held is dropped from it, silently.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::scan`].
+    pub fn scan_but(
+        &mut self,
+        dir: &Path,
+        index: &mut Index,
+        now: SystemTime,
+        settle: Duration,
+        skip: &dyn Fn(&str) -> bool,
+    ) -> Result<Vec<Seen>, ScanError> {
         if !dir.is_dir() {
             return Err(ScanError::Missing(dir.display().to_string()));
         }
+        index.files.retain(|rel, _| !skip(rel));
         let mut on_disk = BTreeMap::new();
-        walk(dir, "", &mut on_disk)?;
+        walk(dir, "", skip, &mut on_disk)?;
         let now_ns = now
             .duration_since(UNIX_EPOCH)
             .ok()
@@ -303,7 +323,12 @@ pub fn hex(bytes: &[u8]) -> String {
     )
 }
 
-fn walk(dir: &Path, prefix: &str, out: &mut BTreeMap<String, Stat>) -> std::io::Result<()> {
+fn walk(
+    dir: &Path,
+    prefix: &str,
+    skip: &dyn Fn(&str) -> bool,
+    out: &mut BTreeMap<String, Stat>,
+) -> std::io::Result<()> {
     for entry in std::fs::read_dir(dir)?.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         let rel = if prefix.is_empty() {
@@ -318,8 +343,9 @@ fn walk(dir: &Path, prefix: &str, out: &mut BTreeMap<String, Stat>) -> std::io::
             continue;
         };
         if kind.is_dir() {
-            walk(&entry.path(), &rel, out)?;
+            walk(&entry.path(), &rel, skip, out)?;
         } else if kind.is_file()
+            && !skip(&rel)
             && let Ok(meta) = entry.metadata()
         {
             out.insert(rel, Stat::of(&meta));

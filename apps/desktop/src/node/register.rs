@@ -70,11 +70,11 @@ pub async fn sign_in(
         expires_in: secs(started.expires_in_seconds),
     };
     shown(&prompt);
-    let until = Instant::now() + prompt.expires_in;
+    let started_at = Instant::now();
     let mut every = secs(started.interval_seconds).max(Duration::from_secs(1));
     loop {
         tokio::time::sleep(every).await;
-        if Instant::now() >= until {
+        if started_at.elapsed() >= prompt.expires_in {
             return Err("the code ran out before it was approved".to_owned());
         }
         match auth

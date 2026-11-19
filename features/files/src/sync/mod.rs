@@ -37,7 +37,9 @@ pub mod verify;
 
 #[cfg(feature = "s3")]
 pub use bucket::BucketHolder;
-pub use engine::{Docs, Engine, EngineConfig, EngineError, KEEP_INLINE, RootStatus, VERIFY_WINDOW};
+pub use engine::{
+    Docs, Engine, EngineConfig, EngineError, KEEP_INLINE, RootStatus, Skip, VERIFY_WINDOW,
+};
 pub use lane::{BLOB_PERMITS, HeldManifest, POSSESSION_PERMITS};
 pub use ledger::{Identity, LedgerDoc};
 pub use manifest::{Checkpoint, FileVersion, Manifest, RootMeta, Section, Settled, Tree};

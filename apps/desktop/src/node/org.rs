@@ -961,10 +961,11 @@ pub fn remembered_all(data: &Path) -> Vec<NodeOrg> {
 
 /// Keep `orgs` for [`remembered_all`].
 pub fn remember_all(data: &Path, orgs: &[NodeOrg]) {
-    let text: String = orgs
-        .iter()
-        .map(|o| format!("{}={}\n", o.slug, o.id.0))
-        .collect();
+    let text = orgs.iter().fold(String::new(), |mut text, o| {
+        use std::fmt::Write as _;
+        let _ = writeln!(text, "{}={}", o.slug, o.id.0);
+        text
+    });
     if let Err(error) = std::fs::write(data.join("orgs"), text) {
         tracing::warn!(%error, "the orgs are not kept: the next start asks the issuer");
     }

@@ -509,7 +509,7 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
     // ── Projects and asset libraries: manifests in the same registry ──
     let files_registry: Arc<std::sync::OnceLock<crdt::DocRegistry>> = Arc::default();
     let files = config
-        .files_dir
+        .files_root()
         .as_ref()
         .map(|dir| files::engine(&config, dir, files_registry.clone()))
         .transpose()
@@ -577,18 +577,29 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
         }
         org::VaultOrgs::new(orgs.clone(), by_vault)
     };
-    let lanes: Vec<org::OrgLane> = match &issuer {
-        Some(issuer) => orgs
-            .iter()
+    // Each vault's attachments, a root held where the vault is.
+    if let (true, Some(engine)) = (config.vault_files, &files) {
+        let slugs: Vec<String> = orgs.iter().map(|o| o.slug.clone()).collect();
+        for (id, root) in &roots {
+            files::hold_vault(
+                engine,
+                config.vault_files_org(id, &slugs),
+                id,
+                root,
+                &collab,
+            );
+        }
+    }
+    let lanes: Vec<org::OrgLane> = issuer.as_ref().map_or_else(Vec::new, |issuer| {
+        orgs.iter()
             .map(|org| {
                 org::OrgLane::new(org.clone(), &admission, issuer)
                     .with_recheck(Duration::from_secs(config.lane_recheck_secs.max(1)))
                     .with_issuer_grace(Duration::from_secs(config.lane_issuer_grace_secs))
                     .with_origins(config.lane_origins.clone())
             })
-            .collect(),
-        None => Vec::new(),
-    };
+            .collect()
+    });
     let catalog = VaultCatalog::new(backend.clone())
         .with_files(files.clone())
         .with_documents(collab.clone(), extension_kinds);

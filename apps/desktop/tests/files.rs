@@ -517,3 +517,81 @@ async fn a_node_with_a_holding_rule_never_fetches_the_multitracks() {
     hosted.stop().await;
     always.stop().await;
 }
+
+/// A vault's attachments sync between the nodes that hold it, like its
+/// notes: the recording and the cover reach the other node's vault, and a
+/// node with a holding rule gets the light ones and leaves the multitrack
+/// listed (#490, #904).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_vaults_attachments_reach_the_other_node_under_its_holding_rule() {
+    let origin = issuer().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let vaulted = |name: &str, bind: &str, session: PathBuf| {
+        let dir = tmp.path().join(name);
+        Config {
+            vaults: [("setlists".to_owned(), PathBuf::from("vaults/setlists"))].into(),
+            vault_files: true,
+            files_dir: None,
+            ..config(name, &dir, &origin, session, PathBuf::new(), false, bind)
+        }
+    };
+    let storage_dir = tmp.path().join("storage");
+    let vault = storage_dir.join("data/vaults/setlists");
+    std::fs::create_dir_all(vault.join("Songs/Joy/Media")).unwrap();
+    std::fs::write(vault.join("Songs/Joy/Joy.md"), "# Joy\n\n![[cover.png]]\n").unwrap();
+    std::fs::write(vault.join("Songs/Joy/cover.png"), vec![8u8; 3_000]).unwrap();
+    std::fs::write(vault.join("Songs/Joy/reference.mp3"), vec![4u8; 50_000]).unwrap();
+    std::fs::write(vault.join("Songs/Joy/Media/kick.wav"), vec![6u8; 400_000]).unwrap();
+    let storage = node::start(vaulted(
+        "storage",
+        &free_udp(),
+        session(&origin, &storage_dir).await,
+    ))
+    .await
+    .unwrap();
+
+    let hosted_dir = tmp.path().join("hosted");
+    let mut hosted = vaulted("hosted", &free_udp(), session(&origin, &hosted_dir).await);
+    hosted.peers = vec![storage.dial().unwrap()];
+    hosted.files_skip_paths = vec!["**/Media/**".to_owned()];
+    let hosted = node::start(hosted).await.unwrap();
+    let there = hosted_dir.join("data/vaults/setlists");
+
+    until("the note reaches the other node", async || {
+        read(&there.join("Songs/Joy/Joy.md")).contains("# Joy")
+    })
+    .await;
+    until("its cover and its recording do too", async || {
+        std::fs::metadata(there.join("Songs/Joy/cover.png")).is_ok_and(|m| m.len() == 3_000)
+            && std::fs::metadata(there.join("Songs/Joy/reference.mp3"))
+                .is_ok_and(|m| m.len() == 50_000)
+    })
+    .await;
+    let root = async || {
+        engine(&hosted)
+            .status()
+            .await
+            .into_iter()
+            .find(|r| r.place == "setlists/Vaults/setlists")
+    };
+    until("the multitrack is listed and left out", async || {
+        root()
+            .await
+            .is_some_and(|r| r.files == 3 && r.left_out == 1 && r.missing == 0)
+    })
+    .await;
+    assert!(!there.join("Songs/Joy/Media/kick.wav").exists());
+    // The note is a document, not one of the root's files.
+    let listed = root().await.unwrap();
+    assert_eq!(listed.files, 3, "{listed:?}");
+
+    // A new attachment on the storage node arrives too.
+    std::fs::write(vault.join("Songs/Joy/chart.pdf"), b"%PDF-1.7").unwrap();
+    until("a new attachment arrives", async || {
+        std::fs::read(there.join("Songs/Joy/chart.pdf")).is_ok_and(|b| b == b"%PDF-1.7")
+    })
+    .await;
+
+    hosted.stop().await;
+    storage.stop().await;
+}
