@@ -29,7 +29,7 @@ pub mod link;
 #[cfg(feature = "ui")]
 pub mod ui;
 
-pub use collection::{Collection, Entry, Resolved, Row, Section};
+pub use collection::{Collection, Entry, Resolved, Row, Section, Tile};
 pub use item::Item;
 
 /// The note type a generic collection takes.
