@@ -93,7 +93,14 @@ pub enum Target {
     /// A place relative to the open note: a heading (`#songs`) or a
     /// note beside it (`Charts/`), resolved by the shell against the note.
     Place(String),
+    /// A menu that opens above the tab (a phone's "more"): what does not
+    /// fit the bar's places, each an entry with a target of its own (a
+    /// view or an action; never another menu). At most [`MAX_MENU`].
+    Menu(Vec<Favourite>),
 }
+
+/// The most entries a tab's menu holds.
+pub const MAX_MENU: usize = 8;
 
 impl Default for Target {
     fn default() -> Self {
@@ -375,11 +382,29 @@ fn check_face(id: &str, label: &str, icon: &str, target: Option<&Target>) -> Res
     if !is_id(icon) {
         return Err(format!("icon {icon:?} is not a Lucide name"));
     }
+    if let Some(Target::Menu(entries)) = target {
+        if entries.is_empty() || entries.len() > MAX_MENU {
+            return Err(format!("a menu of 1 to {MAX_MENU} entries"));
+        }
+        let mut ids = std::collections::BTreeSet::new();
+        for entry in entries {
+            if matches!(entry.target, Target::Menu(_)) {
+                return Err(format!("menu entry {:?}: a menu inside a menu", entry.id));
+            }
+            check_face(&entry.id, &entry.label, &entry.icon, Some(&entry.target))
+                .map_err(|why| format!("menu entry {:?}: {why}", entry.id))?;
+            if !ids.insert(entry.id.as_str()) {
+                return Err(format!("two menu entries with id {:?}", entry.id));
+            }
+        }
+        return Ok(());
+    }
     if let Some(target) = target {
         let (kind, text) = match target {
             Target::View(v) => ("view", v),
             Target::Action(a) => ("action", a),
             Target::Place(p) => ("place", p),
+            Target::Menu(_) => return Ok(()),
         };
         let ok = !text.is_empty()
             && text.len() <= MAX_NAME
@@ -396,6 +421,7 @@ fn check_face(id: &str, label: &str, icon: &str, target: Option<&Target>) -> Res
                 // which a browser reads as `/`, so `\\host` would be
                 // `//host`; no `%`, `:`, `?`, `@`), never above the note.
                 Target::Place(p) => place_ok(p),
+                Target::Menu(_) => true,
             };
         if !ok {
             return Err(format!("{kind} target {text:?} is not one"));

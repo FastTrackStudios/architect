@@ -419,6 +419,7 @@ fn PopoutView(props: PopoutProps) -> Element {
     // The window's own buttons, where it has no system title bar.
     let buttons = try_use_context::<super::PopoutButtons>();
     // Its document, where `APP_SHOT` finds it by this window's id.
+    #[cfg(feature = "native")]
     crate::shot::use_window_shot(&props.window.0);
     let host = use_context_provider(|| Host {
         workspace: props.workspace,

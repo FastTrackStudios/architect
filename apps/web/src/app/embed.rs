@@ -173,6 +173,10 @@ pub fn NoteEmbed(
     properties: Vec<(String, String)>,
     body: String,
     #[props(default)] files: Vec<ViewFile>,
+    /// The view fills the place it is given (the note is its view: a
+    /// link's page), never a strip at the note's head.
+    #[props(default)]
+    pane: bool,
 ) -> Element {
     let listing = use_listing();
     let vault = try_consume_context::<super::vault::WebVault>();
@@ -211,17 +215,25 @@ pub fn NoteEmbed(
     );
     rsx! {
         Claimed {
-            key: "{island.folder}/{claim.view}",
+            // A frame is made as tall as its box or as it says once, at
+            // its mount: a view that becomes the page is mounted again.
+            key: "{island.folder}/{claim.view}/{pane}",
             island: island.clone(),
             view: claim.view.clone(),
             note,
+            pane,
         }
     }
 }
 
 /// `island`'s view `view`, once its bundle is fetched and checked.
 #[component]
-fn Claimed(island: Island, view: String, note: Value) -> Element {
+pub(super) fn Claimed(
+    island: Island,
+    view: String,
+    note: Value,
+    #[props(default)] pane: bool,
+) -> Element {
     let bundle = use_bundle(island);
     let checked: Option<Rc<Bundle>> = bundle
         .read()
@@ -230,7 +242,28 @@ fn Claimed(island: Island, view: String, note: Value) -> Element {
     let Some(bundle) = checked else {
         return rsx! {};
     };
-    rsx! { Embedded { bundle, view, note } }
+    rsx! { Embedded { bundle, view, note, pane } }
+}
+
+/// View `view` of extension `extension`'s island, filling the page: a
+/// favourite's tab whose view claims no note type (the lyrics of what
+/// plays, its arrangement). It is handed where its source is and no note.
+#[component]
+pub fn IslandView(extension: String, view: String) -> Element {
+    let islands = use_resource(super::frames::islands);
+    let found = islands
+        .read()
+        .as_ref()
+        .and_then(|l| l.iter().find(|i| i.id == extension).cloned());
+    match found {
+        Some(island) => rsx! {
+            div { "data-testid": "page-view", "data-view": "{view}",
+                style: "display: flex; flex-direction: column; min-height: 70vh; margin: 0 -16px;",
+                Claimed { island, view: view.clone(), note: Value::Null, pane: true }
+            }
+        },
+        None => rsx! {},
+    }
 }
 
 /// View `view` of `bundle`'s island on `note`, its playhead source its
@@ -280,7 +313,7 @@ pub fn Embedded(
     let (testid, style) = if pane {
         (
             "ext-view-pane",
-            "flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; padding: 12px 16px;",
+            "flex: 1 1 0; min-height: 0; display: flex; flex-direction: column;",
         )
     } else {
         // At a note's head: the same gap below it as the core list

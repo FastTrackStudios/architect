@@ -121,6 +121,11 @@ thread_local! {
 }
 
 /// The node's islands this app believes (none without a node).
+/// The islands the node lists (cached for the page's life).
+pub async fn islands() -> Rc<Vec<Island>> {
+    listing().await
+}
+
 async fn listing() -> Rc<Vec<Island>> {
     if let Some(l) = LISTING.with(|l| l.borrow().clone()) {
         return l;
@@ -526,6 +531,17 @@ fn heard(shared: &Shared, data: &JsValue) {
                 f.mark("data-ext-refused", "too many requests");
                 return;
             }
+            // To a note beside its own (a set's row, to its song): the
+            // app's own press, where the viewer may make it.
+            if action == ext_host::NOTE_OPEN {
+                let opened = ext_host::note_ask(&args).is_some_and(|path| open_note(&path));
+                if opened {
+                    f.mark("data-ext-asked", &action);
+                } else {
+                    f.mark("data-ext-refused", "not a note the viewer can open here");
+                }
+                return;
+            }
             if !ext_host::INTENTS.contains(&action.as_str()) {
                 f.mark("data-ext-refused", "not an ask a frame makes");
                 return;
@@ -540,6 +556,24 @@ fn heard(shared: &Shared, data: &JsValue) {
         Said::Error(why) => f.die(&why),
         Said::Nothing => {}
     }
+}
+
+thread_local! {
+    /// What opens a note for [`ext_host::NOTE_OPEN`]: the page showing
+    /// notes now (a share link's guest page), which says whether it did.
+    static NOTE_OPENER: RefCell<Option<Rc<dyn Fn(&str) -> bool>>> = const { RefCell::new(None) };
+}
+
+/// The page that opens a note a frame asks for (none: every such ask is
+/// refused). It opens only what its viewer may open, and says whether it
+/// did.
+pub fn set_note_opener(opener: Option<Rc<dyn Fn(&str) -> bool>>) {
+    NOTE_OPENER.with(|o| *o.borrow_mut() = opener);
+}
+
+fn open_note(path: &str) -> bool {
+    let opener = NOTE_OPENER.with(|o| o.borrow().clone());
+    opener.is_some_and(|open| open(path))
 }
 
 fn loaded(shared: &Shared) {
@@ -811,6 +845,21 @@ pub fn ExtensionFrame(
         FrameState::Ready => "ready",
         FrameState::Gone(_) => "gone",
     };
+    // A frame that becomes as tall as its box after its mount (a note's
+    // head that turns out to be the page): the frame is told, and its
+    // element takes the box's height at once.
+    {
+        let shared = shared.clone();
+        use_effect(use_reactive!(|fill| {
+            let mut f = shared.borrow_mut();
+            if f.fill != fill {
+                f.fill = fill;
+                if let (true, Some(el)) = (fill, f.iframe.as_ref()) {
+                    let _ = el.style().set_property("height", "100%");
+                }
+            }
+        }));
+    }
     let shown = if ready { "block" } else { "none" };
     let height = if fill { "height: 100%;" } else { "" };
     rsx! {

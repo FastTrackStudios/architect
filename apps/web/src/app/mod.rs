@@ -39,12 +39,17 @@
 mod audio;
 mod click;
 mod collection;
+mod decoded;
 mod documents;
 mod embed;
 pub mod extensions;
 mod favourites;
 mod frames;
 mod guest;
+
+/// The action a round button runs to open the Now Playing bar's detail.
+const PLAYER_DETAIL: &str = "PLAYHEAD_DETAIL";
+mod home;
 mod index_sync;
 mod installs;
 mod keys;
@@ -53,6 +58,7 @@ mod page;
 mod recording;
 mod screen;
 mod settings;
+mod tabmenu;
 mod theme;
 pub mod vault;
 
@@ -63,7 +69,9 @@ use architect::action::ActionList;
 use architect_commands::{Command, Overlay, PaletteView};
 use architect_shell::{self as shell, AppShell, icon};
 use dioxus::prelude::*;
-use lucide_dioxus::{Command as CommandIcon, Files, LogIn, LogOut, Search, Settings2, SquarePen};
+use lucide_dioxus::{
+    Command as CommandIcon, Files, House, LogIn, LogOut, Pause, Play, Search, Settings2, SquarePen,
+};
 
 /// Which app the page is.
 #[derive(Clone)]
@@ -209,25 +217,139 @@ fn WebApp() -> Element {
         ("PLAYHEAD_TOGGLE", "Play or pause"),
         ("PLAYHEAD_NEXT", "Next"),
         ("PLAYHEAD_PREVIOUS", "Previous"),
+        // The bar's detail (the position, previous and next, the
+        // sources): the bar's own `^`, for a round button that stands
+        // for it.
+        (PLAYER_DETAIL, "Show the player"),
     ] {
         architect_commands::use_command(Command::new(id, name).group("Now Playing"), move || {
-            architect_playhead::ui::press(id, &serde_json::json!({}));
+            if id == PLAYER_DETAIL {
+                architect_playhead::ui::toggle_detail();
+            } else {
+                architect_playhead::ui::press(id, &serde_json::json!({}));
+            }
         });
     }
     // The bottom slots: the open note's type's favourites, else the
     // web app's own.
     let slots = favourites::use_web_favourites(workspace, &web_vault.source, &commands);
     let set = slots.set.clone();
-    let tabs = set.slots().to_vec();
-    let separate = set.primary.clone();
     let current = slots.current;
-    let foot = vec![shell::Action::new(
+    // What the viewer may do here, and so which of the shell's controls
+    // are drawn (`crate::permits`): a link's guest has no vault and writes
+    // nothing. A permission on the same shell, never another one.
+    let permits = if guest {
+        crate::permits::Permits::GUEST
+    } else {
+        crate::permits::Permits::MEMBER
+    };
+    let tabs: Vec<_> = set
+        .slots()
+        .iter()
+        .filter(|t| permits.allows(crate::permits::own_tab(t.id)))
+        .cloned()
+        .collect();
+    // The round button beside them: the app's own is "New note" (a note
+    // type's declared primary, a player's Play, is everyone's).
+    let separate = set
+        .primary
+        .clone()
+        .filter(|a| a.label != "New note" || permits.allows(crate::permits::Needs::Write));
+    // A link's own tabs: the favourites its root note's type declares
+    // (`guest::BAR`), and its round button, which plays and pauses.
+    let playing = architect_playhead::ui::use_playhead();
+    let link_bar = guest.then(|| guest::BAR()).filter(|b| !b.tabs.is_empty());
+    let (tabs, current, separate) = match &link_bar {
+        Some(bar) => (
+            bar.tabs
+                .iter()
+                .map(|t| shell::Tab::named(t.id, t.label, t.glyph))
+                .collect(),
+            bar.current,
+            bar.primary.as_ref().and_then(|p| {
+                let architect_favourites::Target::Action(action) = &p.target else {
+                    return None;
+                };
+                let action = action.clone();
+                action.starts_with("PLAYHEAD_").then(|| {
+                    let on = playing().active.is_some_and(|a| a.playing);
+                    let (label, icon, glyph) = match (&p.on, on) {
+                        (Some(face), true) => (face.label.clone(), icon!(Pause), None),
+                        // Its own icon, by name, where it has no faces.
+                        (None, _) => (p.label.clone(), icon!(Play), Some(guest::kept(&p.icon))),
+                        _ => (p.label.clone(), icon!(Play), None),
+                    };
+                    let mut button = shell::Action::new(label, icon, move |()| {
+                        if action == PLAYER_DETAIL {
+                            architect_playhead::ui::toggle_detail();
+                        } else {
+                            architect_playhead::ui::press(&action, &serde_json::json!({}));
+                        }
+                    });
+                    button.glyph = glyph;
+                    button
+                })
+            }),
+        ),
+        None => (tabs, current, separate),
+    };
+    let on_link_bar = link_bar.is_some();
+    // A member's home: an island's view over the workspace, first on show
+    // (`home`), with a tab and a foot button back to it.
+    let home_view = home::use_home();
+    let has_home = matches!(mode, Mode::Org { .. }) && home_view().is_some();
+    let home_on = has_home && home::HOME();
+    // A page for looking and listening has no row of editing buttons: a
+    // link's guest page, the home, and a note an extension's view draws.
+    let listing = frames::use_listing();
+    let on_show_type = {
+        let source = web_vault.source.clone();
+        use_memo(move || vault::note_on_show(&workspace.read(), &source).and_then(|(_, ty)| ty))
+    };
+    let view_on_show = !guest
+        && !home_on
+        && on_show_type().is_some_and(|ty| {
+            listing
+                .read()
+                .as_ref()
+                .is_some_and(|l| crate::ext_host::claimed(l, &ty).is_some())
+        });
+    let quiet = guest || home_on || view_on_show;
+    use_effect(use_reactive!(|(quiet, view_on_show)| {
+        shell::quiet_actions(quiet);
+        if *vault::VIEW_ON_SHOW.peek() != view_on_show {
+            *vault::VIEW_ON_SHOW.write() = view_on_show;
+        }
+    }));
+    // The Home tab leads the app's own tabs. A note its view draws has
+    // tabs of its own (a setlist's Setlist, Charts, Lyrics, More): there
+    // the way home is the back button at the top left.
+    let (tabs, current) = if has_home && !view_on_show {
+        (
+            std::iter::once(shell::Tab::named("home", "Home", "house"))
+                .chain(tabs)
+                .collect::<Vec<_>>(),
+            if home_on { Some("home") } else { current },
+        )
+    } else {
+        (tabs, current)
+    };
+    let mut foot = vec![shell::Action::new(
         "Settings",
         icon!(Settings2),
         move |()| {
             settings.show(None);
         },
     )];
+    if has_home {
+        // A desk has no bottom tabs: the way back to the home is here.
+        foot.insert(
+            0,
+            shell::Action::new("Home", icon!(House), move |()| {
+                *home::HOME.write() = true;
+            }),
+        );
+    }
     let account = match &mode {
         Mode::Demo => shell::Account::new("Demo")
             .detail("Nothing leaves this tab")
@@ -340,8 +462,17 @@ fn WebApp() -> Element {
                         tabs,
                         current,
                         on_tab: move |id: &'static str| {
-                            if !set.press(id) {
-                                favourites::own_tab(id, workspace, &commands);
+                            if on_link_bar {
+                                guest::press_tab(id);
+                            } else if id == "home" {
+                                *home::HOME.write() = true;
+                            } else {
+                                if has_home {
+                                    *home::HOME.write() = false;
+                                }
+                                if !set.press(id) {
+                                    favourites::own_tab(id, workspace, &commands);
+                                }
                             }
                         },
                         separate,
@@ -351,22 +482,45 @@ fn WebApp() -> Element {
                         status,
                         // A phone's navigator: the shell's left side (the
                         // workspace's left dock is the shell's on a desk).
-                        left: phone.then(|| rsx! { vault::FilesView {} }),
-                        actions: vec![
-                            shell::BarAction::new(vault::FILES, "Files", icon!(Files)),
-                            shell::BarAction::new(architect_command_palette::OPEN_ANYTHING_ACTION, "Open…", icon!(Search)),
-                            shell::BarAction::new(vault::NEW_NOTE, "New note", icon!(SquarePen)),
-                            shell::BarAction::new(architect_command_palette::OPEN_ACTION, "Commands", icon!(CommandIcon)),
-                            shell::BarAction::new("APP_SETTINGS", "Settings", icon!(Settings2)),
-                        ]
+                        // A guest's: the link itself (who it is for, its
+                        // notes, its files).
+                        left: if guest {
+                            Some(rsx! { guest::GuestSide {} })
+                        } else {
+                            phone.then(|| rsx! { vault::FilesView {} })
+                        },
+                        actions: {
+                            use crate::permits::Needs;
+                            [
+                                (Needs::Vault, shell::BarAction::new(vault::FILES, "Files", icon!(Files))),
+                                (Needs::Vault, shell::BarAction::new(architect_command_palette::OPEN_ANYTHING_ACTION, "Open…", icon!(Search))),
+                                (Needs::Write, shell::BarAction::new(vault::NEW_NOTE, "New note", icon!(SquarePen))),
+                                (Needs::Nothing, shell::BarAction::new(architect_command_palette::OPEN_ACTION, "Commands", icon!(CommandIcon))),
+                                (Needs::Nothing, shell::BarAction::new("APP_SETTINGS", "Settings", icon!(Settings2))),
+                            ]
+                        }
                         .into_iter()
+                        // The row is for working on notes: a viewer who
+                        // writes none has none of it.
+                        .filter(|(needs, _)| !home_on && permits.allows(crate::permits::Needs::Write) && permits.allows(*needs))
+                        .map(|(_, action)| action)
                         .chain(demo.then(|| shell::BarAction::new("WEB_SIGN_IN", "Sign in", icon!(LogIn))))
                         .collect::<Vec<_>>(),
                         now_playing: rsx! { architect_playhead::ui::NowPlayingBar { art } },
                         if let Mode::Guest { code, rest } = &mode {
                             guest::GuestPage { code: code.clone(), rest: rest.clone() }
                         } else {
-                            vault::VaultPage {}
+                            if let (true, Mode::Org { person, org, .. }) = (home_on, &mode) {
+                                home::HomePage { person: person.clone(), org: org.clone() }
+                            }
+                            // The workspace itself (its panes, what is
+                            // open) is the app's and stays; its page, with
+                            // the bar buttons it adds, is off while the
+                            // home shows.
+                            if !home_on {
+                                vault::VaultPage {}
+                            }
+                            tabmenu::TabMenu {}
                         }
                     }
                 }

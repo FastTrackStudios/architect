@@ -57,6 +57,8 @@ process-views = ["gui", "architect-app/process-views-lab"]
 node-wasi = ["architect-sites/wasi"]
 
 [dependencies]
+# The node gzips an island's files for a browser that takes it (#602).
+flate2 = "1"
 architect-app = { workspace = true, optional = true }
 # The window's node is on the account as the app's signed-in account: its
 # folder's accounts file and its secret store (the keychain in a release).

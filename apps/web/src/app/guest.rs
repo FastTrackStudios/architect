@@ -305,6 +305,24 @@ fn show_path(path: &str) {
     }
 }
 
+/// The page's scrollers back at their top (the guest page's content
+/// scrolls in an element of its own, `data-guest-scroll`).
+fn to_top() {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    if let Ok(list) = doc.query_selector_all("[data-guest-scroll]") {
+        for i in 0..list.length() {
+            if let Some(el) = list
+                .item(i)
+                .and_then(|n| n.dyn_into::<web_sys::Element>().ok())
+            {
+                el.set_scroll_top(0);
+            }
+        }
+    }
+}
+
 /// The location's path, below the window.
 fn pathname() -> Option<String> {
     web_sys::window()?.location().pathname().ok()
@@ -487,13 +505,65 @@ pub fn GuestPage(code: String, rest: String) -> Element {
                     .find(|n| &n.path == p)
                     .and_then(|n| n.page.clone()),
                 Open::Files => Some(format!("{}_files/", o.link.link)),
-                Open::Nothing => None,
+                Open::View(..) | Open::Nothing => None,
             };
             if let Some(page) = page {
                 show_path(&page);
             }
         }
         open.set(Some(next));
+        // From its top: the page before it may have been scrolled far down
+        // (the link's list of notes), and the note would open off screen.
+        to_top();
+    });
+    // A view's ask to open a note of this link (`ext_host::NOTE_OPEN`: a
+    // set's row, to its song): only a note the link lists, as a press in
+    // the list of its notes.
+    use_hook(move || {
+        super::frames::set_note_opener(Some(std::rc::Rc::new(move |path: &str| {
+            let listed = matches!(&*opened.peek(), Some(Ok(o)) if o.link.notes.iter().any(|n| n.path == path));
+            if listed {
+                choose.call(Open::Note(path.to_owned()));
+            }
+            listed
+        })));
+    });
+    use_drop(|| super::frames::set_note_opener(None));
+    // The same chooser for the shell's bottom tabs and the sidebar, which
+    // are drawn outside this page ([`press_tab`], [`GuestSide`]).
+    use_hook(move || {
+        CHOOSER.with(|c| *c.borrow_mut() = Some(Rc::new(move |next: Open| choose.call(next))));
+    });
+    use_drop(|| {
+        CHOOSER.with(|c| *c.borrow_mut() = None);
+        *MENU.write() = None;
+        *BAR.write() = Bar::default();
+        *SIDE.write() = None;
+    });
+    // The bottom tabs: the favourites an extension declares for the type
+    // of the link's root note (a setlist's Setlist, Charts, Lyrics,
+    // Arrangement), each a view of that extension's; and which is current.
+    let declared = use_resource(super::frames::favourites);
+    let islands = use_resource(super::frames::islands);
+    use_effect(move || {
+        let (link, files) = match &*opened.read() {
+            Some(Ok(o)) => ((*o.link).clone(), o.files.len()),
+            _ => return,
+        };
+        let at = open().unwrap_or_else(|| guest_view::open(&link, &at_path()));
+        let bar = bar_of(
+            &link,
+            &at,
+            declared.read().as_deref().map_or(&[][..], |d| d.as_slice()),
+            islands.read().as_deref().map_or(&[][..], |i| i.as_slice()),
+        );
+        if *BAR.peek() != bar {
+            *BAR.write() = bar;
+        }
+        let side = Side { link, files, at };
+        if SIDE.peek().as_ref() != Some(&side) {
+            *SIDE.write() = Some(side);
+        }
     });
     let state = opened.read().clone();
     // The root note as the core list (#668): a collection whose type no
@@ -524,6 +594,7 @@ pub fn GuestPage(code: String, rest: String) -> Element {
                 LinkHead { opened: o.clone(), at: at.clone(), on_open: choose }
                 match at.clone() {
                     Open::Files => rsx! { FilesView { opened: o.clone() } },
+                    Open::View(extension, view) => rsx! { super::embed::IslandView { key: "{extension}/{view}", extension, view } },
                     // The root note: its list first (what a setlist is
                     // opened for), then its words; any other, its words.
                     Open::Note(path) if core_list && guest_view::root_note(&o.link).is_some_and(|r| r.path == path) => rsx! {
@@ -537,13 +608,9 @@ pub fn GuestPage(code: String, rest: String) -> Element {
                     // link's notes to open, under their own heading.
                     Open::Note(path) if claimed_list && guest_view::root_note(&o.link).is_some_and(|r| r.path == path) => rsx! {
                         div { style: "display: flex; flex-direction: column; gap: 20px;",
-                            GuestNoteView { key: "{path}-{revision}", code: code.clone(), path: path.clone() }
-                            section { "data-testid": "guest-notes", style: "display: flex; flex-direction: column; gap: 4px;",
-                                h2 { style: "margin: 8px 0 0; font-size: 13px; font-weight: 650; letter-spacing: .01em; color: {t.ink_3};",
-                                    "Notes on this link"
-                                }
-                                NoteList { opened: o.clone(), chosen: path.clone(), on_open: choose }
-                            }
+                            // The link is named for this note: its title is the page's heading already.
+                            // The link's other notes and its files are in the sidebar ([`GuestSide`]).
+                            GuestNoteView { key: "{path}-{revision}", code: code.clone(), path: path.clone(), untitled: true }
                         }
                     },
                     Open::Note(path) if guest_view::root_note(&o.link).is_some_and(|r| r.path == path) => rsx! {
@@ -575,9 +642,12 @@ pub fn GuestPage(code: String, rest: String) -> Element {
         }
     };
     rsx! {
+        TabMenu {}
         div { "data-testid": "guest-page",
-            style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: 16px 16px 120px; color: {t.ink};",
-            div { style: "max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px;",
+            // No scrollbar track: a view that is the page goes to both edges (a
+            // note's words still scroll by touch, wheel and keys).
+            "data-guest-scroll": "", style: "flex: 1 1 0; min-height: 0; overflow: auto; scrollbar-width: none; padding: 6px 16px 120px; color: {t.ink};",
+            div { style: "max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px;",
                 {body}
             }
         }
@@ -600,7 +670,7 @@ fn OutOfDate(skew: crate::ShellSkew, node: String) -> Element {
     };
     rsx! {
         div { "data-testid": "guest-page",
-            style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: 16px; color: {t.ink};",
+            "data-guest-scroll": "", style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: 16px; color: {t.ink};",
             section { "data-testid": "guest-problem", "data-why": "{title}",
                 style: "max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; padding: 24px 0;",
                 h1 { style: "margin: 0; font-size: 22px;", "{title}" }
@@ -641,49 +711,319 @@ fn Closed(shut: Shut) -> Element {
     }
 }
 
-/// The link's title, who it is for, and the way to its files.
+/// The top of a link: one thin line, the link's name centred and quiet,
+/// and the way to the sidebar, where who it is for, its notes and its
+/// files are ([`GuestSide`]). The page under it is the note.
 #[component]
 fn LinkHead(opened: Opened, at: Open, on_open: EventHandler<Open>) -> Element {
+    let shell = use_shell();
+    let t = shell.theme.clone();
+    let _ = (at, on_open);
+    rsx! {
+        header { style: "position: relative; display: flex; align-items: center; justify-content: center; min-height: 32px;",
+            button { r#type: "button", "data-testid": "guest-side-open", "aria-label": "This link: who it is for, its notes and its files",
+                style: "position: absolute; left: -10px; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; display: grid; place-items: center; border: 0; background: transparent; color: {t.ink_3}; cursor: pointer; border-radius: 10px;",
+                onclick: move |_| shell.toggle(architect_shell::Side::Left),
+                svg { view_box: "0 0 24 24", width: "18", height: "18", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", "aria-hidden": "true",
+                    path { d: "M4 7h16M4 12h16M4 17h10" }
+                }
+            }
+            span { "data-testid": "guest-title",
+                style: "max-width: calc(100% - 96px); font-size: 13px; color: {t.ink_3}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
+                "{opened.link.title}"
+            }
+        }
+    }
+}
+
+/// What the sidebar and the bottom tabs are drawn from: the open link,
+/// how many files it has and what is open. Set by the page, read by the
+/// shell's own slots, which are drawn outside it.
+#[derive(Clone, PartialEq)]
+pub(super) struct Side {
+    link: GuestLink,
+    files: usize,
+    at: Open,
+}
+
+/// One bottom tab of a link: a declared favourite.
+#[derive(Clone, PartialEq)]
+pub(super) struct BarTab {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub glyph: &'static str,
+    /// The extension whose view it opens, and the view.
+    extension: String,
+    view: String,
+    /// The note types that view claims; none: it fills the page.
+    claims: Vec<String>,
+    /// Its menu's entries, for a tab that opens one above itself (a
+    /// phone's "more"); empty for a tab that opens a view.
+    pub menu: Vec<BarTab>,
+}
+
+/// A link's bottom tabs, which is current, and its round button.
+#[derive(Clone, Default, PartialEq)]
+pub(super) struct Bar {
+    pub tabs: Vec<BarTab>,
+    pub current: Option<&'static str>,
+    pub primary: Option<architect_favourites::Primary>,
+}
+
+pub(super) static BAR: GlobalSignal<Bar> = Signal::global(Bar::default);
+pub(super) static SIDE: GlobalSignal<Option<Side>> = Signal::global(|| None);
+/// The tab whose menu is open above the bar, by its id.
+pub(super) static MENU: GlobalSignal<Option<&'static str>> = Signal::global(|| None);
+
+thread_local! {
+    /// Opens a note, the files or a view on the page ([`GuestPage`]'s `choose`).
+    static CHOOSER: RefCell<Option<Rc<dyn Fn(Open)>>> = const { RefCell::new(None) };
+    /// The declared ids and labels, kept for the page's life: the shell's
+    /// tabs name theirs with `&'static str`.
+    static NAMES: RefCell<HashMap<String, &'static str>> = RefCell::new(HashMap::new());
+}
+
+pub(super) fn kept(name: &str) -> &'static str {
+    NAMES.with(|n| {
+        *n.borrow_mut()
+            .entry(name.to_owned())
+            .or_insert_with(|| Box::leak(name.to_owned().into_boxed_str()))
+    })
+}
+
+fn choose_on_page(next: Open) {
+    let chooser = CHOOSER.with(|c| c.borrow().clone());
+    if let Some(choose) = chooser {
+        choose(next);
+    }
+}
+
+/// The bar for `link` with `at` open: the favourites declared for its
+/// root note's type whose targets are views of an island the node lists.
+fn bar_of(
+    link: &GuestLink,
+    at: &Open,
+    declared: &[architect_favourites::Listed],
+    islands: &[crate::ext_host::Island],
+) -> Bar {
+    use architect_favourites::Target;
+    let Some(kind) = guest_view::root_note(link).and_then(|r| r.kind.clone()) else {
+        return Bar::default();
+    };
+    let Some(set) = declared
+        .iter()
+        .find(|d| d.favourites.is_for(&kind) && !d.favourites.tabs.is_empty())
+    else {
+        return Bar::default();
+    };
+    let Some(island) = islands.iter().find(|i| i.id == set.by.extension) else {
+        return Bar::default();
+    };
+    let tab_of = |f: &architect_favourites::Favourite| -> Option<BarTab> {
+        let (view, menu) = match &f.target {
+            Target::View(view) => (
+                view.rsplit('/').next().unwrap_or(view).to_owned(),
+                Vec::new(),
+            ),
+            // Filled below: a menu's entries are tabs of their own.
+            Target::Menu(_) => (String::new(), Vec::new()),
+            Target::Action(_) | Target::Place(_) => return None,
+        };
+        let claims = island
+            .embeds
+            .iter()
+            .find(|e| !view.is_empty() && e.view == view)
+            .map(|e| e.note_types.clone())
+            .unwrap_or_default();
+        Some(BarTab {
+            id: kept(&f.id),
+            label: kept(&f.label),
+            glyph: kept(&f.icon),
+            extension: island.id.clone(),
+            view,
+            claims,
+            menu,
+        })
+    };
+    let tabs: Vec<BarTab> = set
+        .favourites
+        .tabs
+        .iter()
+        .filter_map(|f| {
+            let mut tab = tab_of(f)?;
+            if let Target::Menu(entries) = &f.target {
+                tab.menu = entries.iter().filter_map(&tab_of).collect();
+                if tab.menu.is_empty() {
+                    return None;
+                }
+            }
+            Some(tab)
+        })
+        .collect();
+    let claims = |t: &BarTab, kind: &str| t.claims.iter().any(|c| c.eq_ignore_ascii_case(kind));
+    let current = match at {
+        Open::Note(path) => link
+            .notes
+            .iter()
+            .find(|n| &n.path == path)
+            .and_then(|n| n.kind.as_deref())
+            .and_then(|k| tabs.iter().find(|t| claims(t, k)))
+            .map(|t| t.id),
+        Open::View(_, view) => tabs
+            .iter()
+            .find(|t| &t.view == view || t.menu.iter().any(|m| &m.view == view))
+            .map(|t| t.id),
+        Open::Files | Open::Nothing => None,
+    };
+    Bar {
+        tabs,
+        current,
+        primary: set.favourites.primary.clone(),
+    }
+}
+
+/// A bottom tab pressed. A tab whose view claims a note type opens a note
+/// of that type: the link's root when it is one, else the one whose
+/// recording is playing, else the first. A tab whose view claims none
+/// fills the page with that view.
+pub(super) fn press_tab(id: &str) {
+    let found = {
+        let bar = BAR.peek();
+        bar.tabs
+            .iter()
+            .chain(bar.tabs.iter().flat_map(|t| t.menu.iter()))
+            .find(|t| t.id == id)
+            .cloned()
+    };
+    let Some(tab) = found else {
+        return;
+    };
+    // A tab with a menu opens it above itself (pressed again: closes it).
+    if !tab.menu.is_empty() {
+        let open = *MENU.peek() == Some(tab.id);
+        *MENU.write() = (!open).then_some(tab.id);
+        return;
+    }
+    *MENU.write() = None;
+    let Some(side) = SIDE.peek().clone() else {
+        return;
+    };
+    if tab.claims.is_empty() {
+        choose_on_page(Open::View(tab.extension, tab.view));
+        return;
+    }
+    let of_type = |n: &&architect_spaces::ListedNote| {
+        n.kind
+            .as_deref()
+            .is_some_and(|k| tab.claims.iter().any(|c| c.eq_ignore_ascii_case(k)))
+    };
+    let playing = architect_playhead::with(|d| {
+        d.active()
+            .and_then(|a| d.state(a, architect_playhead::now_ms()))
+    })
+    .and_then(|s| s["item"]["media"].as_str().map(str::to_owned));
+    let note = guest_view::root_note(&side.link)
+        .filter(of_type)
+        .or_else(|| {
+            let media = playing.as_deref()?;
+            side.link
+                .notes
+                .iter()
+                .filter(of_type)
+                .find(|n| n.media.as_deref() == Some(media))
+        })
+        .or_else(|| side.link.notes.iter().find(of_type));
+    if let Some(note) = note {
+        choose_on_page(Open::Note(note.path.clone()));
+    }
+}
+
+/// The menu open above a bottom tab (a phone's "more"): its entries, one
+/// a row, over the page; a press outside closes it.
+#[component]
+pub(super) fn TabMenu() -> Element {
     let t = use_shell().theme;
-    let link = opened.link.clone();
-    let count = opened.files.len();
-    let whom = match link.audience.as_str() {
+    let Some(open) = MENU() else {
+        return rsx! {};
+    };
+    let bar = BAR();
+    let Some(tab) = bar.tabs.iter().find(|t| t.id == open).cloned() else {
+        return rsx! {};
+    };
+    let now = SIDE().map(|s| s.at);
+    rsx! {
+        div { "data-testid": "tab-menu-scrim", style: "position: fixed; inset: 0; z-index: 60;",
+            onclick: move |_| *MENU.write() = None,
+        }
+        div { "data-testid": "tab-menu", role: "menu", "aria-label": "{tab.label}",
+            style: "position: fixed; z-index: 61; right: 76px; bottom: calc(env(safe-area-inset-bottom, 0px) + 76px); min-width: 208px; padding: 6px; border-radius: 14px; background: {t.sheet}; border: 1px solid {t.rule}; box-shadow: 0 2px 6px rgba(0,0,0,.12), 0 18px 40px -12px rgba(0,0,0,.45); display: flex; flex-direction: column; gap: 2px;",
+            for entry in tab.menu.iter().cloned() {
+                button { key: "{entry.id}", r#type: "button", role: "menuitem", "data-testid": "tab-menu-item",
+                    "aria-current": if matches!(&now, Some(Open::View(_, v)) if *v == entry.view) { "page" },
+                    style: "display: flex; align-items: center; gap: 12px; width: 100%; min-height: 46px; padding: 0 12px; border: 0; border-radius: 10px; background: transparent; color: {t.ink}; font: inherit; font-size: 16px; text-align: left; cursor: pointer;",
+                    onclick: move |_| press_tab(entry.id),
+                    span { style: "display: grid; place-items: center; width: 22px; height: 22px; color: {t.ink_3};",
+                        {architect_shell::Tab::named(entry.id, entry.label, entry.glyph).draw(architect_shell::Icon { size: 20, color: t.ink_3.clone() })}
+                    }
+                    "{entry.label}"
+                }
+            }
+        }
+    }
+}
+
+/// The link in the shell's sidebar (a phone's drawer): what it is, who it
+/// is for, its notes and its files. What the top of the page used to hold.
+#[component]
+pub(super) fn GuestSide() -> Element {
+    let shell = use_shell();
+    let t = shell.theme.clone();
+    let Some(side) = SIDE() else {
+        return rsx! {};
+    };
+    let whom = match side.link.audience.as_str() {
         "public" => "Public",
         "org" => "For an organization's members",
         "invited" => "For the people it was shared with",
         _ => "Anyone with the link",
     };
-    let files_on = at == Open::Files;
-    let root = guest_view::root_note(&link).map(|n| n.path.clone());
-    let pill = |on: bool| {
-        if on {
-            format!(
-                "padding: 5px 12px; border-radius: 999px; border: 1px solid {}; background: {}; color: {}; font: inherit; font-size: 13px; cursor: pointer;",
-                t.accent, t.accent, t.accent_ink
-            )
-        } else {
-            format!(
-                "padding: 5px 12px; border-radius: 999px; border: 1px solid {}; background: transparent; color: {}; font: inherit; font-size: 13px; cursor: pointer;",
-                t.rule, t.ink
-            )
+    let go = use_callback(move |next: Open| {
+        choose_on_page(next);
+        if architect_shell::drawer_open() {
+            shell.toggle(architect_shell::Side::Left);
         }
+    });
+    let row = |on: bool| {
+        format!(
+            "display: block; width: 100%; text-align: left; border: 0; border-radius: 8px; padding: 9px 10px; min-height: 40px; font: inherit; font-size: 15px; cursor: pointer; color: {}; background: {}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
+            t.ink,
+            if on {
+                t.pill.to_string()
+            } else {
+                "transparent".to_owned()
+            }
+        )
     };
+    let files_on = side.at == Open::Files;
     rsx! {
-        header { style: "display: flex; flex-direction: column; gap: 8px;",
-            div { style: "font-size: 12px; color: {t.ink_3}; letter-spacing: 0.02em;", "Shared with you · {whom}" }
-            h1 { "data-testid": "guest-title", style: "margin: 0; font-size: 24px; line-height: 1.2;", "{link.title}" }
-            nav { style: "display: flex; flex-wrap: wrap; gap: 6px;",
-                if let Some(root) = root {
-                    button { "data-testid": "guest-notes-tab", style: pill(!files_on),
-                        onclick: move |_| on_open.call(Open::Note(root.clone())),
-                        "Notes ({link.notes.len()})"
-                    }
+        nav { "data-testid": "guest-side", "aria-label": "{side.link.title}",
+            style: "display: flex; flex-direction: column; gap: 2px; padding: 14px 10px; overflow-y: auto; height: 100%; box-sizing: border-box; color: {t.ink};",
+            div { style: "padding: 2px 10px 10px;",
+                div { style: "font-size: 17px; font-weight: 650; line-height: 1.25;", "{side.link.title}" }
+                div { style: "margin-top: 4px; font-size: 13px; color: {t.ink_3};", "Shared with you. {whom}." }
+            }
+            for note in side.link.notes.iter().cloned() {
+                button { key: "{note.path}", r#type: "button", "data-testid": "guest-side-note",
+                    style: row(side.at == Open::Note(note.path.clone())),
+                    onclick: move |_| go.call(Open::Note(note.path.clone())),
+                    "{note.title}"
                 }
-                if count > 0 {
-                    button { "data-testid": "guest-files-tab", style: pill(files_on),
-                        onclick: move |_| on_open.call(Open::Files),
-                        "Files ({count})"
-                    }
+            }
+            if side.files > 0 {
+                button { r#type: "button", "data-testid": "guest-side-files",
+                    style: "margin-top: 8px; {row(files_on)}",
+                    onclick: move |_| go.call(Open::Files),
+                    "Files ({side.files})"
                 }
             }
         }
@@ -853,7 +1193,16 @@ fn FilesView(opened: Opened) -> Element {
 /// Note `path` of link `code`: the view its type's island claims, handed
 /// what the node gave a guest, then its page's words and images.
 #[component]
-fn GuestNoteView(code: String, path: String, #[props(default)] core_list: bool) -> Element {
+fn GuestNoteView(
+    code: String,
+    path: String,
+    #[props(default)] core_list: bool,
+    /// The note's title is on the page already (the link's root, under the
+    /// link's own heading): not drawn a second time.
+    #[props(default)]
+    untitled: bool,
+) -> Element {
+    let listing = super::frames::use_listing();
     // Read again when the note asked for changes (props are not signals).
     let note = use_resource(use_reactive!(|(code, path)| {
         {
@@ -873,13 +1222,40 @@ fn GuestNoteView(code: String, path: String, #[props(default)] core_list: bool) 
         Some(Err(why)) => rsx! { p { "data-testid": "guest-problem", "{why}" } },
         Some(Ok((note, files, code))) => {
             let kind = note.kind.clone().unwrap_or_default();
+            // An extension claims this type and the node gave its view the
+            // note's text: the view draws the note.
+            let claimed = note.source.is_some()
+                && listing
+                    .read()
+                    .as_ref()
+                    .is_some_and(|l| crate::ext_host::claimed(l, &kind).is_some());
             let count = files.len();
             rsx! {
                 article { "data-testid": "guest-note", "data-files": "{count}",
                     "data-text": "{note.source.is_some()}",
                     style: "display: flex; flex-direction: column; gap: 10px;",
-                    h2 { style: "margin: 0; font-size: 20px;", "{note.title}" }
-                    if !kind.is_empty() {
+                    if !untitled && !claimed {
+                        h2 { style: "margin: 0; font-size: 20px;", "{note.title}" }
+                    }
+                    if claimed {
+                        // An extension draws this type: its view is the
+                        // note here, the height of the page. The note's
+                        // words are what the view reads, not a second
+                        // copy under it.
+                        // To the screen's edges: the view gives its own parts their gutters.
+                        div { "data-testid": "guest-note-view", style: "display: flex; flex-direction: column; height: calc(100dvh - 208px); min-height: 320px; margin: 0 -16px;",
+                            super::embed::NoteEmbed {
+                                audience: Audience::Guest,
+                                path: String::new(),
+                                title: note.title.clone(),
+                                note_type: kind.clone(),
+                                properties: Vec::new(),
+                                body: note.source.clone().unwrap_or_default(),
+                                files: files.clone(),
+                                pane: true,
+                            }
+                        }
+                    } else if !kind.is_empty() {
                         super::embed::NoteEmbed {
                             audience: Audience::Guest,
                             // A guest's view is never handed a vault path.
@@ -891,7 +1267,8 @@ fn GuestNoteView(code: String, path: String, #[props(default)] core_list: bool) 
                             files,
                         }
                     }
-                    Blocks {
+                    if !claimed {
+                      Blocks {
                         code,
                         // The core list says what a listing fence repeats.
                         blocks: note
@@ -904,6 +1281,7 @@ fn GuestNoteView(code: String, path: String, #[props(default)] core_list: bool) 
                             })
                             .cloned()
                             .collect::<Vec<_>>(),
+                      }
                     }
                 }
             }
