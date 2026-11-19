@@ -1026,9 +1026,15 @@ impl ProcessViewWidget {
                     match texture {
                         Ok(texture) => match ctx.try_register_custom_resource(Box::new(texture)) {
                             Ok(rid) => ids.push(rid),
-                            Err(_) => break,
+                            Err(_) => {
+                                eprintln!("process view: the window renderer took no shared frame ({width}x{height}); asking for shared memory");
+                                break;
+                            }
                         },
-                        Err(_) => break,
+                        Err(error) => {
+                            eprintln!("process view: a shared frame could not be imported ({width}x{height}): {error}; asking for shared memory");
+                            break;
+                        }
                     }
                 }
                 if ids.len() != usize::from(slots) {
