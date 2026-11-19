@@ -16,6 +16,14 @@
 //   (an image as a `data:` URL, `.lrc` as text), nothing outside the link;
 // - with `documents` alone: the text, no files;
 // - declaring nothing: no note at all;
+//
+// The node gives a guest the text and the files its link admits, whatever
+// the island declares (apps/desktop/tests/shares.rs
+// `what_a_guest_reads_is_the_links_permission_whatever_the_islands_declare`):
+// the three outcomes above are the app's, which hands a view only what its
+// island declares it reads (apps/web/src/ext_host.rs `note_reads`). The
+// page says what it handed on (`data-text`, `data-files`), never what the
+// node sent.
 // - the build's `_note.json` is never a file of the link, by any spelling.
 //
 // Firefox over WebDriver BiDi (FIREFOX=… or `firefox` on the PATH), in a
@@ -329,7 +337,9 @@ test('a view that declares documents alone gets the text, no files', { skip }, a
 });
 
 test('a view that declares no read gets no note', { skip }, async () => {
-  const { note, page } = await asGuest('', 'guest-setlist-no-read-390.png');
+  const { note, page, proxied } = await asGuest('', 'guest-setlist-no-read-390.png');
+  // The node answered the read all the same: the app held the note back.
+  assert.ok(proxied.some((p) => p.startsWith(`POST /s/${CODE}/_guest/read`)), proxied.join('\n'));
   assert.equal(note, null);
   assert.equal(page.text, 'false');
   assert.equal(page.files, '0');

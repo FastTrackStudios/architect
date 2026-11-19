@@ -207,6 +207,38 @@ pub fn claimed<'a>(islands: &'a [Island], note_type: &str) -> Option<(&'a Island
         .find_map(|i| i.claim_for(note_type).map(|e| (i, e)))
 }
 
+/// What the view that draws a note of a type is handed of it
+/// ([`note_reads`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NoteReads {
+    /// The note's text: its claim names [`READS_NOTE`] and its extension
+    /// declares it.
+    pub text: bool,
+    /// The note's files: [`Self::text`], and its extension declares
+    /// [`READS_FILES`] too.
+    pub files: bool,
+}
+
+/// What the view `islands` draw a note of type `note_type` with is handed
+/// of it: nothing when none claims the type ([`claimed`]).
+///
+/// The app's rule, for a member and a share link's guest alike, and the
+/// same one as `architect_sites::island::note_reads`. A link's node hands
+/// its guest what the link admits (`GuestNote::source`,
+/// `GuestNote::files`) and knows nothing of the views here: the app
+/// fetches a file, and hands a view text or files ([`note_props`]), only
+/// as this says.
+#[must_use]
+pub fn note_reads(islands: &[Island], note_type: &str) -> NoteReads {
+    let Some((island, claim)) = claimed(islands, note_type) else {
+        return NoteReads::default();
+    };
+    NoteReads {
+        text: claim.reads_note && island.declares_reading_notes(),
+        files: island.reads_files_of(note_type),
+    }
+}
+
 /// Who is viewing the note a view is handed: what [`note_props`] lets
 /// through depends on it, and every caller has to say.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,9 +250,9 @@ pub enum Audience {
     /// A share link's guest (#629): what the sharer shared (#648, #669).
     /// The note as the link's node handed it (`ShareGuest::read`, never a
     /// vault file): its title, its type, the properties the claim declares
-    /// for that type, its text (as the share's build wrote it, the node
-    /// giving it only to a view that reads the note) and the link's files
-    /// the node gave for it. No vault path.
+    /// for that type, its text (as the share's build wrote it) and the
+    /// link's files the node gave for it, each only as [`note_reads`]
+    /// says of the view. No vault path.
     Guest,
 }
 
@@ -307,8 +339,9 @@ pub struct Note<'a> {
     /// when it gave none).
     pub body: &'a str,
     /// Its files a view may read (#669), fetched and checked by the caller
-    /// only when [`Island::reads_files_of`] holds: a member's from their
-    /// vault, a guest's only those the link's node handed for the note.
+    /// only when [`Island::reads_files_of`] holds ([`note_reads`]): a
+    /// member's from their vault, a guest's from those the link's node
+    /// listed for the note.
     pub files: &'a [ViewFile],
 }
 
@@ -1162,6 +1195,53 @@ mod tests {
             "~~~~md\n%%\n~~~\n%%\n~~~~\nz"
         );
         assert_eq!(without_comments("a %%b\n```\nc\n```\nd%% e"), "a  e");
+    }
+
+    /// The app keeps what a view is handed (the node gives a guest all
+    /// the link admits): text only to a claim that reads the note of an
+    /// extension that declares `documents`, files only with `files` too,
+    /// nothing to a view that declares no read or claims another type.
+    #[test]
+    fn what_a_view_is_handed_is_what_its_island_declares_whatever_the_node_gave() {
+        let reading = json!({"view": "list", "note_type": ["Playlist"], "reads": ["documents"], "properties": ["date"]});
+        let silent = json!({"view": "list", "note_type": ["playlist"]});
+        // (the claim, what the extension declares, text?, files?)
+        for (claim, reads, text, files) in [
+            (&reading, &["documents"][..], true, false),
+            (&reading, &["files"][..], false, false),
+            (&reading, &[][..], false, false),
+            (&silent, &["documents", "files"][..], false, false),
+            (&reading, &["documents", "files"][..], true, true),
+        ] {
+            let islands = vec![note_world(reads, claim.clone())];
+            let row = format!("{claim} declares {reads:?}");
+            assert_eq!(
+                note_reads(&islands, "playlist"),
+                NoteReads { text, files },
+                "{row}"
+            );
+            assert_eq!(note_reads(&islands, "poem"), NoteReads::default(), "{row}");
+            assert_eq!(note_reads(&islands, " "), NoteReads::default(), "{row}");
+            // The gate on the frame agrees: a guest's note the node gave
+            // whole (its text, its files) reaches the view only so far.
+            let properties: Vec<(String, String)> = vec![("date".into(), "2026-12-24".into())];
+            let given = vec![ViewFile::of("Art/Joy.png", b"\x89PNG").unwrap()];
+            let note = Note {
+                files: &given,
+                ..the_note(&properties)
+            };
+            let handed = note_props(Audience::Guest, &islands[0], &note);
+            assert_eq!(!handed.is_null(), text, "{row}");
+            assert_eq!(handed.get("files").is_some(), files, "{row}");
+        }
+        assert_eq!(note_reads(&[], "playlist"), NoteReads::default());
+        // The first island listed that claims the type is the one asked.
+        let first = note_world(&[], silent);
+        let second = note_world(&["documents", "files"], reading);
+        assert_eq!(
+            note_reads(&[first, second], "playlist"),
+            NoteReads::default()
+        );
     }
 
     #[test]

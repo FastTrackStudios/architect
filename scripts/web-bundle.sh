@@ -17,6 +17,10 @@
 #                   start.js imports from there and puts
 #                   the folder on <html data-assets> for the app
 #   OUT/ROUTES.md   how a server must serve OUT (scripts/web-routes.md)
+#   OUT/_ext/       only with ARCHITECT_WEB_EXT: a distribution's islands,
+#                   their runtime and frame documents and the two listings
+#                   (islands.json, favourites.json), with headers.json: the
+#                   headers a server must send with each path
 #
 # What `just web` serves, the release attaches as architect-web-<v>.tar.gz
 # (the one deployment: the VPS's static file server serves it), and
@@ -57,6 +61,14 @@
 #                        /app/distribution.json (its name and its compiled-in
 #                        extensions, which the app shows); none, the Architect
 #                        app with none listed. `cargo xtask dist web` sets it.
+# ARCHITECT_WEB_EXT      a folder outside OUT that `<app> web-ext <folder>` wrote (the
+#                        distribution's binary: its islands and favourites
+#                        as static files, `architect_sites::island::export`):
+#                        its `_ext/` is copied to OUT/_ext/, so the server of
+#                        the bundle answers `/_ext/` itself, with the headers
+#                        `_ext/headers.json` names for each path, and the
+#                        node needs none of it. Unset, the bundle has no
+#                        `_ext/` and `/_ext` is the node's, as before.
 set -euo pipefail
 out="${1:?usage: web-bundle.sh OUT}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -65,6 +77,16 @@ url="${url%/}"
 # The nixpkgs bun and node come from when the PATH has none (the dev shell
 # has neither).
 nixpkgs=github:NixOS/nixpkgs/e62746b0b472753ef019baceab6f1e2e52014980
+
+# The distribution's `/_ext/` tree, named before OUT is emptied: it is
+# whole (its listing and its headers) or the build stops.
+ext="${ARCHITECT_WEB_EXT:-}"
+if [ -n "$ext" ]; then
+    ext="$(cd "$ext" && pwd)" || { echo "web-bundle: ARCHITECT_WEB_EXT is not a folder" >&2; exit 1; }
+    for f in islands.json favourites.json headers.json; do
+        [ -s "$ext/_ext/$f" ] || { echo "web-bundle: $ext/_ext/$f is missing (write it with \`<app> web-ext\`)" >&2; exit 1; }
+    done
+fi
 
 # The site first: it is the cheapest piece and the likeliest to refuse.
 site="${ARCHITECT_SITE:-}"
@@ -132,6 +154,11 @@ mkdir -p "$out/app"
 cp "$root"/apps/web/app/* "$out/app/"
 if [ -n "${ARCHITECT_DISTRIBUTION:-}" ]; then
     cp "$ARCHITECT_DISTRIBUTION" "$out/app/distribution.json"
+fi
+if [ -n "$ext" ]; then
+    rm -rf "$out/_ext"
+    cp -r "$ext/_ext" "$out/_ext"
+    chmod -R u+w "$out/_ext"
 fi
 # The app's code and face, staged, then put under a folder named by their
 # content: a new build is a new folder, an old one stays cached as it was.

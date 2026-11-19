@@ -23,9 +23,13 @@
 //! - `_live`: a rebuild or a revoke reads the link again.
 //!
 //! Everything a guest's view is handed comes from the link's node, never
-//! from a vault: the note's text as the node gave it (none unless the
-//! view reads the note), and only the files the node listed for it
-//! (`GuestNote::files`). Each file is fetched below the link on this
+//! from a vault: the note's text as the node gave it, and only the files
+//! the node listed for it (`GuestNote::files`). The node gives what the
+//! link admits; what a view is handed of it is kept here, by what the
+//! view's island declares it reads (`ext_host::note_reads`): the text
+//! only to a view that reads the note, a file fetched and handed only to
+//! one that reads files, nothing to a view that declares no read. Each
+//! file is fetched below the link on this
 //! origin (no credentials, no redirect), then checked here before it is
 //! handed in: its URL, parsed and normalised as the browser fetches it,
 //! is on this origin below this link (`view_files::guest_file_url`); it
@@ -169,8 +173,17 @@ async fn checked(code: &str, file: &ListedFile) -> Result<ViewFile, String> {
 }
 
 /// The files the node gave for `note`, each checked; what fails is left
-/// out. Within the caps again, whatever the node listed.
-async fn files_of(code: &str, note: &GuestNote) -> Vec<ViewFile> {
+/// out. Within the caps again, whatever the node listed. None, and none
+/// fetched, unless the view that draws the note's type reads files
+/// (`reads`, `ext_host::note_reads`).
+async fn files_of(
+    code: &str,
+    note: &GuestNote,
+    reads: crate::ext_host::NoteReads,
+) -> Vec<ViewFile> {
+    if !reads.files {
+        return Vec::new();
+    }
     let mut out = Vec::new();
     for f in &note.files {
         if let Ok(v) = checked(code, f).await {
@@ -1202,7 +1215,6 @@ fn GuestNoteView(
     #[props(default)]
     untitled: bool,
 ) -> Element {
-    let listing = super::frames::use_listing();
     // Read again when the note asked for changes (props are not signals).
     let note = use_resource(use_reactive!(|(code, path)| {
         {
@@ -1211,8 +1223,14 @@ fn GuestNoteView(
                 let note = as_guest(|t| c.read(code.clone(), t, path.clone()))
                     .await
                     .map_err(|e| said(&e))?;
-                let files = files_of(&code, &note).await;
-                Ok::<_, String>((Rc::new(note), files, code))
+                // What the view that draws its type is handed of it, by
+                // the islands listed here: the node gave what the link
+                // admits, whoever draws it.
+                let islands = super::frames::islands().await;
+                let reads =
+                    crate::ext_host::note_reads(&islands, note.kind.as_deref().unwrap_or_default());
+                let files = files_of(&code, &note, reads).await;
+                Ok::<_, String>((Rc::new(note), files, reads, code))
             }
         }
     }));
@@ -1220,19 +1238,18 @@ fn GuestNoteView(
     match state {
         None => rsx! {},
         Some(Err(why)) => rsx! { p { "data-testid": "guest-problem", "{why}" } },
-        Some(Ok((note, files, code))) => {
+        Some(Ok((note, files, reads, code))) => {
             let kind = note.kind.clone().unwrap_or_default();
-            // An extension claims this type and the node gave its view the
-            // note's text: the view draws the note.
-            let claimed = note.source.is_some()
-                && listing
-                    .read()
-                    .as_ref()
-                    .is_some_and(|l| crate::ext_host::claimed(l, &kind).is_some());
+            // The note's text, for a view that reads the note and no
+            // other: never handed on, nor said to be there, otherwise.
+            let text = note.source.clone().filter(|_| reads.text);
+            // An extension claims this type and its view reads the note's
+            // text: the view draws the note.
+            let claimed = text.is_some();
             let count = files.len();
             rsx! {
                 article { "data-testid": "guest-note", "data-files": "{count}",
-                    "data-text": "{note.source.is_some()}",
+                    "data-text": "{text.is_some()}",
                     style: "display: flex; flex-direction: column; gap: 10px;",
                     if !untitled && !claimed {
                         h2 { style: "margin: 0; font-size: 20px;", "{note.title}" }
@@ -1250,7 +1267,7 @@ fn GuestNoteView(
                                 title: note.title.clone(),
                                 note_type: kind.clone(),
                                 properties: Vec::new(),
-                                body: note.source.clone().unwrap_or_default(),
+                                body: text.clone().unwrap_or_default(),
                                 files: files.clone(),
                                 pane: true,
                             }
@@ -1263,7 +1280,7 @@ fn GuestNoteView(
                             title: note.title.clone(),
                             note_type: kind,
                             properties: Vec::new(),
-                            body: note.source.clone().unwrap_or_default(),
+                            body: text.clone().unwrap_or_default(),
                             files,
                         }
                     }

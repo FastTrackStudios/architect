@@ -65,6 +65,23 @@ pub const THEME_BOOT: &str = "try{var t=localStorage.getItem('site-theme');if(t)
 /// 'sha256-…'`): the one inline script a site's page runs.
 pub const THEME_BOOT_HASH: &str = "'sha256-deQKU2EOWf3ZNuWj0YOr9gSGJkEEn27H0aM2lBzWZlA='";
 
+/// The Content-Security-Policy of every page of a share or a Site, and
+/// of every file beside them that is data, never a page.
+///
+/// Scripts and everything else from the page's own origin alone, plus the
+/// site's one inline script by its hash ([`THEME_BOOT_HASH`]); images
+/// also `data:` and `https:`; no plugins, no `<base>`, forms posted only
+/// to the origin, no framing by other sites. Inline styles stay allowed.
+/// `default-src 'self'` stands in for `frame-src`: a frame on such a page
+/// (an island's sandbox, a web view, `crate::island`) can only ever be
+/// the origin's own.
+#[must_use]
+pub fn content_security_policy() -> String {
+    format!(
+        "default-src 'self'; script-src 'self' {THEME_BOOT_HASH}; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'; img-src 'self' data: https:; media-src 'self'; style-src 'self' 'unsafe-inline'"
+    )
+}
+
 const ICON_MENU: &str =
     r#"<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>"#;
 const ICON_THEME: &str = r#"<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>"#;

@@ -1,0 +1,9 @@
+---
+"architect-app" = "minor"
+"architect-desktop" = "minor"
+"architect-sites" = "minor"
+"architect-spaces" = "minor"
+"architect-web" = "minor"
+---
+
+Changed what a share link guest reads to the link permission alone, and made everything a node answers under /_ext/ a static tree a web bundle can carry. ShareGuest::read now fills GuestNote::source and GuestNote::files whenever the link scope, audience and layer admit the note, whatever the node islands declare (behaviour change: the node no longer calls architect_sites::island::note_reads; a note no island claims now comes with its text and files too). Which view is handed them is kept by the app: the web app fetches and hands a view only what its island declares it reads (new architect_web ext_host::note_reads and NoteReads: text with reads = ["documents"], files with "files" too, nothing with no read), and the native Shared tab draws a note with an extension only when it declares it reads documents. Added architect_sites::island::export, Exported, headers_json, listing_json, favourites_json, listing_headers, file_headers, LISTING_PATH, FAVOURITES_PATH, HEADERS_PATH and architect_sites::ui::content_security_policy; the distribution binary subcommand `<app> web-ext <out-dir>` (architect_desktop::web_ext_command, write_web_ext) writes <out-dir>/_ext/ with headers.json (each path and the headers a static server must send), and scripts/web-bundle.sh copies it into the bundle when ARCHITECT_WEB_EXT names that folder.

@@ -12,8 +12,9 @@
 //! sharer's node by name, who it is shared with, read only. Its notes are
 //! read through the link's guest service (`architect_spaces::ShareGuest`)
 //! and drawn as plain blocks; a note whose type an installed extension
-//! claims (`Embeds::resolve`) is drawn by it once the note's text is given
-//! to guests (`GuestNote::source`), else plain, with "Open in browser".
+//! claims (`Embeds::resolve`) and that declares it reads documents is
+//! drawn by it from the note's text (`GuestNote::source`, as the link
+//! admits it), else plain, with "Open in browser".
 //! The extension draws it only through its page, on a host that reaches
 //! nothing of the person's (`GuestEmbedView`).
 //!
@@ -1338,14 +1339,30 @@ fn LinkView(
 }
 
 /// A note: drawn by the extension that claims its type when it may be
-/// (its text given to guests), else its page's words as plain blocks.
+/// (it declares it reads documents), else its page's words as plain
+/// blocks.
 #[component]
 fn GuestNoteView(guest: Guest, note: GuestNote, url: Option<ShareUrl>) -> Element {
     let t = use_shell().theme;
     let ui = try_consume_context::<architect_extensions::interface::ExtensionUi>();
     let claim = note.kind.clone().map(Claim::NoteType);
+    // The node gives the note's text as its link admits it, whoever draws
+    // it. Handing it to a view is this app's to keep: only the extension
+    // that claims the type, and only when it declares that it reads
+    // documents (`architect_sites::island::note_reads` is the same rule
+    // for the web app's views).
     let claimed = match (&ui, &claim) {
-        (Some(ui), Some(claim)) => ui.host().embeds().resolve(claim).is_some(),
+        (Some(ui), Some(claim)) => {
+            let host = ui.host();
+            host.embeds().resolve(claim).is_some_and(|spec| {
+                host.get(&spec.extension).is_some_and(|loaded| {
+                    loaded
+                        .manifest
+                        .capabilities
+                        .may_read(architect_extensions::capabilities::DOCUMENTS)
+                })
+            })
+        }
         _ => false,
     };
     let page = url.as_ref().map(|u| page_url(u, &note.page));

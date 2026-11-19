@@ -22,6 +22,10 @@ assets/app-<sha12>/  the web app's code and face, named by their content:
                   the wasm and its JS (architect_web.js, snippets/), its
                   font (Inter-Variable.woff2); start.js imports from here
 ROUTES.md         this file
+_ext/             only in a bundle built with ARCHITECT_WEB_EXT: a
+                  distribution's islands, their runtime and frame
+                  documents, islands.json, favourites.json, and
+                  headers.json (the headers each path is served with)
 ```
 
 ## The rules
@@ -56,8 +60,15 @@ image).
 
 What the server adds around them, as before this bundle carried the site:
 
-- the node's paths (`/s/`, `/_ext`, `/mcp`, the node's other prefixes) go
-  to the node, before the static files. A share link's page
+- the node's paths (`/s/`, `/mcp`, the node's other prefixes) go
+  to the node, before the static files. `/_ext` goes there too, unless
+  this bundle has an `_ext/` folder: then the server answers `/_ext/`
+  from it, each path with exactly the headers `_ext/headers.json` gives
+  for it (`{"/_ext/…": {"<header>": "<value>"}}`; a frame's document
+  served without its `content-security-policy` would run with the
+  page's origin's, so a path with no entry, `headers.json` itself among
+  them, is better not served), and a path with no file is a plain 404.
+  A share link's page
   (`/s/<code>/`, every page path below it and `<link>_files/`) is the
   node's answer: its copy of this bundle's `app/index.html` with a
   `<head>` for the link and the policy below as a header (#646). That

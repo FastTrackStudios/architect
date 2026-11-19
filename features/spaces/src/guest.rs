@@ -429,22 +429,24 @@ pub struct GuestNote {
     /// What its page says, as plain blocks: the page's own prose, made
     /// safe as the page's is, never its markdown.
     pub blocks: Vec<PlainBlock>,
-    /// Its text after the frontmatter, for the extension whose view draws
-    /// its type (#648, #669): given only when the node's island that
-    /// claims the type reads the note (`reads = ["documents"]`), and then
-    /// as the share's build wrote it: `%%comments%%` and HTML gone
+    /// Its text after the frontmatter, as the link admits it (#648,
+    /// #669), for the extension whose view draws its type: as the share's
+    /// build wrote it, `%%comments%%` and HTML gone
     /// ([`crate::view::without_comments`]), a link to anything outside
     /// the link reduced to its words, an embed of it gone. Its
-    /// frontmatter never. None otherwise: the note is drawn from
-    /// `blocks`.
+    /// frontmatter never. The node gives it whoever draws the note; the
+    /// app hands it only to a view whose extension declares it reads
+    /// documents (`reads = ["documents"]`), and draws the note from
+    /// `blocks` otherwise. None when the build wrote none.
     pub source: Option<String>,
-    /// The link's files the view that draws its type may read (#669): only
-    /// when that island declares `reads = ["files"]` too; images and
+    /// The link's files a view on the note may read (#669): images and
     /// synced lyrics the link serves at its layer, the note's own first,
     /// within [`crate::view::within_caps`]; never one the vault has not
-    /// hashed yet. Each is fetched from its `url` (below the link, checked
-    /// as every request for it is) and checked against its `sha256`; the
-    /// app takes none without one.
+    /// hashed yet. The node lists them whoever draws the note; the app
+    /// fetches and hands them only to a view whose extension declares
+    /// `reads = ["files"]` too. Each is fetched from its `url` (below the
+    /// link, checked as every request for it is) and checked against its
+    /// `sha256`; the app takes none without one.
     #[facet(default)]
     pub files: Vec<ListedFile>,
 }

@@ -370,6 +370,9 @@ pub fn run(distribution: Distribution) -> ExitCode {
         Some("distribution") => {
             return crate::distribution_command(dist, std::env::args().nth(2).as_deref());
         }
+        Some("web-ext") => {
+            return crate::web_ext_command(dist, std::env::args().nth(2).as_deref());
+        }
         _ => {}
     }
     if architect_presence::single_instance(&dist.instance_id())

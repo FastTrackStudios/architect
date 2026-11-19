@@ -665,15 +665,21 @@ page or renderer (`GuestPage`, `guest_view`, plain blocks, the native
   `architect_sites::data_dir`, so no URL of the link, however a
   filesystem folds its spelling, reaches it: it is read only through
   the service).
-- **What a guest's view reads (#648, #669).** A guest gets what the
-  sharer shared. `read` hands a note's text (`GuestNote::source`) only
-  when the island this node draws its type with reads the note (its
-  claim names `documents` and its extension declares it,
-  `features/sites/src/island.rs` `note_reads`), and the link's images
-  and lyrics (`GuestNote::files`: the note's own first, then the rest of
-  the link's, within `architect_spaces::view::within_caps`) only when
-  that extension declares `files` too. The node decides it, never the
-  caller. The text is the one the share's build wrote for that link
+- **What a guest reads, and what a view is handed (#648, #669).** A
+  guest gets what the sharer shared, and that is the link's permission
+  alone: its scope, its audience and its layer, checked by the node.
+  `read` hands a note's text (`GuestNote::source`) and the link's images
+  and lyrics a view on it may read (`GuestNote::files`: the note's own
+  first, then those of the notes it lists, within
+  `architect_spaces::view::within_caps`) whenever the link admits the
+  note. The node does not look at what draws it: it knows nothing of the
+  app's views. Which view is handed either is the app's rule, kept in
+  the app (`apps/web/src/ext_host.rs` `note_reads`, `note_props`; the
+  same rule as `features/sites/src/island.rs` `note_reads`): the text
+  only to a view whose claim names `documents` and whose extension
+  declares it, a file fetched and handed only when that extension
+  declares `files` too, nothing to a view that declares no read.
+  The text is the one the share's build wrote for that link
   (`features/sites/src/guest_text.rs`), from the same link resolution as
   the page: `%%comments%%` and raw HTML gone, a link to anything outside
   the link reduced to its words, an embed of it or of a held-back file
@@ -1249,6 +1255,34 @@ browser's bearer travels in it on `/org/<slug>/vox` and `/vox`. The node
 opens its org lane to a browser on its own origin only (the request's
 `Host`, or `X-Forwarded-Host`): a proxy that rewrites both, or a web app on
 another origin, needs that origin in `ARCHITECT_LANE_ORIGINS`.
+
+The node also answers `/_ext/` (islands for the web app's views: their
+files, the runtime, the frame documents, `/_ext/islands.json` and
+`/_ext/favourites.json`), from what its distribution links in; a node
+with no islands answers `404` for an island's file there and lists none.
+None of it depends on the node's data: it is fixed when the distribution
+is built. So a static server may serve `/_ext` from the web bundle
+instead, and the node then needs to know nothing of the client:
+
+```sh
+<app> web-ext out/            # the distribution's binary: out/_ext/…
+ARCHITECT_WEB_EXT=out scripts/web-bundle.sh bundle/   # bundle/_ext/…
+```
+
+`<app> web-ext <out-dir>` (`apps/desktop/src/lib.rs` `web_ext_command`,
+`write_web_ext`) writes every path a node of that distribution answers
+under `/_ext/`, the same bytes (`features/sites/src/island.rs` `export`),
+and `_ext/headers.json`: `{"/_ext/…": {"<header>": "<value>"}}`, the
+headers the node sends with each path, which a static server must send
+too. They are not optional: the sandbox and web view documents carry a
+`content-security-policy` of their own (`sandbox allow-scripts`, nothing
+to fetch or connect to), and a frame's document served without it would
+run with the page's origin. Generate the server's rules from that file
+(one `header` block a path in Caddy), route `/_ext` to the static files
+and not to the node, and serve no path the file does not name.
+`apps/desktop/tests/islands.rs`
+`the_static_ext_tree_is_what_the_node_answers_path_for_path` holds the
+tree to a running node's answers, body and headers.
 
 A share link's page (`/s/<code>/`) is the node's copy of the web app's
 page, which loads the app from `/app/` on the same host: the web front
