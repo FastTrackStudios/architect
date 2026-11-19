@@ -117,6 +117,9 @@ pub const QUICK_OPEN: &str = "COMMAND_PALETTE_OPEN_ANYTHING";
 #[must_use]
 pub fn opens(by: &Declarer, target: &Target, reach: &Reach<'_>) -> Option<Opens> {
     match target {
+        // A tab's menu is drawn by the bar that shows it (a link's guest
+        // page has one); the member's bar has none yet.
+        Target::Menu(_) => None,
         Target::View(v) => match v.as_str() {
             "page" => Some(Opens::Note),
             "search" => reach
