@@ -469,6 +469,8 @@ on = { label = "Stop", icon = "pause" }
             },
             Target::Place(p) => Shows::Note(format!("Food/{}", p.trim_end_matches('/'))),
             Target::Action(_) => Shows::Elsewhere,
+            // A menu opens above its tab; it shows nothing of its own.
+            Target::Menu(_) => return None,
         };
         Some((Callback::new(|()| {}), shows))
     }
