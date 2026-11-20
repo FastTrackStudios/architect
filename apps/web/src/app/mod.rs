@@ -364,6 +364,20 @@ fn WebApp() -> Element {
     // The Home tab leads the app's own tabs. A note its view draws has
     // tabs of its own (a setlist's Setlist, Charts, Lyrics, More): there
     // the way home is the back button at the top left.
+    // The extensions' tabs after the app's own (a distribution's
+    // sections: Studio's Records, Setlists, Signal), on a member's app; a
+    // kept one holds a phone's place. One on show is the current tab.
+    let ext_tab = home::EXT_TAB();
+    let ext_on = !guest && !home_on && !view_on_show && ext_tab.is_some_and(|id| ext_ui.is_tab(id));
+    let (tabs, current) = if guest || view_on_show {
+        (tabs, current)
+    } else {
+        let ext_tabs = ext_ui.chrome().tabs;
+        (
+            tabs.into_iter().chain(ext_tabs).collect::<Vec<_>>(),
+            if ext_on { ext_tab } else { current },
+        )
+    };
     let (tabs, current) = if has_home && !view_on_show {
         (
             std::iter::once(shell::Tab::named("home", "Home", "house"))
@@ -503,10 +517,15 @@ fn WebApp() -> Element {
                                 guest::press_tab(id);
                             } else if id == "home" {
                                 *home::HOME.write() = true;
+                                *home::EXT_TAB.write() = None;
+                            } else if ext_ui.is_tab(id) {
+                                *home::HOME.write() = false;
+                                *home::EXT_TAB.write() = Some(id);
                             } else {
                                 if has_home {
                                     *home::HOME.write() = false;
                                 }
+                                *home::EXT_TAB.write() = None;
                                 if !set.press(id) {
                                     favourites::own_tab(id, workspace, &commands);
                                 }
@@ -559,7 +578,17 @@ fn WebApp() -> Element {
                             // open) is the app's and stays; its page, with
                             // the bar buttons it adds, is off while the
                             // home shows.
-                            if !home_on {
+                            // An extension's tab: its view, filling the page.
+                            if ext_on {
+                                if let Some((extension, tab)) = ext_tab.and_then(|id| ext_ui.tab(id)) {
+                                    shell::Page { title: tab.title.clone(), scroll: false,
+                                        div { style: "flex: 1; min-height: 0; display: flex; flex-direction: column;",
+                                            architect_extensions::interface::ExtensionView { ui: ext_ui, extension, view: tab.view }
+                                        }
+                                    }
+                                }
+                            }
+                            if !home_on && !ext_on {
                                 vault::VaultPage {}
                             }
                             tabmenu::TabMenu {}
