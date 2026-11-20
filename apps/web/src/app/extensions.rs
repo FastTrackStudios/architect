@@ -152,13 +152,15 @@ pub fn use_web_extensions(app: &Arc<ActionList>, guest: bool) -> ExtensionUi {
         }
         host.set_app_list((**app).clone());
         host.forward_actions_to(app);
-        let mut extensions = Extensions::new(
+        let extensions = Extensions::new(
             host,
             Installs::new(super::installs::INSTALLS).with_disk(disk),
-        )
+        );
         // The showcase's packages the distribution carries, as on a desk:
         // what the showcase vault's "Install all" installs, no network.
-        .with_source(architect_distribution::showcase::source());
+        #[cfg(feature = "showcase")]
+        let extensions = extensions.with_source(architect_distribution::showcase::source());
+        let mut extensions = extensions;
         let mut linked = architect_distribution::current()
             .map(architect_distribution::Distribution::extensions)
             .unwrap_or_default();
