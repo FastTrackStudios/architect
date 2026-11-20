@@ -146,7 +146,8 @@ node:
   # The paths the node owns on the shared host. Every one is routed to
   # the node by the Ingress (tests/routes.sh) and must be by any proxy.
   #   /vox            vox over WebSocket (the node's services)
-  #   /org            /org/<slug>/vox: the org lane (vaults, share links)
+  #   /org            /org/<slug>/vox: the org lane (vaults, share links);
+  #                   /org/<slug>/held/…: a project's files for its members
   #   /mcp            MCP (only with node.mcp)
   #   /health         liveness and readiness
   #   /s              share links /s/<code>/ and their sign-in /s/_signin. A

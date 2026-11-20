@@ -18,6 +18,8 @@ export const requests: HostRequest[] = /* BEGIN */ [
   { "op": "rename_document", "path": "notes/b.md", "to": "notes/c.md" },
   { "op": "move_document", "path": "notes/c.md", "folder": "archive" },
   { "op": "live_document", "path": "Charts/a.kf" },
+  { "op": "file_list", "place": "vault:notes", "folder": "Songs/Joy" },
+  { "op": "file_url", "place": "vault:notes", "path": "Songs/Joy/stems/bass.wav" },
   { "op": "delete_document", "path": "archive/c.md" },
   { "op": "actions" },
   { "op": "set_view_state", "pane": "chart-1", "state": "zoom=2" },

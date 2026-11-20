@@ -224,6 +224,7 @@ export function check(manifest, may, request, effect = 'read_only', appAction = 
   if (op === 'run') return mayRun(may, appAction ? null : actionPrefix(manifest.id), String(request.action ?? ''), effect);
   if (op === 'org') return reads('org');
   if (op === 'selection') return reads('selection');
+  if (op === 'file_list' || op === 'file_url') return reads('files');
   if (DOC_READS.includes(op)) return reads('documents');
   if (DOC_WRITES.includes(op)) return writes('documents');
   if (op === 'editor_state')
@@ -279,4 +280,5 @@ export const HOST_OPS = [
   'actions',
   'set_view_state',
   'undo_document', 'redo_document',
+  'file_list', 'file_url',
 ];

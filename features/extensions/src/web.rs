@@ -506,6 +506,8 @@ impl WebHost {
             | HostRequest::UndoDocument { .. }
             | HostRequest::RedoDocument { .. }
             | HostRequest::WatchDocuments { .. }
+            | HostRequest::FileList { .. }
+            | HostRequest::FileUrl { .. }
             | HostRequest::ReadFile { .. }
             | HostRequest::WriteFile { .. } => Err(HostError::Failed {
                 message: "a browser host has no documents or files to reach".to_owned(),

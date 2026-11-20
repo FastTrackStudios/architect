@@ -193,6 +193,19 @@ The service is `features/vault/vault-proto/src/query.rs` `VaultQuery` (one metho
 - **The app's part.** `features/extensions/src/hostapi.rs` `Host::set_kind_documents` with a `features/extensions/src/live.rs` `KindDocuments`: `resolve(path)` to `KindDoc {doc_id, kind}`, and `registry()`. `RegistryDocuments::new(registry, resolve)` builds one from a node's `VaultCollab` (`document_of`, `kind_of`, `registry`). The desktop app gives its window's host the node's (`apps/desktop/src/node/mod.rs` `Running::kind_documents`, through `apps/ui/src/extensions.rs` `on_host`): a path is in the node's one vault, or its first folder names one of several (`vault_path`); its node holds the vaults its configuration names (`ARCHITECT_VAULTS`), none by default.
 - **Tests.** `features/extensions/tests/live_documents.rs`.
 
+### A project's files on the org's node
+
+| op | Rust (linked or process) / Luau | needs | platforms |
+|---|---|---|---|
+| `file_list {place, folder?}` | `Handle::host(HostRequest::FileList {..})` / `host.file_list(place, folder?)` | `reads = ["files"]` | the web app signed in; elsewhere `unsupported` |
+| `file_url {place, path}` | `Handle::host(HostRequest::FileUrl {..})` / `host.file_url(place, path)` | `reads = ["files"]` | the same |
+
+- **What it is for.** An engine in the app (Studio's, in a browser) lists a project folder and range-reads its files: the member's own project, not only a share link's. Generic: a place is `vault:<name>` (a vault of the org's) or `root:<id>` (a root the node holds, `architect_files::sync::Engine::hold_at`).
+- **The answers.** `file_list`: `{place, folder, files: [{path, size, sha256, url}], expires_us}`, every file under the folder the person may read, in path order, each `url` absolute and read with `Range` and no header (a read ticket for the folder in its query) until `expires_us`. `file_url`: `{url, expires_us}`, a ticket for one file. Ask again once it runs out (an hour, `apps/desktop/src/node/held.rs` `TICKET_TTL_US`).
+- **Who decides.** The host checks the capability (`features/extensions/src/hostcall.rs` `check`, and `features/extensions/web/check.js`), then hands the call to the app's `features/extensions/src/held.rs` `HeldFilesSource` (`Host::set_held_files`); the node decides what the person may read (`features/files/src/held.rs` `HeldFiles`, served by `apps/desktop/src/node/held.rs` `HeldFace` under the org lane's gate). A host with no source answers `unsupported`: a share link's guest, the demo and the desk app have none, so a guest reads nothing past what its link hands it.
+- **The app's part.** The web app's source is `apps/web/src/app/held.rs` `WebHeldFiles`, over the signed-in org's lane (`apps/web/src/app/org.rs` `OrgVaults::held_list`, `held_url`, the lane's bearer in a header).
+- **Tests.** `features/extensions/tests/held_files.rs`; the node's face `apps/desktop/tests/node.rs` `a_member_reads_a_project_folders_files_by_range_and_nobody_else_does`.
+
 ### Files, settings and data
 
 | op | Luau / TSX | needs | notes |

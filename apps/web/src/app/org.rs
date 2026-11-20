@@ -86,6 +86,9 @@ async fn dial(slug: &str, token: String) -> Result<Lane, String> {
 struct Inner {
     slug: String,
     lane: RefCell<Lane>,
+    /// The bearer the lane was dialled with last: what the node's
+    /// project files (`architect_files::held`) are asked with, in a header.
+    token: RefCell<String>,
     /// Each open note's session, woken when the lane is dialled again.
     redialled: RefCell<Vec<UnboundedSender<()>>>,
     /// Whoever shows what failed.
@@ -105,10 +108,11 @@ impl OrgVaults {
     ///
     /// The lane cannot be reached, or refuses the session.
     pub async fn open(slug: &str, token: String) -> Result<Self, String> {
-        let lane = dial(slug, token).await?;
+        let lane = dial(slug, token.clone()).await?;
         Ok(Self(Rc::new(Inner {
             slug: slug.to_owned(),
             lane: RefCell::new(lane),
+            token: RefCell::new(token),
             redialled: RefCell::default(),
             problems: RefCell::default(),
             vaults: RefCell::default(),
@@ -122,8 +126,9 @@ impl OrgVaults {
     ///
     /// The lane cannot be reached with it; the old lane stays.
     pub async fn redial(&self, token: String) -> Result<(), String> {
-        let lane = dial(&self.0.slug, token).await?;
+        let lane = dial(&self.0.slug, token.clone()).await?;
         *self.0.lane.borrow_mut() = lane;
+        *self.0.token.borrow_mut() = token;
         self.0
             .redialled
             .borrow_mut()
@@ -273,6 +278,58 @@ impl OrgVaults {
         self.0.slug.clone()
     }
 
+    /// The node's project files on this origin, as the person (the lane's
+    /// bearer in `Authorization`, never the URL).
+    fn held(&self) -> Option<(String, architect_files::held::HeldFilesHttpClient)> {
+        let origin = web_sys::window()?.location().origin().ok()?;
+        let client = architect_files::held::HeldFilesHttpClient::at(origin.clone())
+            .with_bearer(self.0.token.borrow().clone());
+        Some((origin, client))
+    }
+
+    /// Every file under `folder` of `place` (`vault:<name>`, `root:<id>`)
+    /// the person may read, each URL absolute on this origin (it carries a
+    /// read ticket, so a worker or a media element reads it by range).
+    ///
+    /// # Errors
+    ///
+    /// The node refused (not a member, no such place) or did not answer.
+    pub async fn held_list(
+        &self,
+        place: String,
+        folder: Option<String>,
+    ) -> Result<architect_files::held::HeldListing, HeldRefusal> {
+        let (origin, client) = self.held().ok_or(HeldRefusal::Unreachable)?;
+        let mut listing = client
+            .list(self.slug(), place, folder, String::new())
+            .await
+            .map_err(HeldRefusal::of)?;
+        for file in &mut listing.files {
+            file.url = format!("{origin}{}", file.url);
+        }
+        Ok(listing)
+    }
+
+    /// A URL on this origin that reads the file at `path` of `place` by
+    /// range until it runs out.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::held_list`].
+    pub async fn held_url(
+        &self,
+        place: String,
+        path: String,
+    ) -> Result<architect_files::held::HeldTicket, HeldRefusal> {
+        let (origin, client) = self.held().ok_or(HeldRefusal::Unreachable)?;
+        let mut ticket = client
+            .ticket(self.slug(), place, path, String::new())
+            .await
+            .map_err(HeldRefusal::of)?;
+        ticket.url = format!("{origin}{}", ticket.url);
+        Ok(ticket)
+    }
+
     /// Writes `text` as the note at `path` (`<vault>/<path in it>`) on the
     /// node (`Notes::write`): an extension's document change (#495).
     ///
@@ -420,3 +477,21 @@ impl LiveNote {
 }
 
 pub use crate::read_only::NodeLayout;
+
+/// Why the node's project files did not answer.
+#[derive(Debug)]
+pub enum HeldRefusal {
+    /// It refused, saying why (`architect_files::FilesFault`).
+    Refused(architect_files::FilesFault),
+    /// It did not answer.
+    Unreachable,
+}
+
+impl HeldRefusal {
+    fn of(e: architect::ClientError<architect_files::FilesFault>) -> Self {
+        match e {
+            architect::ClientError::App(fault) => Self::Refused(fault),
+            _ => Self::Unreachable,
+        }
+    }
+}
