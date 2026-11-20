@@ -906,7 +906,15 @@ pub fn LabApp() -> Element {
         // The Inbox's first row, selected from the start.
         let first = lists.of("inbox", None, false).first().map(|i| i.id);
         Lab {
-            route: Signal::new(Route::Tab(if sandbox { "inbox" } else { "vault" })),
+            // A distribution's own home first (Studio's launcher), else
+            // the Vault.
+            route: Signal::new(Route::Tab(if sandbox {
+                "inbox"
+            } else if crate::distribution().home_view().is_some() {
+                extensions::HOME_TAB
+            } else {
+                "vault"
+            })),
             back: Signal::new(Vec::new()),
             style: Signal::new(ShellStyle::FloatingPill),
             right: Signal::new(true),
@@ -1085,13 +1093,19 @@ pub fn LabApp() -> Element {
     let mut needs_vault =
         use_signal(move || windowed && !crate::distribution().is_sandbox() && !notes::has_vault());
     use_hook(move || {
-        if windowed && !needs_vault() && guide::tour_place() == guide::TourPlace::Never {
+        // A distribution with a home of its own does not start Architect's
+        // tour by itself (⌘K › Take the tour still does).
+        if windowed
+            && !needs_vault()
+            && crate::distribution().home_view().is_none()
+            && guide::tour_place() == guide::TourPlace::Never
+        {
             take_tour();
         }
     });
     let vault_opened = use_callback(move |()| {
         needs_vault.set(false);
-        if guide::tour_place() == guide::TourPlace::Never {
+        if crate::distribution().home_view().is_none() && guide::tour_place() == guide::TourPlace::Never {
             take_tour();
         }
     });
@@ -1526,6 +1540,14 @@ pub fn LabApp() -> Element {
             .flatten();
         (set.slots().to_vec(), set.primary.clone(), set, on)
     };
+    // The distribution's home (its linked view: Studio's launcher), first
+    // and kept on a phone's bar, where the open note declares no tabs of
+    // its own.
+    if declared_on.is_none() && crate::distribution().home_view().is_some() {
+        let mut home = shell::Tab::named(extensions::HOME_TAB, "Home", "house");
+        home.kept = true;
+        tabs.insert(0, home);
+    }
     // An open share link, beside the vaults and never one of them.
     if guest.is_open() {
         tabs.push(guest::tab());
@@ -1656,7 +1678,7 @@ pub fn LabApp() -> Element {
                             if set.press(id) {
                                 return;
                             }
-                            if ext_ui.is_tab(id) {
+                            if id == extensions::HOME_TAB || ext_ui.is_tab(id) {
                                 lab.jump(Route::Tab(id));
                             } else if id == "embedded" {
                                 lab.jump(Route::Tab("vault"));
@@ -1721,6 +1743,7 @@ pub fn LabApp() -> Element {
                                 }
                             },
                             Route::Tab(guest::TAB) => rsx! { guest::GuestPage { guest } },
+                            Route::Tab(tab) if tab == extensions::HOME_TAB => rsx! { extensions::HomeTab { ui: ext_ui } },
                             Route::Tab(tab) if ext_ui.is_tab(tab) => rsx! { extensions::ExtensionTab { key: "{tab}", ui: ext_ui, id: tab } },
                             Route::Tab(tab) => rsx! { pages::ListPage { key: "{tab}", tab } },
                             Route::Item(tab, id) => rsx! { pages::ItemPage { tab, id } },
