@@ -872,6 +872,27 @@ impl RemoteDocument {
         true
     }
 
+    /// Gives the view's first focusable element the focus when nothing in
+    /// it has it: what a pane that becomes active, or is made again,
+    /// gives the view it shows, so its keys reach it before any click
+    /// (#889). Whether the focus moved.
+    pub fn take_focus(&mut self) -> bool {
+        if self.doc.get_focussed_node_id().is_some() {
+            return false;
+        }
+        let mut stack = vec![self.root];
+        while let Some(id) = stack.pop() {
+            let Some(n) = self.doc.get_node(id) else {
+                continue;
+            };
+            if id != self.root && n.is_focussable() {
+                return self.focus_pressed(id);
+            }
+            stack.extend(n.children.iter().rev().copied());
+        }
+        false
+    }
+
     /// Its Blitz document, to read.
     #[must_use]
     pub const fn document(&self) -> &BaseDocument {
@@ -2539,6 +2560,36 @@ fn Mount(
     // The app's theme, into the view's document now and on every change.
     let theme = architect_theme::try_use_root_css();
     let mut node_at = use_signal(|| None::<NodeHandle>);
+    // The keys go to the active pane (#889). A view's element that is
+    // made again (its pane moved by a layout change: a split closing or
+    // opening beside it) or first made (a chart just opened) has lost or
+    // never had the window's focus, which a linked pane's element keeps:
+    // while its pane is active, the view takes it, as a click would.
+    {
+        let pane = architect_workspace::try_use_pane();
+        let active = use_memo(move || {
+            pane.as_ref()
+                .is_some_and(architect_workspace::PaneHandle::is_active)
+        });
+        use_effect(move || {
+            if !active() {
+                return;
+            }
+            if let Some(node) = node_at() {
+                spawn(async move {
+                    with_doc(&node, |doc, at| {
+                        if doc.get_focussed_node_id() != Some(at) {
+                            doc.set_focus_to(at);
+                        }
+                        if let Some(r) = remote(doc, at) {
+                            r.take_focus();
+                        }
+                    })
+                    .await;
+                });
+            }
+        });
+    }
     use_effect(move || {
         let Some(css) = theme.map(|t| t()) else {
             return;

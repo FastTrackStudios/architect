@@ -769,6 +769,17 @@ impl PaneHandle {
     /// redraws when it changes.
     #[must_use]
     pub fn state(&self) -> String {
+        self.state_now()
+    }
+
+    /// Whether it is the workspace's active pane (the one the keys go
+    /// to); read in a render or an effect, it follows.
+    #[must_use]
+    pub fn is_active(&self) -> bool {
+        self.host.workspace.read().active.as_ref() == Some(&self.id)
+    }
+
+    fn state_now(&self) -> String {
         self.host
             .workspace
             .read()
