@@ -37,6 +37,9 @@ use crate::favourites::{Opens, Reach, label_for, opens};
 pub struct Slots {
     pub set: Favourites,
     pub current: Option<&'static str>,
+    /// Whether they are the note on show's type's own (a setlist's
+    /// Setlist, Charts, Lyrics, More), not the app's.
+    pub declared: bool,
 }
 
 /// The web app's own set.
@@ -139,6 +142,7 @@ pub fn use_web_favourites(
     let vault_slots = |set| Slots {
         set,
         current: Some("vault"),
+        declared: false,
     };
     let Some((shown, shown_type)) = on_show() else {
         return vault_slots(default);
@@ -271,7 +275,11 @@ pub fn use_web_favourites(
         None => Shows::Note(shown),
     };
     let current = set.current(&on);
-    Slots { set, current }
+    Slots {
+        set,
+        current,
+        declared: true,
+    }
 }
 
 /// What is on show once `what` opened, on note `note`.

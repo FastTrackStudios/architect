@@ -268,6 +268,7 @@ fn WebApp() -> Element {
     let slots = favourites::use_web_favourites(workspace, &web_vault.source, &commands);
     let set = slots.set.clone();
     let current = slots.current;
+    let note_tabs = slots.declared;
     // What the viewer may do here, and so which of the shell's controls
     // are drawn (`crate::permits`): a link's guest has no vault and writes
     // nothing. A permission on the same shell, never another one.
@@ -356,6 +357,11 @@ fn WebApp() -> Element {
             )
             .is_some_and(|d| d.is_page())
         });
+    // A note whose type declares its own tabs (a setlist's Setlist,
+    // Charts, Lyrics, More) is a page for looking and listening too: the
+    // bar to itself, its way home the back button, no editing row.
+    let view_on_show =
+        view_on_show || (!guest && !home_on && note_tabs && home::EXT_TAB().is_none());
     let quiet = guest || home_on || view_on_show || (home::EXT_TAB().is_some() && !home_on);
     use_effect(use_reactive!(|(quiet, view_on_show)| {
         shell::quiet_actions(quiet);
