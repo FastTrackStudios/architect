@@ -10,11 +10,18 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = ["start"]
+default = ["start", "demo", "showcase"]
 # The page's start (`#[wasm_bindgen(start)]`): the Architect app's
 # distribution. A distribution crate's web build turns it off and starts
 # with its own (`architect_web::run(<its Distribution>)`, #495).
 start = []
+# The demo vault built in (`/app/?demo`, `apps/ui/demo-vault`: notes and
+# about 17 MB of images). Off, `?demo` opens an empty vault: a
+# distribution's web build that has no demo leaves it out.
+demo = []
+# The showcase's packages as a built-in registry (what its vault's
+# "Install all" installs). Off, the web app installs from the store only.
+showcase = ["architect-distribution/showcase"]
 
 [dependencies]
 serde = { workspace = true }
@@ -95,7 +102,7 @@ architect-media = { workspace = true, features = ["ui"] }
 # The distribution's linked extensions (#495, W1): which ones
 # (`architect_distribution::current`, set by `run`), and the host that runs
 # them here as on a desk (src/app/extensions.rs; no Luau in a browser).
-architect-distribution = { workspace = true, features = ["showcase"] }
+architect-distribution = { workspace = true }
 # `page`: the vault's needs and the consent prompt, the desk's components
 # (src/app/installs.rs).
 architect-extensions = { workspace = true, features = ["ui", "linked", "crdt", "page"] }

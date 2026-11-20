@@ -9,9 +9,15 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use include_dir::{Dir, DirEntry, include_dir};
+#[cfg(feature = "demo")]
+use include_dir::include_dir;
+use include_dir::{Dir, DirEntry};
 
+#[cfg(feature = "demo")]
 static DEMO: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/../ui/demo-vault");
+/// No demo built in (feature `demo` off): an empty vault.
+#[cfg(not(feature = "demo"))]
+static DEMO: Dir<'static> = Dir::new("", &[]);
 
 /// Whether this tab opened the demo (`?demo`, `?showcase`).
 static OPEN: AtomicBool = AtomicBool::new(false);
