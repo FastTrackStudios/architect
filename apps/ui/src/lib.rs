@@ -1401,6 +1401,10 @@ pub fn LabApp() -> Element {
         // What extensions add to each menu.
         .contributed(move |menu| ext_ui.menu_rows(menu));
     let route = (lab.route)();
+    // The home and an extension's tab are pages for looking and listening:
+    // no row of note-editing buttons over a phone's tabs (as on the web).
+    let quiet = matches!(route, Route::Tab(t) if t == extensions::HOME_TAB || ext_ui.is_tab(t));
+    use_effect(use_reactive!(|quiet| architect_shell::quiet_actions(quiet)));
     let inbox_count = lab.lists.read().count("inbox");
     // The sandbox's made-up tabs; the Architect app's are its favourites,
     // below, once the capture button is made.

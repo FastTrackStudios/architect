@@ -2051,8 +2051,10 @@ pub fn HomeTab(ui: ExtensionUi) -> Element {
         return rsx! {};
     };
     let (extension, view) = (extension.to_owned(), view.to_owned());
+    // Clear of the status bar: the view draws from the page's top.
+    let top = architect_shell::use_shell().screen.insets.top;
     rsx! {
-        div { style: "flex: 1; min-height: 0; display: flex; flex-direction: column;",
+        div { style: "flex: 1; min-height: 0; display: flex; flex-direction: column; padding-top: {top}px; box-sizing: border-box;",
             architect_extensions::interface::ExtensionView { ui, extension, view }
         }
     }
@@ -2074,6 +2076,19 @@ pub fn ExtensionTab(ui: ExtensionUi, id: &'static str) -> Element {
     let Some((extension, tab)) = found else {
         return rsx! {};
     };
+    // On a phone a tab's view is the page, as on the web: it draws its own
+    // title and bar, clear of the status bar.
+    let shell = architect_shell::use_shell();
+    if shell.form() == architect_shell::FormFactor::Phone {
+        let top = shell.screen.insets.top;
+        return rsx! {
+            div { style: "flex: 1; min-height: 0; display: flex; flex-direction: column; padding-top: {top}px; box-sizing: border-box;",
+                onfocusin: move |_| typing.focus(),
+                onfocusout: move |_| typing.blur(),
+                architect_extensions::interface::ExtensionView { ui, extension, view: tab.view }
+            }
+        };
+    }
     rsx! {
         architect_shell::Page { title: tab.title.clone(), scroll: false,
             div { style: "flex: 1; min-height: 0; display: flex; flex-direction: column;",
