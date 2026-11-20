@@ -216,6 +216,8 @@ fn WebApp() -> Element {
                 runtime.in_scope(scope, || {
                     vault::show(workspace, &found);
                     *home::HOME.write() = false;
+                    // Out of an extension's tab too: the note is the page.
+                    *home::EXT_TAB.write() = None;
                 });
                 true
             })));
