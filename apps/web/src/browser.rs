@@ -167,16 +167,24 @@ async fn read_distribution() {
     let Ok((200, text)) = fetch("GET", DISTRIBUTION, None, &[]).await else {
         return;
     };
-    let Ok(dist) = Distribution::parse(&text) else {
+    let Ok(mut dist) = Distribution::parse(&text) else {
         return;
     };
+    name_page(&dist.name);
+    DIST.with(|d| {
+        dist.icon = std::mem::take(&mut d.borrow_mut().icon);
+        *d.borrow_mut() = dist;
+    });
+}
+
+/// Names the page and its header after the distribution.
+fn name_page(name: &str) {
     if let Some(doc) = window().ok().and_then(|w| w.document()) {
-        doc.set_title(&dist.name);
+        doc.set_title(name);
         if let Ok(Some(brand)) = doc.query_selector("header .brand") {
-            brand.set_text_content(Some(&dist.name));
+            brand.set_text_content(Some(name));
         }
     }
-    DIST.with(|d| *d.borrow_mut() = dist);
 }
 
 /// The page's start: the Architect app ([`architect_distribution::architect`]),
@@ -217,8 +225,11 @@ pub fn run(distribution: architect_distribution::Distribution) {
     }));
     // `install` registers its linked extensions' note file types before
     // any vault is read (the demo's is built before the host loads them).
+    let icon = distribution.icons().svg;
     let dist = distribution.install();
-    if let Ok(described) = serde_json::from_value::<Distribution>(dist.describe()) {
+    if let Ok(mut described) = serde_json::from_value::<Distribution>(dist.describe()) {
+        described.icon = icon.to_owned();
+        name_page(&described.name);
         DIST.with(|d| *d.borrow_mut() = described);
     }
     spawn_local(async {

@@ -191,6 +191,10 @@ pub struct Distribution {
     /// Its compiled-in extensions.
     #[serde(default)]
     pub extensions: Vec<BuiltIn>,
+    /// Its icon as SVG text, drawn on the splash: the build's own
+    /// (`run`'s distribution), never read from `distribution.json`.
+    #[serde(skip)]
+    pub icon: String,
 }
 
 /// An extension compiled into the distribution.
@@ -215,6 +219,7 @@ impl Default for Distribution {
             name: "Architect".to_owned(),
             version: String::new(),
             extensions: Vec::new(),
+            icon: String::new(),
         }
     }
 }
@@ -457,6 +462,32 @@ fn decode(v: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// The splash while the app starts: the distribution's icon and name, and
+/// a thin bar running under them. Inline styles alone (no sheet of the
+/// page's is assumed), on the page's own background.
+#[must_use]
+pub fn splash(dist: &Distribution) -> String {
+    let name = escape(&dist.name);
+    let icon = if dist.icon.trim_start().starts_with("<svg") {
+        format!(
+            "<div class=\"splash-icon\" style=\"width:84px;height:84px;border-radius:20px;overflow:hidden\">{}</div>",
+            dist.icon
+        )
+    } else {
+        String::new()
+    };
+    format!(
+        "<style>.splash-icon svg{{width:100%;height:100%;display:block}}\
+         @keyframes splash-run{{0%{{transform:translateX(-100%)}}100%{{transform:translateX(250%)}}}}</style>\
+         <div class=\"splash\" role=\"status\" aria-label=\"{name} is starting\" \
+         style=\"min-height:80vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px\">\
+         {icon}<div style=\"font-size:28px;font-weight:700;letter-spacing:-0.02em\">{name}</div>\
+         <div style=\"width:96px;height:3px;border-radius:2px;overflow:hidden;background:rgba(127,127,127,0.18)\">\
+         <div style=\"width:40%;height:100%;border-radius:2px;background:currentColor;opacity:0.55;\
+         animation:splash-run 1.1s ease-in-out infinite\"></div></div></div>"
+    )
+}
+
 /// Escape text for HTML.
 #[must_use]
 pub fn escape(s: &str) -> String {
@@ -527,7 +558,14 @@ pub fn view(screen: &Screen, dist: &Distribution) -> String {
     let name = escape(&dist.name);
     let built_in = dist.built_in();
     match screen {
-        Screen::Loading => "<p class=\"muted\">Loading…</p>".to_owned(),
+        // Starting, and signed in while the node is asked and the org's
+        // vaults open: the distribution's splash, never another app's card.
+        Screen::Loading
+        | Screen::SignedIn {
+            node: None,
+            lane: None,
+            ..
+        } => splash(dist),
         Screen::Broken(why) => format!(
             "<section class=\"card\"><h2>{name} can't start here</h2><p class=\"problem\">{}</p></section>",
             escape(why)
@@ -599,6 +637,44 @@ pub fn view(screen: &Screen, dist: &Distribution) -> String {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn starting_and_opening_the_org_show_the_distributions_splash() {
+        let dist = Distribution {
+            name: "Studio".to_owned(),
+            icon: "<svg viewBox=\"0 0 1 1\"></svg>".to_owned(),
+            ..Distribution::default()
+        };
+        let person = Person {
+            name: Some("Ada".to_owned()),
+            email: None,
+        };
+        for screen in [
+            Screen::Loading,
+            Screen::SignedIn {
+                person: person.clone(),
+                node: None,
+                lane: None,
+            },
+        ] {
+            let html = view(&screen, &dist);
+            assert!(html.contains("class=\"splash\""), "{screen:?}: {html}");
+            assert!(html.contains(">Studio<") && html.contains("<svg"), "{html}");
+            assert!(
+                !html.contains("Architect") && !html.contains("Download"),
+                "{html}"
+            );
+        }
+        let answered = view(
+            &Screen::SignedIn {
+                person,
+                node: Some(Err("down".to_owned())),
+                lane: None,
+            },
+            &dist,
+        );
+        assert!(answered.contains("did not answer"), "{answered}");
+    }
 
     #[test]
     fn the_config_needs_an_issuer_and_defaults_the_client() {
