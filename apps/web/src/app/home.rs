@@ -184,6 +184,7 @@ pub fn HomePage(person: String, org: String) -> Element {
                     runtime.in_scope(scope, || {
                         super::vault::show(workspace, path);
                         *HOME.write() = false;
+                        *EXT_TAB.write() = None;
                     });
                 }
                 known
