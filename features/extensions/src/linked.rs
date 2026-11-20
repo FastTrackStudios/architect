@@ -47,6 +47,8 @@ use serde_json::Value as Json;
 
 use crate::contrib::{Contribution, StateWrite};
 
+pub mod deferred;
+
 /// A host-service call's answer, to await. `Send` natively; in a
 /// browser, where nothing is (architect's `ActionFuture` is local there),
 /// it need not be.
