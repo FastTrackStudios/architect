@@ -29,6 +29,10 @@ use super::vault::{VaultWorkspace, WebVault};
 /// Whether the home shows (over the workspace, which stays as it was).
 pub static HOME: GlobalSignal<bool> = Signal::global(|| true);
 
+/// The extension tab on show (`studio.launcher/setlists`), when one is:
+/// a distribution's section in place of the workspace.
+pub static EXT_TAB: GlobalSignal<Option<&'static str>> = Signal::global(|| None);
+
 /// The most rows handed to the view, and the most notes remembered as
 /// recently opened.
 const MAX_ROWS: usize = 4000;
