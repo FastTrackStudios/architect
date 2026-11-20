@@ -244,6 +244,10 @@ pub struct TabDecl {
     pub icon: String,
     /// Its view the tab shows.
     pub view: String,
+    /// Kept on a phone's bar even past its first four places
+    /// (`architect_shell::Tab::kept`): a distribution's own sections
+    /// (Studio's Records, Setlists and Signal) in place of the app's.
+    pub kept: bool,
 }
 
 /// Which end of the status bar an item keeps to.
@@ -3012,6 +3016,7 @@ mod tests {
                 title: "Board".into(),
                 icon: "layout-dashboard".into(),
                 view: "board".into(),
+                ..TabDecl::default()
             }],
             status: vec![StatusDecl {
                 id: "clock".into(),
