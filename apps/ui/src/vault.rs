@@ -365,17 +365,57 @@ fn open_by_path(path: &str) -> Result<serde_json::Value, String> {
     if !vault::note_types::is_note_path(path) {
         return Err(format!("nothing opens {path}"));
     }
+    // The app to the Vault, from wherever it is (a home, an extension's
+    // tab): its root hears it (`vault_wanted`).
+    {
+        let mut wanted = vault_wanted();
+        wanted.retain(|tx| !tx.is_closed());
+        for tx in wanted.iter() {
+            let _ = tx.unbounded_send(());
+        }
+    }
     let tx = {
         let mut receivers = path_receivers();
         receivers.retain(|tx| !tx.is_closed());
-        receivers
-            .last()
-            .cloned()
-            .ok_or_else(|| "no Vault view is open".to_owned())?
+        receivers.last().cloned()
     };
-    tx.unbounded_send(path.to_owned())
-        .map_err(|_| "the window is gone".to_owned())?;
+    match tx {
+        Some(tx) if tx.unbounded_send(path.to_owned()).is_ok() => {}
+        // No Vault page yet: the one the jump mounts opens it.
+        _ => *pending_path() = Some(path.to_owned()),
+    }
     Ok(serde_json::json!({ "opened_by": "app", "path": path }))
+}
+
+/// A note asked for before a Vault page was there to open it.
+fn pending_path() -> std::sync::MutexGuard<'static, Option<String>> {
+    static PENDING: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+    PENDING.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Who moves the app to the Vault when a note is opened by path: the
+/// app's root (`use_vault_wanted`).
+fn vault_wanted() -> std::sync::MutexGuard<'static, Vec<futures_channel::mpsc::UnboundedSender<()>>> {
+    static WANTED: std::sync::Mutex<Vec<futures_channel::mpsc::UnboundedSender<()>>> =
+        std::sync::Mutex::new(Vec::new());
+    WANTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Calls `go` whenever a note is opened by path (an extension's `open`):
+/// the app's root moves to the Vault with it.
+pub fn use_vault_wanted(go: impl FnMut() + 'static) {
+    let go = std::rc::Rc::new(std::cell::RefCell::new(go));
+    use_future(move || {
+        let go = go.clone();
+        async move {
+            use futures_util::StreamExt as _;
+            let (tx, mut rx) = futures_channel::mpsc::unbounded::<()>();
+            vault_wanted().push(tx);
+            while rx.next().await.is_some() {
+                (go.borrow_mut())();
+            }
+        }
+    });
 }
 
 fn show_vault_note(workspace: Signal<Workspace>, path: &str, target: Target) {
@@ -793,6 +833,13 @@ pub fn VaultPage() -> Element {
             let (tx, mut rx) = futures_channel::mpsc::unbounded::<String>();
             path_receivers().push(tx);
             ui.host().set_path_opener(open_by_path);
+            // A note asked for before this page was there.
+            let waiting = pending_path().take();
+            if let Some(path) = waiting
+                && opener_disk.peek().is_some()
+            {
+                show_vault_note(workspace, &path, Target::Tab);
+            }
             while let Some(path) = rx.next().await {
                 // Only a vault on disk has notes by path.
                 if opener_disk.peek().is_some() {

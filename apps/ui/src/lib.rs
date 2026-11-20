@@ -1400,6 +1400,13 @@ pub fn LabApp() -> Element {
         .menu("Help", |m| m.commands(["LAB_HELP", "COMMAND_PALETTE_OPEN"]))
         // What extensions add to each menu.
         .contributed(move |menu| ext_ui.menu_rows(menu));
+    // A note opened by path (an extension's `open`: the launcher's Open
+    // setlist) shows in the Vault, from a home or an extension's tab.
+    crate::vault::use_vault_wanted(move || {
+        if !matches!(*lab.route.peek(), Route::Tab("vault")) {
+            lab.jump(Route::Tab("vault"));
+        }
+    });
     let route = (lab.route)();
     // The home and an extension's tab are pages for looking and listening:
     // no row of note-editing buttons over a phone's tabs (as on the web).
