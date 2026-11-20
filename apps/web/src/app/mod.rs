@@ -354,7 +354,7 @@ fn WebApp() -> Element {
             )
             .is_some_and(|d| d.is_page())
         });
-    let quiet = guest || home_on || view_on_show;
+    let quiet = guest || home_on || view_on_show || (home::EXT_TAB().is_some() && !home_on);
     use_effect(use_reactive!(|(quiet, view_on_show)| {
         shell::quiet_actions(quiet);
         if *vault::VIEW_ON_SHOW.peek() != view_on_show {
@@ -558,7 +558,7 @@ fn WebApp() -> Element {
                         .into_iter()
                         // The row is for working on notes: a viewer who
                         // writes none has none of it.
-                        .filter(|(needs, _)| !home_on && permits.allows(crate::permits::Needs::Write) && permits.allows(*needs))
+                        .filter(|(needs, _)| !home_on && !ext_on && permits.allows(crate::permits::Needs::Write) && permits.allows(*needs))
                         .map(|(_, action)| action)
                         .chain(demo.then(|| shell::BarAction::new("WEB_SIGN_IN", "Sign in", icon!(LogIn))))
                         .collect::<Vec<_>>(),
@@ -578,13 +578,12 @@ fn WebApp() -> Element {
                             // open) is the app's and stays; its page, with
                             // the bar buttons it adds, is off while the
                             // home shows.
-                            // An extension's tab: its view, filling the page.
+                            // An extension's tab: its view, filling the page as
+                            // the home does (it draws its own title).
                             if ext_on {
                                 if let Some((extension, tab)) = ext_tab.and_then(|id| ext_ui.tab(id)) {
-                                    shell::Page { title: tab.title.clone(), scroll: false,
-                                        div { style: "flex: 1; min-height: 0; display: flex; flex-direction: column;",
-                                            architect_extensions::interface::ExtensionView { ui: ext_ui, extension, view: tab.view }
-                                        }
+                                    div { style: "position: absolute; inset: 0; display: flex; flex-direction: column;",
+                                        architect_extensions::interface::ExtensionView { ui: ext_ui, extension, view: tab.view }
                                     }
                                 }
                             }
