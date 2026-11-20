@@ -11,7 +11,8 @@ yq() { if type -P yq >/dev/null && command yq --version 2>&1 | grep -q mikefarah
 
 # Every prefix the node serves (apps/desktop/src/node: /vox and /health from
 # EngineHost, /org/<slug>/vox the org lane, /mcp, /s share links, /node the
-# HTTP face) and the two it reserves. A prefix taken out of values.yaml
+# HTTP face; /org/<slug>/held/… a project's files for its members, under
+# /org) and the two it reserves. A prefix taken out of values.yaml
 # fails here. `/s` stays the node's whole: a share link's page is the
 # node's answer (the web app's page, #646), its script the web front end's
 # `/app/` (routed to web below).

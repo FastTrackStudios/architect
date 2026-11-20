@@ -235,6 +235,10 @@ pub fn use_web_extensions(app: &Arc<ActionList>, guest: bool) -> ExtensionUi {
         let docs = match &web.org {
             None => super::documents::WebDocuments::demo(web.source.clone()),
             Some(org) => {
+                // The member's own projects' files, through the node.
+                host.set_held_files(Some(std::sync::Arc::new(super::held::WebHeldFiles::over(
+                    org.clone(),
+                ))));
                 let (tx, mut rx) =
                     futures_channel::mpsc::unbounded::<super::documents::NodeWrite>();
                 let org = org.clone();

@@ -198,6 +198,25 @@ file, and another's typing shows as it comes.
   `the_host_never_logs_a_browser_bearer`, `apps/desktop/tests/node.rs`
   `the_node_never_logs_a_browser_bearer_even_at_trace`).
 
+**A project's files** (a vault's folder, a root the node holds) are on
+the node's HTTP face beside the lane, for the same bearer in a header
+(`features/files/src/held.rs` `HeldFiles`, `apps/desktop/src/node/held.rs`):
+
+```text
+GET  /org/{slug}/held/list/{place}?folder=              files with size, sha256, url
+POST /org/{slug}/held/ticket/{place}/{*path}            a read ticket's URL for one file
+GET  /org/{slug}/held/content/{place}/{*path}?ticket=   the bytes, ranged
+```
+
+`{place}` is `vault:<name>` or `root:<id>`. Each listed URL carries an
+hour's read ticket for the folder, so a media element or a worker reads it
+by `Range` with no header; the person's rights are asked again on every
+read, and a session is never taken from a URL. The extensions in the page
+reach it through the host calls `file_list` and `file_url`
+(`apps/web/src/app/held.rs`; `docs/content/architecture/extensions.md`).
+It is under `/org`, so the chart's `node.paths` and the dev proxy
+(`apps/web/Dioxus.toml`) route it already.
+
 Nothing is kept in the browser between visits: a reload lists and reads
 again (no IndexedDB or OPFS copy yet), and with the node out of reach the
 app says why. A node that names no org, or a lane that refuses the

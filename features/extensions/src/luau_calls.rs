@@ -249,6 +249,14 @@ pub fn host_request(name: &str, args: &[Value]) -> Result<HostRequest, String> {
         },
         "delete_document" => HostRequest::DeleteDocument { path: a.str(0)? },
         "undo_document" => HostRequest::UndoDocument { path: a.str(0)? },
+        "file_list" => HostRequest::FileList {
+            place: a.str(0)?,
+            folder: a.opt_str(1)?,
+        },
+        "file_url" => HostRequest::FileUrl {
+            place: a.str(0)?,
+            path: a.str(1)?,
+        },
         "redo_document" => HostRequest::RedoDocument { path: a.str(0)? },
         "editor" => HostRequest::EditorState,
         "decorate_editor" => from(json!({ "op": "decorate_editor", "decorations": value(0) }))?,

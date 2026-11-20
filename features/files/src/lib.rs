@@ -31,6 +31,9 @@
 //! - `http` (native): `server::WebFiles`, the [`web`] byte face — ranged
 //!   reads a browser's `<video>` seeks against, renditions, resumable
 //!   `PUT` uploads — on the same access rules.
+//! - default too: [`held`], the node's files of a project for an org's
+//!   signed-in members (a vault's folder, a held root's), listed and read
+//!   by range through `HeldFiles`; the node serves it.
 //! - `ffmpeg` (native): `server::FfmpegTranscoder`, renditions by the
 //!   `ffmpeg` and `ffprobe` on `PATH`.
 //!
@@ -51,6 +54,7 @@ pub mod copies;
 #[cfg(all(feature = "drive", unix))]
 pub mod drive;
 mod error;
+pub mod held;
 pub mod hold;
 mod id;
 mod model;

@@ -37,6 +37,10 @@ architect-media = { workspace = true }
 # What a view on a note is handed of it (`architect_spaces::view`, the
 # node's rules too), and a share link's guest service (`ShareGuest`, #669).
 architect-spaces = { workspace = true }
+# A signed-in member's project files on the node (`architect_files::held`,
+# its contract and HTTP client alone): what `src/app/held.rs` gives the
+# extensions in the page (`file_list`, `file_url`).
+architect-files = { workspace = true }
 # A share link guest's file URL parsed and normalised as the browser
 # does before it is fetched (`view_files::guest_file_url`, #673 L3).
 url = "2"

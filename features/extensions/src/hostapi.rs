@@ -193,6 +193,8 @@ pub(crate) struct Services {
     vault_query: Mutex<Option<HeldQuery>>,
     /// Whether the host runs for a share link's guest (`Host::for_guest`).
     guest: std::sync::atomic::AtomicBool,
+    /// The node's files of a project, as the person reaches them.
+    held_files: Mutex<Option<Arc<dyn crate::held::HeldFilesSource>>>,
     /// The app's editors, for the editor calls (`crate::editor`).
     editors: Mutex<Option<Arc<dyn crate::editor::Editors>>>,
     values: Mutex<Arc<dyn SettingValues>>,
@@ -303,6 +305,7 @@ impl Default for Services {
             documents: Mutex::new(None),
             vault_query: Mutex::new(None),
             guest: std::sync::atomic::AtomicBool::new(false),
+            held_files: Mutex::new(None),
             editors: Mutex::new(None),
             values: Mutex::new(Arc::new(MemoryValues::default())),
             data_root: Mutex::new(None),
@@ -571,6 +574,26 @@ impl Host {
         lock(&self.services().vault_query)
             .as_ref()
             .map(|held| (**held).clone())
+    }
+
+    /// The node's files of a project for extensions (`file_list`,
+    /// `file_url`; `crate::held`), as the person reaches them; `None` takes
+    /// them away (signed out). A share guest's host gets none.
+    pub fn set_held_files(&self, source: Option<Arc<dyn crate::held::HeldFilesSource>>) {
+        *lock(&self.services().held_files) = source;
+    }
+
+    /// [`Self::set_held_files`] as a builder.
+    #[must_use]
+    pub fn with_held_files(self, source: Arc<dyn crate::held::HeldFilesSource>) -> Self {
+        self.set_held_files(Some(source));
+        self
+    }
+
+    /// The node's files of a project, when the app gave them.
+    #[must_use]
+    pub fn held_files(&self) -> Option<Arc<dyn crate::held::HeldFilesSource>> {
+        lock(&self.services().held_files).clone()
     }
 
     /// The app's editors, for extensions that may read and change the one
@@ -1279,6 +1302,14 @@ impl ExtensionApi {
                 })
             }
             HostRequest::LiveDocument { path } => self.live_document(&host, manifest, &may, &path),
+            HostRequest::FileList { place, folder } => {
+                let source = host.held_files().ok_or_else(crate::held::unsupported)?;
+                source.list(place, folder).await
+            }
+            HostRequest::FileUrl { place, path } => {
+                let source = host.held_files().ok_or_else(crate::held::unsupported)?;
+                source.url(place, path).await
+            }
             HostRequest::ListDocuments { .. }
             | HostRequest::CreateDocument { .. }
             | HostRequest::EditDocument { .. }

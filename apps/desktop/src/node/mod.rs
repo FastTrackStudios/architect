@@ -63,6 +63,7 @@ pub mod cli;
 pub mod config;
 mod files;
 mod guest_live;
+pub mod held;
 
 /// How often a share guest's live session asks again whether its link
 /// still serves the document (`/s/<code>/_guest/live`, #847).
@@ -952,6 +953,15 @@ pub async fn start_parts(config: Config, parts: Parts) -> Result<Running, StartE
                     .with_node_actions(node_actions.clone())
             })
             .collect();
+        // A project's files for the org's signed-in members, beside each
+        // lane: `/org/{slug}/held/…` (`held`).
+        host = held::HeldFace::new(
+            served.clone(),
+            vault_orgs.clone(),
+            backend.clone(),
+            files.clone(),
+        )
+        .mount(host);
         host = org::mount(served, host);
     }
     // A share link's guests (#629): `POST /s/<code>/_guest/<method>`,
