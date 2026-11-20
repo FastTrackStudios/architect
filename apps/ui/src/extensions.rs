@@ -2040,6 +2040,24 @@ fn board_dev(root: &Path) -> Option<PathBuf> {
     Some(dir)
 }
 
+/// The distribution's home tab's id.
+pub const HOME_TAB: &str = "home";
+
+/// The distribution's home (`Distribution::home`: Studio's launcher), a
+/// page of its own with no title: the view says where it is.
+#[component]
+pub fn HomeTab(ui: ExtensionUi) -> Element {
+    let Some((extension, view)) = crate::distribution().home_view() else {
+        return rsx! {};
+    };
+    let (extension, view) = (extension.to_owned(), view.to_owned());
+    rsx! {
+        div { style: "flex: 1; min-height: 0; display: flex; flex-direction: column;",
+            architect_extensions::interface::ExtensionView { ui, extension, view }
+        }
+    }
+}
+
 /// A tab an extension added (`lab.board/board`): its view, under a page
 /// bar with its title.
 #[component]
