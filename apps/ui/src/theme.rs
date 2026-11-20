@@ -89,7 +89,19 @@ pub fn app_layer() -> architect_theme::Layer {
     let layer = crate::keyflow::EDITOR_TOKENS
         .iter()
         .fold(layer, |layer, (name, value)| layer.token(*name, *value));
-    layer
+    // The distribution's look over the app's: always dark, its tokens.
+    let Some(dist) = architect_distribution::current() else {
+        return layer;
+    };
+    let layer = dist
+        .tokens()
+        .iter()
+        .fold(layer, |layer, (name, value)| layer.token(name.clone(), value.clone()));
+    if dist.is_dark() {
+        layer.appearance(architect_theme::Appearance::Dark)
+    } else {
+        layer
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]

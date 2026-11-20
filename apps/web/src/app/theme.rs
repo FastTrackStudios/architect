@@ -8,9 +8,21 @@ use dioxus::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
-/// The app's own layer: the navigator's tokens.
+/// The app's own layer: the navigator's tokens, and the distribution's
+/// look (always dark, its tokens) over them.
 fn app_layer() -> architect_theme::Layer {
-    architect_navigator::ui::with_tokens(architect_theme::Layer::default())
+    let layer = architect_navigator::ui::with_tokens(architect_theme::Layer::default());
+    let Some(dist) = architect_distribution::current() else {
+        return layer;
+    };
+    let layer = dist.tokens().iter().fold(layer, |layer, (name, value)| {
+        layer.token(name.clone(), value.clone())
+    });
+    if dist.is_dark() {
+        layer.appearance(architect_theme::Appearance::Dark)
+    } else {
+        layer
+    }
 }
 
 /// The app's theme store, in context, its actions on `list`.
