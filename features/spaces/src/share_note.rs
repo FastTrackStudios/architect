@@ -11,8 +11,13 @@ const FENCE: &str = "```json\n";
 #[must_use]
 pub fn share_note(share: &Share) -> String {
     let json = facet_json::to_string(share).unwrap_or_default();
+    // What it shares (its scope's root, `note:<path>` for a setlist's
+    // link) and how far it plays, as properties: a vault query finds a
+    // note's link by them (a client that may not read the note's text).
+    let shares = facet_json::to_string(&share.scope.root()).unwrap_or_default();
     format!(
-        "---\npublish: false\n---\n# Share {code}\n\nA share link, kept by Architect (`SHARE_*`): {scope} of `{vault}`, for {audience}. Change it with `SHARE_UPDATE` or `SHARE_REVOKE`.\n\n{FENCE}{json}\n```\n",
+        "---\npublish: false\nshares: {shares}\nlisten: {listen}\n---\n# Share {code}\n\nA share link, kept by Architect (`SHARE_*`): {scope} of `{vault}`, for {audience}. Change it with `SHARE_UPDATE` or `SHARE_REVOKE`.\n\n{FENCE}{json}\n```\n",
+        listen = share.listen.label(),
         code = share.code,
         scope = share.scope.describe(),
         vault = share.vault,
@@ -126,7 +131,12 @@ mod tests {
             listen: Listen::Reference,
         };
         let note = share_note(&share);
-        assert!(note.starts_with("---\npublish: false\n---\n"), "{note}");
+        assert!(
+            note.starts_with(
+                "---\npublish: false\nshares: \"note:a.md\"\nlisten: reference\n---\n"
+            ),
+            "{note}"
+        );
         assert_eq!(parse_share_note(&note), Some(share));
         assert_eq!(parse_share_note("# nothing"), None);
 
