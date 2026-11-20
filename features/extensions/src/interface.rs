@@ -150,11 +150,14 @@ impl ExtensionUi {
         let mut chrome = Chrome::default();
         for by in reg.tabs() {
             let t = &by.item;
-            chrome.tabs.push(Tab::new(
+            // By its Lucide name, so any icon the manifest names draws.
+            let mut tab = Tab::named(
                 intern(&format!("{}/{}", by.owner, t.id)),
                 intern(&t.title),
-                named_icon(&t.icon),
-            ));
+                intern(&t.icon),
+            );
+            tab.kept = t.kept;
+            chrome.tabs.push(tab);
         }
         for by in reg.status(now_ms()) {
             let s = by.item;
