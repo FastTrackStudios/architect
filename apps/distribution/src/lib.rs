@@ -184,6 +184,10 @@ pub struct Distribution {
     /// theme's ([`Self::token`]), as the theme's `App` layer.
     dark: bool,
     tokens: Vec<(String, String)>,
+    /// A phone's tabs labelled ([`Self::tab_labels`]); the round button
+    /// beside them Search ([`Self::search_button`]).
+    tab_labels: bool,
+    search_button: bool,
 }
 
 impl std::fmt::Debug for Distribution {
@@ -261,6 +265,8 @@ impl Distribution {
             home: None,
             dark: false,
             tokens: Vec::new(),
+            tab_labels: false,
+            search_button: false,
             listed_favourites: Vec::new(),
             adopts: None,
             registries: vec![store()],
@@ -747,6 +753,33 @@ impl Distribution {
     pub fn token(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.tokens.push((name.into(), value.into()));
         self
+    }
+
+    /// A phone's bottom tabs say their names under their icons.
+    #[must_use]
+    pub const fn tab_labels(mut self) -> Self {
+        self.tab_labels = true;
+        self
+    }
+
+    /// The round button beside a phone's tabs is Search (quick open), not
+    /// New note or Capture; a note type's own (a player's Play) still wins.
+    #[must_use]
+    pub const fn search_button(mut self) -> Self {
+        self.search_button = true;
+        self
+    }
+
+    /// Whether its tabs are labelled ([`Self::tab_labels`]).
+    #[must_use]
+    pub const fn has_tab_labels(&self) -> bool {
+        self.tab_labels
+    }
+
+    /// Whether its round button is Search ([`Self::search_button`]).
+    #[must_use]
+    pub const fn has_search_button(&self) -> bool {
+        self.search_button
     }
 
     /// Whether it is always dark ([`Self::dark`]).

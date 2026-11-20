@@ -1544,7 +1544,19 @@ pub fn LabApp() -> Element {
             .flatten();
         (set.slots().to_vec(), set.primary.clone(), set, on)
     };
-    // The distribution's home (its linked view: Studio's launcher), first
+    // A distribution's round button may be Search (Studio's) in place of
+    // the app's own capture; a note type's declared primary stays.
+    let separate = if declared_on.is_none() && crate::distribution().has_search_button() {
+        Some(shell::Action::new("Search", icon!(Search), move |()| {
+            let _ = commands.run(favourites::QUICK_OPEN);
+        }))
+    } else {
+        separate
+    };
+    if crate::distribution().has_tab_labels() && !*shell::TAB_LABELS.peek() {
+        *shell::TAB_LABELS.write() = true;
+    }
+        // The distribution's home (its linked view: Studio's launcher), first
     // and kept on a phone's bar, where the open note declares no tabs of
     // its own.
     if declared_on.is_none() && crate::distribution().home_view().is_some() {

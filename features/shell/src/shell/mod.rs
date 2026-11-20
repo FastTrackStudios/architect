@@ -546,6 +546,10 @@ static DRAWER_OPEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// ([`quiet_actions`]).
 pub static ACTIONS_QUIET: GlobalSignal<bool> = Signal::global(|| false);
 
+/// Whether a phone's bottom tabs say their names under their icons (a
+/// distribution's choice: `Distribution::tab_labels`).
+pub static TAB_LABELS: GlobalSignal<bool> = Signal::global(|| false);
+
 /// Puts a phone's row of buttons over its bottom tabs away (`true`) or
 /// back. The keyboard's own bar, while typing, is not this row.
 pub fn quiet_actions(quiet: bool) {

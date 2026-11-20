@@ -289,6 +289,23 @@ fn WebApp() -> Element {
         .primary
         .clone()
         .filter(|a| a.label != "New note" || permits.allows(crate::permits::Needs::Write));
+    // A distribution's round button may be Search (Studio's), in place of
+    // the app's own New note; a note type's own (a player's Play) stays.
+    let dist = architect_distribution::current();
+    let separate = match separate {
+        Some(a) if a.label != "New note" => Some(a),
+        _ if dist.is_some_and(architect_distribution::Distribution::has_search_button) => {
+            Some(shell::Action::new("Search", icon!(Search), move |()| {
+                commands.show(architect_commands::Overlay::QuickOpen);
+            }))
+        }
+        other => other,
+    };
+    if dist.is_some_and(architect_distribution::Distribution::has_tab_labels)
+        && !*shell::TAB_LABELS.peek()
+    {
+        *shell::TAB_LABELS.write() = true;
+    }
     // A link's own tabs: the favourites its root note's type declares
     // (`guest::BAR`), and its round button, which plays and pauses.
     let playing = architect_playhead::ui::use_playhead();
