@@ -1402,6 +1402,9 @@ pub fn LabApp() -> Element {
         .contributed(move |menu| ext_ui.menu_rows(menu));
     // A note opened by path (an extension's `open`: the launcher's Open
     // setlist) shows in the Vault, from a home or an extension's tab.
+    // The host's path opener from the start, not only once a Vault page
+    // was shown (a phone starts on its home).
+    use_hook(move || ext_ui.host().set_path_opener(crate::vault::open_by_path));
     crate::vault::use_vault_wanted(move || {
         if !matches!(*lab.route.peek(), Route::Tab("vault")) {
             lab.jump(Route::Tab("vault"));

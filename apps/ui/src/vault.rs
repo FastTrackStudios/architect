@@ -360,7 +360,7 @@ fn path_receivers()
 /// The app's opener of a path no extension claims: a note (`.md`, or a
 /// declared file type's), sent to
 /// the newest Vault view still open.
-fn open_by_path(path: &str) -> Result<serde_json::Value, String> {
+pub(crate) fn open_by_path(path: &str) -> Result<serde_json::Value, String> {
     // A note: `.md`, or a file type an extension declared (`[[file_types]]`).
     if !vault::note_types::is_note_path(path) {
         return Err(format!("nothing opens {path}"));
