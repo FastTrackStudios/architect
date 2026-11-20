@@ -180,6 +180,10 @@ pub struct Distribution {
     shipped: Vec<String>,
     /// The linked view that is its signed-in home: [`Self::home`].
     home: Option<(String, String)>,
+    /// Its look: always dark ([`Self::dark`]), and its tokens over the
+    /// theme's ([`Self::token`]), as the theme's `App` layer.
+    dark: bool,
+    tokens: Vec<(String, String)>,
 }
 
 impl std::fmt::Debug for Distribution {
@@ -255,6 +259,8 @@ impl Distribution {
             islands: Vec::new(),
             shipped: Vec::new(),
             home: None,
+            dark: false,
+            tokens: Vec::new(),
             listed_favourites: Vec::new(),
             adopts: None,
             registries: vec![store()],
@@ -725,6 +731,34 @@ impl Distribution {
     pub fn home(mut self, extension: impl Into<String>, view: impl Into<String>) -> Self {
         self.home = Some((extension.into(), view.into()));
         self
+    }
+
+    /// Always dark, whatever the system says (the theme's `App` layer:
+    /// a person's own choice still wins).
+    #[must_use]
+    pub const fn dark(mut self) -> Self {
+        self.dark = true;
+        self
+    }
+
+    /// One of its tokens over the theme's (`desk`, `card`, …: a literal
+    /// or an expression), in the theme's `App` layer.
+    #[must_use]
+    pub fn token(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.tokens.push((name.into(), value.into()));
+        self
+    }
+
+    /// Whether it is always dark ([`Self::dark`]).
+    #[must_use]
+    pub const fn is_dark(&self) -> bool {
+        self.dark
+    }
+
+    /// Its tokens ([`Self::token`]).
+    #[must_use]
+    pub fn tokens(&self) -> &[(String, String)] {
+        &self.tokens
     }
 
     /// The linked view named as its home ([`Self::home`]): the
