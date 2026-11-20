@@ -101,6 +101,8 @@ mod forward;
 #[cfg(all(feature = "guest", unix))]
 pub mod guest;
 #[cfg(feature = "host")]
+pub mod held;
+#[cfg(feature = "host")]
 pub mod host;
 #[cfg(feature = "host")]
 pub mod host_events;

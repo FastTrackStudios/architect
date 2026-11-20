@@ -19,6 +19,8 @@
 //! | `open {path}` | opens a document or file in the app | `reads = ["documents"]` |
 //! | `read_document {path}` | a document's text | `reads = ["documents"]` |
 //! | `list_documents {under?}` | the app's documents (`DocInfo`s), all or under a folder | `reads = ["documents"]` |
+//! | `file_list {place, folder?}` | the files under a folder of a project the org's node holds (`vault:<name>`, `root:<id>`) that the person may read: `{place, folder, files: [{path, size, sha256, url}], expires_us}` (`crate::held`) | `reads = ["files"]` |
+//! | `file_url {place, path}` | a URL that reads one of them by range, no header, until `expires_us`: `{url, expires_us}` | `reads = ["files"]` |
 //! | `create_document {path, text?}` | a new document: its `DocInfo` | `writes = ["documents"]` |
 //! | `edit_document {path, edits, name?}` | edits as one CRDT transaction, one undo step (`DocEdit`s): its text after | `writes = ["documents"]` |
 //! | `rename_document {path, to}` / `move_document {path, folder}` | a new path (or folder) for it, its history kept: its `DocInfo` | `writes = ["documents"]` |
@@ -76,7 +78,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::capabilities::{
-    BADGES, CLIPBOARD, DOCUMENTS, EDITOR, MENUS, NOTIFY, ORG, PICKERS, PROMPTS, SELECTION,
+    BADGES, CLIPBOARD, DOCUMENTS, EDITOR, FILES, MENUS, NOTIFY, ORG, PICKERS, PROMPTS, SELECTION,
 };
 pub use crate::documents::{DocEdit, DocInfo};
 use crate::manifest::{Capabilities, Manifest, Reach};
@@ -128,6 +130,23 @@ pub enum HostRequest {
     /// `reads = ["documents"]`; its edits reach the node only with
     /// `writes = ["documents"]`.
     LiveDocument {
+        path: String,
+    },
+    /// Every file under `folder` (all of it without one) of a project the
+    /// org's node holds, `place` (`vault:<name>`, `root:<id>`), that the
+    /// person may read: `{place, folder, files: [{path, size, sha256,
+    /// url}], expires_us}`, each `url` read by range until `expires_us`
+    /// (`crate::held`). Needs `reads = ["files"]`.
+    FileList {
+        place: String,
+        #[serde(default)]
+        folder: Option<String>,
+    },
+    /// A URL that reads the file at `path` of `place` by range, with no
+    /// header, until it runs out: `{url, expires_us}`. Needs
+    /// `reads = ["files"]`.
+    FileUrl {
+        place: String,
         path: String,
     },
     /// The app's documents (`crate::documents::Documents`), every one or
@@ -786,6 +805,8 @@ impl HostRequest {
             Self::ReadDocument { .. } => "read_document",
             Self::QueryVault { .. } => "query_vault",
             Self::LiveDocument { .. } => "live_document",
+            Self::FileList { .. } => "file_list",
+            Self::FileUrl { .. } => "file_url",
             Self::ListDocuments { .. } => "list_documents",
             Self::CreateDocument { .. } => "create_document",
             Self::EditDocument { .. } => "edit_document",
@@ -1004,6 +1025,7 @@ pub fn check(
                 .map_err(|(c, why)| (c.to_owned(), why)),
         ),
         HostRequest::Org => ("reads", reads(ORG)),
+        HostRequest::FileList { .. } | HostRequest::FileUrl { .. } => ("reads", reads(FILES)),
         HostRequest::Selection => ("reads", reads(SELECTION)),
         HostRequest::Open { .. }
         | HostRequest::ReadDocument { .. }

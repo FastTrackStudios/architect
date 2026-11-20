@@ -1287,6 +1287,242 @@ async fn a_signed_in_web_client_edits_a_note_live_on_the_org_lane() {
     host.stop().await;
 }
 
+/// A signed-in member's browser reads a project folder's files on the
+/// node (`architect_files::held`): Alan, a member of indie, lists a song's
+/// folder with sizes and sha256s and reads a stem by range through the
+/// ticket its URL carries, or with his bearer; the ticket reads nothing
+/// outside the folder; a session in a URL is never read; a hidden file is
+/// nowhere. Ada, of another org, is refused; no bearer, or a ticket this
+/// node did not sign, reads nothing; a share link's guest has neither.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_member_reads_a_project_folders_files_by_range_and_nobody_else_does() {
+    use architect_files::FilesFault;
+    use architect_files::held::HeldFilesHttpClient;
+    use sha2::Digest as _;
+
+    let origin = issuer().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let host_dir = tmp.path().join("host");
+    let vault = host_dir.join("data/vaults/notes");
+    std::fs::create_dir_all(vault.join("Songs/Joy/stems")).unwrap();
+    std::fs::create_dir_all(vault.join("Songs/Other")).unwrap();
+    std::fs::create_dir_all(vault.join(".architect")).unwrap();
+    std::fs::write(vault.join("hello.md"), "# Hello\n").unwrap();
+    std::fs::write(
+        vault.join("Songs/Joy/joy.md"),
+        "---\ntype: song\n---\n# Joy\n",
+    )
+    .unwrap();
+    let stem: Vec<u8> = (0..1024_u32)
+        .map(|i| u8::try_from(i % 251).unwrap())
+        .collect();
+    std::fs::write(vault.join("Songs/Joy/stems/bass.wav"), &stem).unwrap();
+    std::fs::write(vault.join("Songs/Other/x.wav"), b"other").unwrap();
+    std::fs::write(vault.join(".architect/secret.txt"), b"hidden").unwrap();
+    let mut host = config(
+        "indie-held",
+        &host_dir,
+        &origin,
+        session_of(&origin, &host_dir, "grace@local.test").await,
+    );
+    host.host_org = Some("indie".to_owned());
+    let host = node::start(host).await.unwrap();
+    let base = format!("http://{}", host.http);
+    let token = |email: &'static str| {
+        let (origin, dir) = (origin.clone(), tmp.path().join(email));
+        async move {
+            session_of(&origin, &dir, email).await;
+            token_in(&dir)
+        }
+    };
+    let (alan, ada) = (
+        token("alan@local.test").await,
+        token("ada@local.test").await,
+    );
+    let as_alan = HeldFilesHttpClient::at(base.clone()).with_bearer(alan.clone());
+    let place = || "vault:notes".to_owned();
+
+    // The song's folder: its files, every one under it, with size and sha256.
+    let listing = as_alan
+        .list(
+            "indie".to_owned(),
+            place(),
+            Some("Songs/Joy".to_owned()),
+            String::new(),
+        )
+        .await
+        .unwrap();
+    let paths: Vec<&str> = listing.files.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(paths, ["Songs/Joy/joy.md", "Songs/Joy/stems/bass.wav"]);
+    let listed_stem = &listing.files[1];
+    assert_eq!(listed_stem.size, 1024);
+    assert_eq!(
+        listed_stem.sha256.as_deref(),
+        Some(format!("{:x}", sha2::Sha256::digest(&stem)).as_str())
+    );
+    // Listed again: the same hashes, kept for the file's size and mtime.
+    let again = as_alan
+        .list(
+            "indie".to_owned(),
+            place(),
+            Some("Songs/Joy".to_owned()),
+            String::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(again.files[1].sha256, listed_stem.sha256);
+    // The whole vault: nothing hidden in it.
+    let all = as_alan
+        .list("indie".to_owned(), place(), None, String::new())
+        .await
+        .unwrap();
+    assert!(all.files.iter().any(|f| f.path == "hello.md"), "{all:?}");
+    assert!(
+        !all.files.iter().any(|f| f.path.contains(".architect")),
+        "{all:?}"
+    );
+
+    // Its URL reads by range with no header: the ticket it carries.
+    let http = reqwest::Client::new();
+    let ranged = http
+        .get(format!("{base}{}", listed_stem.url))
+        .header("range", "bytes=10-19")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ranged.status(), 206);
+    assert_eq!(
+        ranged.headers()["content-range"].to_str().unwrap(),
+        "bytes 10-19/1024"
+    );
+    assert_eq!(
+        ranged.headers()["content-type"].to_str().unwrap(),
+        "audio/wav"
+    );
+    assert_eq!(&ranged.bytes().await.unwrap()[..], &stem[10..20]);
+    // The folder's ticket reads nothing outside the folder.
+    let outside = listed_stem
+        .url
+        .replace("Songs/Joy/stems/bass.wav", "Songs/Other/x.wav");
+    let refused = http.get(format!("{base}{outside}")).send().await.unwrap();
+    assert_eq!(refused.status(), 401);
+
+    // With the bearer in its header: the whole file.
+    let content = |path: &str| format!("{base}/org/indie/held/content/vault%3Anotes/{path}");
+    let whole = http
+        .get(content("Songs/Joy/stems/bass.wav"))
+        .bearer_auth(&alan)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(whole.status(), 200);
+    assert_eq!(whole.bytes().await.unwrap().len(), 1024);
+    // A session in the URL is never read.
+    let in_url = http
+        .get(format!(
+            "{}?token={alan}",
+            content("Songs/Joy/stems/bass.wav")
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(in_url.status(), 401);
+    // A ticket this node did not sign reads nothing.
+    let forged = http
+        .get(format!(
+            "{}?ticket=fht1.e30.AAAA",
+            content("Songs/Joy/stems/bass.wav")
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(forged.status(), 401);
+    // Hidden: nowhere, even for a member.
+    let hidden = http
+        .get(content(".architect/secret.txt"))
+        .bearer_auth(&alan)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(hidden.status(), 404);
+
+    // A ticket for one file: its URL reads it, by range.
+    let ticket = as_alan
+        .ticket(
+            "indie".to_owned(),
+            place(),
+            "Songs/Other/x.wav".to_owned(),
+            String::new(),
+        )
+        .await
+        .unwrap();
+    assert!(ticket.expires_us > 0);
+    let one = http
+        .get(format!("{base}{}", ticket.url))
+        .header("range", "bytes=1-2")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(one.status(), 206);
+    assert_eq!(&one.bytes().await.unwrap()[..], b"th");
+    // Only a file that is there.
+    assert!(
+        as_alan
+            .ticket(
+                "indie".to_owned(),
+                place(),
+                "Songs/none.wav".to_owned(),
+                String::new()
+            )
+            .await
+            .is_err()
+    );
+    // A vault of no org's here: nowhere.
+    assert!(matches!(
+        as_alan
+            .list(
+                "indie".to_owned(),
+                "vault:acme".to_owned(),
+                None,
+                String::new()
+            )
+            .await,
+        Err(architect::ClientError::App(FilesFault::PathNotFound(_)))
+    ));
+
+    // Ada is in no org of this node's: refused, her bearer reads nothing.
+    let as_ada = HeldFilesHttpClient::at(base.clone()).with_bearer(ada.clone());
+    assert!(matches!(
+        as_ada
+            .list("indie".to_owned(), place(), None, String::new())
+            .await,
+        Err(architect::ClientError::App(FilesFault::Denied { .. }))
+    ));
+    let theirs = http
+        .get(content("Songs/Joy/stems/bass.wav"))
+        .bearer_auth(&ada)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(theirs.status(), 403);
+    // Nobody (a share link's guest sends no bearer here): nothing.
+    let nobody = HeldFilesHttpClient::at(base.clone());
+    assert!(matches!(
+        nobody
+            .list("indie".to_owned(), place(), None, String::new())
+            .await,
+        Err(architect::ClientError::App(FilesFault::Unauthenticated))
+    ));
+    let anonymous = http
+        .get(content("Songs/Joy/stems/bass.wav"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(anonymous.status(), 401);
+
+    host.stop().await;
+}
+
 /// A mock of a bank's token exchange (`features/extensions/tests/support`).
 #[path = "../../../features/extensions/tests/support/server.rs"]
 mod bank;

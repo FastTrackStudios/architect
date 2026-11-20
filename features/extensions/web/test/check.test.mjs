@@ -41,6 +41,20 @@ test('the interface it uses is granted one by one', () => {
   ]);
 });
 
+test("a project's files are read with reads = files alone (hostcall.rs)", () => {
+  const manifest = { id: 'fts.engine' };
+  const files = within({ reads: ['files'] }, { reads: ['files'] });
+  assert.equal(check(manifest, files, { op: 'file_list', place: 'vault:notes', folder: 'Songs/Joy' }), null);
+  assert.equal(check(manifest, files, { op: 'file_url', place: 'vault:notes', path: 'Songs/Joy/a.wav' }), null);
+  const documents = within({ reads: ['documents'] }, { reads: ['documents'] });
+  for (const op of ['file_list', 'file_url']) {
+    assert.deepEqual(check(manifest, documents, { op, place: 'vault:notes', path: 'a' }), [
+      'reads.files',
+      "this extension may not read the app's files (capabilities.reads)",
+    ]);
+  }
+});
+
 test('each request is checked as hostcall::check checks it', () => {
   const manifest = {
     id: 'fts.net',

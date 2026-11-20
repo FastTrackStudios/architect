@@ -3930,6 +3930,33 @@ refused without `reads` / `writes`), `features/pages/tests/documents.rs`
 `features/extensions/tests/wasi_wit.rs` (the typed imports are the
 calls).
 
+## A project's files on the org's node
+
+An engine an extension runs in the app (Studio's, in a browser) streams a
+project: it lists a folder and range-reads its files. The member's own
+project, not only a share link's: two host calls, each needing
+`reads = ["files"]` alone (`features/extensions/src/held.rs`).
+
+| call | Luau `host.` | answer |
+|---|---|---|
+| `file_list {place, folder?}` | `file_list(place, folder?)` | `{place, folder, files: [{path, size, sha256, url}], expires_us}` |
+| `file_url {place, path}` | `file_url(place, path)` | `{url, expires_us}` |
+
+A place is `vault:<name>` (one of the org's vaults) or `root:<id>` (a
+root the node holds). Every `url` is absolute, read with `Range` and no
+header until `expires_us` (a short-lived read ticket in its query); then
+ask again. The host checks the capability (`hostcall::check`, and
+`features/extensions/web/check.js` in a page) and hands the call to the
+app's `HeldFilesSource` (`Host::set_held_files`). The node decides what
+the person may read: `features/files/src/held.rs` `HeldFiles`, served at
+`/org/{slug}/held/…` by `apps/desktop/src/node/held.rs` `HeldFace` under
+the org lane's gate (a member reads what their role lets them; another
+org's person, a share link's guest and no bearer read nothing; a hidden
+file and a symlink are nowhere). Only the signed-in web app gives a source
+today (`apps/web/src/app/held.rs`); every other host, a guest's included,
+answers `unsupported`, so a guest reads only what its link lists, through
+the link (`<link>_files.json`).
+
 ## The vault's query service
 
 The vault keeps an index of its notes, as Obsidian's metadata cache is

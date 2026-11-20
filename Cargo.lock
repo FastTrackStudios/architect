@@ -2581,6 +2581,7 @@ dependencies = [
  "architect-distribution",
  "architect-extensions",
  "architect-favourites",
+ "architect-files",
  "architect-media",
  "architect-navigator",
  "architect-pages",

@@ -417,6 +417,36 @@ impl OrgLane {
                 .allowed()
     }
 
+    /// Who `bearer` is, as the lane's gate resolves it: the issuer's
+    /// person (its `whoami`, cached for the re-check interval), their orgs
+    /// and roles learnt on the way; anonymous for none, a refused one or
+    /// an issuer that cannot be reached.
+    pub async fn person(&self, bearer: Option<&str>) -> Principal {
+        self.gate.identity_resolver().resolve(bearer).await
+    }
+
+    /// Whether `who` is a member of the org, of any role.
+    #[must_use]
+    pub fn is_member(&self, who: &Principal) -> bool {
+        matches!(who, Principal::User { .. }) && self.members.role(who, &self.org.id).is_some()
+    }
+
+    /// Whether a person may read `relative` (a resource of the org's,
+    /// `vaults/<vault>/<path>`, `files/<root>/<path>`): the org's engine,
+    /// as for every other read on the lane (`super::held`'s files).
+    #[must_use]
+    pub fn reads_at(&self, who: &Principal, relative: &str) -> bool {
+        matches!(who, Principal::User { .. })
+            && self
+                .engine
+                .check(
+                    who,
+                    &Resource::new(format!("org/{}/{relative}", self.org.id.0)),
+                    &Action::read(),
+                )
+                .allowed()
+    }
+
     /// A fingerprint of what `who` may read in the org: their role, which
     /// the lane's rules are per ([`engine`]). It moves when their role does.
     #[must_use]

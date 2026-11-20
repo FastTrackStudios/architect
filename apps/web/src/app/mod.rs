@@ -46,6 +46,7 @@ pub mod extensions;
 mod favourites;
 mod frames;
 mod guest;
+mod held;
 
 /// The action a round button runs to open the Now Playing bar's detail.
 const PLAYER_DETAIL: &str = "PLAYHEAD_DETAIL";
