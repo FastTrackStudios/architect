@@ -1407,7 +1407,8 @@ pub fn LabApp() -> Element {
     use_hook(move || ext_ui.host().set_path_opener(crate::vault::open_by_path));
     crate::vault::use_vault_wanted(move || {
         if !matches!(*lab.route.peek(), Route::Tab("vault")) {
-            lab.jump(Route::Tab("vault"));
+            // Over the tab it was opened from, with the way back to it.
+            lab.go(Route::Tab("vault"));
         }
     });
     let route = (lab.route)();

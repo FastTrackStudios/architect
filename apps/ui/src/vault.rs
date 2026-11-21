@@ -1036,9 +1036,15 @@ pub fn VaultPage() -> Element {
         })
         .with_label(),
     );
+    // Opened from the home or an extension's tab (a setlist from Studio's
+    // launcher): the way back to it, as a page pushed over a tab has.
+    let lab = try_use_context::<crate::Lab>();
+    let on_back = lab
+        .filter(|l| l.can_go_back())
+        .map(|l| EventHandler::new(move |()| l.go_back()));
     rsx! {
         if phone {
-            PageBar { title: pane_title, lead: note_lead, toolbar: panes }
+            PageBar { title: pane_title, lead: note_lead, toolbar: panes, on_back }
         } else if title_row.is_none() && !title_filled {
             PageBar { title: "Vault" }
         }
