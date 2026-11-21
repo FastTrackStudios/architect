@@ -1079,6 +1079,13 @@ pub fn LabApp() -> Element {
         architect_commands::Command::new("LAB_TAKE_TOUR", "Take the tour").group("Help"),
         take_tour,
     );
+    // The Now Playing bar's detail (the position, previous and next, the
+    // sources), as the bar's own `^` opens it: what a note type's round
+    // button names to stand for it (a setlist's player), as in the web app.
+    architect_commands::use_command(
+        architect_commands::Command::new("PLAYHEAD_DETAIL", "Show the player").group("Now Playing"),
+        architect_playhead::ui::toggle_detail,
+    );
     // The Architect app's first run: no vault yet, so the Vault tab asks
     // for one (`first_run`), and the tour is offered once it is open.
     let mut needs_vault =
