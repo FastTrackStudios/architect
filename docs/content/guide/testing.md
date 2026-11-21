@@ -170,9 +170,9 @@ in parallel and `check`, the status branch protection requires, passes
 only when both did:
 
 - `fast checks`: `cargo fmt --all -- --check`, the chart, a stale
-  `Cargo.lock`, change files (`just ci-changes`), the workspace-hack, and
+  `Cargo.lock`, change files (`just ci-changes`), and
   the xtasks that only read sources and the graph: `feature-tests`,
-  `docs`, `surfaces`, `fleet-deps --check` and `boundaries`.
+  `docs`, `surfaces` and `boundaries`.
 - `lint`: main's `cargo clippy --workspace --all-targets` (every target:
   tests, benches, examples, as Linux builds them) whenever the PR changes
   a crate, then a `cargo clippy` of each `feature-tests.toml` pass and of

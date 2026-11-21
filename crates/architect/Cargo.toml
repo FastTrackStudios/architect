@@ -435,7 +435,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 # that crate's stream type, so a version skew is a type mismatch.
 # TLS is named here, with bundled Mozilla roots (the workspace's rule for
 # reqwest too): `connect` dials `wss://` issuers and nodes. Inside this
-# workspace the feature arrived by unification (workspace-hack), so a build
+# workspace the feature arrived by unification, so a build
 # from outside it (a distribution: Studio Architect) had none, and every
 # `wss://` dial failed with `Url(TlsFeatureNotEnabled)`: the node never
 # reached its issuer.
@@ -595,9 +595,6 @@ required-features = ["http", "http-client", "vox", "local", "dispatch-tokio"]
 
 [lints]
 workspace = true
-
-[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
-architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 # `blob`: the store budget's keep-free floor asks `statvfs` (safe, and
 # already in the graph through tempfile and tokio's io-uring).

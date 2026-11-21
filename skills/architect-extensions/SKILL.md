@@ -83,5 +83,5 @@ Details, minimal examples and tests for each: `references/runtimes.md`.
 - `#[architect::rpc]` methods take at most four parameters besides `&self` (vox sends a tuple; facet stops at four): put the rest in one wire struct.
 - On wasm, futures aren't `Send`: bound with `MaybeSend`, hold wasm-only clients in `SendWrapper`, give a browser host `Host::with_spawn`.
 - Linked UI runs on Blitz: no native `<select>`, no `style { … }` node beside the workspace (use `document::Style`); see `skills/architect/references/blitz-quirks.md`.
-- A new crate must join the `workspace-hack` (hakari) correctly: `skills/architect/references/xtask-tooling.md`.
+- A new crate names every feature it needs in its own `Cargo.toml`; nothing unifies them for it.
 - A view that reads a cache needs a revision prop; a refresh → bump → effect loop freezes the app with no log.

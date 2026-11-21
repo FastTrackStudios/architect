@@ -54,7 +54,6 @@ WORKSPACE_INPUTS = (
     "rustfmt.toml",
     ".rustfmt.toml",
     "feature-tests.toml",
-    ".config/hakari.toml",
     ".github/workflows/pr.yml",
     ".github/actions/",
     "scripts/pr-scope.py",
@@ -233,8 +232,6 @@ def main():
         if o:
             seeds.add(o)
         seeds |= included.get(f, set())
-    if "architect-workspace-hack" in seeds:
-        everything("the workspace-hack changed", members, cmds)
     if not seeds:
         print(f"scope: {len(files)} changed file(s), none in a crate", file=sys.stderr)
         emit(rust="false", reached="", builds=feature_builds(set(), cmds))

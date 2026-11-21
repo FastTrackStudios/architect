@@ -1,5 +1,5 @@
 # architect's dev environment. The toolchain (rust 1.99.1, the
-# rust-toolchain.toml pin), mold, cargo-hakari, cargo-rail (change files,
+# rust-toolchain.toml pin), mold, cargo-rail (change files,
 # .changes/README) and prek come from devenv-fleet's `rust` module; dx,
 # wasm-bindgen, binaryen and tailwindcss from its `dioxus` module
 # (devenv.yaml). This file adds what this workspace links against and runs.

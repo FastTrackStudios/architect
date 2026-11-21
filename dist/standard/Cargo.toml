@@ -163,7 +163,6 @@ architect-time-tracker = { path = "../../extensions/time-tracker" }
 architect-ui = { path = "../../features/ui/architect-ui" }
 architect-updates = { path = "../../features/updates" }
 architect-workspace = { path = "../../features/workspace" }
-architect-workspace-hack = { path = "../../workspace-hack" }
 auth-client = { path = "../../features/auth/auth-client" }
 auth-proto = { path = "../../features/auth/auth-proto" }
 crdt = { path = "../../features/crdt/crdt" }
@@ -274,7 +273,6 @@ architect-time-tracker = { path = "../../extensions/time-tracker" }
 architect-ui = { path = "../../features/ui/architect-ui" }
 architect-updates = { path = "../../features/updates" }
 architect-workspace = { path = "../../features/workspace" }
-architect-workspace-hack = { path = "../../workspace-hack" }
 auth-client = { path = "../../features/auth/auth-client" }
 auth-proto = { path = "../../features/auth/auth-proto" }
 crdt = { path = "../../features/crdt/crdt" }

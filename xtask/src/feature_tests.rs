@@ -153,7 +153,7 @@ pub fn run_cli(
     let text = std::fs::read_to_string(root.join(config))
         .map_err(|e| format!("{}: {e}", config.display()))?;
     let config: Config = toml::from_str(&text).map_err(|e| format!("{}: {e}", config.display()))?;
-    let graph = crate::fleet_deps::load(root, false)?;
+    let graph = load(root)?;
     let builds = builds(&graph, &config)?;
     let gated = gated(&graph)?;
 
@@ -874,4 +874,11 @@ fn w() {}
         assert_eq!(lines, vec![9, 11, 15]);
         assert_eq!(s.sites[2].1, vec![Cfg::Feature("d".into())]);
     }
+}
+
+/// The workspace's package graph, as `cargo metadata` reports it.
+fn load(root: &Path) -> Result<guppy::graph::PackageGraph, String> {
+    let mut cmd = guppy::MetadataCommand::new();
+    cmd.current_dir(root);
+    guppy::graph::PackageGraph::from_command(&mut cmd).map_err(|e| format!("{}: {e}", root.display()))
 }

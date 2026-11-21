@@ -62,5 +62,3 @@ workspace = true
 architect-extensions = { workspace = true, features = ["guest"] }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 
-[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
-architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

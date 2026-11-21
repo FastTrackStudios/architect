@@ -50,8 +50,8 @@ architect-server = ["server-seaorm"]
 # (architect/connect, tokio-tungstenite client-side); still no server stack.
 # 2026-11-10 (+2, #487): architect-guide's `capture` and `story` mount a
 # film's window with `architect-workspace/native` (the desk window's own
-# document: stylesheets, HTML parser), which unifies workspace-hack's
-# features to include tower-http, like the story crates above; the guide
+# document: stylesheets, HTML parser), whose features include
+# tower-http, like the story crates above; the guide
 # itself reaches no server stack.
 ui-reach = 15
 transport-host = 4

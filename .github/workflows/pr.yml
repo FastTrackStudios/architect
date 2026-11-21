@@ -114,21 +114,6 @@ jobs:
           export PATH="$dl/cargo-rail:$PATH"
           git fetch -q --no-tags --depth=1 origin "$BASE"
           cargo rail change check --since "$BASE"
-      # The workspace-hack is current (workspace-hack/Cargo.toml, hakari's
-      # section): a dependency change that skipped `cargo hakari generate`,
-      # or a new member without its hack line, fails here. Neither
-      # compiles anything.
-      - name: install cargo-hakari
-        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-hakari@0.9.38
-      - name: hakari
-        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
-        run: |
-          set -euo pipefail
-          cargo hakari generate --diff
-          cargo hakari manage-deps --dry-run
       # No tracked path may hold a character cargo cannot package or Windows
       # cannot check out: a build that vendors this repo by git (crane, in a
       # distribution's image) fails on the first one.
@@ -153,10 +138,7 @@ jobs:
           python3 scripts/check-token-mints.py
           bash scripts/release-notes-test.sh
           bash scripts/release-sums-test.sh
-      # xtask alone, without the workspace-hack (`--cfg no_workspace_hack`,
-      # as `xtask boundaries` resolves) and in its own target dir: through
-      # the hack its debug build compiles most of the third-party graph
-      # (401s cold, measured).
+      # xtask alone, in its own target dir.
       - name: rust cache
         if: ${{ !cancelled() }}
         uses: Swatinem/rust-cache@v2
@@ -168,12 +150,11 @@ jobs:
         id: xtask
         if: ${{ !cancelled() }}
         env:
-          RUSTFLAGS: --cfg no_workspace_hack
           CARGO_TARGET_DIR: target/xtask
         run: cargo build -q -p xtask
       # Main's Lint xtasks that read sources and the resolved graph: every
       # feature-gated test has a pass, every docs path exists, the layer
-      # table holds, MCP and CLI match, the fleet feature union is current.
+      # table holds, MCP and CLI match.
       - name: feature-tests
         if: ${{ !cancelled() && steps.xtask.outcome == 'success' }}
         run: target/xtask/debug/xtask feature-tests
@@ -183,9 +164,6 @@ jobs:
       - name: surfaces
         if: ${{ !cancelled() && steps.xtask.outcome == 'success' }}
         run: target/xtask/debug/xtask surfaces
-      - name: fleet-deps
-        if: ${{ !cancelled() && steps.xtask.outcome == 'success' }}
-        run: target/xtask/debug/xtask fleet-deps --check
       # The core extensions list (extensions/core-extensions.toml): its rules,
       # dist/standard generated from it, and dist/standard's lock holding one
       # Architect. Reads files only; never builds or fetches Studio
