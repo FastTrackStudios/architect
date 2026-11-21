@@ -1236,6 +1236,12 @@ pub fn AppShell(
     #[props(into)]
     title: Option<String>,
     tabs: Vec<Tab>,
+    /// Whether `tabs` are the open note's declared set (a setlist's
+    /// Setlist, Chart, Lyrics): then they hold a phone's bar, and the tabs
+    /// others add ([`Chrome`]) give up their kept places there (the
+    /// sidebar and the rail still list them).
+    #[props(default)]
+    declared: bool,
     /// The current tab's id; `None` when the page is under none of them.
     current: Option<&'static str>,
     on_tab: EventHandler<&'static str>,
@@ -1291,7 +1297,12 @@ pub fn AppShell(
         tabs
     } else {
         tabs.into_iter()
-            .chain(chrome.tabs.iter().cloned())
+            .chain(chrome.tabs.iter().cloned().map(|mut t| {
+                if declared {
+                    t.kept = false;
+                }
+                t
+            }))
             .collect()
     };
     let status: Vec<StatusItem> = status

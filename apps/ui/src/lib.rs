@@ -1694,6 +1694,7 @@ pub fn LabApp() -> Element {
                         style: (lab.style)(),
                         title: crate::distribution().name(),
                         tabs,
+                        declared: declared_on.is_some(),
                         // The help is over a tab, not one of them.
                         current: declared_on.as_ref().map_or_else(
                             || (!matches!(route, Route::Help(_))).then(|| route.tab()),
