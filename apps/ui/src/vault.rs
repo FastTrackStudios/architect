@@ -2718,6 +2718,25 @@ fn VaultNote(path: String) -> Element {
             },
         );
     let core_list = is_list && !claimed;
+    // What the type's embed is handed: the note's frontmatter fields, as
+    // ever, and the note itself as the web app hands a view it
+    // (`note`: its path, title, type, properties and body, the shape of
+    // architect_web's `ext_host::note_props`), so one view reads the note
+    // the same way in either app.
+    let embed_props = {
+        let mut props = fields.clone();
+        props.insert(
+            "note".to_owned(),
+            serde_json::json!({
+                "path": here,
+                "title": shown,
+                "type": note_type,
+                "properties": serde_json::Value::Object(fields.clone()),
+                "body": body.cloned(),
+            }),
+        );
+        serde_json::Value::Object(props)
+    };
     // Its type's renderer (`[[renderers]]`): how its text reads in the
     // editor (a recipe's Cooklang, as the Cookbook draws it).
     let renderer = (!note_type.is_empty())
@@ -2743,7 +2762,7 @@ fn VaultNote(path: String) -> Element {
             architect_extensions::embeds::EmbedView {
                 claim: architect_extensions::contrib::Claim::NoteType(note_type.clone()),
                 source: body.cloned(),
-                props: serde_json::Value::Object(fields.clone()),
+                props: embed_props.clone(),
                 fallback: rsx! {},
             }
         }
@@ -2765,7 +2784,7 @@ fn VaultNote(path: String) -> Element {
                 architect_extensions::embeds::EmbedView {
                     claim: architect_extensions::contrib::Claim::NoteType(note_type.clone()),
                     source: body.cloned(),
-                    props: serde_json::Value::Object(fields.clone()),
+                    props: embed_props.clone(),
                     fallback: list,
                 }
             }
