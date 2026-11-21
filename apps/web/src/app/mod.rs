@@ -58,7 +58,6 @@ mod page;
 mod recording;
 mod screen;
 mod settings;
-mod tabmenu;
 mod theme;
 pub mod vault;
 
@@ -520,7 +519,6 @@ fn WebApp() -> Element {
                             if !home_on {
                                 vault::VaultPage {}
                             }
-                            tabmenu::TabMenu {}
                         }
                     }
                 }

@@ -14,6 +14,7 @@ mod page;
 #[cfg(test)]
 mod snapshot_tests;
 mod status;
+mod tab_menu;
 mod typing;
 mod workspaces;
 
@@ -54,6 +55,7 @@ pub use page::{
 };
 pub use status::{STATUS_BADGE, STATUS_BAR, StatusItem, StatusSide, StatusStyle, use_status};
 use status::{StatusBadge, StatusBar};
+pub use tab_menu::{TAB_MENU, TabMenuEntry, close_tab_menu, toggle_tab_menu};
 pub use typing::{
     Typing, TypingButton, TypingContent, TypingItem, TypingMenu, TypingTools, TypingWidget,
 };
