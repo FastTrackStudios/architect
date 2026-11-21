@@ -394,15 +394,20 @@ pub(crate) fn open_by_path(path: &str) -> Result<serde_json::Value, String> {
 /// A note asked for before a Vault page was there to open it.
 fn pending_path() -> std::sync::MutexGuard<'static, Option<String>> {
     static PENDING: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
-    PENDING.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    PENDING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Who moves the app to the Vault when a note is opened by path: the
 /// app's root (`use_vault_wanted`).
-fn vault_wanted() -> std::sync::MutexGuard<'static, Vec<futures_channel::mpsc::UnboundedSender<()>>> {
+fn vault_wanted() -> std::sync::MutexGuard<'static, Vec<futures_channel::mpsc::UnboundedSender<()>>>
+{
     static WANTED: std::sync::Mutex<Vec<futures_channel::mpsc::UnboundedSender<()>>> =
         std::sync::Mutex::new(Vec::new());
-    WANTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    WANTED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Calls `go` whenever a note is opened by path (an extension's `open`):
@@ -438,6 +443,12 @@ fn show_vault_note(workspace: Signal<Workspace>, path: &str, target: Target) {
 fn open_in_main(workspace: Signal<Workspace>, pane: Pane, target: Target) {
     let mut workspace = workspace;
     let mut w = workspace.write();
+    // Ids count from 1 in each run, and a workspace restored from the
+    // last one holds its panes' ids: a new pane takes one not in use.
+    let mut pane = pane;
+    while w.panes.iter().any(|p| p.id == pane.id) {
+        pane.id = vault_note("").id;
+    }
     if let Some(doc) = w.current_document().cloned() {
         let _ = w.activate(&doc);
     }
@@ -847,9 +858,15 @@ pub fn VaultPage() -> Element {
                 // A page just mounted may not have its vault yet (it opens
                 // as the page does): the note waits for it, a few seconds
                 // at most.
-                for _ in 0..100 {
+                for waited in 0..100 {
                     if opener_disk.peek().is_some() {
                         show_vault_note(workspace, &path, Target::Tab);
+                        tracing::info!(
+                            vault.open_by_path = "pending_opened",
+                            vault.waited = waited,
+                            vault.tabs = workspace.peek().tab_count(),
+                            "vault: a note asked for before the page opened"
+                        );
                         break;
                     }
                     futures_timer::Delay::new(std::time::Duration::from_millis(50)).await;
@@ -860,7 +877,10 @@ pub fn VaultPage() -> Element {
                 if opener_disk.peek().is_some() {
                     show_vault_note(workspace, &path, Target::Tab);
                 } else {
-                    tracing::warn!(vault.open_by_path = "no_disk", "vault: a note asked for by path, and no vault on disk");
+                    tracing::warn!(
+                        vault.open_by_path = "no_disk",
+                        "vault: a note asked for by path, and no vault on disk"
+                    );
                 }
             }
         }

@@ -1105,7 +1105,9 @@ pub fn LabApp() -> Element {
     });
     let vault_opened = use_callback(move |()| {
         needs_vault.set(false);
-        if crate::distribution().home_view().is_none() && guide::tour_place() == guide::TourPlace::Never {
+        if crate::distribution().home_view().is_none()
+            && guide::tour_place() == guide::TourPlace::Never
+        {
             take_tour();
         }
     });
@@ -1567,7 +1569,7 @@ pub fn LabApp() -> Element {
     if crate::distribution().has_tab_labels() && !*shell::TAB_LABELS.peek() {
         *shell::TAB_LABELS.write() = true;
     }
-        // The distribution's home (its linked view: Studio's launcher), first
+    // The distribution's home (its linked view: Studio's launcher), first
     // and kept on a phone's bar, where the open note declares no tabs of
     // its own.
     if declared_on.is_none() && crate::distribution().home_view().is_some() {
