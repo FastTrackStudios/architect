@@ -379,11 +379,15 @@ pub(crate) fn open_by_path(path: &str) -> Result<serde_json::Value, String> {
         receivers.retain(|tx| !tx.is_closed());
         receivers.last().cloned()
     };
-    match tx {
-        Some(tx) if tx.unbounded_send(path.to_owned()).is_ok() => {}
+    let sent = match tx {
+        Some(tx) if tx.unbounded_send(path.to_owned()).is_ok() => "page",
         // No Vault page yet: the one the jump mounts opens it.
-        _ => *pending_path() = Some(path.to_owned()),
-    }
+        _ => {
+            *pending_path() = Some(path.to_owned());
+            "pending"
+        }
+    };
+    tracing::info!(vault.open_by_path = sent, "vault: a note opened by path");
     Ok(serde_json::json!({ "opened_by": "app", "path": path }))
 }
 
@@ -437,8 +441,12 @@ fn open_in_main(workspace: Signal<Workspace>, pane: Pane, target: Target) {
     if let Some(doc) = w.current_document().cloned() {
         let _ = w.activate(&doc);
     }
-    let Ok(id) = w.open(pane, target) else {
-        return;
+    let id = match w.open(pane, target) {
+        Ok(id) => id,
+        Err(e) => {
+            tracing::warn!(vault.open = "refused", error = ?e, "vault: the workspace did not open the pane");
+            return;
+        }
     };
     let docked = w
         .locate(&id)
@@ -844,6 +852,8 @@ pub fn VaultPage() -> Element {
                 // Only a vault on disk has notes by path.
                 if opener_disk.peek().is_some() {
                     show_vault_note(workspace, &path, Target::Tab);
+                } else {
+                    tracing::warn!(vault.open_by_path = "no_disk", "vault: a note asked for by path, and no vault on disk");
                 }
             }
         }
