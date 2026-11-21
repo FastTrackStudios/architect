@@ -843,10 +843,17 @@ pub fn VaultPage() -> Element {
             ui.host().set_path_opener(open_by_path);
             // A note asked for before this page was there.
             let waiting = pending_path().take();
-            if let Some(path) = waiting
-                && opener_disk.peek().is_some()
-            {
-                show_vault_note(workspace, &path, Target::Tab);
+            if let Some(path) = waiting {
+                // A page just mounted may not have its vault yet (it opens
+                // as the page does): the note waits for it, a few seconds
+                // at most.
+                for _ in 0..100 {
+                    if opener_disk.peek().is_some() {
+                        show_vault_note(workspace, &path, Target::Tab);
+                        break;
+                    }
+                    futures_timer::Delay::new(std::time::Duration::from_millis(50)).await;
+                }
             }
             while let Some(path) = rx.next().await {
                 // Only a vault on disk has notes by path.
