@@ -243,8 +243,9 @@ pub fn opens(declaring: &str, target: &Target, reach: &Reach<'_>) -> Option<Open
             let e = *reach.actions.get(a)?;
             may_run(declaring, a, e, reach).then(|| Opens::Action(a.clone()))
         }
-        // A menu of targets: the web app's guest bar draws it; this shell
-        // has no menu tab yet, so the tab is left out.
+        // A menu of targets: `declared` makes it a tab whose press opens
+        // the shell's menu (`architect_shell::TabMenu`); as one entry's
+        // target, nothing.
         Target::Menu(_) => None,
         Target::Place(p) => {
             let path = architect_extensions::favourites::place_path(reach.note, p)?;
@@ -281,6 +282,51 @@ pub fn declared(
             architect_shell::declare(
                 d,
                 |target| {
+                    // A tab that opens a menu above itself (the shell's
+                    // `TabMenu`): its entries, each with what it opens here
+                    // (one that opens nothing is left out; none left, no tab).
+                    if let Target::Menu(entries) = target {
+                        let items: Vec<(String, String, Opens)> = entries
+                            .iter()
+                            .filter_map(|e| {
+                                Some((
+                                    e.label.clone(),
+                                    e.icon.clone(),
+                                    opens(extension, &e.target, reach)?,
+                                ))
+                            })
+                            .collect();
+                        if items.is_empty() {
+                            return None;
+                        }
+                        let label = d
+                            .tabs
+                            .iter()
+                            .find(|t| &t.target == target)
+                            .map_or_else(|| "More".to_owned(), |t| t.label.clone());
+                        let key = format!("{}\0{ty}\0{extension}\0{label}\0menu", reach.note);
+                        let run = run.clone();
+                        let by = extension.clone();
+                        let press = presses.get(key, || {
+                            Callback::new(move |()| {
+                                let entries = items
+                                    .iter()
+                                    .map(|(label, glyph, what)| {
+                                        let (run, by, what) =
+                                            (run.clone(), by.clone(), what.clone());
+                                        architect_shell::TabMenuEntry {
+                                            label: label.clone(),
+                                            glyph: glyph.clone(),
+                                            press: Callback::new(move |()| run(&by, what.clone())),
+                                        }
+                                    })
+                                    .collect();
+                                architect_shell::toggle_tab_menu(&label, entries);
+                            })
+                        });
+                        // The tab stays on nothing: what its entries open is theirs.
+                        return Some((press, Shows::Elsewhere));
+                    }
                     let what = opens(extension, target, reach)?;
                     let shows = what.shows(reach.note);
                     let key = format!("{}\0{ty}\0{extension}\0{what:?}", reach.note);

@@ -205,26 +205,21 @@ pub fn use_web_favourites(
                     let (by, path) = (d.by.extension.clone(), path.clone());
                     let press = presses.get(key, || {
                         Callback::new(move |()| {
-                            if super::tabmenu::MENU.peek().is_some() {
-                                *super::tabmenu::MENU.write() = None;
-                                return;
-                            }
                             let entries = items
                                 .iter()
                                 .map(|(label, glyph, what)| {
                                     let (what, by, said, path) =
                                         (what.clone(), by.clone(), label.clone(), path.clone());
-                                    super::tabmenu::Entry {
+                                    shell::TabMenuEntry {
                                         label: label.clone(),
                                         glyph: glyph.clone(),
                                         press: Callback::new(move |()| {
-                                            *super::tabmenu::MENU.write() = None;
                                             run(&what, &by, &said, &path, workspace, &commands);
                                         }),
                                     }
                                 })
                                 .collect();
-                            *super::tabmenu::MENU.write() = Some((label.clone(), entries));
+                            shell::toggle_tab_menu(&label, entries);
                         })
                     });
                     return Some((press, on_show));

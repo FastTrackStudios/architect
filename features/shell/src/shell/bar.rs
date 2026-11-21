@@ -477,7 +477,11 @@ pub(super) fn PhoneFoot(
             ActionBar { items, keyboard_button, bottom: if tab_bar { 0.0 } else { ins.bottom }, screen }
         }
         if tab_bar {
-            BottomBar { tabs, current, on_tab, separate, screen }
+            // Its box positions a tab's menu above it (`TabMenu`).
+            div { style: "position: relative; flex-shrink: 0; display: flex; flex-direction: column;",
+                BottomBar { tabs, current, on_tab, separate, screen }
+                super::tab_menu::TabMenu {}
+            }
         }
         // The keyboard on its way down: the bars ride it.
         if lift > 0.5 {

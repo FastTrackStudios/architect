@@ -62,7 +62,6 @@ mod page;
 mod recording;
 mod screen;
 mod settings;
-mod tabmenu;
 mod theme;
 pub mod vault;
 mod view_probe;
@@ -615,7 +614,6 @@ fn WebApp() -> Element {
                             if !home_on && !ext_on {
                                 vault::VaultPage {}
                             }
-                            tabmenu::TabMenu {}
                         }
                     }
                 }
