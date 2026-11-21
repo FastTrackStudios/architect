@@ -59,10 +59,17 @@ pub fn FirstRun(on_open: Callback<()>) -> Element {
     let dist = architect_distribution::current();
     let name = dist.map_or_else(|| "Architect".to_owned(), |d| d.name().to_owned());
     let mark = dist.map(|d| {
-        let svg: String = d.icons().svg.split_whitespace().collect::<Vec<_>>().join(" ");
+        let svg: String = d
+            .icons()
+            .svg
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
         format!(
             "data:image/svg+xml;utf8,{}",
-            svg.replace('%', "%25").replace('#', "%23").replace('"', "'")
+            svg.replace('%', "%25")
+                .replace('#', "%23")
+                .replace('"', "'")
         )
     });
     let label = "font-size: 14px; font-weight: 650;";

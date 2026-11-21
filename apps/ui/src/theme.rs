@@ -93,10 +93,9 @@ pub fn app_layer() -> architect_theme::Layer {
     let Some(dist) = architect_distribution::current() else {
         return layer;
     };
-    let layer = dist
-        .tokens()
-        .iter()
-        .fold(layer, |layer, (name, value)| layer.token(name.clone(), value.clone()));
+    let layer = dist.tokens().iter().fold(layer, |layer, (name, value)| {
+        layer.token(name.clone(), value.clone())
+    });
     if dist.is_dark() {
         layer.appearance(architect_theme::Appearance::Dark)
     } else {
