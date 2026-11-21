@@ -190,9 +190,6 @@ required-features = ["native"]
 [lints]
 workspace = true
 
-[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
-architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
-
 [[example]]
 name = "paint_web"
 required-features = ["paint-web"]

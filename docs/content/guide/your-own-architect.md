@@ -142,7 +142,7 @@ cargo xtask dist all           # no --manifest-path: the Architect app itself
 | target | how | out (in `--out`, default `target/dist`) |
 | --- | --- | --- |
 | `desktop` | the window's build, then `scripts/desktop/linux.sh` (an AppImage) or `scripts/desktop/macos.sh` (a signed dmg, on airlock) | `<Name>-linux-x86_64.AppImage` |
-| `node` | `--no-default-features` and `--cfg no_workspace_hack`, as the release's node | the binary |
+| `node` | `--no-default-features`, as the release's node | the binary |
 | `node-image` | the node in `flake.nix`'s `architect-image-prebuilt` | `<folder>-node.tar` |
 | `web` | with a `web` feature, the crate's own wasm (below); then `scripts/web-bundle.sh`, with the node's `distribution` as `/app/distribution.json` | `web/` |
 | `web-image` | the bundle in `flake.nix`'s `architect-web-image-prebuilt` | `<folder>-web.tar` |

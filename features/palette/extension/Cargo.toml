@@ -48,5 +48,3 @@ workspace = true
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 architect-extensions = { workspace = true, features = ["guest"], optional = true }
 
-[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
-architect-workspace-hack = { version = "0.1", path = "../../../workspace-hack" }

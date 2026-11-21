@@ -64,5 +64,3 @@ mlua = { version = "0.12", optional = true, features = ["luau", "async", "send",
 # The app's runtime a script's action calls run on (`vm::Dispatch`).
 tokio = { workspace = true, optional = true }
 
-[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
-architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

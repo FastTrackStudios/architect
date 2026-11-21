@@ -295,10 +295,8 @@ The command lines:
   node beside the workspace panics its layout (use `document::Style` and
   inline token styles). A process view may set raw HTML only on a
   `<style>`.
-- **A new crate** joins the `workspace-hack` (hakari): `cargo hakari
-  generate`, `cargo hakari manage-deps`, then `cargo xtask fleet-deps` to
-  gate its line, or its wasm build pulls the native union and fails
-  (`skills/architect/references/xtask-tooling.md`).
+- **A new crate** names every feature it needs in its own `Cargo.toml`:
+  nothing unifies features across the workspace for it.
 - **Action ids** start with the extension's prefix (`fts.metronome` →
   `FTS_METRONOME_`) or it does not load.
 - **Views that read a cache** need a revision prop to redraw; a refresh

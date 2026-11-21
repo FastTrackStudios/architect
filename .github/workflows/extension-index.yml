@@ -42,8 +42,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # xtask is built here: architect's .cargo/config.toml links with
-      # mold, and the workspace-hack brings the desktop crates' -sys build
-      # scripts (GTK, WebKit, the tray), which ask pkg-config for headers.
+      # mold.
       - name: Build dependencies
         run: |
           sudo apt-get update -q

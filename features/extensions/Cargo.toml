@@ -154,8 +154,8 @@ guest = [
     "dep:tokio",
     "dep:dioxus",
     # Its views' events arrive serialised (`guest.rs`): dioxus-html's
-    # `serialize`, which only the workspace-hack gave it before (a build
-    # with `--cfg no_workspace_hack`, the node's, failed).
+    # `serialize` (the node's build, without the window, gets it from
+    # nothing else).
     "dep:dioxus-html",
     "dep:tracing",
     # The host's theme as the app's theme store in its views
@@ -494,5 +494,3 @@ required-features = ["lsp"]
 [lints]
 workspace = true
 
-[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
-architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

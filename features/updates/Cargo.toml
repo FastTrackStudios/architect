@@ -51,5 +51,3 @@ required-features = ["release"]
 [lints]
 workspace = true
 
-[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
-architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

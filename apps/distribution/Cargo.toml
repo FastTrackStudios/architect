@@ -48,5 +48,3 @@ workspace = true
 architect-sites = { workspace = true }
 architect-updates = { workspace = true, features = ["release"] }
 
-[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
-architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

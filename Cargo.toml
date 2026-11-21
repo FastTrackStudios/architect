@@ -150,8 +150,6 @@ members = [
     "features/launcher/architect-launcher-core",
     "features/launcher/architect-launcher-ui",
     "features/launcher/architect-launcher-providers",
-    # ── the fleet's feature union (hakari + `cargo xtask fleet-deps`) ──
-    "workspace-hack",
     # ── repo tooling ──────────────────────────────────────────────────
     "xtask",
 ]
@@ -456,7 +454,7 @@ hex = "0.4"
 serde_json = "1.0"
 toml = "0.8"
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
-# xtask fleet-deps: the resolver cargo-hakari uses, per platform.
+# xtask feature-tests: the resolved package graph.
 guppy = "0.19"
 thiserror = "2.0"
 # `serde` because architect-launcher-core derives Serialize/Deserialize on

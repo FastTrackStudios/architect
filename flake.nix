@@ -119,9 +119,7 @@
             in
             if v != null then v else self.rev or self.dirtyRev or "unknown";
 
-          # The node, without the window. `no_workspace_hack` drops the
-          # hakari crate, which would otherwise pull the GUI stack's
-          # features into every member (Cargo.toml's workspace-hack lines).
+          # The node, without the window.
           # `archext install` (features/extensions/archive): a signed
           # extension archive checked against a pinned hash and publisher
           # keys, then unpacked; what `lib.architectExtension` builds with.
@@ -132,7 +130,6 @@
             cargoArtifacts = null;
             doCheck = false;
             cargoExtraArgs = "--package architect-extension-archive --bin archext";
-            RUSTFLAGS = "--cfg no_workspace_hack";
             meta.mainProgram = "archext";
           };
 
@@ -143,7 +140,6 @@
             cargoArtifacts = null;
             doCheck = false;
             cargoExtraArgs = "--package architect-desktop --bin architect-desktop --no-default-features --features vox,node-wasi";
-            RUSTFLAGS = "--cfg no_workspace_hack";
             ARCHITECT_BUILD_REV = buildRev;
             nativeBuildInputs = [ pkgs.pkg-config ];
           };
@@ -184,7 +180,6 @@
             cargoArtifacts = null;
             doCheck = false;
             cargoExtraArgs = "--package architect-cli --bin architect";
-            RUSTFLAGS = "--cfg no_workspace_hack";
             nativeBuildInputs = [ pkgs.pkg-config ];
           };
           # The site (apps/site): its node_modules from the frozen lockfile
