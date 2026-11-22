@@ -47,6 +47,7 @@ pub mod disk;
 pub mod editor;
 pub mod events;
 pub mod hostcall;
+mod fuzzy;
 pub mod index;
 pub mod interop;
 pub mod manifest;

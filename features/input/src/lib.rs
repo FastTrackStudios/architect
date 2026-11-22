@@ -36,6 +36,7 @@ pub mod notation;
 pub mod ports;
 pub mod processor;
 pub mod scroll;
+pub mod shortcut;
 pub mod sequence;
 pub mod surface;
 pub mod trie;

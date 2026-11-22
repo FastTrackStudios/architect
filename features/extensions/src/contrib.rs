@@ -1953,7 +1953,7 @@ impl Contribution {
         }
         for k in &self.key_bindings {
             let what = format!("key {}", k.chord);
-            if architect_commands::parse_shortcut(&k.chord).is_none() {
+            if architect_input::shortcut::parse_shortcut(&k.chord).is_none() {
                 return refuse(what, "its chord is not one (`⌘K`, `⇧⌘P`)".to_owned());
             }
             action(&what, &k.action)?;
