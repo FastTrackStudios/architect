@@ -11,7 +11,6 @@
 
 use std::collections::BTreeMap;
 
-use architect_orgs::{OrgId, Orgs};
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 
@@ -181,10 +180,10 @@ impl Policy {
     }
 }
 
-/// Each organization's [`Policy`], by its id.
+/// Each organization's [`Policy`], by the org's id (its slug).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Policies {
-    pub by_org: BTreeMap<OrgId, Policy>,
+    pub by_org: BTreeMap<String, Policy>,
 }
 
 impl Policies {
@@ -194,16 +193,16 @@ impl Policies {
     }
 
     #[must_use]
-    pub fn with(mut self, org: OrgId, policy: Policy) -> Self {
-        self.by_org.insert(org, policy);
+    pub fn with(mut self, org: impl Into<String>, policy: Policy) -> Self {
+        self.by_org.insert(org.into(), policy);
         self
     }
 
-    /// The policy where the window is: its org's, none in All (or an org
-    /// with no policy).
+    /// The policy where the window is: its org's (`active`, the org's id),
+    /// none in All (`None`) or for an org with no policy.
     #[must_use]
-    pub fn current(&self, orgs: &Orgs) -> Option<&Policy> {
-        orgs.current().and_then(|o| self.by_org.get(&o.id))
+    pub fn current(&self, active: Option<&str>) -> Option<&Policy> {
+        active.and_then(|o| self.by_org.get(o))
     }
 }
 
@@ -384,7 +383,6 @@ pub fn plan(
 mod tests {
     use super::{Missing, Policies, Policy, Requirement, Requirements, plan};
     use crate::index::{Listing, Location};
-    use architect_orgs::{Org, OrgId, Orgs, Role};
     use semver::Version;
 
     fn listing(id: &str, v: &str, kind: &str) -> Listing {
@@ -514,9 +512,9 @@ mod tests {
             matches!(&p.missing[0].1, Missing::NotApproved(why) if why.contains("approved list"))
         );
 
-        let orgs = Orgs::new(vec![Org::new("fts", "FTS", Role::Member)]);
-        let policies = Policies::new().with(OrgId::new("fts"), policy.clone());
-        assert_eq!(policies.current(&orgs), Some(&policy));
+        let policies = Policies::new().with("fts", policy.clone());
+        assert_eq!(policies.current(Some("fts")), Some(&policy));
+        assert_eq!(policies.current(None), None);
     }
 
     #[test]

@@ -995,7 +995,6 @@ dependencies = [
  "architect-guide",
  "architect-input",
  "architect-navigator-api",
- "architect-orgs",
  "architect-permissions",
  "architect-scene",
  "architect-scripting",
