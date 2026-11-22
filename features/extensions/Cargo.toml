@@ -128,7 +128,7 @@ person-sync = ["host", "archive", "architect-extension-archive/sign"]
 # an extension of its own.
 manager = ["host", "linked", "architect-workspace/home"]
 # The wire and the protocol (`wire`, `proto`); the derives key on `vox`.
-vox = ["dep:architect", "architect/vox", "dep:vox", "dep:thiserror", "dep:architect-permissions"]
+vox = ["dep:architect", "architect/vox", "dep:vox", "dep:thiserror"]
 # An extension's server-side part on the org's node (#583, `crate::node`):
 # `NodeHost`, the one implementation of `NodeActions`, which loads
 # installed extensions' node actions and runs them with `fetch` to their
@@ -294,7 +294,6 @@ futures = { version = "0.3", optional = true }
 base64 = { workspace = true, optional = true }
 vox = { workspace = true, optional = true }
 # `vox`: `NodeActions`' permit table for the org lane's gate (`crate::node`).
-architect-permissions = { workspace = true, optional = true }
 vox-core = { workspace = true, optional = true }
 vox-stream = { version = "0.10.0-rc.7", optional = true }
 thiserror = { workspace = true, optional = true }
