@@ -893,11 +893,11 @@ impl FileTypeDecl {
         self.body != "text"
     }
 
-    /// Makes its files notes, for the life of the process
-    /// (`vault_proto::note_types::register_with`).
+    /// Makes its files notes, for the life of the process, in the note type
+    /// registry in force ([`crate::vault::note_types`]).
     #[cfg(feature = "host")]
     pub fn register(&self) {
-        vault_proto::note_types::register_type(vault_proto::note_types::NoteFileType {
+        crate::vault::note_types().register(crate::vault::NoteFileType {
             extension: self.extension.clone(),
             note_type: self.note_type.clone(),
             markdown: self.markdown_body(),

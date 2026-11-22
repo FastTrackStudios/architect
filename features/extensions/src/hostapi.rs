@@ -117,25 +117,6 @@ pub trait DataStore: Send + Sync {
     fn keep(&self, id: &str, data: &BTreeMap<String, Value>) -> Result<(), String>;
 }
 
-/// The vault query service's client as a host keeps it: as it is
-/// natively; in a browser, where vox's clients hold `Rc`s and the page
-/// has one thread, wrapped so the host stays `Send` and `Sync` (touched
-/// from another thread, it panics rather than race), #495.
-#[cfg(not(target_family = "wasm"))]
-type HeldQuery = Box<vault_proto::query::VaultQueryClient>;
-#[cfg(target_family = "wasm")]
-type HeldQuery = send_wrapper::SendWrapper<vault_proto::query::VaultQueryClient>;
-
-#[cfg(not(target_family = "wasm"))]
-fn held_query(client: vault_proto::query::VaultQueryClient) -> HeldQuery {
-    Box::new(client)
-}
-
-#[cfg(target_family = "wasm")]
-fn held_query(client: vault_proto::query::VaultQueryClient) -> HeldQuery {
-    send_wrapper::SendWrapper::new(client)
-}
-
 /// Settings' values in memory, for the run.
 #[derive(Debug, Default)]
 pub struct MemoryValues(Mutex<BTreeMap<String, Value>>);
@@ -187,7 +168,7 @@ pub(crate) struct Services {
     /// The app's documents, for the document calls.
     documents: Mutex<Option<Arc<dyn Documents>>>,
     /// The vault's query service, when the app keeps a vault index.
-    vault_query: Mutex<Option<HeldQuery>>,
+    vault_query: Mutex<Option<Arc<dyn crate::vault::VaultQuery>>>,
     /// Whether the host runs for a share link's guest (`Host::for_guest`).
     guest: std::sync::atomic::AtomicBool,
     /// The node's files of a project, as the person reaches them.
@@ -506,8 +487,8 @@ impl Host {
         lock(&self.services().kind_docs).clone()
     }
 
-    /// A vault for extensions: its `documents` and its query service's
-    /// client (`vault_proto::query::VaultQuery`, served wherever the app
+    /// A vault for extensions: its `documents` and its query service
+    /// ([`crate::vault::VaultQuery`], served wherever the app
     /// keeps the vault's index: in process on a desk and a phone, over a
     /// browser's synced index), given together, for one [`VaultScope`], so
     /// a host never queries past the documents it gives. A share guest's
@@ -517,7 +498,7 @@ impl Host {
     pub fn with_vault(
         self,
         documents: Arc<dyn Documents>,
-        queries: vault_proto::query::VaultQueryClient,
+        queries: Arc<dyn crate::vault::VaultQuery>,
         scope: VaultScope,
     ) -> Self {
         self.set_vault(documents, queries, scope);
@@ -528,12 +509,12 @@ impl Host {
     pub fn set_vault(
         &self,
         documents: Arc<dyn Documents>,
-        queries: vault_proto::query::VaultQueryClient,
+        queries: Arc<dyn crate::vault::VaultQuery>,
         scope: VaultScope,
     ) {
         *lock(&self.services().documents) = Some(documents);
         *lock(&self.services().vault_query) = match scope {
-            VaultScope::Person => Some(held_query(queries)),
+            VaultScope::Person => Some(queries),
             VaultScope::Guest => None,
         };
     }
@@ -565,12 +546,10 @@ impl Host {
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// The vault's query service's client, when the app gave one.
+    /// The vault's query service, when the app gave one.
     #[must_use]
-    pub fn vault_query(&self) -> Option<vault_proto::query::VaultQueryClient> {
-        lock(&self.services().vault_query)
-            .as_ref()
-            .map(|held| (**held).clone())
+    pub fn vault_query(&self) -> Option<Arc<dyn crate::vault::VaultQuery>> {
+        lock(&self.services().vault_query).clone()
     }
 
     /// The node's files of a project for extensions (`file_list`,
@@ -1281,7 +1260,7 @@ impl ExtensionApi {
                 let client = host.vault_query().ok_or_else(|| HostError::Unsupported {
                     what: "the vault's query service: this host has no vault index (none kept, or a share's guest)".to_owned(),
                 })?;
-                let request = vault_proto::query::QueryRequest {
+                let request = crate::vault::QueryRequest {
                     path,
                     source,
                     view,
@@ -1291,9 +1270,10 @@ impl ExtensionApi {
                     // if it does.
                     limit: Some(limit.map_or(QUERY_LIMIT, |n| n.min(QUERY_LIMIT_MAX))),
                 };
-                let answer = client.query(request).await.map_err(|e| HostError::Failed {
-                    message: e.to_string(),
-                })?;
+                let answer = client
+                    .query(request)
+                    .await
+                    .map_err(|message| HostError::Failed { message })?;
                 serde_json::from_str(&answer).map_err(|e| HostError::Failed {
                     message: format!("the query service's answer: {e}"),
                 })

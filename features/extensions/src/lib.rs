@@ -49,6 +49,8 @@ pub mod events;
 pub mod hostcall;
 mod fuzzy;
 pub mod languages;
+#[cfg(feature = "host")]
+pub mod vault;
 pub mod index;
 pub mod interop;
 pub mod manifest;

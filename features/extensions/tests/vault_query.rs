@@ -88,13 +88,14 @@ async fn an_extension_queries_the_vault_through_the_hosts_client() {
         .await
         .unwrap();
 
+    let queries: Arc<dyn architect_extensions::vault::VaultQuery> = Arc::new(Queries(client));
     let docs = || -> Arc<dyn architect_extensions::documents::Documents> {
         Arc::new(CrdtDocuments::new().with_space("notes"))
     };
     let list = ActionList::new();
     let host = Host::new(list, SharedSections::new(Registry::new())).with_vault(
         docs(),
-        client.clone(),
+        queries.clone(),
         VaultScope::Person,
     );
     load(&host, &tmp.path().join("reader"), READER);
@@ -139,7 +140,7 @@ async fn an_extension_queries_the_vault_through_the_hosts_client() {
     // its documents are the share's, and the index is the whole vault's.
     let guest = Host::new(ActionList::new(), SharedSections::new(Registry::new())).with_vault(
         docs(),
-        client.clone(),
+        queries.clone(),
         VaultScope::Guest,
     );
     load(&guest, &tmp.path().join("reader3"), READER);
@@ -154,4 +155,29 @@ async fn an_extension_queries_the_vault_through_the_hosts_client() {
         Err(HostError::Unsupported { .. })
     ));
     scope.close().await;
+}
+
+/// The vault's query client as the host's [`VaultQuery`], as an app that
+/// keeps a vault gives it.
+struct Queries(vault_proto::query::VaultQueryClient);
+
+impl architect_extensions::vault::VaultQuery for Queries {
+    fn query(
+        &self,
+        r: architect_extensions::vault::QueryRequest,
+    ) -> architect_extensions::vault::QueryFuture {
+        let client = self.0.clone();
+        Box::pin(async move {
+            client
+                .query(vault_proto::query::QueryRequest {
+                    path: r.path,
+                    source: r.source,
+                    view: r.view,
+                    if_changed: r.if_changed,
+                    limit: r.limit,
+                })
+                .await
+                .map_err(|e| e.to_string())
+        })
+    }
 }
