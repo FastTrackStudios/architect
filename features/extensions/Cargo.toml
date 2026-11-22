@@ -251,7 +251,6 @@ architect-navigator-api = { workspace = true }
 architect-commands = { workspace = true, optional = true }
 # A tour's scenario (`[[tours]]`) read and checked at load: the guide's
 # model only (no Dioxus, wasm-clean).
-architect-guide = { workspace = true }
 # MIDI ports, OSC endpoints and control surfaces (`ports`, feature
 # `host`): the messages, the backends, the surface engine.
 architect-input = { workspace = true }
@@ -357,6 +356,8 @@ web-sys = { version = "0.3", optional = true, features = [
 ] }
 
 [dev-dependencies]
+# tests/interop.rs: tours checked with the guide's scenario reader.
+architect-guide = { workspace = true }
 # tests/vault_query.rs: the vault's query engine, served in process.
 vault-query = { workspace = true }
 # tests/editor_view.rs: a linked extension's view holds the editor's

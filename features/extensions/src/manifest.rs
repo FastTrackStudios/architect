@@ -1616,10 +1616,10 @@ impl Manifest {
         }
     }
 
-    /// Its tours (`[[tours]]`), each with its scenario: the text `read`
-    /// gives for its path in the package, read and checked against its
-    /// rules ([`crate::contrib::TourDecl::read`]). What a load checks, and
-    /// what a test plays.
+    /// Its tours (`[[tours]]`), each with its scenario's text: what `read`
+    /// gives for its path in the package, checked against its rules
+    /// ([`crate::contrib::TourDecl::read`]). What a load checks, and what a
+    /// test plays.
     ///
     /// # Errors
     ///
@@ -1627,7 +1627,7 @@ impl Manifest {
     pub fn tours(
         &self,
         read: impl Fn(&str) -> Option<String>,
-    ) -> Result<Vec<(crate::contrib::TourDecl, architect_guide::Scenario)>, Refused> {
+    ) -> Result<Vec<(crate::contrib::TourDecl, String)>, Refused> {
         let views = self.view_ids();
         let rules = self.rules(&views);
         self.contributes

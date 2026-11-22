@@ -1194,16 +1194,46 @@ pub struct TourDecl {
     pub scenario_text: Option<String>,
 }
 
+/// What a tour's scenario says, as far as a load checks it: its id, how
+/// many of its steps a person sees, and the action each step runs.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ScenarioFacts {
+    pub id: String,
+    pub visible_steps: usize,
+    /// `(step id, action id)` of every step that runs an action.
+    pub runs: Vec<(String, String)>,
+}
+
+/// Reads a scenario's text into its [`ScenarioFacts`]: the guide that plays
+/// tours knows the format, the runtime does not. The app installs one
+/// ([`set_scenario_check`]); without it a tour's text is kept unchecked.
+pub trait ScenarioCheck: Send + Sync {
+    /// # Errors
+    ///
+    /// Why the text is not a scenario.
+    fn facts(&self, text: &str) -> Result<ScenarioFacts, String>;
+}
+
+static SCENARIO_CHECK: std::sync::OnceLock<std::sync::Arc<dyn ScenarioCheck>> =
+    std::sync::OnceLock::new();
+
+/// Install the reader tours are checked with at load (once; later calls are
+/// ignored).
+pub fn set_scenario_check(check: std::sync::Arc<dyn ScenarioCheck>) {
+    let _ = SCENARIO_CHECK.set(check);
+}
+
 impl TourDecl {
-    /// Its scenario, read and checked against its owner's `rules`: it
-    /// parses, its id is the tour's, and each action a step runs is the
-    /// owner's own or one its capabilities reach (a check only reads, and
-    /// the guide runs only read-only ones).
+    /// Its scenario's text, checked against its owner's `rules` when a
+    /// [`ScenarioCheck`] is installed: it reads, its id is the tour's, a
+    /// person sees a step, and each action a step runs is the owner's own
+    /// or one its capabilities reach (a check only reads, and the guide
+    /// runs only read-only ones).
     ///
     /// # Errors
     ///
     /// No text read yet, or the first thing wrong with it.
-    pub fn read(&self, rules: &Rules<'_>) -> Result<architect_guide::Scenario, Refused> {
+    pub fn read(&self, rules: &Rules<'_>) -> Result<String, Refused> {
         let what = format!("tour {}", self.id);
         let refuse = |why: String| Refused {
             what: what.clone(),
@@ -1213,28 +1243,30 @@ impl TourDecl {
             .scenario_text
             .as_deref()
             .ok_or_else(|| refuse(format!("{} is not in its package", self.scenario)))?;
-        let scenario =
-            architect_guide::load(text).map_err(|e| refuse(format!("{}: {e}", self.scenario)))?;
-        if scenario.id != self.id {
+        let Some(check) = SCENARIO_CHECK.get() else {
+            return Ok(text.to_owned());
+        };
+        let facts = check
+            .facts(text)
+            .map_err(|e| refuse(format!("{}: {e}", self.scenario)))?;
+        if facts.id != self.id {
             return Err(refuse(format!(
                 "{} is scenario {:?}; its id is the tour's",
-                self.scenario, scenario.id
+                self.scenario, facts.id
             )));
         }
-        if !scenario.steps.iter().any(|s| !s.hide) {
+        if facts.visible_steps == 0 {
             return Err(refuse("it has no step a person sees".to_owned()));
         }
-        for step in &scenario.steps {
-            if let Some(architect_guide::Do::Run { id, .. }) = &step.act
-                && !rules.reaches(id)
-            {
+        for (step, id) in &facts.runs {
+            if !rules.reaches(id) {
                 return Err(refuse(format!(
-                    "step {} runs {id}, neither its own ({}…) nor one its capabilities reach",
-                    step.id, rules.prefix
+                    "step {step} runs {id}, neither its own ({}…) nor one its capabilities reach",
+                    rules.prefix
                 )));
             }
         }
-        Ok(scenario)
+        Ok(text.to_owned())
     }
 }
 

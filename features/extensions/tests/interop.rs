@@ -981,8 +981,30 @@ fn toured(ext: &Extensions, dir: &std::path::Path, tour: &str) -> Vec<Event> {
     ext.dev(dir)
 }
 
+/// Tours checked as an app checks them: with the guide's scenario reader.
+struct GuideScenarios;
+
+impl architect_extensions::contrib::ScenarioCheck for GuideScenarios {
+    fn facts(&self, text: &str) -> Result<architect_extensions::contrib::ScenarioFacts, String> {
+        let s = architect_guide::load(text).map_err(|e| e.to_string())?;
+        Ok(architect_extensions::contrib::ScenarioFacts {
+            visible_steps: s.steps.iter().filter(|st| !st.hide).count(),
+            runs: s
+                .steps
+                .iter()
+                .filter_map(|st| match &st.act {
+                    Some(architect_guide::Do::Run { id, .. }) => Some((st.id.clone(), id.clone())),
+                    _ => None,
+                })
+                .collect(),
+            id: s.id,
+        })
+    }
+}
+
 #[test]
 fn tours_are_checked_at_load_and_withdrawn_when_off() {
+    architect_extensions::contrib::set_scenario_check(std::sync::Arc::new(GuideScenarios));
     let tmp = tempfile::tempdir().unwrap();
     let list = ActionList::new();
     let ext = Extensions::new(host(&list), Installs::new(tmp.path().join("i")));
