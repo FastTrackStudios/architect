@@ -23,7 +23,7 @@
 //! the app itself) — so the list's authorizer, or a server's gate, can
 //! tell its call from the person's. Each call is a span (`ext.host_call`)
 //! carrying `perm.*` (the capability asked, the decision, the reason and
-//! the principal), set with `architect_telemetry::wide::set` as well; a
+//! the principal), recorded on that span; a
 //! refused or failed call is a line in the extension's log (`EXT_LOGS`).
 //!
 //! What the app knows that the host does not — the organization, the
@@ -158,15 +158,12 @@ impl SettingValues for MemoryValues {
     }
 }
 
-/// One `perm.*` field on the wide event (`architect_telemetry::wide::set`,
-/// feature `wide-events`); the span's own fields carry it regardless.
-#[cfg(feature = "wide-events")]
+/// One field (`perm.*`, `ext.*`, `http.*`) on the call's span: recorded
+/// where the span declares it, ignored where it does not.
 fn wide(key: &'static str, value: impl Into<String>) {
-    architect_telemetry::wide::set(key, value.into());
+    let value: String = value.into();
+    tracing::Span::current().record(key, value.as_str());
 }
-
-#[cfg(not(feature = "wide-events"))]
-fn wide(_key: &'static str, _value: impl Into<String>) {}
 
 /// The documents service's client and the scope its server lives in.
 type DocsClient = (
