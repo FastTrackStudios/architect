@@ -770,8 +770,8 @@ impl NavigatorProviderDecl {
 ///
 /// It is architect-editor's registry entry, as a manifest writes it. Its
 /// `highlights` query is read from the package when the extension loads
-/// (`architect_editor::Language::highlights_text`).
-pub type LanguageDecl = architect_editor::Language;
+/// (`crate::languages::Language::highlights_text`).
+pub type LanguageDecl = crate::languages::Language;
 
 /// A file type that is a note (`[[file_types]]`).
 ///
@@ -1369,10 +1369,10 @@ pub struct Contribution {
     pub tours: Vec<TourDecl>,
     /// Keys in the editor that run its actions (`[[keymaps]]`,
     /// `crate::editor`): `capabilities.writes = ["editor"]`.
-    pub keymaps: Vec<architect_editor::ext::KeymapEntry>,
+    pub keymaps: Vec<editor_ext::KeymapEntry>,
     /// Rows of the editor's slash menu that run its actions (`[[slash]]`):
     /// `capabilities.writes = ["editor"]`.
-    pub slash: Vec<architect_editor::ext::SlashEntry>,
+    pub slash: Vec<editor_ext::SlashEntry>,
 }
 
 /// What a contribution is checked against: its owner's namespace and
@@ -2119,7 +2119,7 @@ impl Contribution {
 }
 
 /// A keymap entry's key in a diff and a merge: its scope and key.
-fn keymap_key(k: &architect_editor::ext::KeymapEntry) -> String {
+fn keymap_key(k: &editor_ext::KeymapEntry) -> String {
     format!("{}/{}", k.when, k.key)
 }
 
@@ -2581,13 +2581,13 @@ impl Contributions {
     /// Every extension's keys in the editor (`[[keymaps]]`), in load
     /// order: `crate::editor::key_action` picks the one a key runs.
     #[must_use]
-    pub fn keymaps(&self) -> Vec<By<architect_editor::ext::KeymapEntry>> {
+    pub fn keymaps(&self) -> Vec<By<editor_ext::KeymapEntry>> {
         self.all(|c| c.keymaps.clone())
     }
 
     /// Every extension's slash-menu rows (`[[slash]]`).
     #[must_use]
-    pub fn slash(&self) -> Vec<By<architect_editor::ext::SlashEntry>> {
+    pub fn slash(&self) -> Vec<By<editor_ext::SlashEntry>> {
         self.all(|c| c.slash.clone())
     }
 

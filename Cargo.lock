@@ -1016,6 +1016,7 @@ dependencies = [
  "dioxus-native-dom",
  "dioxus-ssr",
  "dispatch2",
+ "editor-ext",
  "facet",
  "futures",
  "futures-timer",

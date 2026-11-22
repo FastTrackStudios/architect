@@ -28,8 +28,8 @@
 //! | `undo_document {path}` / `redo_document {path}` | takes back the document's last undo step (its own history: a CRDT document's every step, a vault note's edits made through the documents) or makes it again; edits made since stay: `{step, text}`, `null` when there is none | `writes = ["documents"]` |
 //! | `watch_documents {action \| script, function?}` | its action (script) on every `doc.created/saved/renamed/deleted`: the hooks' keys | `reads = ["documents"]` |
 //! | `editor_state` | the editor being typed in: `{editor, context, text, selection, primary, cursor, node, version}` (`crate::editor::EditorView`; `node` is the block at the cursor: a list item, a table cell and its table's cells, …) | `reads = ["editor"]` or `writes = ["editor"]` |
-//! | `edit_editor {changes, selection?, name?, base?}` | its changes (byte offsets into the text it read) and selection as one transaction, one undo step named `name`, made as the extension (`architect_editor::ext::EditCommand`): the editor after | `writes = ["editor"]` |
-//! | `decorate_editor {decorations}` | its marks, line and gutter decorations and widgets (`architect_editor::ext::DecorationSpec`; a widget mounts one of its own `[[embeds]]` or `[[views]]`) in the editor, in place of the ones it set before (`[]`: none) | `writes = ["editor"]` |
+//! | `edit_editor {changes, selection?, name?, base?}` | its changes (byte offsets into the text it read) and selection as one transaction, one undo step named `name`, made as the extension (`editor_ext::EditCommand`): the editor after | `writes = ["editor"]` |
+//! | `decorate_editor {decorations}` | its marks, line and gutter decorations and widgets (`editor_ext::DecorationSpec`; a widget mounts one of its own `[[embeds]]` or `[[views]]`) in the editor, in place of the ones it set before (`[]`: none) | `writes = ["editor"]` |
 //! | `read_file {path}` / `write_file {path, text}` | a file: relative paths are in its own data folder | its own folder, or `capabilities.folders` |
 //! | `setting {key}` / `set_setting {key, value}` | one of its own settings (`<id>.…`) | nothing |
 //! | `data {key}` / `set_data {key, value?}` | its own data, kept for it | nothing |
@@ -208,12 +208,12 @@ pub enum HostRequest {
     EditorState,
     /// `changes` and `selection` as one transaction of the editor being
     /// typed in, one undo step named `name`, made as the extension
-    /// (`architect_editor::ext::EditCommand`): the editor after.
+    /// (`editor_ext::EditCommand`): the editor after.
     EditEditor {
         #[serde(default)]
-        changes: Vec<architect_editor::ext::TextChange>,
+        changes: Vec<editor_ext::TextChange>,
         #[serde(default)]
-        selection: Option<Vec<architect_editor::ext::SelRange>>,
+        selection: Option<Vec<editor_ext::SelRange>>,
         #[serde(default)]
         name: Option<String>,
         #[serde(default)]
@@ -223,7 +223,7 @@ pub enum HostRequest {
     /// it set before.
     DecorateEditor {
         #[serde(default)]
-        decorations: Vec<architect_editor::ext::DecorationSpec>,
+        decorations: Vec<editor_ext::DecorationSpec>,
     },
     ReadFile {
         path: String,

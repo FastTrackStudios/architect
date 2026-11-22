@@ -1280,7 +1280,7 @@ extensions = ["ron"]
 
 #[test]
 fn languages_are_registered_while_the_extension_is_on() {
-    use architect_editor::languages::{APP, Grammar, Languages, builtin};
+    use architect_extensions::languages::{APP, Grammar, Languages, builtin};
     let tmp = tempfile::tempdir().unwrap();
     let list = ActionList::new();
     // The app's registry, with its own languages in it.

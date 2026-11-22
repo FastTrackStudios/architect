@@ -919,11 +919,7 @@ struct Inner {
     theme_heard: Mutex<Option<architect_theme::Subscription>>,
     /// The editor's language registry: the app's own languages
     /// ([`Host::with_languages`]) and loaded extensions' `[[languages]]`.
-    languages: Mutex<architect_editor::Languages>,
-    /// The language servers it runs (`crate::lsp`), when the app gave
-    /// them.
-    #[cfg(all(feature = "lsp", not(target_family = "wasm")))]
-    language_servers: Mutex<Option<architect_editor::lsp::LanguageServers>>,
+    languages: Mutex<crate::languages::Languages>,
     /// What loaded extensions add to the interface.
     contributions: Contributions,
     /// What starts an extension's tour: the app's ([`Host::on_tour`]).
@@ -1062,9 +1058,7 @@ impl Host {
                 listeners: Mutex::new(Vec::new()),
                 themes: Mutex::new(None),
                 theme_heard: Mutex::new(None),
-                languages: Mutex::new(architect_editor::Languages::new()),
-                #[cfg(all(feature = "lsp", not(target_family = "wasm")))]
-                language_servers: Mutex::new(None),
+                languages: Mutex::new(crate::languages::Languages::new()),
                 contributions: Contributions::new(),
                 tour: Mutex::new(None),
                 toolbars: crate::toolbars::Toolbars::new(),
@@ -1659,11 +1653,11 @@ impl Host {
 
     /// Puts loaded extensions' languages (`[[languages]]`) in `registry`,
     /// the app's (with its own languages already in it, owner
-    /// `architect_editor::languages::APP`): in as each loads, replaced on
+    /// `crate::languages::APP`): in as each loads, replaced on
     /// a reload, out as it unloads or is turned off. Without it the host
     /// keeps a registry of its own.
     #[must_use]
-    pub fn with_languages(self, registry: architect_editor::Languages) -> Self {
+    pub fn with_languages(self, registry: crate::languages::Languages) -> Self {
         *self
             .inner
             .languages
@@ -1672,16 +1666,10 @@ impl Host {
         self
     }
 
-    /// Where the language servers are kept (`crate::lsp`).
-    #[cfg(all(feature = "lsp", not(target_family = "wasm")))]
-    pub(crate) fn servers_slot(&self) -> &Mutex<Option<architect_editor::lsp::LanguageServers>> {
-        &self.inner.language_servers
-    }
-
     /// The language registry the editor asks by file type or fence name:
     /// the app's languages and every loaded extension's.
     #[must_use]
-    pub fn languages(&self) -> architect_editor::Languages {
+    pub fn languages(&self) -> crate::languages::Languages {
         self.inner
             .languages
             .lock()
@@ -2421,8 +2409,6 @@ impl Host {
             store.withdraw(id);
         }
         self.languages().withdraw(id);
-        #[cfg(all(feature = "lsp", not(target_family = "wasm")))]
-        self.stop_language_servers(id);
         self.inner.contributions.withdraw(id);
         self.inner.windows.close_all(id);
         self.services().forget(id);
