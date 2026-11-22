@@ -520,7 +520,7 @@ fn text(args: &Value, key: &str) -> Result<String, String> {
 }
 
 /// Answers `method` of `provider`, given its action's `args`: what
-/// `Builder::navigator` registers for each of its actions.
+/// `NavigatorBuilderExt::navigator` registers for each of its actions.
 pub fn serve(
     provider: Arc<dyn NavigatorProvider>,
     method: Method,
@@ -731,5 +731,30 @@ mod tests {
                 state: Value::Null
             }
         );
+    }
+}
+
+/// Serving a [`NavigatorProvider`] from an extension (feature `extensions`).
+#[cfg(feature = "extensions")]
+pub trait NavigatorBuilderExt {
+    /// Serves `provider` as the navigator provider whose actions start
+    /// with `actions` (its manifest's `[[navigator_providers]] actions`):
+    /// each of [`Method`]'s actions (`<actions>_SNAPSHOT`, `_OPEN`,
+    /// `_MOVE`, `_CREATE`) answers from it, linked in or as a process.
+    /// Declare the ones it answers in its `[[actions]]`.
+    fn navigator(&mut self, actions: &str, provider: impl NavigatorProvider) -> &mut Self;
+}
+
+#[cfg(feature = "extensions")]
+impl NavigatorBuilderExt for architect_extensions::linked::Builder {
+    fn navigator(&mut self, actions: &str, provider: impl NavigatorProvider) -> &mut Self {
+        let provider: std::sync::Arc<dyn NavigatorProvider> = std::sync::Arc::new(provider);
+        for method in Method::ALL {
+            let provider = std::sync::Arc::clone(&provider);
+            self.action(method.action(actions), move |args| {
+                serve(std::sync::Arc::clone(&provider), method, args)
+            });
+        }
+        self
     }
 }

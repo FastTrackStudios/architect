@@ -994,7 +994,6 @@ dependencies = [
  "architect-favourites",
  "architect-guide",
  "architect-input",
- "architect-navigator-api",
  "architect-permissions",
  "architect-scene",
  "architect-scripting",
@@ -1230,6 +1229,7 @@ dependencies = [
 name = "architect-navigator-api"
 version = "0.1.0"
 dependencies = [
+ "architect-extensions",
  "futures",
  "serde",
  "serde_json",

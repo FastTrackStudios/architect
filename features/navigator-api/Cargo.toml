@@ -9,9 +9,14 @@ authors.workspace = true
 license.workspace = true
 description = "The navigator's provider API (MIT OR Apache-2.0): what fills the sidebar's two panes, a tree of containers and the items in them, as a Rust trait (NavigatorProvider) and as JSON actions (`[[navigator_providers]]`), so a page or an extension drives the GPL navigator without linking it"
 
+[features]
+# `NavigatorBuilderExt`: serving a provider from an extension's builder.
+extensions = ["dep:architect-extensions"]
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+architect-extensions = { workspace = true, optional = true, features = ["linked-core"] }
 
 [dev-dependencies]
 futures = "0.3"

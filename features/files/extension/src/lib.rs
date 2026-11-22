@@ -14,6 +14,7 @@
 pub mod copies;
 pub mod nav;
 
+use architect_navigator_api::NavigatorBuilderExt as _;
 use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};

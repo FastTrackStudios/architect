@@ -240,7 +240,6 @@ architect-favourites = { workspace = true }
 architect-theme = { workspace = true }
 architect-settings = { workspace = true }
 # The navigator's provider API (MIT): `linked::Builder::navigator`.
-architect-navigator-api = { workspace = true }
 architect-commands = { workspace = true, optional = true }
 # A tour's scenario (`[[tours]]`) read and checked at load: the guide's
 # model only (no Dioxus, wasm-clean).
