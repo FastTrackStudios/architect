@@ -1,0 +1,75 @@
+# The lab's document extension (#309): a Luau extension that keeps the
+# lab's notes tidy through the host service's document calls — it
+# creates a note, tidies one in a single undoable transaction, renames,
+# files away into the archive space, and watches every document event.
+id = "lab.tidy"
+name = "Tidy"
+version = "0.1.0"
+kind = "luau"
+api = "0.1"
+description = "Keeps the lab's notes tidy: makes, tidies (one undo step), renames and files notes, and hears every change to them."
+authors = ["FastTrackStudio"]
+
+# The app's documents: list, read and watch them; create, edit, rename,
+# move and delete them, as itself.
+[capabilities]
+reads = ["documents"]
+writes = ["documents"]
+
+[[actions]]
+id = "LAB_TIDY_NEW"
+name = "Tidy: new note"
+description = "Makes note `title` in the notes space (notes/<title>.md), its heading its title."
+group = "Tidy"
+effect = "mutating"
+params = '{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}'
+script = "new.luau"
+
+[[actions]]
+id = "LAB_TIDY_TIDY"
+name = "Tidy: tidy a note"
+description = "Tidies note `path` in one transaction, one undo step: front matter on top, its trailing space trimmed, a closing line. Answers its text after."
+group = "Tidy"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}'
+script = "tidy.luau"
+
+[[actions]]
+id = "LAB_TIDY_RENAME"
+name = "Tidy: rename a note"
+description = "Renames note `path` to `to`."
+group = "Tidy"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"to":{"type":"string"}},"required":["path","to"]}'
+script = "rename.luau"
+
+[[actions]]
+id = "LAB_TIDY_FILE"
+name = "Tidy: file a note away"
+description = "Moves note `path` into the archive space."
+group = "Tidy"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}'
+script = "file.luau"
+
+[[actions]]
+id = "LAB_TIDY_WATCH"
+name = "Tidy: watch the notes"
+description = "Hears every document event from now on (LAB_TIDY_HEARD on each): the hooks' keys."
+group = "Tidy"
+script = "watch.luau"
+
+[[actions]]
+id = "LAB_TIDY_HEARD"
+name = "Tidy: heard a change"
+description = "What its watch runs on a document event: keeps the event and its path."
+group = "Tidy"
+params = '{"type":"object"}'
+script = "heard.luau"
+
+[[actions]]
+id = "LAB_TIDY_LIST"
+name = "Tidy: the notes"
+description = "Every document there is, and the events it heard since it began watching."
+group = "Tidy"
+script = "list.luau"

@@ -1,0 +1,57 @@
+# A Luau extension: everything it adds, declared. The host reads this
+# before anything of it runs, and puts each part where it goes — its
+# actions on the Action List (⌘K, menus, MCP), its section on the settings
+# page, its overlay over every view of the kind it names — and takes them
+# all off again when it is unloaded. Save this file (or a script) while
+# the host runs and it reloads: a diff, its settings' values kept.
+id = "example.hello"
+name = "Hello"
+version = "0.1.0"
+kind = "luau"
+# The extension API it was written against; a newer one is refused.
+api = "0.1"
+description = "Greets you, has two settings, and draws a ruler over the timeline with a tool window."
+authors = ["You"]
+
+# Its actions. Each id starts with its prefix: the id upper-cased, each
+# run of other characters one `_` (`example.hello` → `EXAMPLE_HELLO_`).
+# An id outside it is refused when the manifest is read.
+[[actions]]
+id = "EXAMPLE_HELLO_GREET"
+name = "Hello: greet"
+description = "A greeting for `name` (you, when none is given)."
+group = "Hello"
+# What it takes, as JSON Schema: ⌘K and a model fill it in from this.
+params = '{"type":"object","properties":{"name":{"type":"string"}}}'
+script = "greet.luau"
+
+# A settings section, there while it is loaded (its values are kept
+# across a reload, and read by key: `example.hello.greeting`). Each key
+# starts with the extension's id and a dot.
+[[sections]]
+id = "hello"
+title = "Hello"
+icon = "hand"
+
+[[sections.settings]]
+key = "example.hello.greeting"
+title = "Greeting"
+description = "The word it greets with."
+control = "text"
+default = "Hello"
+
+[[sections.settings]]
+key = "example.hello.loud"
+title = "Greet loudly"
+control = "switch"
+default = false
+
+# A layer over every view of kind `example.timeline`: a live script with
+# `Canvas` (drawing in the view's coordinates) and `ImGui` (tool windows,
+# ReaImGui's API). The host starts it while the extension is loaded and
+# starts it again when the script is saved.
+[[overlays]]
+id = "ruler"
+view = "example.timeline"
+plane = "over"
+script = "ruler.luau"

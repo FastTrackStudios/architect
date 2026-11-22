@@ -40,7 +40,7 @@ fn an_archive_the_npm_cli_packs_and_signs_opens_here() {
     let packed = Command::new("node")
         .arg(&cli)
         .arg("pack")
-        .arg(root.join("examples/showcase/recipe-scaler"))
+        .arg(root.join("features/extensions/tests/fixtures/examples/showcase/recipe-scaler"))
         .arg("--out")
         .arg(&out)
         .arg("--key")

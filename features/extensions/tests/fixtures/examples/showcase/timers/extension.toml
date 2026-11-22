@@ -1,0 +1,54 @@
+# The showcase's Timers sampler (#710: H11): a hook every ten seconds that
+# counts in its status item, a cron hook on weekday mornings, and a worker
+# that does heavy work off every view's thread.
+id = "showcase.timers"
+name = "Timers sampler"
+version = "0.1.0"
+kind = "luau"
+api = "0.1"
+description = "An `every` hook counting in a status item, a cron hook, and a background worker counting primes. Stands in for TaskNotes' pomodoro, Recent Files' bookkeeping and Omnisearch's indexer."
+authors = ["FastTrackStudios"]
+
+[capabilities]
+ui = ["notify"]
+
+[[actions]]
+id = "SHOWCASE_TIMERS_TICK"
+name = "Timers sampler: tick"
+description = "What its every-ten-seconds hook runs: counts a tick in its data and its status item. Answers the count."
+group = "Showcase"
+script = "tick.luau"
+
+[[actions]]
+id = "SHOWCASE_TIMERS_MORNING"
+name = "Timers sampler: good morning"
+description = "What its cron hook runs at 09:00 on weekdays: a toast. Answers what it said."
+group = "Showcase"
+script = "morning.luau"
+
+[[actions]]
+id = "SHOWCASE_TIMERS_PRIMES"
+name = "Timers sampler: count primes"
+description = "Counts the primes below `n` (200000 when left out) in a worker, then says how many in a toast. Answers the count."
+group = "Showcase"
+params = '{"type":"object","properties":{"n":{"type":"integer"}}}'
+script = "primes.luau"
+
+[[hooks]]
+every = "10s"
+action = "SHOWCASE_TIMERS_TICK"
+
+[[hooks]]
+at = "0 9 * * 1-5"
+action = "SHOWCASE_TIMERS_MORNING"
+
+[[workers]]
+id = "primes"
+title = "Count primes"
+script = "workers/primes.luau"
+
+[[status]]
+id = "ticks"
+text = "No ticks yet"
+icon = "timer"
+hint = "The Timers sampler's every-ten-seconds hook"

@@ -337,7 +337,7 @@ fn a_paused_view_hears_nothing() {
 fn the_showcase_example_loads() {
     // examples/extension/webview-board: its manifest, as it ships (its
     // dist/ is built by `just webview-example`, so only the manifest here).
-    let text = include_str!("../../../examples/extension/webview-board/package/extension.toml");
+    let text = include_str!("fixtures/examples/extension/webview-board/package/extension.toml");
     let package = Package::embedded(text, &[("dist/index.html", "<main></main>")]).unwrap();
     let host = host();
     host.load(&package, Origin::Installed).unwrap();

@@ -1,0 +1,24 @@
+# The showcase's Iconize-lite (#710: C9): icons and colours on the
+# showcase vault's folders through the navigator's own actions, and a
+# badge on a file it names.
+id = "showcase.iconize"
+name = "Iconize-lite"
+version = "0.1.0"
+kind = "luau"
+api = "0.1"
+description = "Icons and colours on folders, tags and notes in the navigator, and badges. Stands in for Iconize and File Color."
+authors = ["FastTrackStudios"]
+
+[capabilities]
+actions = ["NAVIGATOR_ICON", "NAVIGATOR_COLOUR"]
+effect = "mutating"
+ui = ["badges", "notify"]
+
+[[actions]]
+id = "SHOWCASE_ICONIZE_DECORATE"
+name = "Iconize-lite: decorate"
+description = "Gives each of the showcase's capability folders an icon and a colour, and the Showcase note a badge. `clear true` takes them off; `root` is the vault's mount in the navigator (`@me`, the person's own, when left out). Answers the folders it changed."
+group = "Showcase"
+effect = "mutating"
+params = '{"type":"object","properties":{"clear":{"type":"boolean"},"root":{"type":"string"}}}'
+script = "decorate.luau"

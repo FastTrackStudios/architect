@@ -1,0 +1,14 @@
+{
+  "label": "Showcase Dusk",
+  "appearance": "dark",
+  "palette": {
+    "background": "#14111f",
+    "foreground": "#ece8f7",
+    "accent": "#f59e0b",
+    "info": "#38bdf8",
+    "chart": ["#f59e0b", "#38bdf8", "#a3e635", "#f472b6", "#a78bfa"]
+  },
+  "overrides": {
+    "dusk.card": "mix($card, $accent, 0.18)"
+  }
+}

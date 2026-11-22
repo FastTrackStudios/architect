@@ -58,6 +58,7 @@ members = [
     "features/extensions/wasi-guest",
     "features/extensions/archive",
     "features/extensions/tests/wasi-hazards",
+    "features/extensions/tests/wasi-counter",
     "features/files",
     "features/files/extension",
     "features/navigator",

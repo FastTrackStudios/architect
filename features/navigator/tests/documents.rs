@@ -29,7 +29,7 @@ use serde_json::{Value, json};
 use vault::actions::OpenVault;
 
 fn tidy_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/sandbox/extensions/tidy")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../extensions/tests/fixtures/sandbox/extensions/tidy")
 }
 
 /// A vault on disk with the lab's two folders and a note.

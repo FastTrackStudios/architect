@@ -1,0 +1,57 @@
+# The lab's MIDI, OSC and control surfaces' example (#311): a development
+# copy beside the registry, loaded when ARCHITECT_LAB_SURFACE=1.
+#
+# - An OSC control surface (`control.surfaces`): a device at
+#   127.0.0.1:9000 that sends to the lab's port 9001 moves the
+#   metronome's tempo (/lab/tempo) and the theme's accent hue
+#   (/lab/hue), each 0–1, and is sent both back as they change.
+# - An OSC echo: it opens 127.0.0.1:9010, hearing on 9011, as the lab
+#   starts, and answers each message there with /echo<its address>.
+#   A background extension: it sleeps until a message comes.
+id = "lab.surface"
+name = "Surface"
+version = "0.1.0"
+kind = "luau"
+api = "0.1"
+description = "An OSC control surface on the metronome's tempo and the accent's hue, and an OSC echo."
+authors = ["FastTrackStudio"]
+
+[capabilities]
+ports = ["osc:127.0.0.1:*", "osc:listen:9001", "osc:listen:9011", "midi:Lab Surface"]
+
+[background]
+idle = "5m"
+
+[[actions]]
+id = "LAB_SURFACE_ECHO"
+name = "Surface: open the echo"
+description = "Opens the OSC echo (127.0.0.1:9010, hearing on 9011): its port."
+group = "Surface"
+script = "open.luau"
+
+[[actions]]
+id = "LAB_SURFACE_STATUS"
+name = "Surface: status"
+description = "The lab's MIDI ports, the targets surfaces may move, and this extension's surfaces and their banks."
+group = "Surface"
+script = "status.luau"
+
+[[hooks]]
+on = "startup"
+action = "LAB_SURFACE_ECHO"
+
+[[hooks]]
+on = "port.message"
+script = "echo.luau"
+function = "heard"
+
+[[contribute."control.surfaces"]]
+id = "osc"
+title = "Lab OSC surface"
+port = "osc:127.0.0.1:9000"
+listen = 9001
+controls = [
+    { id = "tempo", kind = "knob", input = "/lab/tempo", target = "lab.metronome.tempo" },
+    { id = "hue", kind = "knob", input = "/lab/hue", target = "lab.theme.accent_hue" },
+    { id = "tempo-name", kind = "display", feedback = "/lab/tempo/name", target = "lab.metronome.tempo", width = 12 },
+]

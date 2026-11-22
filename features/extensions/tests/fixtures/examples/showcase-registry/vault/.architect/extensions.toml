@@ -1,0 +1,37 @@
+# What this vault needs (#710 L2): opening it lists what is missing, with
+# "Install all" (one consent prompt).
+
+# Required, in the showcase registry: installed by "Install all".
+[[extensions]]
+id = "showcase.word-count"
+name = "Word Count"
+version = "^0.1"
+required = true
+
+# Optional, in the showcase registry: offered, not asked.
+[[extensions]]
+id = "showcase.greeter"
+name = "Greeter"
+version = "*"
+required = false
+
+# Carried in .architect/extensions/: installed from the vault itself.
+[[extensions]]
+id = "showcase.tiny"
+name = "Tiny Theme Tokens"
+version = "*"
+required = true
+
+# macOS only: on Linux it cannot be had, and says why.
+[[extensions]]
+id = "showcase.mac-only"
+name = "Core Audio Devices"
+version = "*"
+required = true
+
+# In no registry: listed as missing, the vault still opens.
+[[extensions]]
+id = "showcase.gone"
+name = "Gone Extension"
+version = "*"
+required = false

@@ -32,7 +32,7 @@ const ID: &str = "example.hello";
 
 /// The example's Luau extension, `examples/extension/registry/hello`.
 fn hello() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extension/registry/hello")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/examples/extension/registry/hello")
 }
 
 /// `hello` copied, at `version`.

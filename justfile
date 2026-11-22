@@ -591,9 +591,9 @@ sandbox-web PORT="8090":
     set -euo pipefail
     out=target/sandbox-web
     mkdir -p "$out"
-    devenv --profile wasi shell -- cargo build -q -p architect-sandbox-wasi-counter --target wasm32-wasip2
+    devenv --profile wasi shell -- cargo build -q -p architect-extension-wasi-counter --target wasm32-wasip2
     (cd features/extensions/web && [ -d node_modules ] || npm ci --silent)
-    node features/extensions/web/transpile.mjs target/wasm32-wasip2/debug/architect_sandbox_wasi_counter.wasm "$out/wasi-counter" >/dev/null
+    node features/extensions/web/transpile.mjs target/wasm32-wasip2/debug/architect_extension_wasi_counter.wasm "$out/wasi-counter" >/dev/null
     cargo build -q -p architect-sandbox-web --target wasm32-unknown-unknown
     want=$(awk '/^name = "wasm-bindgen"$/{getline; gsub(/[^0-9.]/,""); print; exit}' Cargo.lock)
     bindgen=target/tools/bin/wasm-bindgen

@@ -1,0 +1,120 @@
+# The lab's editor extension (#312): a Luau extension that works the
+# live editor through the host service's editor calls — Tab and Shift-Tab
+# indent and outdent a list item, and move between a table's cells; one
+# action marks the note up (a mark on each TODO, a gutter marker on each
+# list item, a widget with the count); a slash row inserts a table.
+# Each edit is one transaction: one undo step, made as the extension.
+id = "lab.outline"
+name = "Outline"
+version = "0.1.0"
+kind = "luau"
+api = "0.1"
+description = "Tab and Shift-Tab in lists and tables; marks TODOs and counts list items; a slash row for a table."
+authors = ["FastTrackStudios"]
+
+# The editor being typed in: read it, edit it, take keys in it and draw in
+# it.
+[capabilities]
+writes = ["editor"]
+
+[[actions]]
+id = "LAB_OUTLINE_INDENT"
+name = "Outline: indent"
+description = "Indents the list item at the cursor two spaces, as one undo step."
+group = "Outline"
+effect = "mutating"
+script = "indent.luau"
+
+[[actions]]
+id = "LAB_OUTLINE_OUTDENT"
+name = "Outline: outdent"
+description = "Outdents the list item at the cursor up to two spaces, as one undo step."
+group = "Outline"
+effect = "mutating"
+script = "outdent.luau"
+
+[[actions]]
+id = "LAB_OUTLINE_NEXT_CELL"
+name = "Outline: next cell"
+description = "Selects the next cell of the table at the cursor; past the last, adds a row."
+group = "Outline"
+effect = "mutating"
+script = "next_cell.luau"
+
+[[actions]]
+id = "LAB_OUTLINE_PREV_CELL"
+name = "Outline: previous cell"
+description = "Selects the previous cell of the table at the cursor."
+group = "Outline"
+effect = "mutating"
+script = "prev_cell.luau"
+
+[[actions]]
+id = "LAB_OUTLINE_MARK"
+name = "Outline: mark up"
+description = "Marks each TODO, puts a marker in the gutter of each list item and a widget with their count at the end. `clear true` takes them off."
+group = "Outline"
+params = '{"type":"object","properties":{"clear":{"type":"boolean"}}}'
+script = "mark.luau"
+
+[[actions]]
+id = "LAB_OUTLINE_TABLE"
+name = "Outline: insert a table"
+description = "Inserts a two-column table at the cursor, its first cell selected."
+group = "Outline"
+effect = "mutating"
+script = "table.luau"
+
+# Keys in the editor, by the block the cursor is in.
+[[keymaps]]
+key = "Tab"
+when = "node:list-item"
+action = "LAB_OUTLINE_INDENT"
+
+[[keymaps]]
+key = "Shift-Tab"
+when = "node:list-item"
+action = "LAB_OUTLINE_OUTDENT"
+
+[[keymaps]]
+key = "Tab"
+when = "node:table"
+action = "LAB_OUTLINE_NEXT_CELL"
+
+[[keymaps]]
+key = "Shift-Tab"
+when = "node:table"
+action = "LAB_OUTLINE_PREV_CELL"
+
+# A row of the editor's slash menu.
+[[slash]]
+label = "Table"
+action = "LAB_OUTLINE_TABLE"
+group = "Outline"
+desc = "A two-column table"
+icon = "|-|"
+
+# The count widget: a Luau page, mounted by a widget decoration (and an
+# embed of type `outline-count` wherever a note embeds one).
+[[embeds]]
+id = "count"
+title = "List items"
+page = "count.luau"
+claims = { embed_type = ["outline-count"] }
+
+# On the Typing Toolbar while a note's editor is typed in.
+[[toolbars]]
+id = "outline"
+title = "Outline"
+where = "typing"
+when = "editor:note"
+
+[[toolbars.items]]
+action = "LAB_OUTLINE_OUTDENT"
+label = "Outdent"
+icon = "indent-decrease"
+
+[[toolbars.items]]
+action = "LAB_OUTLINE_INDENT"
+label = "Indent"
+icon = "indent-increase"

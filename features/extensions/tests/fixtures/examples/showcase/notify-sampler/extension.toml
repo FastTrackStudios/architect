@@ -1,0 +1,51 @@
+# The showcase's Notify sampler (#710: H7, H8, H9, H10): the app's
+# interface lent to an extension. Each action makes one kind of call
+# through `host` and says what came back in a toast.
+id = "showcase.notify"
+name = "Notify sampler"
+version = "0.1.0"
+kind = "luau"
+api = "0.1"
+description = "Toasts, the clipboard, a file picker, prompts and a menu at a point. Stands in for Obsidian's Notice and Modal users, Copy as HTML and Importer's picker."
+authors = ["FastTrackStudios"]
+
+[capabilities]
+ui = ["notify", "clipboard", "pickers", "prompts", "menus"]
+
+[[actions]]
+id = "SHOWCASE_NOTIFY_TOAST"
+name = "Notify sampler: toast"
+description = "Shows a toast: `text` (a greeting when left out), of `kind` info, success, warning or error."
+group = "Showcase"
+params = '{"type":"object","properties":{"text":{"type":"string"},"kind":{"type":"string","enum":["info","success","warning","error"]}}}'
+script = "toast.luau"
+
+[[actions]]
+id = "SHOWCASE_NOTIFY_COPY"
+name = "Notify sampler: copy"
+description = "Puts `text` on the clipboard, reads it back and says so in a toast. Answers what it read."
+group = "Showcase"
+params = '{"type":"object","properties":{"text":{"type":"string"}}}'
+script = "copy.luau"
+
+[[actions]]
+id = "SHOWCASE_NOTIFY_PICK"
+name = "Notify sampler: pick a file"
+description = "Asks for a Markdown or text file with the system's picker and says which in a toast. Answers its path, or nothing when cancelled."
+group = "Showcase"
+script = "pick.luau"
+
+[[actions]]
+id = "SHOWCASE_NOTIFY_ASK"
+name = "Notify sampler: ask"
+description = "Asks for a name, a colour from a list and a yes, then says all three in a toast. Answers {name, colour, sure}."
+group = "Showcase"
+script = "ask.luau"
+
+[[actions]]
+id = "SHOWCASE_NOTIFY_MENU"
+name = "Notify sampler: menu here"
+description = "Opens a menu at `x`, `y` (the window's top left when left out) and says which row was chosen."
+group = "Showcase"
+params = '{"type":"object","properties":{"x":{"type":"number"},"y":{"type":"number"}}}'
+script = "menu.luau"

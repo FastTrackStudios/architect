@@ -963,6 +963,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-extension-wasi-counter"
+version = "0.1.0"
+dependencies = [
+ "architect-extension-wasi",
+ "dioxus",
+ "serde_json",
+]
+
+[[package]]
 name = "architect-extension-wasi-hazards"
 version = "0.1.0"
 dependencies = [

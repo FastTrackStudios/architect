@@ -1,0 +1,56 @@
+# The showcase's Recipe scaler (#710: R7, R3, C1, C4, H1, H10, H7): an
+# extension written only in TypeScript (#536). Its actions are `.ts`
+# modules beside its TSX page, on the pages' runtime (QuickJS in the app,
+# a Web Worker in a browser). It reads a recipe note's servings and
+# ingredients from its frontmatter, scales them, and writes a
+# shopping-list note. It stands in for a light meal-planning extension
+# (Health's meal plan, #371) and for Templater's and QuickAdd's JS user
+# scripts.
+id = "showcase.recipes"
+name = "Recipe scaler"
+version = "0.1.0"
+kind = "typescript"
+api = "0.1"
+description = "Scales a recipe note (servings and ingredients in its frontmatter) and writes a shopping list in Shopping/. Written only in TypeScript: actions as .ts files beside a TSX page. Stands in for a light meal-planning extension, and for Templater's and QuickAdd's JS user scripts."
+authors = ["FastTrackStudios"]
+
+[capabilities]
+# The vault's notes, through the app's own actions; it never deletes.
+actions = ["VAULT_LIST", "VAULT_READ", "VAULT_CREATE", "EXT_VIEW_OPEN"]
+effect = "mutating"
+# The vault's actions read the recipes and make the shopping list: the
+# documents (VAULT_*).
+reads = ["documents"]
+writes = ["documents"]
+ui = ["prompts", "notify"]
+
+[[actions]]
+id = "SHOWCASE_RECIPES_LIST"
+name = "Recipe scaler: list recipes"
+description = "The recipes in `folder` (Recipes when left out): each note with `servings` and `ingredients` in its frontmatter, read and parsed."
+group = "Showcase"
+params = '{"type":"object","properties":{"folder":{"type":"string"}},"additionalProperties":false}'
+script = "actions/list.ts"
+
+[[actions]]
+id = "SHOWCASE_RECIPES_SCALE"
+name = "Recipe scaler: scale a recipe"
+description = "Scales recipe `path` (picked from Recipes when left out) to `servings` (asked when left out) and writes a shopping-list note in Shopping/. Answers its path and lines."
+group = "Showcase"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"servings":{"type":"number"},"folder":{"type":"string"}},"additionalProperties":false}'
+script = "actions/scale.ts"
+
+[[actions]]
+id = "SHOWCASE_RECIPES_OPEN"
+name = "Recipe scaler: open"
+description = "Opens the Recipe scaler tab."
+group = "Showcase"
+script = "actions/open.ts"
+
+# The scaler, as a tab (a TSX page).
+[[views]]
+id = "scaler"
+title = "Recipe scaler"
+icon = "utensils"
+page = "pages/scaler.tsx"

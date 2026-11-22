@@ -1,0 +1,131 @@
+# The lab's metronome: a Luau extension. Loaded, its section is on the
+# settings page and its action in ⌘K; edit this file while the lab runs
+# and it reloads, settings and all.
+id = "fts.metronome"
+name = "Metronome"
+version = "0.1.0"
+kind = "luau"
+api = "0.1"
+description = "A click: its accent, volume and sound, and an action that counts in."
+authors = ["FastTrackStudio"]
+
+# What it asks to reach through the host service, past its own actions,
+# settings and data: the app's status, and what is selected. Shown when
+# it is installed; installed, it runs with what the person granted.
+[capabilities]
+actions = ["APP_STATUS"]
+effect = "read_only"
+reads = ["selection"]
+
+[[actions]]
+id = "FTS_METRONOME_COUNT_IN"
+name = "Metronome: count in"
+description = "The clicks of a count-in, `bars` bars of four (one when none is given), the downbeat accented."
+group = "Metronome"
+params = '{"type":"object","properties":{"bars":{"type":"integer","minimum":1}}}'
+script = "count_in.luau"
+
+[[actions]]
+id = "FTS_METRONOME_STATUS"
+name = "Metronome: status"
+description = "Through the host service: its volume and sound settings, what is selected, and how many problems the app reports."
+group = "Metronome"
+script = "status.luau"
+
+[[actions]]
+id = "FTS_METRONOME_CLICK"
+name = "Metronome: click"
+description = "Turns the click on or off. A toggle: its tick in menus and its toolbar buttons show which."
+group = "Metronome"
+effect = "mutating"
+script = "click.luau"
+toggle = true
+
+# Its toolbars: one in the right dock, one in every note's header. The
+# click's buttons show it on or off and follow it however it is turned; a
+# right-click on the dock's arms it. A person's copy
+# (`toolbars/fts.metronome-transport.toml` in the lab's folder, or
+# TOOLBAR_SAVE) is used in its place.
+[[toolbars]]
+id = "transport"
+title = "Metronome"
+where = "dock:right"
+
+[[toolbars.items]]
+action = "FTS_METRONOME_CLICK"
+icon = "timer"
+label = "Click"
+right_click = "arm"
+
+[[toolbars.items]]
+kind = "separator"
+
+[[toolbars.items]]
+kind = "group"
+label = "Count in"
+items = [
+    { action = "FTS_METRONOME_COUNT_IN", icon = "play", label = "Count in" },
+    { label = "More", menu = [
+        { kind = "heading", label = "Click" },
+        { action = "FTS_METRONOME_CLICK" },
+        { kind = "separator" },
+        { kind = "submenu", label = "Status", items = [{ action = "FTS_METRONOME_STATUS" }] },
+    ] },
+]
+
+[[toolbars]]
+id = "note"
+title = "Metronome"
+where = "view:note"
+
+[[toolbars.items]]
+action = "FTS_METRONOME_CLICK"
+icon = "timer"
+label = "Click"
+
+# In a tab's and a Markdown file's context menus, told which.
+[[context]]
+target = "tab"
+action = "FTS_METRONOME_CLICK"
+title = "Click (from this tab)"
+
+[[context]]
+target = "file:md"
+action = "FTS_METRONOME_CLICK"
+title = "Click (from this file)"
+
+# What the click was left at, said again as it loads.
+[[hooks]]
+on = "startup"
+script = "click.luau"
+
+[[sections]]
+id = "metronome"
+title = "Metronome"
+icon = "timer"
+
+[[sections.settings]]
+key = "fts.metronome.accent"
+title = "Accent the downbeat"
+control = "switch"
+default = true
+
+[[sections.settings]]
+key = "fts.metronome.volume"
+title = "Click volume"
+control = "slider"
+min = 0
+max = 100
+unit = "%"
+default = 70
+
+[[sections.settings]]
+key = "fts.metronome.sound"
+title = "Sound"
+control = "select"
+default = "wood"
+choices = [
+    { value = "wood", label = "Woodblock" },
+    { value = "beep", label = "Beep" },
+    { value = "cowbell", label = "Cowbell" },
+]

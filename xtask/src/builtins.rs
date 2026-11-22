@@ -11,7 +11,7 @@
 //!    `[entry] path`'s file name);
 //! 3. **WASI**: not built here. The WASI runner (PR #285) runs components
 //!    written against their own guest crate (`architect-extension-wasi`,
-//!    the sandbox's `apps/sandbox/wasi-counter`), not a `linked::Extension`. The
+//!    the extensions' test guest `features/extensions/tests/wasi-counter`), not a `linked::Extension`. The
 //!    third way waits on a `linked::Extension` exported as a component
 //!    (#272); the components themselves are built and run by
 //!    `features/extensions/tests/wasi.rs`.

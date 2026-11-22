@@ -32,7 +32,7 @@ use sha2::Digest as _;
 const ID: &str = "example.hello";
 
 fn hello() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extension/registry/hello")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/examples/extension/registry/hello")
 }
 
 /// `hello` copied into `tmp/name`.

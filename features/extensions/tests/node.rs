@@ -50,7 +50,7 @@ const EXT: &str = "showcase.bank-link";
 const EXCHANGE: &str = "SHOWCASE_BANK_LINK_EXCHANGE";
 
 fn bank_link() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/showcase/bank-link")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/examples/showcase/bank-link")
 }
 
 // ── The org lane, in small ──────────────────────────────────────────

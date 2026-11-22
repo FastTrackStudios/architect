@@ -33,7 +33,7 @@ use serde_json::json;
 const GREETER: &str = "showcase.greeter";
 
 fn showcase() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/showcase-registry")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/examples/showcase-registry")
 }
 
 fn key() -> String {
