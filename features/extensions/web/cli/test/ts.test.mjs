@@ -13,7 +13,7 @@ import { gunzipSync } from 'node:zlib';
 import { actionTypes, check, keygen, pack, readManifest, scaffold } from '../ts.mjs';
 
 const cli = fileURLToPath(new URL('../cli.mjs', import.meta.url));
-const recipes = fileURLToPath(new URL('../../../../../examples/showcase/recipe-scaler', import.meta.url));
+const recipes = fileURLToPath(new URL('../../../tests/fixtures/examples/showcase/recipe-scaler', import.meta.url));
 const tmp = () => mkdtempSync(join(tmpdir(), 'architect-ts-'));
 
 /// The entries of a gzipped tar: `[path, bytes]`.

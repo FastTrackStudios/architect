@@ -14,8 +14,8 @@ writeFileSync(
   `// Generated from instance.js by scripts/build.mjs: do not edit.\nexport default ${JSON.stringify(source)};\n`,
 );
 // The app's page and action runtime types, for `architect-ext types`
-// (generated: features/pages/types/architect.d.ts).
-copyFileSync(join(here, '../../pages/types/architect.d.ts'), join(here, 'cli', 'architect.d.ts'));
+// (generated: features/extensions/types/architect.d.ts).
+copyFileSync(join(here, '../types/architect.d.ts'), join(here, 'cli', 'architect.d.ts'));
 for (const f of ['LICENSE-MIT', 'LICENSE-APACHE']) {
   copyFileSync(join(here, '../../..', f), join(here, f));
   copyFileSync(join(here, '../../..', f), join(here, 'cli', f));

@@ -17,10 +17,3 @@ test('the frame’s own CSP: its script, blob: modules and workers, wasm; nothin
   assert.ok(!SANDBOX_CSP.includes("'self'"), "no 'self': the page's origin is not the frame's");
   assert.ok(!SANDBOX_CSP.includes('unsafe-inline'));
 });
-
-test('Architect’s own page that runs components names the current hash in its CSP', async () => {
-  const { readFileSync } = await import('node:fs');
-  const html = readFileSync(new URL('../../../../apps/sandbox/web/index.html', import.meta.url), 'utf8');
-  const csp = /http-equiv="Content-Security-Policy" content="([^"]+)"/.exec(html)[1];
-  assert.ok(csp.includes(`'${SANDBOX_HASH}'`), `apps/sandbox/web/index.html: add '${SANDBOX_HASH}' to script-src`);
-});

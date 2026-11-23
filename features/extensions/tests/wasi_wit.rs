@@ -435,13 +435,13 @@ fn the_worker_interfaces_are_the_other_runners() {
 /// A page's worker says the same names as the others
 /// (`docs/content/architecture/pages.md`): a TSX page's handle in
 /// camelCase, a Luau page's in `snake_case`, as their generated types
-/// write them (`architect-pages`' `types/architect.d.ts` and
+/// write them (the runtime's `types/architect.d.ts` and
 /// `architect.d.luau`, which its own `tests/types.rs` keeps equal to
 /// what its runtimes give).
 #[test]
 fn the_page_runners_say_the_same_worker_names() {
     let w = world();
-    let types = Path::new(env!("CARGO_MANIFEST_DIR")).join("../pages/types");
+    let types = Path::new(env!("CARGO_MANIFEST_DIR")).join("types");
     let ts = std::fs::read_to_string(types.join("architect.d.ts")).unwrap();
     let luau = std::fs::read_to_string(types.join("architect.d.luau")).unwrap();
     let camel = |wit: &str| {

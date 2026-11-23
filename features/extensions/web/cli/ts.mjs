@@ -4,7 +4,7 @@
 //
 // - `scaffold`: a new one (a manifest, one action, one page, a tsconfig);
 // - `writeTypes`: `types/architect.d.ts` (the app's runtime, generated
-//   from its services: features/pages/types/architect.d.ts) and
+//   from its services: features/extensions/types/architect.d.ts) and
 //   `types/actions.d.ts` (each action's arguments from its manifest's
 //   `params`, typegen.mjs's `schemaType`, as `ActionArgs`);
 // - `check`: the manifest (a typescript extension's rules, as
@@ -32,7 +32,7 @@ const SCRIPT = /\.(ts|mts|tsx|js|mjs|jsx)$/;
 /// The app's runtime types: shipped beside this file, or (in the repo)
 /// the generated copy the pages crate checks.
 export function architectTypes() {
-  for (const p of [join(here, 'architect.d.ts'), join(here, '../../../pages/types/architect.d.ts')])
+  for (const p of [join(here, 'architect.d.ts'), join(here, '../../types/architect.d.ts')])
     if (existsSync(p)) return readFileSync(p, 'utf8');
   throw new Error('architect.d.ts is missing from @fasttrackstudio/architect-cli');
 }

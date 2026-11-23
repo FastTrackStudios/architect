@@ -39,7 +39,7 @@ function ready(name, opts, as = name) {
 }
 
 const counterSource = () =>
-  ready('architect_sandbox_wasi_counter', { manifestPath: join(root, 'apps/sandbox/wasi-counter/extension.toml') });
+  ready('architect_extension_wasi_counter', { manifestPath: join(root, 'features/extensions/tests/wasi-counter/extension.toml') });
 
 /// The hazards component has no manifest of its own: this one, ECHO
 /// destructive so `confirm` has something to say no to.
@@ -67,7 +67,7 @@ async function load(source, options) {
 }
 
 test('load the counter and run an action with typed arguments', { skip }, async () => {
-  /** @type {import('../index.js').Extension<import('../../../../target/wasi-web-package/architect_sandbox_wasi_counter/actions.js').Actions>} */
+  /** @type {import('../index.js').Extension<import('../../../../target/wasi-web-package/architect_extension_wasi_counter/actions.js').Actions>} */
   const ext = await load(counterSource(), { host: memoryHost() });
   assert.equal(ext.manifest.id, 'lab.wasi-counter');
   assert.equal(ext.world, '0.1.0');
@@ -171,7 +171,7 @@ test('a component built for a newer world is refused, with why', { skip }, async
 // built; a compromised CDN got everything.
 test('P6: pinned files load; a changed core module, glue or lock is refused before it runs', { skip }, async () => {
   const good = counterSource();
-  const integrity = integrities.get('architect_sandbox_wasi_counter');
+  const integrity = integrities.get('architect_extension_wasi_counter');
   assert.match(integrity, /^sha256-[A-Za-z0-9+/]+=*$/);
   const pinned = await load(good, { host: memoryHost(), integrity });
   assert.equal(await pinned.run('LAB_WASI_COUNTER_ADD', { by: 2 }), 2);
@@ -182,15 +182,15 @@ test('P6: pinned files load; a changed core module, glue or lock is refused befo
   };
   // A core module changed by one byte.
   let at = fresh();
-  const core = join(evil, 'architect_sandbox_wasi_counter.core.wasm');
+  const core = join(evil, 'architect_extension_wasi_counter.core.wasm');
   const bytes = readFileSync(core);
   bytes[bytes.length - 1] ^= 1;
   writeFileSync(core, bytes);
-  await assert.rejects(loadExtension(at, { spawn, integrity }), /architect_sandbox_wasi_counter\.core\.wasm is not the file its lock names/);
+  await assert.rejects(loadExtension(at, { spawn, integrity }), /architect_extension_wasi_counter\.core\.wasm is not the file its lock names/);
   // The glue swapped for the attacker's.
   at = fresh();
-  writeFileSync(join(evil, 'architect_sandbox_wasi_counter.js'), 'globalThis.PWNED = true; export async function instantiate() {}');
-  await assert.rejects(loadExtension(at, { spawn, integrity }), /architect_sandbox_wasi_counter\.js is not the file its lock names/);
+  writeFileSync(join(evil, 'architect_extension_wasi_counter.js'), 'globalThis.PWNED = true; export async function instantiate() {}');
+  await assert.rejects(loadExtension(at, { spawn, integrity }), /architect_extension_wasi_counter\.js is not the file its lock names/);
   // A lock rewritten to match: not the lock pinned.
   at = fresh();
   writeFileSync(join(evil, 'architect.lock.json'), '{"lockfileVersion":1,"files":{}}\n');
@@ -237,7 +237,7 @@ test('N2: every source shape honours every integrity shape, and unpinned must be
   const at = new URL('architect.json', counterSource());
   const folder = new URL('.', at).href;
   const metadata = JSON.parse(readFileSync(at, 'utf8'));
-  const integrity = integrities.get('architect_sandbox_wasi_counter');
+  const integrity = integrities.get('architect_extension_wasi_counter');
   const wrong = `sha256-${'A'.repeat(43)}=`;
   const lock = JSON.parse(readFileSync(new URL('architect.lock.json', folder), 'utf8'));
   // Left out: refused, whatever the source.
@@ -271,8 +271,8 @@ test('S1: an action of handle.run’s, its effect unsaid, needs the destructive 
   const ran = [];
   // The counter, asking for every effect on THEME_ (so only the grant and
   // the yes decide).
-  const toml = (await import('smol-toml')).parse(readFileSync(join(root, 'apps/sandbox/wasi-counter/extension.toml'), 'utf8'));
-  const wide = ready('architect_sandbox_wasi_counter', { manifest: { ...toml, capabilities: { actions: ['THEME_'], effect: 'destructive' } } }, 'counter-wide');
+  const toml = (await import('smol-toml')).parse(readFileSync(join(root, 'features/extensions/tests/wasi-counter/extension.toml'), 'utf8'));
+  const wide = ready('architect_extension_wasi_counter', { manifest: { ...toml, capabilities: { actions: ['THEME_'], effect: 'destructive' } } }, 'counter-wide');
   const host = (confirm) => memoryHost({ handle: { run: (r) => (ran.push(r.action), ['light']) }, confirm });
   // The review's case: a mutating grant, confirm says no.
   const mutating = await load(wide, { host: host(() => false), grant: { actions: ['THEME_'], effect: 'mutating' } });

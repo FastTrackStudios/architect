@@ -13,7 +13,7 @@ import { methodNames, schemaType, typegen } from '../typegen.mjs';
 
 const here = fileURLToPath(new URL('..', import.meta.url));
 const web = join(here, '..');
-const counter = parse(readFileSync(join(web, '../../../apps/sandbox/wasi-counter/extension.toml'), 'utf8'));
+const counter = parse(readFileSync(join(web, '../tests/wasi-counter/extension.toml'), 'utf8'));
 
 test('the JSON schema subset as TypeScript', () => {
   assert.equal(schemaType({ type: 'string' }), 'string');

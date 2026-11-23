@@ -94,8 +94,8 @@ else
     echo "showcase: the process extensions did not build; they are left out" >&2
 fi
 echo "showcase: building the WASI counter's component (wasm32-wasip2)…"
-wasm=architect_sandbox_wasi_counter.wasm
-if devenv --profile wasi shell -- cargo build -p architect-sandbox-wasi-counter --target wasm32-wasip2; then
+wasm=architect_extension_wasi_counter.wasm
+if devenv --profile wasi shell -- cargo build -p architect-extension-wasi-counter --target wasm32-wasip2; then
     to="$stage/wasi-counter"
     link_package "$here/apps/sandbox/wasi-counter" "$to"
     ln -sf "$here/target/wasm32-wasip2/debug/$wasm" "$to/$wasm"

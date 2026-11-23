@@ -258,7 +258,7 @@ export default defineAction<Args>(async (args) =>
 id = "lab.wasi-counter"
 kind = "wasm"
 [wasm]
-component = "architect_sandbox_wasi_counter.wasm"
+component = "architect_extension_wasi_counter.wasm"
 [capabilities]
 actions = ["THEME_LIST"]
 effect = "read_only"

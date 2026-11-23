@@ -376,8 +376,8 @@ What a page downloads for the sandbox's WASI Counter, a release build (`build-we
 
 | File | Raw | gzip | brotli |
 | --- | ---: | ---: | ---: |
-| `architect_sandbox_wasi_counter.core.wasm` (the component's code) | 1035.6 KiB | 310.6 KiB | 229.8 KiB |
-| `architect_sandbox_wasi_counter.js` (jco's glue) | 405.4 KiB | 54.2 KiB | 42.2 KiB |
+| `architect_extension_wasi_counter.core.wasm` (the component's code) | 1035.6 KiB | 310.6 KiB | 229.8 KiB |
+| `architect_extension_wasi_counter.js` (jco's glue) | 405.4 KiB | 54.2 KiB | 42.2 KiB |
 | `architect.json` | 2.2 KiB | 0.8 KiB | 0.6 KiB |
 | five small adapter modules | 0.9 KiB | 0.7 KiB | 0.6 KiB |
 | **the extension, in all** | **1444.1 KiB** | **366.2 KiB** | **273.3 KiB** |
