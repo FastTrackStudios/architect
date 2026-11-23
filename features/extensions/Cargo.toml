@@ -17,8 +17,8 @@ description = "Extensions: adding to an app at run time — data, Luau, WASM and
 # brings loaded extensions' settings sections onto the settings page.
 # Remote views, desk only: `process` runs process extensions for the host
 # (started, spoken to over vox on a local socket, supervised); `guest` is
-# the other end, a process extension's `main`, rendering its Dioxus views
-# into an edit stream; `remote` mounts those views in the host's Blitz
+# the other end, a process extension's `main`, serving its views (a Dioxus
+# view's renderer: architect-extensions-dioxus); `remote` mounts them in the host's Blitz
 # document, a sub-document per pane.
 
 [features]
