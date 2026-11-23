@@ -83,10 +83,10 @@ scenes = ["dep:anyrender", "dep:peniko", "dep:architect-scene", "dep:base64"]
 # records a scene for its pane and takes the pane's input. Linked in with
 # `paint-ui` it is a Blitz widget in the pane (`architect_workspace::paint`);
 # served by `guest` it is a `scene::RemoteScene`.
-paint = ["scenes", "architect-workspace/paint"]
+paint = ["scenes", "dep:architect-workspace", "architect-workspace/paint"]
 paint-ui = ["paint", "linked", "paint-pane", "architect-workspace/paint-ui"]
 # A view's pane, linked in or as a process (`linked::use_pane_state`).
-pane = ["linked-core", "architect-workspace/ui"]
+pane = ["linked-core", "dep:architect-workspace", "architect-workspace/ui"]
 # `linked::PaintPane`: a `PaintView` mounted in an extension's own view,
 # `architect_workspace::PaintPane` linked in and `scene::RemotePaint` in
 # its process copy (with `guest`).
@@ -103,6 +103,7 @@ ui = [
     "architect-settings/ui",
     "dep:architect-shell",
     "architect-shell/ui",
+    "dep:architect-workspace",
     "architect-workspace/ui",
     "dep:architect-commands",
     "architect-commands/ui",
@@ -119,7 +120,7 @@ person-sync = ["host", "archive", "architect-extension-archive/sign"]
 # customizes the app — extensions, scripts, workers, themes, layouts and
 # keys, and kinds the app adds — with its MANAGER_* actions; linked in as
 # an extension of its own.
-manager = ["host", "linked", "architect-workspace/home"]
+manager = ["host", "linked", "dep:architect-workspace", "architect-workspace/home"]
 # The wire and the protocol (`wire`, `proto`); the derives key on `vox`.
 vox = ["dep:architect", "architect/vox", "dep:vox", "dep:thiserror"]
 # An extension's server-side part on the org's node (#583, `crate::node`):
@@ -251,7 +252,11 @@ architect-input = { workspace = true }
 architect-shell = { workspace = true, optional = true }
 architect-ui = { workspace = true, optional = true }
 # The view kinds an extension's views may name (the model, wasm-clean).
-architect-workspace = { workspace = true }
+# The panes views are drawn in: the GUI side's only (paint, pane, ui,
+# manager, remote).
+architect-workspace = { workspace = true, optional = true }
+# The view kinds and meters, shared with the panes.
+architect-views = { workspace = true }
 facet = { workspace = true }
 # `VaultQueryClient`, which the host answers `query_vault` with (feature
 # `host`): the wire contract only, wasm-clean.

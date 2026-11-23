@@ -16,7 +16,7 @@ fn arg<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
 /// Every extension, here or offered (`extension`).
 pub struct ExtensionKind {
     browse: Browse,
-    meters: Option<architect_workspace::Meters>,
+    meters: Option<architect_views::Meters>,
 }
 
 impl ExtensionKind {
@@ -31,7 +31,7 @@ impl ExtensionKind {
     /// Its views' frame times from `meters` (the app's, `EXT_VIEWS`'s):
     /// each extension's page gets a "Frame health" part.
     #[must_use]
-    pub fn with_meters(mut self, meters: architect_workspace::Meters) -> Self {
+    pub fn with_meters(mut self, meters: architect_views::Meters) -> Self {
         self.meters = Some(meters);
         self
     }

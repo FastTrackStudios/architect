@@ -860,7 +860,7 @@ fn uncovered(manifest: &Manifest, hello: &Hello) -> Option<String> {
         // A web or process view is the app's to draw (its `src`, its
         // `program`), not the guest's.
         let app_draws =
-            v.kind == architect_workspace::WEB || v.kind == architect_workspace::PROCESS;
+            v.kind == architect_views::WEB || v.kind == architect_views::PROCESS;
         v.document.is_none() && !app_draws && !hello.views.contains(&v.id)
     }) {
         return Some(format!("it does not draw its view {}", view.id));

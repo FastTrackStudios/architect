@@ -473,7 +473,7 @@ pub struct WorkerDecl {
 }
 
 fn dioxus() -> String {
-    architect_workspace::DIOXUS.to_owned()
+    architect_views::DIOXUS.to_owned()
 }
 
 fn over() -> String {
@@ -1368,7 +1368,7 @@ impl Manifest {
             if let Some(page) = &view.page {
                 inside(page)?;
             }
-            match (&view.src, view.kind == architect_workspace::WEB) {
+            match (&view.src, view.kind == architect_views::WEB) {
                 (Some(src), true) => inside(src)?,
                 (None, true) => {
                     return Err(ManifestError::Interop {
@@ -1516,7 +1516,7 @@ impl Manifest {
             field: field.clone(),
             why,
         };
-        match (&view.program, view.kind == architect_workspace::PROCESS) {
+        match (&view.program, view.kind == architect_views::PROCESS) {
             (Some(program), true) => {
                 inside(program)?;
                 for arg in &view.args {

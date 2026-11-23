@@ -1001,6 +1001,7 @@ dependencies = [
  "architect-shell",
  "architect-theme",
  "architect-ui",
+ "architect-views",
  "architect-workspace",
  "base64 0.22.1",
  "blitz-dom",
@@ -1661,6 +1662,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-views"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "architect-workspace"
 version = "0.1.0"
 dependencies = [
@@ -1673,6 +1681,7 @@ dependencies = [
  "architect-scene",
  "architect-shell",
  "architect-theme",
+ "architect-views",
  "architect-workspace",
  "blitz-dom",
  "blitz-html",

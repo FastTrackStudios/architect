@@ -31,7 +31,7 @@ use std::time::Duration;
 
 use architect::action::ActionList;
 use architect_settings::Section;
-use architect_workspace::ViewKinds;
+use architect_views::ViewKinds;
 use facet::Facet;
 
 use crate::Origin;
@@ -358,7 +358,7 @@ impl Checker {
                 elements: None,
                 note: None,
             };
-            if view.kind == architect_workspace::DIOXUS && manifest.kind == Kind::Process {
+            if view.kind == architect_views::DIOXUS && manifest.kind == Kind::Process {
                 #[cfg(all(feature = "remote", unix))]
                 match processes
                     .as_ref()

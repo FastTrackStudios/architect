@@ -53,6 +53,8 @@ paint-web = ["paint", "dep:anyrender_vello_hybrid", "dep:vello_gpu", "dep:vello_
 paint-web-ui = ["paint-web", "dep:dioxus", "dioxus/web", "dep:js-sys"]
 
 [dependencies]
+# The view kinds and meters the extension runtime shares with the panes.
+architect-views = { workspace = true }
 # A view's theme tokens from a resolved theme (`ctx`); the Blitz host
 # follows the app's theme store (`ui`).
 architect-theme = { workspace = true, optional = true }

@@ -17,6 +17,7 @@ members = [
     "features/atom",
     "features/form",
     "features/input",
+    "features/views",
     "features/permissions",
     "features/permissions/proto",
     "features/mcp",
@@ -302,6 +303,7 @@ nucleo-matcher = "0.3"
 palette = "0.7.6"
 linkme = "0.3"
 architect-shell = { path = "features/shell", default-features = false }
+architect-views = { path = "features/views" }
 architect-workspace = { path = "features/workspace" }
 architect-scene = { path = "features/scene" }
 architect-commands = { path = "features/commands" }

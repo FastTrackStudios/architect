@@ -1,11 +1,11 @@
 //! View kinds: what a pane's view draws *with*
 //! (`docs/content/architecture/embedded-views.md`).
 //!
-//! A [`View`](crate::View) says *which* view a pane shows (its
-//! [`ViewKind`](crate::ViewKind), `"session.mixer"`); its kind
+//! A the workspace's `View` says *which* view a pane shows (its
+//! `ViewKind`, `"session.mixer"`); its kind
 //! ([`KindId`]) says what draws it: a Dioxus component (the built-in
 //! [`DIOXUS`]), a GPU scene, a web view, a Frame surface, an agent's
-//! generated UI. Every kind mounts through one contract, [`crate::ViewCtx`]
+//! generated UI. Every kind mounts through one contract, the workspace's `ViewCtx`
 //! (feature `ctx`), and is declared once in a [`ViewKinds`] registry:
 //! where it can be shown ([`Hosts`]), where it can be mounted
 //! ([`Placements`]) and what it may do ([`Capabilities`]).
@@ -23,7 +23,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 /// The built-in kind: a Dioxus component in the app's own document (a
-/// workspace [`View`](crate::View)), or a process extension's, drawn
+/// workspace the workspace's `View`), or a process extension's, drawn
 /// remotely in a pane.
 pub const DIOXUS: &str = "dioxus";
 
@@ -233,7 +233,7 @@ pub enum Capability {
     Ime,
     /// Draws on the GPU itself (its own scene, a texture).
     Gpu,
-    /// Edits a document ([`crate::ViewCtx`]'s `DocRef`), through its
+    /// Edits a document (the workspace's `ViewCtx`'s `DocRef`), through its
     /// history.
     Document,
     /// Runs actions on the host's Action List (always as the view's

@@ -51,7 +51,7 @@ use architect_scripting::luau::{Limits, Runtime};
 use architect_scripting::worker::{WorkerGroup, Workers};
 use architect_settings::{Owner, Registry, Section};
 use architect_theme::{Contribution, Problem, Theme, ThemeStore};
-use architect_workspace::{KindError, ViewKinds};
+use architect_views::{KindError, ViewKinds};
 use semver::Version;
 use serde_json::Value;
 
@@ -1089,7 +1089,7 @@ impl Host {
             .declare(crate::interop::APP, &[crate::hostui::decorations_point()]);
         // The context-menu targets of the features here: the workspace's
         // (a pane, a tab) and the toolbars'.
-        host.declare_context_targets("workspace", &architect_workspace::CONTEXT_TARGETS);
+        host.declare_context_targets("workspace", &architect_views::CONTEXT_TARGETS);
         host.declare_context_targets("toolbars", &crate::toolbar::CONTEXT_TARGETS);
         host
     }

@@ -16,7 +16,7 @@
 use architect::action::{
     ActionCaller, ActionError, ActionList, ActionMeta, Effect, Problem, Problems, RawJson,
 };
-use architect_workspace::{Meters, ViewHealth, ViewReport, ViewSummary};
+use architect_views::{Meters, ViewHealth, ViewReport, ViewSummary};
 use serde_json::{Value, json};
 
 static VIEWS: ActionMeta = ActionMeta {
@@ -174,7 +174,7 @@ mod tests {
     use std::time::Duration;
 
     use architect::action::Problems;
-    use architect_workspace::Meters;
+    use architect_views::Meters;
 
     use super::{ViewProblems, health_lines};
 
