@@ -82,7 +82,7 @@ pub fn from_input(input: &crate::contrib::EmbedInput) -> Option<OverlaySpaces> {
 
 /// In an overlay's view: the spaces of the view it draws over, now; the
 /// view renders again when they change.
-#[cfg(any(feature = "linked", all(feature = "guest", unix)))]
+#[cfg(feature = "dioxus")]
 #[must_use]
 pub fn spaces() -> Option<OverlaySpaces> {
     crate::linked::use_embed().and_then(|i| from_input(&i))

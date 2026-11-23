@@ -73,7 +73,11 @@ linked = ["host", "linked-core"]
 # linked extension's crate needs to build for a browser
 # (`wasm32-unknown-unknown`), where `guest` (vox, tokio) does not build
 # (#495). The web app's host links it (`architect-web`).
-linked-core = ["dep:dioxus"]
+linked-core = []
+# The Dioxus side of linked extensions: views as components
+# (`Builder::view`, `Host::linked_view`), their root context, the embed and
+# pane hooks. The runtime (`linked-core`) keeps views type-erased.
+dioxus = ["dep:dioxus"]
 # Scenes in remote views (`scene`, #175): an element a view paints as an
 # anyrender scene, carried by two attributes (content by hash, then a
 # transform). The guest's `RemoteScene`, the host's widget, the browser's
@@ -86,7 +90,7 @@ scenes = ["dep:anyrender", "dep:peniko", "dep:architect-scene", "dep:base64"]
 paint = ["scenes", "dep:architect-workspace", "architect-workspace/paint"]
 paint-ui = ["paint", "linked", "paint-pane", "architect-workspace/paint-ui"]
 # A view's pane, linked in or as a process (`linked::use_pane_state`).
-pane = ["linked-core", "dep:architect-workspace", "architect-workspace/ui"]
+pane = ["linked-core", "dioxus", "dep:architect-workspace", "architect-workspace/ui"]
 # `linked::PaintPane`: a `PaintView` mounted in an extension's own view,
 # `architect_workspace::PaintPane` linked in and `scene::RemotePaint` in
 # its process copy (with `guest`).
@@ -97,7 +101,7 @@ ui = [
     "dep:objc2-ui-kit",
     "dep:objc2-foundation",
     "linked",
-    "dep:dioxus",
+    "dioxus",
     "dep:futures",
     "dep:futures-timer",
     "architect-settings/ui",
@@ -120,7 +124,7 @@ person-sync = ["host", "archive", "architect-extension-archive/sign"]
 # customizes the app — extensions, scripts, workers, themes, layouts and
 # keys, and kinds the app adds — with its MANAGER_* actions; linked in as
 # an extension of its own.
-manager = ["host", "linked", "dep:architect-workspace", "architect-workspace/home"]
+manager = ["host", "linked", "dioxus", "dep:architect-workspace", "architect-workspace/home"]
 # The wire and the protocol (`wire`, `proto`); the derives key on `vox`.
 vox = ["dep:architect", "architect/vox", "dep:vox", "dep:thiserror"]
 # An extension's server-side part on the org's node (#583, `crate::node`):
@@ -142,7 +146,7 @@ guest = [
     "dep:vox-core",
     "dep:vox-stream",
     "dep:tokio",
-    "dep:dioxus",
+    "dioxus",
     # Its views' events arrive serialised (`guest.rs`): dioxus-html's
     # `serialize` (the node's build, without the window, gets it from
     # nothing else).

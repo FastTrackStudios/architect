@@ -172,7 +172,7 @@ impl Embeds {
             .filter(|by| !by.item.claims.note_type.is_empty())
             .filter_map(|by| {
                 let view = by.item.view.clone()?;
-                self.host.linked_view(&by.owner, &view)?;
+                self.host.linked_view_root(&by.owner, &view)?;
                 let loaded = self.host.get(&by.owner)?;
                 Some(LinkedNoteView {
                     reads: self

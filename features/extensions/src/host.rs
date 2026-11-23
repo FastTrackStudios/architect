@@ -1462,13 +1462,23 @@ impl Host {
 
     /// The component of view `view` of `extension`, when the copy of it
     /// running is the one linked in (a process copy's is drawn remotely).
-    #[cfg(feature = "linked")]
+    #[cfg(all(feature = "linked", feature = "dioxus"))]
     #[must_use]
     pub fn linked_view(
         &self,
         extension: &str,
         view: &str,
     ) -> Option<fn() -> dioxus::prelude::Element> {
+        self.linked_view_root(extension, view)?
+            .downcast_ref::<fn() -> dioxus::prelude::Element>()
+            .copied()
+    }
+
+    /// The root of view `view` of `extension` as it was linked in (any UI:
+    /// [`crate::linked::ViewRoot`]), when the copy running is that one.
+    #[cfg(feature = "linked")]
+    #[must_use]
+    pub fn linked_view_root(&self, extension: &str, view: &str) -> Option<crate::linked::ViewRoot> {
         if self.get(extension)?.origin != Origin::Builtin {
             return None;
         }
@@ -1477,7 +1487,7 @@ impl Host {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(extension)?
-            .view_root(view)
+            .view_root_any(view)
     }
 
     /// The in-process extensions linked in, built: for their root context.

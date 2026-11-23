@@ -42,12 +42,20 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+#[cfg(feature = "dioxus")]
 use dioxus::prelude::Element;
 use serde_json::Value as Json;
 
 use crate::contrib::{Contribution, StateWrite};
 
+#[cfg(feature = "dioxus")]
 pub mod deferred;
+
+/// A view's root as the runtime keeps it: what draws the view, in the UI
+/// the app links. With feature `dioxus` it is a Dioxus component
+/// (`fn() -> Element`, [`Builder::view`], [`Builder::view_root`]); the
+/// runtime itself only stores, lists and hands it on.
+pub type ViewRoot = Arc<dyn std::any::Any + Send + Sync>;
 
 /// A host-service call's answer, to await. `Send` natively; in a
 /// browser, where nothing is (architect's `ActionFuture` is local there),
@@ -295,11 +303,11 @@ where
 #[derive(Clone, Default)]
 pub struct Builder {
     pub(crate) actions: BTreeMap<String, Action>,
-    pub(crate) views: BTreeMap<String, fn() -> Element>,
+    pub(crate) views: BTreeMap<String, ViewRoot>,
     /// What draws a view in its process copy, where that differs from
     /// `views` (a paint view: a `scene::RemoteScene`).
     #[cfg(all(feature = "guest", feature = "paint"))]
-    pub(crate) remote_views: BTreeMap<String, fn() -> Element>,
+    pub(crate) remote_views: BTreeMap<String, ViewRoot>,
     pub(crate) contribution: Contribution,
     pub(crate) context: Vec<Provide>,
     pub(crate) handle: Handle,
@@ -350,7 +358,14 @@ impl Builder {
     }
 
     /// Its view `id` (one of its manifest's `[[views]]`), drawn by `root`.
+    #[cfg(feature = "dioxus")]
     pub fn view(&mut self, id: impl Into<String>, root: fn() -> Element) -> &mut Self {
+        self.view_any(id, Arc::new(root))
+    }
+
+    /// Its view `id`, drawn by `root` in whatever UI the app links (a
+    /// Dioxus component is `fn() -> Element`: [`Self::view`]).
+    pub fn view_any(&mut self, id: impl Into<String>, root: ViewRoot) -> &mut Self {
         self.views.insert(id.into(), root);
         self
     }
@@ -376,10 +391,13 @@ impl Builder {
     {
         let id = id.into();
         #[cfg(feature = "paint-ui")]
-        self.views.insert(id.clone(), paint_root::<V>);
+        self.views
+            .insert(id.clone(), Arc::new(paint_root::<V> as fn() -> Element));
         #[cfg(feature = "guest")]
-        self.remote_views
-            .insert(id.clone(), crate::scene::remote_paint_root::<V>);
+        self.remote_views.insert(
+            id.clone(),
+            Arc::new(crate::scene::remote_paint_root::<V> as fn() -> Element),
+        );
         let _ = id;
         self
     }
@@ -388,9 +406,12 @@ impl Builder {
     /// `[[base_views]]` that names no `view` or `page`): drawn as view
     /// `base.<id>`, given the base's rows ([`use_base_view`]), linked in or
     /// as a process.
+    #[cfg(feature = "dioxus")]
     pub fn base_view(&mut self, id: &str, root: fn() -> Element) -> &mut Self {
-        self.views
-            .insert(format!("{}{id}", crate::contrib::BASE_VIEW_PREFIX), root);
+        self.views.insert(
+            format!("{}{id}", crate::contrib::BASE_VIEW_PREFIX),
+            Arc::new(root),
+        );
         self
     }
 
@@ -405,6 +426,7 @@ impl Builder {
 
     /// A value its views read with `use_context`, provided at the app's
     /// root when it is linked in. It stays until the app ends.
+    #[cfg(feature = "dioxus")]
     pub fn context<T: Clone + 'static>(&mut self, make: fn() -> T) -> &mut Self {
         self.context.push(Arc::new(move || {
             dioxus::prelude::provide_context(make());
@@ -445,9 +467,19 @@ impl Builder {
     }
 
     /// Its view `id`'s component.
+    #[cfg(feature = "dioxus")]
     #[must_use]
     pub fn view_root(&self, id: &str) -> Option<fn() -> Element> {
-        self.views.get(id).copied()
+        self.views
+            .get(id)
+            .and_then(|root| root.downcast_ref::<fn() -> Element>())
+            .copied()
+    }
+
+    /// Its view `id`'s root, as it was given ([`ViewRoot`]).
+    #[must_use]
+    pub fn view_root_any(&self, id: &str) -> Option<ViewRoot> {
+        self.views.get(id).cloned()
     }
 
     /// Its action `id`.
@@ -468,12 +500,14 @@ impl Builder {
 /// An inline embed's input in context: the host provides it around a
 /// linked view it mounts as an embed (`embeds::EmbedView`), the guest
 /// around every process view (filled when the host opens it as one).
+#[cfg(feature = "dioxus")]
 #[derive(Clone, Copy)]
 pub struct EmbedContext(pub dioxus::prelude::Signal<crate::contrib::EmbedInput>);
 
 /// What the host gave this view as an inline embed — the claim, the
 /// block's text, the host's properties — when it is drawn as one: read
 /// in a view, it draws again when the block changes. `None` in a pane.
+#[cfg(feature = "dioxus")]
 #[must_use]
 pub fn use_embed() -> Option<crate::contrib::EmbedInput> {
     use dioxus::prelude::{ReadableExt as _, try_use_context};
@@ -663,12 +697,17 @@ impl crate::guest::Guest {
         let built = Builder::of(extension);
         built.handle.connect(Arc::new(Wire));
         let mut guest = Self::new();
+        let component = |root: &ViewRoot| root.downcast_ref::<fn() -> Element>().copied();
         for (id, root) in &built.views {
-            guest = guest.view(id.clone(), *root);
+            if let Some(root) = component(root) {
+                guest = guest.view(id.clone(), root);
+            }
         }
         #[cfg(feature = "paint")]
         for (id, root) in &built.remote_views {
-            guest = guest.view(id.clone(), *root);
+            if let Some(root) = component(root) {
+                guest = guest.view(id.clone(), root);
+            }
         }
         for (id, run) in built.actions {
             guest = guest.action_in(id, move |args, cx| run(args, cx));
@@ -686,6 +725,7 @@ impl crate::guest::Guest {
 /// What Bases gave this view, when it draws a base's view of a type its
 /// extension adds (`[[base_views]]`): the view's spec and its rows, drawn
 /// again when either changes. `None` elsewhere.
+#[cfg(feature = "dioxus")]
 #[must_use]
 pub fn use_base_view() -> Option<crate::contrib::BaseViewInput> {
     let input = use_embed()?;
