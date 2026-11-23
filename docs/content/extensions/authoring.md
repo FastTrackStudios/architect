@@ -1,14 +1,15 @@
 +++
 title = "Writing an extension"
-description = "Every way to build, run, install, use and test an Architect extension, on one page that links to the rest: runtimes, the manifest, the host API and consent, surfaces, install and sync, the showcase."
+description = "Every way to build, run, install, use and test an Architect extension, on one page that links to the rest: runtimes, the manifest, the host API and consent, surfaces, install and sync, tests."
 weight = 5
 +++
 
-An extension adds to Architect what the app's own features add (actions,
-views, settings, openers, toolbars, themes, hooks, services) without the
-app being rebuilt, and without doing more than the person allowed. Every
-user-facing feature of Architect is itself one (#272), and Studio is a
-set of them. This page walks through it all and links to the page that
+An extension adds to an app built on Architect what the app's own
+features add (actions, views, settings, openers, toolbars, themes, hooks,
+services) without the app being rebuilt, and without doing more than the
+person allowed. An app's features can all be extensions: Studio's are
+(`studio:extensions`), compiled in for speed and loaded at run time while
+they are developed. This page walks through it all and links to the page that
 goes deep on each part. Agents load the `architect-extensions` skill
 (`skills/architect-extensions/SKILL.md`), which says the same with exact
 keys and file paths.
@@ -28,9 +29,6 @@ keys and file paths.
   `architect::serve_local` on the desktop and iOS, vox over the org lane
   on the signed-in web, `serve_local` in wasm in the demo. There is never a
   second copy for the web or the node.
-- **Browsers get open notes plus a synced index.** Queries run in the
-  page over the synced index (`apps/web/src/app/index_sync.rs`);
-  full-text search runs on the node.
 - **WASI runs on iOS**, release builds included, interpreted by
   Wasmtime's Pulley. HealthKit stays first-party: only a compiled-in
   extension may use it.
@@ -56,15 +54,11 @@ What each costs, where it runs and why:
 [Extensions](@/architecture/extensions.md) ("The layers", "WASI
 components", "Processes over vox", "One trait, three ways to run it",
 "What each runner costs", "Server-side parts on the node"),
-[Pages as files](@/architecture/pages.md) (pages and TypeScript actions)
 and [Embedded views](@/architecture/embedded-views.md) (`paint`, `web`).
 
-The desktop and iOS share one host (`apps/ui/src/extensions.rs`), which
-adds the Luau, TypeScript, process and (with `wasi`) WASI runners to the
-data and linked ones. The web app's host
-(`apps/web/src/app/extensions.rs`) runs the distribution's linked
-extensions today; installed Luau, pages and WASI in the browser are
-#495's.
+The host is `features/extensions/src/host.rs` `Host`: an app adds the
+Luau, process and (with `wasi`) WASI runners to the data and linked ones;
+app-shell draws the result (`app-shell:crates/app-shell-extensions`).
 
 ## Start one
 
@@ -73,63 +67,42 @@ extensions today; installed Luau, pages and WASI in the browser are
   `features/extensions/web/cli/README.md`) writes a manifest, an action,
   a page and its types; `architect-ext types` regenerates
   `architect.d.ts`, `architect-ext check` loads it as the app would.
-- **Anything else:** copy the nearest example. `examples/showcase/` has
-  one per capability (the table in [The extension
-  showcase](@/guide/showcase.md), "The example extensions");
-  `examples/extension/` has a Luau and a process extension, a registry and
-  a web view app; `apps/sandbox/` has the Board (linked and process), the
-  Clicker (a remote view), the WASI Counter and Sketch (`paint`, scenes).
+- **Anything else:** start from the manifest
+  ([the walkthrough](@/getting-started/extension.md) writes a Luau and a
+  process extension), or from an app's own: Studio's are in
+  `studio:extensions`.
 - **The walkthrough:** [Your first extension](@/getting-started/extension.md),
   then [Extending an app](@/guide/extending.md).
 
 ## The development loop
 
-Develop against the app itself, in an instance of your own: your
-extension loaded from its folder, reloaded on save, nothing else in the
-way, and the app you use every day untouched.
+Develop against the app that hosts the extension, in an instance of its
+own, with your extension loaded from its folder and reloaded on save.
 
-1. **Have the app, with `architect` on your `PATH`.** From a checkout of
-   Architect, `cargo run --release -p architect-desktop -- install`
-   installs that build (on a Mac bundled, signed, notarized and stapled
-   as a release is, into `/Applications`; on Linux under `~/.local`) and
-   links `~/.local/bin/architect` to it (`apps/desktop/src/install.rs`).
-   Your extension's repository needs no Architect crate to build.
-2. **Run your extension in an isolated instance.** From its repository:
-
-   ```sh
-   architect dev --extension path/to/your-extension      # it, and the app's own extensions
-   architect dev --extension ./ext --only your.id         # it alone
-   architect dev --extension ./ext --open "Charts/A.kf" --hide all   # just its view, no sidebars, rail or status bar
-   ```
-
-   Each working folder gets its own instance (its own settings, vault,
-   secrets and control socket), so agents in several worktrees each run
-   theirs. `--fresh` starts it over; run it again with other flags and
-   the running one takes them. The same with no launcher, for a
-   `justfile` or devenv: `ARCHITECT_DEV=1` plus `ARCHITECT_DEV_EXTENSIONS`,
-   `ARCHITECT_DEV_ONLY`, `ARCHITECT_DEV_OPEN`, `ARCHITECT_DEV_HIDE`, … on
-   the app's environment.
-3. **Save.** The folder is a development copy: every file is
+1. **Load it as a development copy.** `EXT_DEV` loads a folder unsigned;
+   `EXT_CLONE {"id": …}` copies a built-in or installed extension into
+   one, and for a built-in with a `[source]` builds its crate and
+   overrides it live (`features/extensions/src/source.rs`).
+2. **Save.** The folder is a development copy: every file is
    fingerprinted twice a second, and a change reloads it as a diff, its
-   state kept and its panes where they were. Data, themes, Luau, pages
-   and TypeScript take effect at once. A process extension's program (its
-   `[entry] path`) is your build's to write, path dependencies and all;
-   when it changes, the app restarts the process on it. A view keeps its
-   place across that restart with `linked::use_view_state`: what it kept
-   (zoom, scroll, selection, a mode, as a string) is its pane's, given
-   back when the new program's view starts, and when the pane moves or
-   pops out. A broken save keeps the last good copy and says why.
-4. **See and drive it.** `dev` prints the instance's `socket`;
-   `architect actions --app <socket> run APP_SHOT --json '{"path":"/tmp/a.png"}'`
-   draws it, `EXT_LOGS {id}` and `APP_STATUS` say what went wrong, and
-   every action your extension adds runs the same way. `architect dev
-   path` prints this folder's instance; `dev list`, `dev stop [--all]`.
-5. **Check it as CI would.** `architect extensions check <folder>` loads
-   it once with no window and renders each view; nonzero when it fails.
+   state kept and its panes where they were. Data, themes and Luau take
+   effect at once. A process extension's program (its `[entry] path`) is
+   your build's to write; a copy built from source rebuilds when any
+   local crate it builds from changes, and the app restarts the process
+   on it. A view keeps its place across that restart with
+   `linked::use_view_state`: what it kept (zoom, scroll, selection, a
+   mode, as a string) is its pane's, given back when the new program's
+   view starts, and when the pane moves or pops out. A broken save keeps
+   the last good copy and says why.
+3. **See and drive it.** `EXT_LOGS {id}` says what went wrong, and every
+   action your extension adds runs from the app's `actions` command line,
+   its control socket and MCP ([Command line and
+   MCP](@/guide/cli-and-mcp.md)).
+4. **Check it as CI would.** `EXT_CHECK` loads it once with no window
+   and renders each view (`features/extensions/src/check.rs`).
 
-More: "An instance of your own" in the `architect-extensions` skill
-(`skills/architect-extensions/references/install-lifecycle.md`), and
-[Command line and MCP](@/guide/cli-and-mcp.md).
+More: the `architect-extensions` skill
+(`skills/architect-extensions/references/install-lifecycle.md`).
 
 ## The manifest
 
@@ -227,13 +200,12 @@ The command lines:
 | `architect-ext` (npm, `features/extensions/web/cli`) | `new --typescript`, `types`, `check`, `pack [--key]`, `keygen`, `build-web` |
 | `cargo xtask` (this repo) | `ext-pack`, `ext-sign`, `ext-verify`, `ext-keygen`, `ext-index` |
 | `archext install` (`features/extensions/archive`) | unpacks a signed archive with no app running (what Nix uses) |
-| `architect-desktop extensions` | `check <folder>`, `dev <folder>`, `undev <folder>`, `registries` |
 | the app's actions (`EXT_*`) | `EXT_LIST`, `EXT_CHECK`, `EXT_LOGS`, `EXT_DEV`, `EXT_CLONE`, `EXT_RELOAD`, `EXT_ENABLE`, `EXT_DISABLE`, `EXT_GRANT` and the rest, from the `actions` CLI, MCP or ⌘K |
 
 ## Install and lifecycle
 
-- **A development copy** loads a folder unsigned (`EXT_DEV`, or
-  `architect-desktop extensions dev <folder>`) and reloads it on save: the
+- **A development copy** loads a folder unsigned (`EXT_DEV`) and reloads
+  it on save: the
   app polls every 500 ms, fingerprinting every file
   (`features/extensions/src/watch.rs`); a reload is a diff, its state kept.
   `EXT_CLONE` copies a built-in or installed one into a development copy,
@@ -255,31 +227,20 @@ The command lines:
   share link's extensions".
 - **Enable, disable, pin, update, remove**: the extensions page and the
   `EXT_*` actions; an update that asks for more waits for consent.
-- **The standard release** ships the core extensions listed in
-  `extensions/core-extensions.toml`: [Core
-  extensions](@/guide/core-extensions.md).
 - **The node** gets its extensions through Nix (`nix/node/extension.nix`),
   each pinned by version, hash and signature and checked when the system
-  builds: [Deploy](@/guide/deploy.md).
+  builds.
 
-## Test it and show it
+## Test it
 
 - **Tests per runtime** live in `features/extensions/tests/` (the host,
-  install, WASI, processes, remote views and input, node actions),
-  `features/pages/tests/` (pages and TypeScript),
-  `features/extensions/web/test/` (the browser runtimes, `npm test`) and
-  `apps/web/test/` (the web app's host, `just app-linked-extensions-test`
-  and its neighbours). See [Testing](@/guide/testing.md).
+  install, WASI, processes, remote views and input, node actions) and
+  `features/extensions/web/test/` (the browser runtimes, `npm test`). See
+  [Testing](@/guide/testing.md).
 - **A feature-gated test needs a pass.** `cargo xtask feature-tests`
   fails when a test the workspace build leaves out is neither run by a
   `[[pass]]` nor named by a `[[skip]]` in `feature-tests.toml`
   ([Testing](@/guide/testing.md), "Feature-gated tests").
-- **The showcase** is the checklist of what an extension can do on each
-  platform, with evidence: [The extension showcase](@/guide/showcase.md).
-  `just showcase` runs the app on a scratch vault with every example as a
-  development copy; its "Run it and capture it" section covers each
-  platform. A cell moves only with an example, a test and screenshots at
-  390 px and 1280 px, light and dark.
 
 ## Traps
 
@@ -295,10 +256,8 @@ The command lines:
   node beside the workspace panics its layout (use `document::Style` and
   inline token styles). A process view may set raw HTML only on a
   `<style>`.
-- **A new crate** joins the `workspace-hack` (hakari): `cargo hakari
-  generate`, `cargo hakari manage-deps`, then `cargo xtask fleet-deps` to
-  gate its line, or its wasm build pulls the native union and fails
-  (`skills/architect/references/xtask-tooling.md`).
+- **A new crate** names every feature it needs in its own `Cargo.toml`:
+  nothing unifies features across the workspace for it.
 - **Action ids** start with the extension's prefix (`fts.metronome` →
   `FTS_METRONOME_`) or it does not load.
 - **Views that read a cache** need a revision prop to redraw; a refresh

@@ -32,7 +32,7 @@
 //! node loads each installed extension's node part
 //! (`Manifest::node_part`: its node actions, their secrets, its hosts) on
 //! a [`Host`] of its own, and serves it on the org lane
-//! (`/org/{slug}/vox`) behind the org's permissions gate ([`PERMITS`]).
+//! (`/org/{slug}/vox`) behind the org's permissions gate (its table: [`PERMITS`]).
 //! Every client, the desktop, iOS and the browser, holds the generated
 //! `NodeActionsClient`. Its own host registers a node action as a
 //! forwarder to it ([`NodeLane`], `Host::with_node`), so ⌘K, the CLI, MCP
@@ -135,19 +135,50 @@ pub trait NodeActions {
     -> Result<(), NodeFault>;
 }
 
+/// The service [`PERMITS`] is for.
+#[cfg(feature = "vox")]
+pub const SERVICE: &str = "NodeActions";
+
+/// One method's permit: what it needs (`action` on `resource`) and whether
+/// a call is audited. A permissions gate builds its own rule from it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Permit {
+    pub method: &'static str,
+    pub action: &'static str,
+    pub resource: &'static str,
+    pub audited: bool,
+}
+
 /// The gate's table for [`NodeActions`] on the org lane: any member of
 /// the org lists them; running one is a member's (`write`); a secret is
 /// an admin's.
 #[cfg(feature = "vox")]
-pub const PERMITS: architect_permissions::ServicePermits = architect_permissions::ServicePermits {
-    service: "NodeActions",
-    methods: &[
-        architect_permissions::MethodPermit::new("list", "read", "extensions/**"),
-        architect_permissions::MethodPermit::new("run", "write", "extensions/**").audited(),
-        architect_permissions::MethodPermit::new("secrets", "admin", "extensions/**"),
-        architect_permissions::MethodPermit::new("set_secret", "admin", "extensions/**").audited(),
-    ],
-};
+pub const PERMITS: &[Permit] = &[
+    Permit {
+        method: "list",
+        action: "read",
+        resource: "extensions/**",
+        audited: false,
+    },
+    Permit {
+        method: "run",
+        action: "write",
+        resource: "extensions/**",
+        audited: true,
+    },
+    Permit {
+        method: "secrets",
+        action: "admin",
+        resource: "extensions/**",
+        audited: false,
+    },
+    Permit {
+        method: "set_secret",
+        action: "admin",
+        resource: "extensions/**",
+        audited: true,
+    },
+];
 
 /// The future a [`NodeLane`] answers with: `Send` natively, not on wasm.
 #[cfg(all(feature = "host", not(target_arch = "wasm32")))]

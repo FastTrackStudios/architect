@@ -3,7 +3,7 @@
 //! whichever copy of it is loaded (built in, installed or in
 //! development).
 //!
-//! [`use_process_views`] provides `architect_extensions::interface::ProcessViews`
+//! [`use_process_views`] provides `architect_extensions_dioxus::process::ProcessViews`
 //! for the app's window: `ExtensionView` asks it for each such view. Each
 //! pane:
 //!
@@ -31,8 +31,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use architect_extensions::host::Host;
-use architect_extensions::interface::{ProcessAsk, ProcessViews};
 use architect_extensions::process_view::{Launch, launch};
+use architect_extensions_dioxus::process::{ProcessAsk, ProcessViews};
 use architect_workspace::use_pane;
 use dioxus::prelude::*;
 

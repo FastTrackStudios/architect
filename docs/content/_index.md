@@ -1,42 +1,41 @@
 +++
 title = "architect"
-description = "A Rust framework for local-first, multiplayer, collaborative apps: declare each service and document once, and architect gives you every wire, offline and peer-to-peer sync, and one Action List that keys, menus, scripts, extensions and MCP all run."
+description = "An application framework for Rust apps: services declared once with every wire, one Action List that keys, menus, scripts, extensions and MCP all run, and extensions of every kind."
 weight = 0
 +++
 
-A Rust framework for local-first, multiplayer, collaborative apps:
-declare each service and document once, and architect gives you every
-wire, offline and peer-to-peer sync, and one Action List that keys,
-menus, scripts, extensions and MCP all run.
+An application framework for Rust apps: declare each service once and
+architect gives you every wire; put every command on one Action List that
+keys, menus, scripts, extensions and MCP all run; and grow the app with
+extensions of every kind (compiled in, a process, Luau, TypeScript, WASM
+or plain data), loaded at run time while you develop.
 
 `#[architect::entity]`, `#[architect::error]` and `#[architect::service]`
 on plain Rust types write the wire types, the vox and HTTP clients and
-routes, the SeaORM storage and the Action List actions. The repo doubles
-as a working **reference monorepo**: the facade crate lives in
-`crates/architect`, its proc-macros in `crates/`, the features in
-`features/`, and `examples/greeter` is the reference feature (an entity,
-a service, its error, a backend and a server, tested over every wire)
-that a real project copies. `apps/auth-server` is the full-size server
-built the same way. `apps/desktop` and `apps/mobile` are the Architect app
-(its UI in `apps/ui`), and `apps/sandbox` the same app on made-up data,
-where the UI is designed.
+routes and the Action List actions. The facade crate lives in
+`crates/architect`, its proc-macros in `crates/`, the features
+(the extension runtime, control and MCP, scenes and process views,
+input, settings, auth) in `features/`. `apps/auth-server` is a
+full-size server built the same way. The app's shell, workspace,
+toolbars and UI are not here: they are FastTrackStudio/app-shell
+(`app-shell:crates/app-shell-extensions` draws extensions in it).
 
 ## Where to start
 
 - [Getting started](@/getting-started/_index.md): get the dev shell up,
-  build the workspace, run the reference feature's tests.
+  build the workspace, run the tests.
 - [**Build a feature, end to end**](@/getting-started/walkthrough.md):
   the fastest way to learn how to *use* architect: define an entity, pick
   a backend, serve it, consume it remote or in-process.
 - [Script an app, end to end](@/getting-started/scripting.md): actions on
   an Action List, driven from Luau as one undo step, saved as actions and
-  run by an agent over MCP (`examples/scripting`).
+  run by an agent over MCP.
 - [Write an extension, end to end](@/getting-started/extension.md): a
   manifest, a Luau overlay and a process extension with a remote view,
-  loaded from a registry and hot-reloaded (`examples/extension`).
+  loaded from a registry and hot-reloaded.
 - [Build an app with architect](@/guide/_index.md): the guide, chapter by
-  chapter, from the contract to the shell, commands, settings, documents,
-  sign-in and extensions.
+  chapter, from the contract to commands, settings, documents, sign-in
+  and extensions.
 - [Features](@/features/_index.md): one page per feature: what it is, the
   least code to use it, a tour of its code, the tests to read, its status.
 - [Architecture](@/architecture/_index.md): the design pages: contracts
@@ -59,5 +58,5 @@ where the UI is designed.
 - **Multi-target by construction.** wasm32, native server, desktop —
   all linked by the same feature crate, whose default feature set is
   the contract ([layout](@/architecture/layout.md)).
-- **Monorepo template.** `apps/<app>/<role>` + `features/<feature>/`
-  scales to many apps and features without crate name collisions.
+- **Monorepo template.** `features/<feature>/` scales to many features
+  without crate name collisions.

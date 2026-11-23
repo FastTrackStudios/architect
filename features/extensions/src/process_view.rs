@@ -105,7 +105,7 @@ pub fn launch(host: &Host, extension: &str, view: &str) -> Result<Launch, String
         .manifest
         .views
         .iter()
-        .find(|v| v.id == view && v.kind == architect_workspace::PROCESS)
+        .find(|v| v.id == view && v.kind == architect_views::PROCESS)
         .ok_or_else(|| format!("{extension} has no process view {view}"))?;
     if let Some(why) = not_here(&host.platform()) {
         return Err(why);
@@ -161,7 +161,7 @@ pub fn needs_grant(host: &Host, extension: &str, view: &str) -> Option<String> {
         .manifest
         .views
         .iter()
-        .find(|v| v.id == view && v.kind == architect_workspace::PROCESS)?
+        .find(|v| v.id == view && v.kind == architect_views::PROCESS)?
         .program
         .clone()?;
     let asks = loaded.manifest.capabilities.may_run_program(&program);
@@ -264,6 +264,14 @@ fn stamp(file: &Path, origin: Origin) -> String {
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map_or(0, |d| d.as_nanos());
     format!("{origin:?}:{len}:{at}")
+}
+
+/// A `process` view, as an app's process-view host is asked for it: the
+/// extension and its view (a Dioxus window's `ProcessViews` draws it).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProcessAsk {
+    pub extension: String,
+    pub view: String,
 }
 
 #[cfg(all(test, unix))]

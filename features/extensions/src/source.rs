@@ -103,6 +103,9 @@ impl BuildStatus {
 struct Outcome {
     took: Duration,
     result: Result<(), Failure>,
+    /// The other local crates the build reads (`cargo metadata`'s
+    /// packages with no registry or git source), when that answered.
+    local: Option<Vec<PathBuf>>,
 }
 
 #[derive(Clone)]
@@ -116,6 +119,9 @@ struct Crate {
     id: String,
     bin: String,
     entry: String,
+    /// The other local crates it builds from (its workspace's members, its
+    /// path dependencies): their sources are its sources too.
+    local: Vec<PathBuf>,
     print: u64,
     state: BuildState,
     good: bool,
@@ -301,7 +307,8 @@ impl Extensions {
                     id: manifest.id.clone(),
                     bin,
                     entry: manifest.entry.path.clone(),
-                    print: source_print(dir, &manifest.entry.path),
+                    local: Vec::new(),
+                    print: source_print(dir, &manifest.entry.path, &[]),
                     state: BuildState::Building { since_ms: now_ms() },
                     good,
                     running: None,
@@ -375,7 +382,7 @@ impl Extensions {
             let mut state = self.builds().lock();
             let target = self.build_target(&state);
             for (dir, c) in &mut state.crates {
-                let print = source_print(dir, &c.entry);
+                let print = source_print(dir, &c.entry, &c.local);
                 let changed = print != c.print;
                 if changed {
                     c.print = print;
@@ -391,6 +398,7 @@ impl Extensions {
                     Ok(o) => o,
                     Err(TryRecvError::Empty) => continue,
                     Err(TryRecvError::Disconnected) => Outcome {
+                        local: None,
                         took: Duration::ZERO,
                         result: Err(Failure {
                             error: "the build stopped".to_owned(),
@@ -400,6 +408,14 @@ impl Extensions {
                     },
                 };
                 c.running = None;
+                // The crates it reads, learnt by this build: watched from
+                // now (what they hold now is what it built from).
+                if let Some(local) = outcome.local.clone() {
+                    if local != c.local {
+                        c.local = local;
+                        c.print = source_print(dir, &c.entry, &c.local);
+                    }
+                }
                 swap.push((dir.clone(), c.id.clone(), c.seen.elapsed(), outcome));
                 if std::mem::take(&mut c.again) {
                     c.seen = Instant::now();
@@ -528,10 +544,12 @@ fn start(dir: &Path, c: &mut Crate, target: &Path) {
         .name(format!("ext-build-{}", c.id))
         .spawn(move || {
             let started = Instant::now();
+            let local = local_crates(&dir);
             let result = build(&dir, &target, &bin, &entry);
             let _ = to.send(Outcome {
                 took: started.elapsed(),
                 result,
+                local,
             });
         });
     if let Err(e) = spawned {
@@ -634,17 +652,65 @@ fn normal_git(git: &str) -> String {
         .to_owned()
 }
 
-/// A crate's sources' fingerprint: what a build reads, not what it
-/// writes (its program, its lockfile, `target/`).
-fn source_print(dir: &Path, entry: &str) -> u64 {
-    watch::fingerprint_except(dir, &|rel: &Path| {
-        rel == Path::new(entry)
+/// A crate's sources' fingerprint, with the other local crates it builds
+/// from (`local`): what a build reads, not what it writes (its program,
+/// its lockfile, `target/`).
+fn source_print(dir: &Path, entry: &str, local: &[PathBuf]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let skip = |entry: &str, rel: &Path| {
+        (!entry.is_empty() && rel == Path::new(entry))
             || rel == Path::new("Cargo.lock")
             || rel.components().any(|c| {
                 let c = c.as_os_str().to_string_lossy();
                 c == "target" || c.starts_with('.')
             })
-    })
+    };
+    let own = watch::fingerprint_except(dir, &|rel: &Path| skip(entry, rel));
+    if local.is_empty() {
+        return own;
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    own.hash(&mut hasher);
+    for other in local {
+        other.hash(&mut hasher);
+        watch::fingerprint_except(other, &|rel: &Path| skip("", rel)).hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+/// The local crates (no registry or git source) the crate in `dir` builds
+/// from, other than itself and any inside it: `cargo metadata`, offline.
+/// `None` when cargo does not answer.
+fn local_crates(dir: &Path) -> Option<Vec<PathBuf>> {
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let out = Command::new(cargo)
+        .current_dir(dir)
+        .args(["metadata", "--format-version", "1", "--offline"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    let meta: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    let own = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    let mut dirs: Vec<PathBuf> = meta
+        .get("packages")?
+        .as_array()?
+        .iter()
+        .filter(|p| p.get("source").is_none_or(serde_json::Value::is_null))
+        .filter_map(|p| {
+            Path::new(p.get("manifest_path")?.as_str()?)
+                .parent()
+                .map(Path::to_path_buf)
+        })
+        .filter(|d| !d.starts_with(&own))
+        .collect();
+    dirs.sort();
+    dirs.dedup();
+    // A crate inside another's folder is already watched with it.
+    let all = dirs.clone();
+    dirs.retain(|d| !all.iter().any(|o| o != d && d.starts_with(o)));
+    Some(dirs)
 }
 
 /// The crate at `source.path` in `checkout`, written to `to` as a crate
@@ -981,12 +1047,12 @@ workspace = true
         assert!(!to.join("target").exists(), "not its build output");
 
         // What a build writes is not a change to build again.
-        let print = source_print(&to, "x");
+        let print = source_print(&to, "x", &[]);
         std::fs::write(to.join("x"), "a program").unwrap();
         std::fs::write(to.join("Cargo.lock"), "# pruned\n").unwrap();
-        assert_eq!(source_print(&to, "x"), print);
+        assert_eq!(source_print(&to, "x", &[]), print);
         std::fs::write(to.join("src/main.rs"), "fn main() { }").unwrap();
-        assert_ne!(source_print(&to, "x"), print);
+        assert_ne!(source_print(&to, "x", &[]), print);
     }
 
     #[test]

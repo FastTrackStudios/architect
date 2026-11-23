@@ -53,8 +53,8 @@ test('SF4: a component’s cache is emptied when it stops', { skip }, async () =
   const { spawn } = await import('../node.js');
   const root = fileURLToPath(new URL('../../../..', import.meta.url));
   const out = join(root, 'target/wasi-web-package/sf4-counter');
-  build(join(dir, 'architect_sandbox_wasi_counter.wasm'), out, { manifestPath: join(root, 'apps/sandbox/wasi-counter/extension.toml') });
-  const c = new Component({ url: pathToFileURL(join(out, 'architect_sandbox_wasi_counter.js')).href, instance: '', spawn, host: async () => '{}' });
+  build(join(dir, 'architect_extension_wasi_counter.wasm'), out, { manifestPath: join(root, 'features/extensions/tests/wasi-counter/extension.toml') });
+  const c = new Component({ url: pathToFileURL(join(out, 'architect_extension_wasi_counter.js')).href, instance: '', spawn, host: async () => '{}' });
   await c.start();
   assert.ok(c.cache.size > 0, 'its modules, cached');
   c.stop();
@@ -70,7 +70,7 @@ test('D4: integrity: false is said on the console when the embedder gave no log'
   const { spawn } = await import('../node.js');
   const root = fileURLToPath(new URL('../../../..', import.meta.url));
   const out = join(root, 'target/wasi-web-package/d4-counter');
-  build(join(dir, 'architect_sandbox_wasi_counter.wasm'), out, { manifestPath: join(root, 'apps/sandbox/wasi-counter/extension.toml') });
+  build(join(dir, 'architect_extension_wasi_counter.wasm'), out, { manifestPath: join(root, 'features/extensions/tests/wasi-counter/extension.toml') });
   const warned = [];
   const warn = console.warn;
   console.warn = (...a) => warned.push(a.join(' '));

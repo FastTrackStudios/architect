@@ -1,6 +1,5 @@
 ---
 "architect-commands" = "minor"
-"architect-app" = "minor"
 "architect-workspace" = "minor"
 ---
 

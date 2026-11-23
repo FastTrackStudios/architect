@@ -20,5 +20,3 @@ workspace = true
 
 [lib]
 doctest = false
-
-[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]

@@ -4,12 +4,11 @@ description = "Put actions on an Action List, drive them from Luau as one undo s
 weight = 20
 +++
 
-This walks architect's scripting API against `examples/scripting`
-(`examples/scripting/src/lib.rs`, `examples/scripting/src/main.rs`, the
-scripts in `examples/scripting/scripts`, and the tests in
-`examples/scripting/tests/scripts.rs` and
-`examples/scripting/tests/mcp.rs`). Each step points at the real file;
-copy the crate to start your own.
+This walks architect's scripting API on a small app, a task board: its
+state, four actions on its Action List, scripting over the list, the
+scripts that drive it and an agent over MCP. The runtime is
+`architect-scripting` (`features/scripting`), the MCP server
+`architect-mcp` (`features/mcp`).
 
 ## The mental model
 
@@ -34,7 +33,7 @@ script.
 
 ## 1. The app's state
 
-The example is a task board (`examples/scripting/src/lib.rs`, section 1):
+The app is a task board:
 tasks in a Loro document, with its `crdt::History`. Every change goes
 through `History::transact`, so on its own each one is an undo step:
 
@@ -55,7 +54,7 @@ back into the Action List.
 
 ## 2. The actions
 
-Section 2 puts four actions on the list (`register`): one read-only, the
+The app puts four actions on the list (`register`): one read-only, the
 rest changing the board.
 
 ```rust
@@ -73,7 +72,7 @@ List itself.
 
 ## 3. Who may run what
 
-Section 3 sets the list's authorizer, a `RoleEngine`: Ana (`editor`) may
+The app sets the list's authorizer, a `RoleEngine`: Ana (`editor`) may
 run every action; Vic (`viewer`) may run `TASKS_LIST`, `SCRIPT_RUN` and
 the other read-only script actions. Services (the agent) are trusted,
 and the app's own door (`ActionCaller::app()`, a key, ⌘K) is never
@@ -84,7 +83,7 @@ script but the script can only do what the viewer may.
 
 ## 4. Scripting over the list
 
-`App::new` (section 4) installs scripting:
+The app installs scripting when it starts:
 
 ```rust
 let library = Library::new(MemoryStore::new()).with_org(MemoryStore::new());
@@ -94,13 +93,13 @@ scripting.install()?;
 
 That registers `SCRIPT_RUN`, `SCRIPT_DESCRIBE`, `SCRIPT_LIST`,
 `SCRIPT_SAVE`/`SCRIPT_SAVE_ORG` and `SCRIPT_DELETE`/`SCRIPT_DELETE_ORG`,
-and every script already saved. The example keeps saved scripts in
+and every script already saved. This board keeps saved scripts in
 memory; a desk app keeps them in a settings file
 (`architect_scripting::settings::SettingsStore`, feature `settings`).
 
 ## 5. A script that reads
 
-`examples/scripting/scripts/inventory.luau` lists the actions it may run
+`inventory.luau` lists the actions it may run
 (`actions.list`), describes one (`actions.describe`, with its `params`
 schema as a table), and reads the board through the read-only action:
 
@@ -114,7 +113,7 @@ It changes nothing, so its run makes no undo step.
 
 ## 6. Branch, loop, one undo step
 
-`examples/scripting/scripts/close_tag.luau` completes every open task
+`close_tag.luau` completes every open task
 with a tag:
 
 ```lua
@@ -133,28 +132,15 @@ end
 return closed
 ```
 
-Run it:
-
-```sh
-cargo run -p example-scripting -- run examples/scripting/scripts/close_tag.luau '{"tag":"home"}'
-```
-
+Run it with `SCRIPT_RUN` (its source and `{"tag":"home"}` as its args).
 The report is `{result, log, ran, undo}`: it returned 2, printed a line
 per task, ran `TASKS_LIST` and `TASKS_COMPLETE` twice, and made one step,
-`Script: close_tag`. One Undo takes both tasks back
-(`close_tag_branches_loops_and_undoes_as_one_step` in
-`examples/scripting/tests/scripts.rs`).
+`Script: close_tag`. One Undo takes both tasks back.
 
 ## 7. Errors carry their line
 
-`examples/scripting/scripts/broken.luau` completes a task, then asks for
-one that does not exist on line 9:
-
-```sh
-cargo run -p example-scripting -- run examples/scripting/scripts/broken.luau
-```
-
-The run fails with `{error: {kind: "action", line: 9, message: …}}`, and
+`broken.luau` completes a task, then asks for one that does not exist
+on line 9. The run fails with `{error: {kind: "action", line: 9, message: …}}`, and
 the task it did complete is taken back with the rest of the step: the
 board is as it was, with no undo step. Through `SCRIPT_RUN` the same
 failure is the action's, `line 9: …`, followed by what ran and the log.
@@ -165,25 +151,19 @@ Syntax errors, Luau errors (`nil + 1`, `error(…)`) and limits
 
 `Scripting::save` checks the source and keeps it; the script is then an
 action of its own, `SCRIPT_MY_<NAME>` (`SCRIPT_ORG_<NAME>` for the
-organization's), in the list and ⌘K, bindable to a key, taking nothing:
-
-```sh
-cargo run -p example-scripting -- save "Tidy the board" examples/scripting/scripts/tidy.luau
-```
-
-saves `examples/scripting/scripts/tidy.luau` as
-`SCRIPT_MY_TIDY_THE_BOARD`, in the group "Your scripts", and runs it by
+organization's), in the list and ⌘K, bindable to a key, taking nothing.
+`SCRIPT_SAVE` with the name "Tidy the board" and `tidy.luau`'s source
+saves it as `SCRIPT_MY_TIDY_THE_BOARD`, in the group "Your scripts", and runs it by
 its id the way the palette does (`ActionList::run_json_async`; in an app,
 architect-commands' `Commands::run`). Saving the same name again
-replaces it; `SCRIPT_DELETE` takes it off the list
-(`a_saved_script_is_an_action_the_palette_runs`).
+replaces it; `SCRIPT_DELETE` takes it off the list.
 
 ## 9. An agent does the same over MCP
 
-`App::mcp` serves the list with `architect-mcp` in named mode, so every
+The app serves the list with `architect-mcp` in named mode, so every
 action is a tool: `tasks_list`, `script_describe`, `script_run`,
 `script_save`, and each saved script as soon as it is saved.
-`examples/scripting/tests/mcp.rs` drives it as a model would:
+An agent drives it like this:
 
 1. `script_describe`: the globals a script has and every action it may
    run, with schemas.
@@ -193,9 +173,6 @@ action is a tool: `tasks_list`, `script_describe`, `script_run`,
 4. `script_save` with `tidy.luau`, then `tools/list` offers
    `script_my_tidy_the_board`, and calling it tidies the board.
 
-Run `cargo run -p example-scripting -- mcp` to serve the board on stdio
-for a real agent.
-
 ## 10. A read-only caller is refused part-way
 
 Over MCP as Vic, `tools/list` offers no `tasks_complete`, but
@@ -203,15 +180,14 @@ Over MCP as Vic, `tools/list` offers no `tasks_complete`, but
 stops at line 11, the first `actions.run`: `TASKS_COMPLETE` is not
 allowed for a viewer. The failure lists what ran (`TASKS_LIST,
 TASKS_COMPLETE`) and nothing changed. `inventory.luau` runs fine for Vic;
-`actions.list` shows a viewer only `TASKS_LIST`
-(`a_viewer_is_refused_part_way`).
+`actions.list` shows a viewer only `TASKS_LIST`.
 
 ## 11. A live script
 
 `Runtime::start` runs a script's first part and keeps its Luau state;
 each function it hands `defer` runs on the next `Live::frame`, each frame
 an undo step of its own (ReaScript's `reaper.defer`, an immediate-mode
-window's loop). `examples/scripting/scripts/burndown.luau` completes one
+window's loop). `burndown.luau` completes one
 open task a frame until none is left:
 
 ```lua
@@ -224,22 +200,17 @@ end
 defer(tick)
 ```
 
-```sh
-cargo run -p example-scripting -- live examples/scripting/scripts/burndown.luau
-```
-
 A frame that fails stops the script with its line. A one-off run has no
 `defer`.
 
 ## 12. Test it
 
 ```sh
-cargo test -p example-scripting
+cargo test -p architect-scripting
+cargo test -p architect-mcp
 ```
 
-`examples/scripting/tests/scripts.rs` runs every script in
-`examples/scripting/scripts` and fails when one is added without a test.
-The runtime's own tests are `features/scripting/tests/scripts.rs` and
+The runtime's tests are `features/scripting/tests/scripts.rs` and
 `features/scripting/tests/live.rs`; the API in depth is
 `features/scripting/src/luau.rs` (`Runtime`, `Report`) and
 `features/scripting/src/actions.rs` (`Scripting`). The design is

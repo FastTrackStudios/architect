@@ -1,8 +1,6 @@
 ---
 "architect" = "minor"
 "architect-accounts" = "minor"
-"architect-desktop" = "minor"
-"architect-sites" = "minor"
 "architect-spaces" = "minor"
 ---
 

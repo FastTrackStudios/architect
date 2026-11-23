@@ -46,8 +46,35 @@ impl Extension for Recipes {
     fn build(&self, _: &mut Builder) {}
 }
 
+/// The vault's registry as the runtime's note types, as an app that keeps
+/// a vault installs it.
+struct VaultTypes;
+
+impl architect_extensions::vault::NoteTypes for VaultTypes {
+    fn register(&self, t: architect_extensions::vault::NoteFileType) -> bool {
+        vault_proto::note_types::register_type(vault_proto::note_types::NoteFileType {
+            extension: t.extension,
+            note_type: t.note_type,
+            markdown: t.markdown,
+            preview: t.preview,
+        })
+    }
+    fn declared(&self) -> Vec<architect_extensions::vault::NoteFileType> {
+        vault_proto::note_types::declared()
+            .into_iter()
+            .map(|t| architect_extensions::vault::NoteFileType {
+                extension: t.extension,
+                note_type: t.note_type,
+                markdown: t.markdown,
+                preview: t.preview,
+            })
+            .collect()
+    }
+}
+
 #[test]
 fn a_linked_extensions_file_type_is_a_note_once_it_loads() {
+    architect_extensions::vault::set_note_types(std::sync::Arc::new(VaultTypes));
     assert!(!vault_proto::note_types::is_note_path(
         "Recipes/Pancakes.labcook"
     ));

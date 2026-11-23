@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 360" width="480" height="360">
-<defs>
-  <radialGradient id="glow" cx="50%" cy="38%" r="75%"><stop offset="0" stop-color="#fff" stop-opacity=".35"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
-</defs>
-<rect width="480" height="360" fill="#f3c98a"/>
-<rect width="480" height="360" fill="url(#glow)"/>
-<ellipse cx="220" cy="318" rx="120" ry="14" fill="#000" opacity=".15"/><rect x="130" y="110" width="180" height="205" rx="34" fill="#d9891b"/><rect x="130" y="150" width="180" height="165" rx="34" fill="#e89a22"/><rect x="150" y="170" width="26" height="110" rx="13" fill="#fff" opacity=".25"/><rect x="140" y="80" width="160" height="40" rx="10" fill="#5b3a1e"/><rect x="146" y="86" width="148" height="10" rx="5" fill="#7a5130"/><rect x="168" y="200" width="104" height="58" rx="8" fill="#fff6dc"/><path d="M190 236 q30 -26 60 0" stroke="#c0392b" stroke-width="7" fill="none" stroke-linecap="round"/><path d="M330 120 q70 30 52 140 q-6 22 -18 8 q10 -90 -48 -126z" fill="#d62f2f"/><path d="M330 120 q-6 -26 14 -34" stroke="#3d8b37" stroke-width="8" fill="none" stroke-linecap="round"/><path d="M362 160 q14 30 10 70" stroke="#fff" stroke-opacity=".35" stroke-width="6" fill="none" stroke-linecap="round"/>
-</svg>

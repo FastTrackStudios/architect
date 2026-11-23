@@ -595,7 +595,7 @@ impl Extensions {
             Effect::ReadOnly,
             move |_: &ActionCaller, a: LanguagesArgs| {
                 let languages = me.host().languages();
-                let one = |r: architect_editor::Registered| {
+                let one = |r: crate::languages::Registered| {
                     let mut v = serde_json::to_value(&r.language).unwrap_or(Value::Null);
                     v.as_object_mut()
                         .map(|map| map.insert("from".to_owned(), json!(r.owner)));
@@ -641,9 +641,9 @@ impl Extensions {
             Effect::ReadOnly,
             move |_: &ActionCaller, (): ()| {
                 let declared = me.host().contributions().file_types();
-                let registered = vault_proto::note_types::declared();
+                let registered = crate::vault::note_types().declared();
                 let mut all = vec![json!({
-                    "extension": vault_proto::note_types::MARKDOWN,
+                    "extension": crate::vault::MARKDOWN,
                     "name": "Note",
                     "icon": "file-text",
                     "note_type": Value::Null,

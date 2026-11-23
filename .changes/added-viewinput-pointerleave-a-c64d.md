@@ -1,7 +1,6 @@
 ---
 "architect-extensions" = "minor"
 "architect-process-view" = "minor"
-"architect-sandbox-sketch" = "minor"
 "architect-ui" = "minor"
 "architect-workspace" = "major"
 ---

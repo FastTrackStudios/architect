@@ -1,8 +1,5 @@
 ---
 "architect-extensions" = "none"
-"architect-sandbox-board" = "minor"
-"architect-app" = "minor"
-"architect-pages" = "minor"
 "architect-scripting" = "minor"
 ---
 

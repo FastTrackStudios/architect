@@ -838,16 +838,9 @@ fn has_workspace_lints(manifest: &str) -> Result<bool, String> {
         .unwrap_or(false))
 }
 
-/// `cargo`, with the workspace-hack off (`--cfg no_workspace_hack`, the
-/// cfg in every member's hack line; `xtask/src/fleet_deps.rs`). The hack
-/// turns the whole fleet's features on for every member, so with it every
-/// crate would reach every engine; the rules are about what a crate
-/// declares. `cargo tree` reads the cfg from `RUSTFLAGS` and compiles
-/// nothing, so no build sees it.
+/// `cargo`, as the environment names it.
 fn cargo() -> Command {
-    let mut cmd = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned()));
-    cmd.env("RUSTFLAGS", "--cfg no_workspace_hack");
-    cmd
+    Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned()))
 }
 
 fn run(cmd: &mut Command, what: &str) -> Result<String, String> {

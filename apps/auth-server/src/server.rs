@@ -94,6 +94,20 @@ where
 
 /// Connect, migrate, and assemble everything from a [`ServerConfig`].
 pub async fn build(config: &ServerConfig) -> eyre::Result<AuthServer> {
+    // The dev stack's auto sign-in, refused before anything opens: a
+    // server asked for it anywhere but the stack's own state on loopback
+    // does not start (`crate::dev::auto_sign_in`).
+    match crate::dev::auto_sign_in(config) {
+        Ok(Some(_)) => tracing::info!(
+            target: "auth_server::dev",
+            "the dev stack's demo account is signed in by itself at /oauth2/authorize"
+        ),
+        Ok(None) => {}
+        Err(why) => {
+            tracing::warn!(target: "auth_server::dev", %why, "AUTH_DEV_AUTO_SIGN_IN refused");
+            return Err(eyre::eyre!("AUTH_DEV_AUTO_SIGN_IN refused: {why}"));
+        }
+    }
     let db = architect::storage::connect(&config.database_url)
         .await
         .map_err(|error| eyre::eyre!("connect auth database: {error}"))?;
@@ -392,6 +406,12 @@ where
 
     let cors = cors_layer(config);
     let svc = AuthVoxService::new(auth.clone());
+    // `build` refused a server that asks for it and may not; an embedder
+    // that skipped `build` gets the form instead.
+    let auto_sign_in = crate::dev::auto_sign_in(config).unwrap_or_else(|why| {
+        tracing::warn!(target: "auth_server::dev", %why, "AUTH_DEV_AUTO_SIGN_IN refused: the sign-in form instead");
+        None
+    });
 
     // Ungated on purpose: this server IS the identity provider. Signing
     // up and signing in are anonymous by nature, and every other method
@@ -407,7 +427,8 @@ where
         .plugin(oauth::router(
             HttpState::new(auth.clone(), cookie.clone())
                 .with_mailer(mail.clone())
-                .with_social(social.clone()),
+                .with_social(social.clone())
+                .with_dev_auto_sign_in(auto_sign_in),
         ))
         // The sign-in and sign-up pages. A plugin of their own so an
         // embedder that already has a login screen can leave them out.

@@ -1,5 +1,4 @@
 ---
-"architect-sandbox-wasi-counter" = "none"
 "architect-extension-wasi-hazards" = "none"
 ---
 

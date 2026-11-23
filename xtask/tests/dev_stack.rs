@@ -253,6 +253,81 @@ fn session_status(auth: &str, token: &str) -> u16 {
     http("POST", &format!("{auth}/auth/session"), None, Some(&body)).0
 }
 
+/// A PKCE verifier and its S256 challenge.
+const PKCE_VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+const PKCE_CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+
+/// A browser with no cookie at the issuer's `/oauth2/authorize`, as the
+/// web app sends it (client `architect`, PKCE): the status, the
+/// `Location` and the `Set-Cookie` it answered with.
+fn authorize(auth: &str, redirect: &str, prompt: Option<&str>) -> (u16, String, String) {
+    let mut url = format!(
+        "{auth}/oauth2/authorize?client_id=architect&response_type=code\
+         &redirect_uri={redirect}&scope=openid%20email%20profile%20offline_access&state=st8\
+         &code_challenge={PKCE_CHALLENGE}&code_challenge_method=S256"
+    );
+    if let Some(prompt) = prompt {
+        url = format!("{url}&prompt={prompt}");
+    }
+    let out = Command::new("curl")
+        .args(["-s", "--max-time", "20", "-o", "/dev/null", "-D", "-"])
+        .arg(&url)
+        .output()
+        .unwrap();
+    let head = String::from_utf8_lossy(&out.stdout).into_owned();
+    let status = head
+        .lines()
+        .next()
+        .and_then(|l| l.split_whitespace().nth(1))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let header = |name: &str| {
+        head.lines()
+            .filter_map(|l| l.split_once(':'))
+            .filter(|(k, _)| k.trim().eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.trim().to_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    (status, header("location"), header("set-cookie"))
+}
+
+/// The code the issuer sent back to `redirect` redeemed, as the web app
+/// redeems it: the access token's `userinfo`.
+fn redeem(auth: &str, redirect: &str, location: &str) -> serde_json::Value {
+    let (_, after) = location
+        .split_once("code=")
+        .unwrap_or_else(|| panic!("no code in {location}"));
+    let code = after.split('&').next().unwrap_or_default();
+    let out = Command::new("curl")
+        .args(["-s", "--max-time", "20"])
+        .args(["--data-urlencode", "grant_type=authorization_code"])
+        // As the issuer wrote it in the URL: already encoded.
+        .args(["--data", &format!("code={code}")])
+        .args(["--data-urlencode", &format!("redirect_uri={redirect}")])
+        .args(["--data-urlencode", "client_id=architect"])
+        .args([
+            "--data-urlencode",
+            &format!("code_verifier={PKCE_VERIFIER}"),
+        ])
+        .arg(format!("{auth}/oauth2/token"))
+        .output()
+        .unwrap();
+    let token: serde_json::Value = serde_json::from_slice(&out.stdout)
+        .unwrap_or_else(|_| panic!("token: {}", String::from_utf8_lossy(&out.stdout)));
+    let access = token["access_token"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no access token: {token}"));
+    let (status, body) = http(
+        "GET",
+        &format!("{auth}/oauth2/userinfo"),
+        Some(access),
+        None,
+    );
+    assert_eq!(status, 200, "{body}");
+    serde_json::from_str(&body).unwrap()
+}
+
 fn mode(path: &Path) -> u32 {
     std::fs::metadata(path).unwrap().permissions().mode() & 0o777
 }
@@ -465,6 +540,42 @@ fn the_demo_stack_signs_in_serves_the_orgs_vault_and_each_share_audience() {
     }
 
     let auth = stack.url("AUTH");
+
+    // Signed in with no form: the web app's sign-in (no cookie at the
+    // issuer) comes straight back with a code, which is the demo
+    // account's, and a session cookie for the issuer's own pages.
+    let callback = format!("{}/auth/callback", stack.url("WEB"));
+    let (status, location, cookie) = authorize(&auth, &callback, None);
+    assert_eq!(status, 303, "{location}\n{}", procs.tail("auth"));
+    assert!(location.starts_with(&format!("{callback}?")), "{location}");
+    assert!(cookie.contains("architect-auth.session="), "{cookie}");
+    assert_eq!(
+        redeem(&auth, &callback, &location)["email"],
+        "ada@local.test"
+    );
+    // A client that asks to see the form (`prompt=login`) gets it.
+    let (_, location, _) = authorize(&auth, &callback, Some("login"));
+    assert!(location.starts_with("/login?return_to="), "{location}");
+    // The window's: the demo account and a 0600 file with its password,
+    // which `dev env app` names (Studio's stack passes them on) and never
+    // prints.
+    assert_eq!(mode(&stack.state.join("app/dev-password")), 0o600);
+    let out = stack.xtask(&["env", "app"]).output().unwrap();
+    let env = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        env.contains("ARCHITECT_DEV_SIGN_IN=ada@local.test"),
+        "{env}"
+    );
+    assert!(env.contains("ARCHITECT_DEV_INSTANCE=dev-stack"), "{env}");
+    assert!(
+        env.contains(&format!(
+            "ARCHITECT_DEV_PASSWORD_FILE={}",
+            stack.state.join("app/dev-password").display()
+        )),
+        "{env}"
+    );
+    assert!(!env.contains(DEV_PASSWORD), "{env}");
+
     let grace = sign_in(&auth, "grace@local.test", DEV_PASSWORD).unwrap();
     let alan = sign_in(&auth, "alan@local.test", DEV_PASSWORD).unwrap();
     assert!(sign_in(&auth, "grace@local.test", "not-the-password").is_err());
@@ -624,6 +735,13 @@ fn a_credentialed_machine_mirrors_production_and_sessions_never_cross() {
             .contains("AUTH_ADMIN_TOKEN_FILE")
     );
     assert_eq!(fill["node_org"], "acme", "{fill}");
+    // A mirror's accounts are real people's: nobody is signed in by
+    // itself, the form is shown.
+    let callback = format!("{}/auth/callback", stack.url("WEB"));
+    let (_, location, _) = authorize(&auth, &callback, None);
+    assert!(location.starts_with("/login?return_to="), "{location}");
+    let out = stack.xtask(&["env", "app"]).output().unwrap();
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("ARCHITECT_DEV_SIGN_IN"));
 
     // The snapshot: private, no real address, no credential.
     let snapshot_path = stack.state.join("auth/snapshot.json");

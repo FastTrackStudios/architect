@@ -1,5 +1,4 @@
 ---
-"architect-sandbox-sketch" = "minor"
 "architect-scene" = "minor"
 "architect-workspace" = "minor"
 ---

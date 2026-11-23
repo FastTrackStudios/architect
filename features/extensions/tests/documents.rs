@@ -28,7 +28,7 @@ use serde_json::{Value, json};
 const TIDY: &str = "lab.tidy";
 
 fn tidy_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/sandbox/extensions/tidy")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sandbox/extensions/tidy")
 }
 
 /// The lab's spaces, and a note in them.

@@ -1,8 +1,4 @@
 ---
-"architect-app" = "minor"
-"architect-calendar" = "minor"
-"architect-dayplan" = "minor"
-"architect-navigator" = "minor"
 "architect-navigator-api" = "minor"
 ---
 

@@ -19,6 +19,8 @@
 //! | `open {path}` | opens a document or file in the app | `reads = ["documents"]` |
 //! | `read_document {path}` | a document's text | `reads = ["documents"]` |
 //! | `list_documents {under?}` | the app's documents (`DocInfo`s), all or under a folder | `reads = ["documents"]` |
+//! | `file_list {place, folder?}` | the files under a folder of a project the org's node holds (`vault:<name>`, `root:<id>`) that the person may read: `{place, folder, files: [{path, size, sha256, url}], expires_us}` (`crate::held`) | `reads = ["files"]` |
+//! | `file_url {place, path}` | a URL that reads one of them by range, no header, until `expires_us`: `{url, expires_us}` | `reads = ["files"]` |
 //! | `create_document {path, text?}` | a new document: its `DocInfo` | `writes = ["documents"]` |
 //! | `edit_document {path, edits, name?}` | edits as one CRDT transaction, one undo step (`DocEdit`s): its text after | `writes = ["documents"]` |
 //! | `rename_document {path, to}` / `move_document {path, folder}` | a new path (or folder) for it, its history kept: its `DocInfo` | `writes = ["documents"]` |
@@ -26,8 +28,8 @@
 //! | `undo_document {path}` / `redo_document {path}` | takes back the document's last undo step (its own history: a CRDT document's every step, a vault note's edits made through the documents) or makes it again; edits made since stay: `{step, text}`, `null` when there is none | `writes = ["documents"]` |
 //! | `watch_documents {action \| script, function?}` | its action (script) on every `doc.created/saved/renamed/deleted`: the hooks' keys | `reads = ["documents"]` |
 //! | `editor_state` | the editor being typed in: `{editor, context, text, selection, primary, cursor, node, version}` (`crate::editor::EditorView`; `node` is the block at the cursor: a list item, a table cell and its table's cells, …) | `reads = ["editor"]` or `writes = ["editor"]` |
-//! | `edit_editor {changes, selection?, name?, base?}` | its changes (byte offsets into the text it read) and selection as one transaction, one undo step named `name`, made as the extension (`architect_editor::ext::EditCommand`): the editor after | `writes = ["editor"]` |
-//! | `decorate_editor {decorations}` | its marks, line and gutter decorations and widgets (`architect_editor::ext::DecorationSpec`; a widget mounts one of its own `[[embeds]]` or `[[views]]`) in the editor, in place of the ones it set before (`[]`: none) | `writes = ["editor"]` |
+//! | `edit_editor {changes, selection?, name?, base?}` | its changes (byte offsets into the text it read) and selection as one transaction, one undo step named `name`, made as the extension (`editor_ext::EditCommand`): the editor after | `writes = ["editor"]` |
+//! | `decorate_editor {decorations}` | its marks, line and gutter decorations and widgets (`editor_ext::DecorationSpec`; a widget mounts one of its own `[[embeds]]` or `[[views]]`) in the editor, in place of the ones it set before (`[]`: none) | `writes = ["editor"]` |
 //! | `read_file {path}` / `write_file {path, text}` | a file: relative paths are in its own data folder | its own folder, or `capabilities.folders` |
 //! | `setting {key}` / `set_setting {key, value}` | one of its own settings (`<id>.…`) | nothing |
 //! | `data {key}` / `set_data {key, value?}` | its own data, kept for it | nothing |
@@ -76,7 +78,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::capabilities::{
-    BADGES, CLIPBOARD, DOCUMENTS, EDITOR, MENUS, NOTIFY, ORG, PICKERS, PROMPTS, SELECTION,
+    BADGES, CLIPBOARD, DOCUMENTS, EDITOR, FILES, MENUS, NOTIFY, ORG, PICKERS, PROMPTS, SELECTION,
 };
 pub use crate::documents::{DocEdit, DocInfo};
 use crate::manifest::{Capabilities, Manifest, Reach};
@@ -128,6 +130,23 @@ pub enum HostRequest {
     /// `reads = ["documents"]`; its edits reach the node only with
     /// `writes = ["documents"]`.
     LiveDocument {
+        path: String,
+    },
+    /// Every file under `folder` (all of it without one) of a project the
+    /// org's node holds, `place` (`vault:<name>`, `root:<id>`), that the
+    /// person may read: `{place, folder, files: [{path, size, sha256,
+    /// url}], expires_us}`, each `url` read by range until `expires_us`
+    /// (`crate::held`). Needs `reads = ["files"]`.
+    FileList {
+        place: String,
+        #[serde(default)]
+        folder: Option<String>,
+    },
+    /// A URL that reads the file at `path` of `place` by range, with no
+    /// header, until it runs out: `{url, expires_us}`. Needs
+    /// `reads = ["files"]`.
+    FileUrl {
+        place: String,
         path: String,
     },
     /// The app's documents (`crate::documents::Documents`), every one or
@@ -189,12 +208,12 @@ pub enum HostRequest {
     EditorState,
     /// `changes` and `selection` as one transaction of the editor being
     /// typed in, one undo step named `name`, made as the extension
-    /// (`architect_editor::ext::EditCommand`): the editor after.
+    /// (`editor_ext::EditCommand`): the editor after.
     EditEditor {
         #[serde(default)]
-        changes: Vec<architect_editor::ext::TextChange>,
+        changes: Vec<editor_ext::TextChange>,
         #[serde(default)]
-        selection: Option<Vec<architect_editor::ext::SelRange>>,
+        selection: Option<Vec<editor_ext::SelRange>>,
         #[serde(default)]
         name: Option<String>,
         #[serde(default)]
@@ -204,7 +223,7 @@ pub enum HostRequest {
     /// it set before.
     DecorateEditor {
         #[serde(default)]
-        decorations: Vec<architect_editor::ext::DecorationSpec>,
+        decorations: Vec<editor_ext::DecorationSpec>,
     },
     ReadFile {
         path: String,
@@ -786,6 +805,8 @@ impl HostRequest {
             Self::ReadDocument { .. } => "read_document",
             Self::QueryVault { .. } => "query_vault",
             Self::LiveDocument { .. } => "live_document",
+            Self::FileList { .. } => "file_list",
+            Self::FileUrl { .. } => "file_url",
             Self::ListDocuments { .. } => "list_documents",
             Self::CreateDocument { .. } => "create_document",
             Self::EditDocument { .. } => "edit_document",
@@ -938,6 +959,48 @@ impl From<Result<Value, HostError>> for HostAnswer {
     }
 }
 
+/// The capability a share link's guest lacks, in a refusal
+/// ([`guest_check`]).
+pub const GUEST: &str = "guest";
+
+/// Whether a host that runs for a share link's guest
+/// (`host::Host::for_guest`) answers `request` from `manifest`'s
+/// extension at all, whatever its capabilities say.
+///
+/// A guest has no vault and no session: an extension running for one asks
+/// for nothing of a person's. What passes is what touches nothing kept:
+/// opening a note (the app's own opener decides, and opens only what the
+/// link lists), its own settings read, a line in its log, a notification,
+/// where its view is, and its own actions. Documents, vault queries, kept
+/// data, files, the clipboard, the device, the network, secrets, ports and
+/// every app action are refused.
+///
+/// # Errors
+///
+/// [`GUEST`] and why.
+pub fn guest_check(manifest: &Manifest, request: &HostRequest) -> Result<(), (String, String)> {
+    let passes = match request {
+        HostRequest::Open { .. }
+        | HostRequest::Setting { .. }
+        | HostRequest::Log { .. }
+        | HostRequest::Notify { .. }
+        | HostRequest::SetViewState { .. } => true,
+        HostRequest::Run { action, .. } => action.starts_with(&manifest.action_prefix()),
+        _ => false,
+    };
+    if passes {
+        Ok(())
+    } else {
+        Err((
+            GUEST.to_owned(),
+            format!(
+                "a share link's guest has no vault or session: {} is not answered for one",
+                request.op()
+            ),
+        ))
+    }
+}
+
 /// Whether an extension that may reach `may` may make `request`.
 ///
 /// `may` is its manifest's capabilities as a person granted them; the
@@ -1004,6 +1067,7 @@ pub fn check(
                 .map_err(|(c, why)| (c.to_owned(), why)),
         ),
         HostRequest::Org => ("reads", reads(ORG)),
+        HostRequest::FileList { .. } | HostRequest::FileUrl { .. } => ("reads", reads(FILES)),
         HostRequest::Selection => ("reads", reads(SELECTION)),
         HostRequest::Open { .. }
         | HostRequest::ReadDocument { .. }
@@ -1180,6 +1244,50 @@ pub fn check(
 #[cfg(test)]
 mod tests {
     use super::{HostAnswer, HostError, HostRequest};
+
+    /// A guest's host answers what touches nothing kept, and refuses the
+    /// rest whatever the extension's capabilities are.
+    #[test]
+    fn a_guests_host_answers_nothing_of_a_vault() {
+        let manifest = crate::manifest::Manifest::parse(
+            "id = \"lab.guest\"\nname = \"Guest\"\nversion = \"0.1.0\"\nkind = \"process\"\n\
+             [entry]\npath = \"x\"\n[capabilities]\nreads = [\"documents\", \"files\"]\n\
+             writes = [\"documents\"]\nactions = [\"*\"]\neffect = \"destructive\"\n",
+        )
+        .unwrap();
+        let ask = |json: &str| {
+            let request: HostRequest = serde_json::from_str(json).unwrap();
+            super::guest_check(&manifest, &request)
+        };
+        for refused in [
+            r#"{"op":"read_document","path":"Songs/Joy.md"}"#,
+            r#"{"op":"list_documents"}"#,
+            r#"{"op":"query_vault","source":"x"}"#,
+            r#"{"op":"create_document","path":"a.md","text":""}"#,
+            r#"{"op":"delete_document","path":"a.md"}"#,
+            r#"{"op":"data","key":"k"}"#,
+            r#"{"op":"set_data","key":"k","value":1}"#,
+            r#"{"op":"read_file","path":"a"}"#,
+            r#"{"op":"selection"}"#,
+            r#"{"op":"org"}"#,
+            r#"{"op":"clipboard_read"}"#,
+            r#"{"op":"secret","name":"token"}"#,
+            r#"{"op":"run","action":"VAULT_READ"}"#,
+            r#"{"op":"run","action":"APP_STATUS"}"#,
+        ] {
+            let (capability, why) = ask(refused).unwrap_err();
+            assert_eq!(capability, super::GUEST, "{refused}");
+            assert!(why.contains("guest"), "{refused}: {why}");
+        }
+        for answered in [
+            r#"{"op":"open","path":"Songs/Joy.md"}"#,
+            r#"{"op":"setting","key":"lab.guest.word"}"#,
+            r#"{"op":"log","text":"hello"}"#,
+            r#"{"op":"run","action":"LAB_GUEST_GO"}"#,
+        ] {
+            assert_eq!(ask(answered), Ok(()), "{answered}");
+        }
+    }
 
     #[test]
     fn calls_and_answers_are_plain_json() {

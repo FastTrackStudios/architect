@@ -1,5 +1,4 @@
 ---
-"architect-desktop" = "patch"
 "architect-extensions" = "patch"
 ---
 

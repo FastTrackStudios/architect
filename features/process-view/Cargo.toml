@@ -31,7 +31,7 @@ host = ["dep:wgpu", "dep:ash", "architect-workspace/paint-ui", "dep:dioxus", "de
 # Extensions' `kind = "process"` views (#838, `extension`): any
 # extension's view drawn by the pane, whichever copy is loaded; the app
 # provides `architect_extensions::interface::ProcessViews` with it.
-extension = ["host", "dep:architect-extensions", "architect-extensions/ui"]
+extension = ["host", "dep:architect-extensions", "architect-extensions/host", "dep:architect-extensions-dioxus", "architect-extensions-dioxus/process"]
 # The lab's demo scene (`demo::Orbits`); with `guest`, its program.
 demo = []
 
@@ -43,7 +43,7 @@ required-features = ["demo", "guest"]
 [dependencies]
 architect-workspace = { workspace = true, features = ["paint"] }
 thiserror = { workspace = true }
-rustix = { version = "1", features = ["net", "fs", "mm", "event", "process", "shm"] }
+rustix = { version = "1", features = ["net", "fs", "mm", "event", "process", "shm", "time"] }
 wgpu = { version = "30", optional = true }
 vello = { version = "0.11", optional = true }
 anyrender_vello = { version = "0.15", optional = true }
@@ -59,6 +59,7 @@ wgpu_context = { version = "0.10", optional = true }
 futures-timer = { workspace = true, optional = true }
 architect = { workspace = true, optional = true, features = ["action-list"] }
 architect-extensions = { workspace = true, optional = true }
+architect-extensions-dioxus = { workspace = true, optional = true }
 
 [lints]
 workspace = true
@@ -72,9 +73,6 @@ objc2 = "0.6"
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFBase", "CFDictionary", "CFNumber", "CFString"] }
 objc2-io-surface = { version = "0.3", default-features = false, features = ["std", "libc", "objc2", "objc2-core-foundation", "IOSurfaceRef", "IOSurfaceTypes"] }
 objc2-metal = { version = "0.3", default-features = false, features = ["std", "objc2-io-surface", "MTLAllocation", "MTLDevice", "MTLPixelFormat", "MTLResource", "MTLTexture"] }
-
-[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
-architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
 pollster = "0.4"

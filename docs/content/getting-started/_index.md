@@ -1,6 +1,6 @@
 +++
 title = "Getting started"
-description = "Get a dev shell up, build the workspace and run the reference feature's tests."
+description = "Get a dev shell up, build the workspace and run the tests."
 weight = 10
 +++
 
@@ -40,8 +40,8 @@ cargo check --target wasm32-unknown-unknown \
 ## Run the tests
 
 ```sh
-# The reference feature: one scenario in process, over vox and over HTTP.
-cargo test -p example-greeter
+# One scenario over every wire: direct, in process, WebSocket, iroh, HTTP.
+cargo test -p auth-server --test surfaces
 
 # The facade: layers, HTTP face, iroh loopback, reconnect, RPC spans.
 cargo test -p architect
@@ -50,19 +50,15 @@ cargo test -p architect
 just test
 ```
 
-If `cargo test -p example-greeter` passes on a fresh checkout, your
+If `cargo test -p architect` passes on a fresh checkout, your
 environment is wired up correctly.
 
 ## Run a server
 
-```sh
-GREETER_BIND=127.0.0.1:4040 cargo run -p example-greeter
-curl -XPOST localhost:4040/greeter/greet -d '{"name":"cody"}'
-```
-
-`EngineHost` serves vox over WebSocket at `/vox`, the HTTP routes and SSE
-streams, and `/health`. The identity server has its own recipes
-(`just auth-dev`, `just auth-demo`, `just auth-e2e`).
+The identity server is the full-size server in this repo, and it runs
+with recipes of its own (`just auth-dev`, `just auth-demo`,
+`just auth-e2e`). Its `EngineHost` serves vox over WebSocket at `/vox`,
+the HTTP routes and SSE streams, and `/health`.
 
 ## Next
 

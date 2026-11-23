@@ -9,8 +9,8 @@ weight = 69
 > Dioxus store (`dioxus`). The shell (`features/shell/src/shell/mod.rs`
 > `ShellTheme`, `AppShell`), architect-ui's root
 > (`features/ui/architect-ui/src/theme/runtime.rs` `ThemeStoreProvider`)
-> and paint panes (`features/workspace/src/paint/widget.rs` `PaintPane`)
-> follow it. The sandbox uses it (`apps/ui/src/theme.rs`). An app's own
+> and paint panes (`features/scene/src/paint/widget.rs` `PaintPane`)
+> follow it. An app's own
 > namespaced tokens, expressions over other tokens, numbers, provenance
 > and `THEME_INSPECT` landed with it (below). Extensions' themes and
 > tokens, the theme for Luau scripts, `ImGui` windows and process
@@ -178,8 +178,7 @@ org changes. The order is the cascade's: the org's default sits under
 the person's choice, and the device's sits over it.
 `Persist::local(store, app, delay)` is the whole of it for an app with no
 account yet: the device's layer in `<app dir>/appearance.json`, the
-person's in a synced settings document kept as `<app dir>/person.loro`
-(the sandbox's look, `apps/ui/src/theme.rs` `use_lab_theme`).
+person's in a synced settings document kept as `<app dir>/person.loro`.
 
 ```rust,ignore
 let persist = Persist::start(&store, &values, Duration::from_millis(250), move |s: &Saved| match s.scope {
@@ -217,11 +216,8 @@ layer's value away, so the one under it shows. A key the org locked is
 dimmed, saying so. The page sizes its own rows by `density` and
 `text-scale`. The shell's own chrome does not read them yet.
 
-The sandbox keeps the device's layer in `<app dir>/appearance.json` and the
-person's in a synced settings document saved as `<app dir>/person.loro`
-(it has no account to sync it with). Its made-up orgs have defaults:
-Harbor & Pine's is Nord with small corners (`apps/ui/src/theme.rs`
-`persist`, `org_settings`).
+An org's defaults sit under the person's: an org whose look is Nord with
+small corners gives that to every member who has not chosen otherwise.
 
 ## Theme files (feature `fs`)
 
@@ -324,7 +320,7 @@ next turn. Below it:
 - `ThemeStoreProvider` is architect-ui's `ThemeProvider` whose CSS
   variables are the store's (`ThemeState::from_resolved`).
 - `PaintPane` gives its view the whole resolved theme as `ThemeTokens`
-  (`features/workspace/src/ctx.rs` `ThemeTokens`, `From<&Resolved>`) and
+  (`features/scene/src/view.rs` `ThemeTokens`, `From<&Resolved>`) and
   requests a frame only when they change (`Painter::set_theme`). A paint
   view reads `ctx.theme.color("brand")`.
 - `use_themed::<T>()` is any typed slice as a memo. Its readers rerun only
@@ -432,10 +428,8 @@ two apps' tokens never collide in one map.
 
 **A view's roles.** A view that paints (an editor, an arrangement) is a
 theming target like the shell: every colour it draws is a role of its own,
-an app token with a default over architect's, never a literal. The sandbox's
-Keyflow source editor is the worked example (`apps/ui/src/keyflow.rs`
-`EDITOR_TOKENS`, set as the sandbox's `App` layer by
-`apps/ui/src/theme.rs` `app_layer`):
+an app token with a default over architect's, never a literal, set as the
+app's `App` layer. A source editor's roles, for example:
 
 | Role | Default | What it colours |
 |---|---|---|
@@ -461,8 +455,7 @@ and sets them as CSS variables on its own root: editor-view's inputs
 `--editor-syntax-*`. Its stylesheet holds no colour, only those
 variables: a `document::Style` is inserted once and never updated, so a
 sheet built from the theme's values would keep the first theme. A theme
-change restyles the editor by its `style` alone, in a pop-out too
-(`apps/ui/src/keyflow.rs` `theme_set_restyles_the_editor`). A theme
+change restyles the editor by its `style` alone, in a pop-out too. A theme
 file or a person overrides any role (`THEME_TOKEN_SET {name:
 "editor.caret", value: "$warn"}`); a broken one draws magenta.
 
@@ -499,6 +492,4 @@ Every GUI an extension draws follows the store: a process view's document
 through `:root` CSS variables, a process itself through the theme sent
 as data, a Luau script through `theme`
 (`features/scripting/src/theme.rs` `ThemeModule`, a frozen snapshot per
-revision), and an `ImGui` window through its style
-(`features/canvas/src/imgui.rs` `Style::from_theme`: `imgui.*` tokens
-first, else derived from the shell's). The extensions page has the table.
+revision). The extensions page has the table.

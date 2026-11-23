@@ -1,5 +1,4 @@
 ---
-"architect-app" = "minor"
 "architect-extension-archive" = "minor"
 "architect-extensions" = "minor"
 "vault-live" = "minor"

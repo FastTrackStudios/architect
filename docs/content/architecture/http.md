@@ -432,7 +432,7 @@ EngineHost::new(vox, gate, bind)
 ```sh
 ARCHITECT_BUILD_REV=$(git rev-parse HEAD) \
 ARCHITECT_BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
-cargo build --release -p example-greeter
+cargo build --release -p <your-server>
 ```
 
 A variable that is unset or empty is `null` in the JSON, never a guess;

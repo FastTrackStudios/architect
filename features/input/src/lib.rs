@@ -37,6 +37,7 @@ pub mod ports;
 pub mod processor;
 pub mod scroll;
 pub mod sequence;
+pub mod shortcut;
 pub mod surface;
 pub mod trie;
 pub mod which_key;

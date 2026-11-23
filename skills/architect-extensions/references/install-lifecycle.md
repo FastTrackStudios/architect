@@ -1,8 +1,8 @@
 # Installing, updating and shipping extensions
 
-How an extension gets onto a device and stays current: development copies, registries, signed archives, install on open, a person's devices, core extensions and the node.
+How an extension gets onto a device and stays current: development copies, registries, signed archives, install on open, a person's devices and the node.
 
-Docs: `docs/content/extensions/authoring.md` (the walkthrough), `docs/content/architecture/extensions.md` ("Hot reload", "Packaging", "Distribution", "Finding and installing", "What a project needs", "A person's installs on all their devices", "A share link's extensions"), `docs/content/guide/core-extensions.md`, `docs/content/guide/deploy.md` ("Extensions' node actions", "Extensions through Nix"), `docs/content/guide/showcase.md` (rows L1–L4).
+Docs: `docs/content/extensions/authoring.md` (the walkthrough), `docs/content/architecture/extensions.md` ("Hot reload", "Packaging", "Distribution", "Finding and installing", "What a project needs", "A person's installs on all their devices", "A share link's extensions").
 
 ## Which copy runs
 
@@ -10,7 +10,7 @@ An id can have three copies at once (`features/extensions/src/catalog.rs`):
 
 | Copy | Where it comes from | Wins when |
 |---|---|---|
-| built-in (linked) | compiled into the distribution (`Extensions::with_linked`) | nothing else is there |
+| built-in (linked) | compiled into the app (`Extensions::with_linked`) | nothing else is there |
 | installed | a registry, a file or a peer, one folder per id under the app's `extensions/` folder | it is newer than the built-in; among installed ones, the newest |
 | development | a folder you point the app at (`EXT_DEV`, `EXT_CLONE`) | always, until its session ends |
 
@@ -18,7 +18,7 @@ What lost is kept, so the extensions page can say "built in, overridden by …" 
 
 Each install's folder holds `installed.toml` (`features/extensions/src/install.rs` `Install`): id, version, kind, source, an optional `link` (a folder registry's package is linked, not copied, so an edit there is what loads), `pin`, and `signer_key` / `signer`. The signed archive it came as is kept beside it.
 
-Where installs are kept is a `Disk` (`features/extensions/src/disk.rs`): the app's folder on a desk and a phone (`OsDisk`), the browser's storage in the web app (`MemDisk`, each change handed to a callback that keeps it). `Installs::with_disk` and `Grants::open_on` take one; a package installed on a `MemDisk` reads through it (`features/extensions/src/package.rs` `Files::Disk`, `Package::texts`). A source with no folder to write into hands its package over as files (`Source::fetch_files`, `Fetched::Files`; the built-in registry `BundledSource` always does). Test: `features/extensions/tests/browser_installs.rs`.
+Where installs are kept is a `Disk` (`features/extensions/src/disk.rs`): the app's folder on a desk and a phone (`OsDisk`), the browser's storage in a web app (`MemDisk`, each change handed to a callback that keeps it). `Installs::with_disk` and `Grants::open_on` take one; a package installed on a `MemDisk` reads through it (`features/extensions/src/package.rs` `Files::Disk`, `Package::texts`). A source with no folder to write into hands its package over as files (`Source::fetch_files`, `Fetched::Files`; the built-in registry `BundledSource` always does). Test: `features/extensions/tests/browser_installs.rs`.
 
 What a platform has no runner for is "Can't run here" with why before anything installs (`features/extensions/src/host.rs` `why_no_runner`, `kind_cannot_run`): in a browser, processes and WASI components (and Luau only when the bundle carries no luau-web).
 
@@ -28,46 +28,24 @@ What a platform has no runner for is "Can't run here" with why before anything i
 |---|---|---|
 | `EXT_DEV {folder}` | loads a package folder unsigned as a development copy; reloaded on save; loaded again on the next start | `features/extensions/src/registry_actions.rs`, `Extensions::dev` |
 | `EXT_DEV_END {folder}` | ends it; the folder stays | `Extensions::end_dev` |
-| `architect-desktop extensions dev <folder>` / `undev <folder>` | the same two actions, over the running app's control socket | `apps/desktop/src/app.rs` |
-| `architect-desktop extensions check <folder>` | loads it once on its own and renders each view once (`EXT_CHECK`) | `features/extensions/src/check.rs` `Checker` |
+| `EXT_CHECK {folder}` | loads it once on its own and renders each view once | `features/extensions/src/check.rs` `Checker` |
 | `EXT_CLONE {id, as?}` | copies a built-in or installed one into the app's `dev/` folder under a new id (manifest, action ids and setting keys renamed) and runs it as a development copy | `features/extensions/src/clone.rs` `Extensions::clone_to_dev` |
 | `EXT_CLONE {id}` on a built-in with `[source]` | writes its crate to the dev folder and builds its process binary; it overrides the built-in under the same id | `features/extensions/src/source.rs` |
 
 Rules:
 
 - **Development installs must be on.** `EXT_DEV` is refused unless Settings → Extensions has them on (`EXT_DEV_INSTALLS {on}`; turning it on from outside needs a person's yes) or the build is a debug build (`Registries::with_dev_forced`).
-- **Change detection is polling, not file events.** `features/extensions/src/watch.rs` fingerprints every file's path and contents (`.git` left out). The app polls `Extensions::reload_changed` on a timer (`apps/ui/src/extensions.rs`, every 500 ms); `EXT_RELOAD` forces one pass.
+- **Change detection is polling, not file events.** `features/extensions/src/watch.rs` fingerprints every file's path and contents (`.git` left out). The app polls `Extensions::reload_changed` on a timer (every 500 ms is usual); `EXT_RELOAD` forces one pass.
 - **A reload is a diff, not a restart** (`docs/content/architecture/extensions.md`, "Hot reload"): the old copy's state is saved, its contributions withdrawn as a diff, the new one gets the state back, and a view that is still there remounts in the same panes. A failed build or a panic keeps the last good copy and says why.
-- **From-source clones** use the app's `cargo` (`$CARGO`, else `PATH`), so run the app from the repo's dev shell. A failed build keeps the last good program; the error is in `APP_STATUS`, `EXT_LOGS` (source `build`) and on the page. `apps/sandbox/board/tests/dev_loop.rs` runs the whole loop (ignored by default: it builds a crate).
+- **From-source clones** use the app's `cargo` (`$CARGO`, else `PATH`), so run the app from the repo's dev shell. A failed build keeps the last good program; the error is in `APP_STATUS`, `EXT_LOGS` (source `build`) and on the page. A from-source copy rebuilds when any local crate it builds from changes (its workspace's members, its path dependencies; `features/extensions/src/source.rs`).
 
 How fast a save shows, by kind: data and themes instantly; Luau and TypeScript on the next run; WASM components rebuilt (seconds, state kept); processes rebuilt and restarted with state handed over (a view's place: `linked::use_view_state`). Full table: "Hot reload" in the architecture page.
-
-### An instance of your own: `architect-desktop dev`
-
-Against an installed app: `cargo run --release -p architect-desktop -- install` from a checkout installs that build (bundled, signed, notarized and stapled on a Mac; `--no-notarize` skips Apple) and links `architect` onto `PATH`, so a repo of extensions runs `architect dev --extension <folder> …` with no Architect crate in its build. A development copy is not built by the app: its program at `[entry] path` is the extension's own build's to write (a path dependency's edit included); the app reloads when a file in the folder changes, the program among them.
-
-An agent (or a worktree) gets its own Architect, apart from the person's window and from every other one: its own settings folder, vault, control socket, file secret store (never the keychain), local-only iroh, and no global capture shortcut (`apps/desktop/src/dev.rs`). As many run at once as are asked for.
-
-```sh
-architect-desktop dev --extension ./my-ext --only navigator --open Showcase.md
-architect-desktop dev --only keyflow --open "Charts/A.kf" --collapse left,right   # that view, sides folded
-architect-desktop dev --only keyflow --open "Charts/A.kf" --hide all              # the tabs and the view, nothing else
-architect-desktop dev list                 # name, pid, socket, log, vault of each
-architect-desktop dev path                 # this folder's instance, with its `drive` command
-architect-desktop dev stop [<name> | --all]
-```
-
-- **Its name** is the working folder's (its last part and a hash of the whole path), so each checkout has one; `--name` picks another. It lives in `~/Library/Caches/architect-dev/<app>/<name>/` (`$ARCHITECT_DEV_ROOT` moves it); `--fresh` starts it over.
-- **What it opens:** the demo vault, seeded fresh (`--seed <dir>` another, `--vault <dir>` an existing one); `--open <path>` a note or file beside the first tab (a file a development copy's opener claims waits up to 20 s for that copy's program to start and say what it opens); `--collapse left,right` (or `all`) opens with those sides folded away (the left sidebar to the rail, the docks collapsed; a press opens them again); `--hide rail,status,now-playing,left,right,bottom` (or `all`) takes them away: the rail, the status bar and the Now Playing bar are the shell's slots (`HOME_SLOT_SET` hidden; an extension may fill one, a layout may hide one), the docks hidden strip and all, so `--hide all` leaves the tab bar and the open view; `--layout <name>` a saved layout, or `--layout <file>.json` a layout file copied into the instance and shown under its file's name (`examples/layouts/setlist-window.json`); `--run ACTION[=JSON]` actions after, in order.
-- **What runs:** `--extension <dir>` loads a folder as a development copy (reloaded on save, as above); `--only <id,id>` turns every other extension off (the development copies stay on; each `--only` adds to the list); `--bare` turns them all off. With neither, everything but `updates` runs. Run again with another `--only`, what it names comes back on (off is kept in the instance's folder). With nothing loaded that fills the left dock (the navigator off), the Vault opens its sidebar folded to the rail by itself (`ExtensionUi::fills_dock`). The vault's install offer is not shown: the instance has what it was given.
-- **Driving it:** the command prints JSON with `socket`; `architect-desktop actions --app <socket> …` drives that instance only (`APP_SHOT`, `APP_STATUS`, `EXT_LOGS`). Run again with the same name, it applies the new flags to the running one. Its output, and any panic with its backtrace, is in the printed `log` (when started from the environment, the panic only; the rest stays where it was started); `--wait` blocks until it ends and exits nonzero if it died.
-- **From the environment:** `ARCHITECT_DEV=1` (or a name) makes a plain launch an isolated instance, so a devenv or a script can set it; `ARCHITECT_DEV_ONLY`, `ARCHITECT_DEV_EXTENSIONS` (a path list), `ARCHITECT_DEV_OPEN`, `ARCHITECT_DEV_COLLAPSE`, `ARCHITECT_DEV_HIDE`, `ARCHITECT_DEV_LAYOUT`, `ARCHITECT_DEV_VAULT`, `ARCHITECT_DEV_SEED`, `ARCHITECT_DEV_FRESH` and `ARCHITECT_DEV_RUN` (JSON `[["ACTION", {args}], …]`) are the flags' equivalents. The window's title says `(dev: <name>)`.
 
 ## Registries
 
 `features/extensions/src/registries.rs` `Registries` keeps the registries an app searches and installs from, kept in `<app dir>/extension-registries.json`:
 
-- **The store's index**: `extensions/index.toml` in this repo, given in code (`apps/distribution/src/lib.rs` `STORE_REGISTRY`; `apps/ui/src/extensions.rs` `app_registries` via `Registries::with_builtin`). Always there, never written or removed. A git registry checked out sparsely (`GitRegistry::in_dir`). A pull request that changes it is checked by `.github/workflows/extension-index.yml`.
+- **The app's own index**: one the app gives in code with `Registries::with_builtin` (this repo's store index is `extensions/index.toml`). Always there, never written or removed. A git registry checked out sparsely (`GitRegistry::in_dir`). A pull request that changes it is checked by `.github/workflows/extension-index.yml`.
 - **Registries a person adds**: Settings → Extensions, or `EXT_REGISTRY_ADD {name, git [+ dir] | folder, keys?: [{name, key}]}`. Adding keys from outside the app needs a person's yes (`confirmation_required`).
 
 Source types (`features/extensions/src/install.rs`): `GitRegistry` (a git repo with an `index.toml`, pulled with the `git` program), `FolderRegistry` (a folder with an `index.toml`, for a registry being written or on a shared drive), `ReaPackSource` (a ReaPack `index.xml`).
@@ -82,9 +60,8 @@ Source types (`features/extensions/src/install.rs`): `GitRegistry` (a git repo w
 
 Examples to copy:
 
-- `examples/registry/`: the skeleton of a real registry (`index.toml`, `index.schema.json`, `README.md`, a sample archive signed by a throwaway key in `keys/`).
-- `examples/extension/registry`: a folder registry with one Luau package (`example.hello`) for the host example in `examples/extension`.
-- `examples/showcase-registry`: signed archives, a fixture vault and a macOS-only extension, used by `features/extensions/tests/showcase_registry.rs` (showcase rows L1–L4).
+- `features/extensions/tests/fixtures/examples/extension/registry`: a folder registry with one Luau package (`example.hello`).
+- `features/extensions/tests/fixtures/examples/showcase-registry`: signed archives (keys in `keys/`, rebuilt by its `make.sh`), a fixture vault and a macOS-only extension, used by `features/extensions/tests/showcase_registry.rs`.
 
 An index entry per version carries `archive` (a release asset URL or a path in the repo) and its `sha256`, `platforms`, `changelog`; older entries may use `path` or `git` + `rev`. `cargo xtask ext-index <dir>` checks an index: schema, each archive's hash and signature, and that the archive is what its entry says (`features/extensions/archive/src/registry.rs` `check`).
 
@@ -136,7 +113,7 @@ Rules that bite:
 - **Updates stop at growth.** An update whose capabilities grow waits in `needs_consent` (`Extensions::update`).
 - **No silent downgrade.** Going older or past a pin by id is `InstallError::Downgrade` unless a person names the version (`EXT_INSTALL {explicit: true}`).
 - **Not here.** An extension whose `platforms` exclude this OS is listed and kept, never started (`LoadError::NotHere`); the store refuses to install it (`InstallError::NotHere`). Tests: `features/extensions/tests/platforms.rs`.
-- **The manager page** (`features/extensions/src/page.rs` `ManagerPage`) does all of the above with the same components; agents also get `MANAGER_LIST` / `MANAGER_RUN` (`features/extensions/src/manager/mod.rs` `Manager`).
+- **The manager page** (`app-shell:crates/app-shell-extensions/src/page.rs` `ManagerPage`) does all of the above with the same components; agents also get `MANAGER_LIST` / `MANAGER_RUN` (`features/extensions/src/manager/mod.rs` `Manager`).
 
 ## Install on open: a vault, a project, a share link
 
@@ -151,10 +128,10 @@ required = true      # false: offered, not asked
 ```
 
 - `Extensions::open_vault` plans it (`features/extensions/src/vault_needs.rs` `VaultNeeds`); `EXT_NEEDS {folder}` gives an agent the same plan (ready, to install, to offer, missing with why, refused). Neither changes anything.
-- A registry can be compiled into the app: `features/extensions/src/bundled.rs` `BundledSource` (packages whose files the build carries, listed and installed like a folder registry's path packages, through the same consent; the app's build vouches for them). The app carries the showcase's Luau, TypeScript and data packages this way (`apps/ui/src/showcase.rs` `source`), so the showcase vault's **Install all** works on the desk and on a phone with no network.
-- The app says it in the status bar (on a phone, a row at the page's top): "17 extensions to install"; pressed, a dialog over the window holds the card (`apps/ui/src/extensions.rs` `VaultNeedsBanner`, with `MissingExtensions` `bare`): required, optional, what cannot be had and why, and **Install all**. `Extensions::previews_for` builds one consent prompt; nothing installs before that one yes (`Extensions::accept_vault`), then everything loads without a restart. "Not now" hides it for the run.
+- A registry can be compiled into the app: `features/extensions/src/bundled.rs` `BundledSource` (packages whose files the build carries, listed and installed like a folder registry's path packages, through the same consent; the app's build vouches for them), so **Install all** works with no network.
+- The app shows the plan as a card (`app-shell:crates/app-shell-extensions/src/page.rs` `MissingExtensions`): required, optional, what cannot be had and why, and **Install all**. `Extensions::previews_for` builds one consent prompt; nothing installs before that one yes (`Extensions::accept_vault`), then everything loads without a restart. "Not now" hides it for the run.
 - What cannot be installed is said, not forced: `Missing::WantsOlder`, `Missing::OutsidePin`, `Missing::CannotRun`.
-- Tests: `features/extensions/tests/vault_needs.rs`; showcase row L2.
+- Tests: `features/extensions/tests/vault_needs.rs`.
 
 ### Carrying extensions in the vault
 
@@ -165,7 +142,7 @@ Small extensions travel as signed archives in `.architect/extensions/*.archext` 
 - at most 16 MB an archive (`MAX_ARCHIVE`), 64 KB for the needs file (`MAX_NEEDS`); a plan reads only the signed index and manifest (`architect_extension_archive::peek`);
 - no link is followed at any level, `.architect` included.
 
-`.architect/` syncs with the vault's files (the sync client keeps that one top-level dot-folder: `features/vault/vault-sync-client/src/lib.rs` `SYNCED_DOT`).
+`.architect/` travels with the vault's files: whatever syncs the folder must keep that one top-level dot-folder.
 
 ### A share link's extensions
 
@@ -174,7 +151,7 @@ A share link names its own, not the vault's: `_architect/shares/<code>.extension
 - The owner sets it: `EXT_SHARE_NEEDS_SET {folder, code, extensions: [{id, required?, hosts?}]}` (`features/extensions/src/share_pick.rs` `Extensions::set_share_needs`); `EXT_SHARE_NEEDS` reads it back. A development copy or unsigned install is refused; so is a host its manifest does not ask for.
 - The guest host uses the wasm-clean model: `LinkNeeds::from_toml`, `plan_link`, `verify_package`, `guest_capabilities` (read-only share documents, no writes, `fetch` only to approved hosts, no `[[secrets]]`).
 - Only the share's owner may write those files: the node's write guard (`features/vault/vault-live/src/write_guard.rs` `ExtensionPaths`).
-- **Not wired yet:** no host runs a guest's extensions (showcase row G1; #495, #755). Tests of the model: `features/extensions/tests/share_needs.rs`.
+- **Not wired yet:** no host runs a guest's extensions (#495, #755). Tests of the model: `features/extensions/tests/share_needs.rs`.
 
 ## A person's installs on all their devices
 
@@ -187,37 +164,19 @@ Owner decision (#683): what a person installs and grants on one device installs 
 - Grants never transfer between people: other members and guests get the needs list and one prompt.
 - Tests: `features/extensions/tests/person_sync.rs`.
 
-## Core extensions (the standard release)
-
-The owner picks which extensions the standard release includes; each lives in its own repo and is listed by reference in `extensions/core-extensions.toml` (schema `extensions/core-extensions.schema.json`). Never copy an extension's code into this repo.
-
-Each `[[core]]` entry pins `id`, `publisher`, `source`, `version`, `tag`, `rev`, a `[core.signature]` (the publisher's minisign over the release's `SHA256SUMS`), and a form per platform: `[core.linked]` (compiled in from its crate at `rev`) or `[core.packaged]` (a signed release file shipped beside the binary, today a share-page island folder).
-
-To add, bump or remove one, only when the owner asks:
-
-1. Edit `extensions/core-extensions.toml` (`version`, `tag`, `rev`, signature URLs and comment, any `archive` + `sha256`).
-2. `cargo xtask core verify` (network: tags name their revs, sums signed, archives listed).
-3. `cargo xtask core sync` (regenerates `dist/standard/Cargo.toml`, `dist/standard/src/list.rs` and the lock).
-4. Commit the list and `dist/standard` together. A bump that changes declared capabilities or the publisher key says so at the top of the PR.
-
-`cargo xtask core check` is the offline CI check; `cargo xtask core graph` fails on a second Architect or a Task crate; `cargo xtask core fetch --platform node --into <dir>` fetches packaged folders. `dist/standard` is outside the workspace and built by `.github/workflows/standard.yml` (not required). Bundled `.archext` packages in the standard build are the next step, not built yet. Details: `docs/content/guide/core-extensions.md`; code: `xtask/src/core_list.rs`.
-
 ## Production: the node through Nix
 
 Owner decision: the production node gets its extensions through Nix, pinned and verified at build time; the server downloads nothing at run time.
 
 - `lib.architectExtension` (`nix/node/extension.nix`) fetches the archive (`url`, `registry`, or `src`), checks the pinned `hash`, then runs `archext install` (`features/extensions/archive/src/bin/archext.rs`): the same `open` every app runs, against `publishers` (and the org key with `trustOrg = true`), and the pinned id and version. Unsigned, unpinned or changed archives fail the build.
 - `services.architect-node` (`nix/node/module.nix`) points `ARCHITECT_EXTENSIONS` at one read-only store path linking each extension by id; a change restarts the node. `extensionSecrets` names the folder of node-action secrets (`<dir>/<ext id>/<secret id>`, as sops-nix writes them).
-- Checks: `nix/tests/extensions.nix` (`nix flake check`): the showcase's Bank link builds; a wrong hash, an unknown key and a tampered archive each fail.
-- What runs there: only an extension's **node actions** (`runs = "node"`, Luau, holding a declared `[[secrets]]`), served on the org lane as `NodeActions` (`features/extensions/src/node.rs` `NodeHost`; `apps/desktop/src/node/mod.rs` `node_actions`). The deployment that names the extension is the node's consent. Tests: `features/extensions/tests/node.rs`.
-- Not built: the desktop reading a declared extension list from Nix (`docs/content/guide/deploy.md`, "Extensions through Nix").
+- Checks: `nix/tests/extensions.nix` (`nix flake check`): a signed fixture builds; a wrong hash, an unknown key and a tampered archive each fail.
+- What runs there: only an extension's **node actions** (`runs = "node"`, Luau, holding a declared `[[secrets]]`), served on the org lane as `NodeActions` (`features/extensions/src/node.rs` `NodeHost`) by the app's node. The deployment that names the extension is the node's consent. Tests: `features/extensions/tests/node.rs`.
 
 ## Per platform today
 
 | | Install from a registry | Install on open | Dev copy |
 |---|---|---|---|
-| Desktop | yes (L1) | vault and project folders yes; share links no (G1) | yes |
-| Web | the registry the app carries (the showcase's), TypeScript and data; kept in the browser's storage (`apps/web/src/app/installs.rs`) | the built-in demo and showcase vaults (`VaultNeeds`); signed-in vaults no | no |
-| iOS | Luau, pages, data, WASM (Pulley); not shown | same banner; not shown | through the control socket |
-
-Current status per capability: `docs/content/guide/showcase.md`.
+| Desktop | yes | vault and project folders yes; share links no | yes |
+| Web | a registry the app carries (`BundledSource`), TypeScript and data; kept in the browser's storage (`MemDisk`) | `VaultNeeds` on the vault the app opened | no |
+| iOS | Luau, data, WASM (Pulley) | the same card | through the control socket |

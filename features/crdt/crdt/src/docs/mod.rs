@@ -17,8 +17,8 @@
 //!   [`DocSync`](crate::sync::DocSync), addressed by the same id.
 //! - **[`DocsStore`]**: where a host keeps the catalog. One trait, a
 //!   backend per deployment, like [`Persistence`](crate::Persistence)
-//!   for the bytes: [`InMemoryDocsStore`] here, `SeaOrmDocsStore` in
-//!   `crdt-seaorm`.
+//!   for the bytes: [`InMemoryDocsStore`] here; a deployment brings its
+//!   own.
 //! - **`DocsHost`** (native): the catalog served (`Docs` + its stream)
 //!   with the content lane beside it (`DocSync` + `DocPresence` over a
 //!   [`DocRegistry`](crate::DocRegistry)), admitting only catalogued,

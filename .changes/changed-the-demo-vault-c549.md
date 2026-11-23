@@ -1,12 +1,5 @@
 ---
-"architect-app" = "minor"
-"architect-bases" = "none"
-"architect-cookbook" = "none"
-"architect-distribution" = "minor"
 "architect-extensions" = "none"
-"architect-mealplan" = "none"
-"architect-pages" = "none"
-"architect-web" = "minor"
 "xtask" = "none"
 ---
 

@@ -16,19 +16,9 @@ In this chapter you put an app inside architect's frame. You will:
 5. launch it on a desk through the workspace's launcher, so pop-outs are
    real OS windows.
 
-The living reference for every step is the sandbox, `apps/sandbox`: the Architect app on made-up data
-in Task's shape (Inbox, Tasks, Schedule and Vault tabs, Capture as the
-separate button) whose Vault tab is the workspace host. Run it while you
-read:
-
-```sh
-cd apps/sandbox
-dx serve --platform desktop --renderer native
-# standing in for a device: iphone, iphone-side, ipad or ipad-side
-ARCHITECT_DEVICE=ipad dx serve --platform desktop --renderer native
-```
-
-`apps/sandbox/README.md` has the iOS simulator steps.
+The shell and the workspace are moving to FastTrackStudio/app-shell,
+which Studio runs on; this chapter describes the copies still in this
+repo.
 
 ## Blitz first, the browser too
 
@@ -64,8 +54,8 @@ narrower than 700pt, or on its side and shorter than 500pt, is a phone;
 anything larger is a tablet under a finger and a desk under a mouse.
 
 The host publishes a `Screen` (width, height, touch, insets) and the shell
-reads it. The sandbox keeps one in a `Signal<Screen>` from the window's size
-(`apps/ui/src/screen.rs` `use_window_screen`) and reads it at the root:
+reads it. An app keeps one in a `Signal<Screen>` from the window's size
+and reads it at the root:
 
 ```rust
 let screen = use_context::<Signal<shell::Screen>>();
@@ -78,8 +68,7 @@ on too, rather than a platform check.
 
 `AppShell` (`features/shell/src/shell/mod.rs`, feature `ui` of
 `architect-shell`) is mounted once and fills its parent, which must be
-positioned (the window's root, `inset: 0`). The sandbox's root,
-`apps/ui/src/lib.rs` `LabApp`:
+positioned (the window's root, `inset: 0`). An app's root:
 
 ```rust
 AppShell {
@@ -132,10 +121,9 @@ frame): the traffic lights placed in it on macOS
 (`features/shell/src/shell/mac.rs` `fit_traffic_lights`), the ribbon down
 the left edge (`RIBBON`), one sidebar, and the status line. Pass a
 `WindowChrome` (`WindowChrome::mac(on_drag, on_zoom)`) for a window that
-draws its own bar; the sandbox builds it in `apps/ui/src/screen.rs`
-`use_window_chrome`, which also follows full screen through window events
-(a Blitz quirk). The window itself is created with a transparent,
-full-size title bar (`apps/desktop/src/main.rs`).
+draws its own bar, following full screen through window events (a Blitz
+quirk). The window itself is created with a transparent, full-size title
+bar.
 
 <!-- media: shell-desk-title-row — a macOS window whose title row holds the traffic lights, the sidebar button and the workspace's tabs; dragging its empty part moves the window -->
 
@@ -162,8 +150,7 @@ rsx! {
 ```
 
 That is the crate's own example (`features/shell/src/lib.rs`). `PageBar`
-is the bar alone, for a page that lays out its body itself (the sandbox's
-Vault, `apps/ui/src/vault.rs` `VaultPage`); `Toolbar` and `Breadcrumb`
+is the bar alone, for a page that lays out its body itself; `Toolbar` and `Breadcrumb`
 (`features/shell/src/shell/page.rs`) are the header's other parts.
 
 A page that fills a side claims it while mounted:
@@ -223,8 +210,8 @@ its pane as a placeholder with its state until the view comes back.
 ### The layout as a value
 
 A layout is a `Workspace` value, built with the same operations every
-gesture comes down to (`features/workspace/src/ops.rs`). The Vault's first
-layout, shortened (`apps/ui/src/vault.rs` `first_workspace`):
+gesture comes down to (`features/workspace/src/ops.rs`). A first layout,
+shortened:
 
 ```rust
 fn first_workspace() -> Workspace {
@@ -288,7 +275,7 @@ rsx! {
 }
 ```
 
-That is `apps/ui/src/vault.rs` `VaultPage`, trimmed. What a person gets
+That is a workspace page, trimmed. What a person gets
 from it without the app writing any of it:
 
 - tab groups with a + and a menu; drag a tab onto a group's middle, edge or
@@ -368,7 +355,7 @@ fn main() {
 }
 ```
 
-That is `apps/desktop/src/main.rs`. `launch_with_fonts` also registers
+That is an app's `main`. `launch_with_fonts` also registers
 the app's fonts in every window's font context, which is how a bundled face
 loads in Blitz at all. Each pop-out is a Blitz view with its own document
 and `VirtualDom`, its root the host's `Popout`, reading the main window's

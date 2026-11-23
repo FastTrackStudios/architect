@@ -1,6 +1,4 @@
 ---
-"architect-app" = "minor"
-"architect-navigator" = "minor"
 "architect-navigator-api" = "minor"
 ---
 

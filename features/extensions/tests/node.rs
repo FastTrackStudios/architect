@@ -50,7 +50,7 @@ const EXT: &str = "showcase.bank-link";
 const EXCHANGE: &str = "SHOWCASE_BANK_LINK_EXCHANGE";
 
 fn bank_link() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/showcase/bank-link")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/examples/showcase/bank-link")
 }
 
 // ── The org lane, in small ──────────────────────────────────────────
@@ -111,7 +111,7 @@ async fn serve_node(node: NodeHost) -> SocketAddr {
         NodeActionsDispatcher::new(node),
     );
     let gate = PermissionsGate::new(Arc::new(Roles), Arc::new(members))
-        .permit(node_actions_service_descriptor(), &PERMITS);
+        .permit(node_actions_service_descriptor(), node_permits());
     let app = EngineHost::new(router, gate, "127.0.0.1:0").into_app();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let at = listener.local_addr().unwrap();
@@ -460,4 +460,19 @@ secrets = ["key"]"#,
 
     let app_only = manifest("luau", r#"script = "a2.luau""#).unwrap();
     assert!(app_only.node_part().is_none());
+}
+
+/// The node's permit table as the gate takes it.
+fn node_permits() -> &'static architect_permissions::ServicePermits {
+    let methods: Vec<architect_permissions::MethodPermit> = PERMITS
+        .iter()
+        .map(|p| {
+            let m = architect_permissions::MethodPermit::new(p.method, p.action, p.resource);
+            if p.audited { m.audited() } else { m }
+        })
+        .collect();
+    Box::leak(Box::new(architect_permissions::ServicePermits {
+        service: architect_extensions::node::SERVICE,
+        methods: Box::leak(methods.into_boxed_slice()),
+    }))
 }

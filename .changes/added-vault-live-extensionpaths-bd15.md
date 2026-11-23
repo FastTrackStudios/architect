@@ -1,5 +1,4 @@
 ---
-"architect-desktop" = "minor"
 "architect-extensions" = "minor"
 "vault-live" = "minor"
 ---

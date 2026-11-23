@@ -1,6 +1,0 @@
----
-title: Note 130
-tags: [scroll/b]
-index: 130
----
-When progress stalls, change one variable and leave the rest alone.

@@ -32,7 +32,7 @@ Example: `examples/extension`, a registry with a Luau extension and a process ex
 
 ## A minimal example
 
-The manifest, from `apps/sandbox/extensions/metronome/extension.toml`:
+The manifest, a metronome's `extension.toml`:
 
 ```toml
 id = "fts.metronome"
@@ -58,8 +58,7 @@ control = "switch"
 default = true
 ```
 
-The host side, `architect-extensions` with `host`, after
-`apps/ui/src/extensions.rs`:
+The host side, `architect-extensions` with `host`:
 
 ```rust
 use architect_extensions::extensions::Extensions;
@@ -158,15 +157,13 @@ only the extensions whose files changed.
   a built-in shadowed by a development copy, disabled and enabled; a project's
   requirements installed only when the policy approves them; capabilities
   refusing a mutating action; an app's own action id refused.
-- `features/canvas/tests/marker_lane.rs`: an extension overlay inside its capabilities.
-- `features/extensions/tests/remote_view.rs`: the process kind.
+- `app-shell:crates/app-shell-extensions/tests/remote_view.rs`: the process kind.
 
 ## Status
 
-Done in architect for the data, Luau and process kinds; the sandbox runs the
-metronome and the clicker. Not yet: WASM runners; the host starting
-`[[overlays]]` by itself (they are parsed and checked, and run today as
-[canvas](@/features/canvas.md) scripts the app starts); signed archives; a
+Done in architect for the data, Luau and process kinds. Not yet: WASM
+runners; the host starting `[[overlays]]` by itself (they are parsed and
+checked); signed archives; a
 CLI for development copies (`Extensions::dev` is the API).
 
 - **Task** and **Studio** do not use it yet.

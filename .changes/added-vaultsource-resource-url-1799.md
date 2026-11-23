@@ -1,6 +1,4 @@
 ---
-"architect-navigator" = "minor"
-"architect-navigator-extension" = "minor"
 "vault" = "minor"
 ---
 

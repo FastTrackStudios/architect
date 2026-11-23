@@ -1,7 +1,4 @@
 ---
-"architect-desktop" = "patch"
-"architect-distribution" = "patch"
-"architect-web" = "patch"
 "xtask" = "patch"
 ---
 

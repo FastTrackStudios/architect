@@ -244,6 +244,10 @@ pub struct TabDecl {
     pub icon: String,
     /// Its view the tab shows.
     pub view: String,
+    /// Kept on a phone's bar even past its first four places
+    /// (`architect_shell::Tab::kept`): a distribution's own sections
+    /// (Studio's Records, Setlists and Signal) in place of the app's.
+    pub kept: bool,
 }
 
 /// Which end of the status bar an item keeps to.
@@ -490,6 +494,7 @@ impl std::fmt::Display for Claim {
 /// page = "pages/kf.tsx"             # or view = "chart" (one of its [[views]])
 /// claims = { fence = ["kf"], note_type = ["song"] }
 /// max_height = 480                  # past it, the embed scrolls
+/// fill = false                      # true: the view is a claimed note's page
 /// ```
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
@@ -506,6 +511,13 @@ pub struct EmbedDecl {
     pub claims: EmbedClaims,
     /// The most it grows to, points; past it the embed scrolls.
     pub max_height: Option<u32>,
+    /// For a note it claims by type: the view is the note's page, filling
+    /// it, where a shell can show it so (the web app: the note's own
+    /// heading, properties and text are out of the way, as for a setlist
+    /// or a song a view draws whole). Unset, the view is drawn at the
+    /// note's head, over its text.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub fill: bool,
 }
 
 impl EmbedDecl {
@@ -758,8 +770,8 @@ impl NavigatorProviderDecl {
 ///
 /// It is architect-editor's registry entry, as a manifest writes it. Its
 /// `highlights` query is read from the package when the extension loads
-/// (`architect_editor::Language::highlights_text`).
-pub type LanguageDecl = architect_editor::Language;
+/// (`crate::languages::Language::highlights_text`).
+pub type LanguageDecl = crate::languages::Language;
 
 /// A file type that is a note (`[[file_types]]`).
 ///
@@ -881,11 +893,11 @@ impl FileTypeDecl {
         self.body != "text"
     }
 
-    /// Makes its files notes, for the life of the process
-    /// (`vault_proto::note_types::register_with`).
+    /// Makes its files notes, for the life of the process, in the note type
+    /// registry in force ([`crate::vault::note_types`]).
     #[cfg(feature = "host")]
     pub fn register(&self) {
-        vault_proto::note_types::register_type(vault_proto::note_types::NoteFileType {
+        crate::vault::note_types().register(crate::vault::NoteFileType {
             extension: self.extension.clone(),
             note_type: self.note_type.clone(),
             markdown: self.markdown_body(),
@@ -1182,16 +1194,46 @@ pub struct TourDecl {
     pub scenario_text: Option<String>,
 }
 
+/// What a tour's scenario says, as far as a load checks it: its id, how
+/// many of its steps a person sees, and the action each step runs.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ScenarioFacts {
+    pub id: String,
+    pub visible_steps: usize,
+    /// `(step id, action id)` of every step that runs an action.
+    pub runs: Vec<(String, String)>,
+}
+
+/// Reads a scenario's text into its [`ScenarioFacts`]: the guide that plays
+/// tours knows the format, the runtime does not. The app installs one
+/// ([`set_scenario_check`]); without it a tour's text is kept unchecked.
+pub trait ScenarioCheck: Send + Sync {
+    /// # Errors
+    ///
+    /// Why the text is not a scenario.
+    fn facts(&self, text: &str) -> Result<ScenarioFacts, String>;
+}
+
+static SCENARIO_CHECK: std::sync::OnceLock<std::sync::Arc<dyn ScenarioCheck>> =
+    std::sync::OnceLock::new();
+
+/// Install the reader tours are checked with at load (once; later calls are
+/// ignored).
+pub fn set_scenario_check(check: std::sync::Arc<dyn ScenarioCheck>) {
+    let _ = SCENARIO_CHECK.set(check);
+}
+
 impl TourDecl {
-    /// Its scenario, read and checked against its owner's `rules`: it
-    /// parses, its id is the tour's, and each action a step runs is the
-    /// owner's own or one its capabilities reach (a check only reads, and
-    /// the guide runs only read-only ones).
+    /// Its scenario's text, checked against its owner's `rules` when a
+    /// [`ScenarioCheck`] is installed: it reads, its id is the tour's, a
+    /// person sees a step, and each action a step runs is the owner's own
+    /// or one its capabilities reach (a check only reads, and the guide
+    /// runs only read-only ones).
     ///
     /// # Errors
     ///
     /// No text read yet, or the first thing wrong with it.
-    pub fn read(&self, rules: &Rules<'_>) -> Result<architect_guide::Scenario, Refused> {
+    pub fn read(&self, rules: &Rules<'_>) -> Result<String, Refused> {
         let what = format!("tour {}", self.id);
         let refuse = |why: String| Refused {
             what: what.clone(),
@@ -1201,28 +1243,30 @@ impl TourDecl {
             .scenario_text
             .as_deref()
             .ok_or_else(|| refuse(format!("{} is not in its package", self.scenario)))?;
-        let scenario =
-            architect_guide::load(text).map_err(|e| refuse(format!("{}: {e}", self.scenario)))?;
-        if scenario.id != self.id {
+        let Some(check) = SCENARIO_CHECK.get() else {
+            return Ok(text.to_owned());
+        };
+        let facts = check
+            .facts(text)
+            .map_err(|e| refuse(format!("{}: {e}", self.scenario)))?;
+        if facts.id != self.id {
             return Err(refuse(format!(
                 "{} is scenario {:?}; its id is the tour's",
-                self.scenario, scenario.id
+                self.scenario, facts.id
             )));
         }
-        if !scenario.steps.iter().any(|s| !s.hide) {
+        if facts.visible_steps == 0 {
             return Err(refuse("it has no step a person sees".to_owned()));
         }
-        for step in &scenario.steps {
-            if let Some(architect_guide::Do::Run { id, .. }) = &step.act
-                && !rules.reaches(id)
-            {
+        for (step, id) in &facts.runs {
+            if !rules.reaches(id) {
                 return Err(refuse(format!(
-                    "step {} runs {id}, neither its own ({}…) nor one its capabilities reach",
-                    step.id, rules.prefix
+                    "step {step} runs {id}, neither its own ({}…) nor one its capabilities reach",
+                    rules.prefix
                 )));
             }
         }
-        Ok(scenario)
+        Ok(text.to_owned())
     }
 }
 
@@ -1325,10 +1369,10 @@ pub struct Contribution {
     pub tours: Vec<TourDecl>,
     /// Keys in the editor that run its actions (`[[keymaps]]`,
     /// `crate::editor`): `capabilities.writes = ["editor"]`.
-    pub keymaps: Vec<architect_editor::ext::KeymapEntry>,
+    pub keymaps: Vec<editor_ext::KeymapEntry>,
     /// Rows of the editor's slash menu that run its actions (`[[slash]]`):
     /// `capabilities.writes = ["editor"]`.
-    pub slash: Vec<architect_editor::ext::SlashEntry>,
+    pub slash: Vec<editor_ext::SlashEntry>,
 }
 
 /// What a contribution is checked against: its owner's namespace and
@@ -1941,7 +1985,7 @@ impl Contribution {
         }
         for k in &self.key_bindings {
             let what = format!("key {}", k.chord);
-            if architect_commands::parse_shortcut(&k.chord).is_none() {
+            if architect_input::shortcut::parse_shortcut(&k.chord).is_none() {
                 return refuse(what, "its chord is not one (`⌘K`, `⇧⌘P`)".to_owned());
             }
             action(&what, &k.action)?;
@@ -2075,7 +2119,7 @@ impl Contribution {
 }
 
 /// A keymap entry's key in a diff and a merge: its scope and key.
-fn keymap_key(k: &architect_editor::ext::KeymapEntry) -> String {
+fn keymap_key(k: &editor_ext::KeymapEntry) -> String {
     format!("{}/{}", k.when, k.key)
 }
 
@@ -2537,13 +2581,13 @@ impl Contributions {
     /// Every extension's keys in the editor (`[[keymaps]]`), in load
     /// order: `crate::editor::key_action` picks the one a key runs.
     #[must_use]
-    pub fn keymaps(&self) -> Vec<By<architect_editor::ext::KeymapEntry>> {
+    pub fn keymaps(&self) -> Vec<By<editor_ext::KeymapEntry>> {
         self.all(|c| c.keymaps.clone())
     }
 
     /// Every extension's slash-menu rows (`[[slash]]`).
     #[must_use]
-    pub fn slash(&self) -> Vec<By<architect_editor::ext::SlashEntry>> {
+    pub fn slash(&self) -> Vec<By<editor_ext::SlashEntry>> {
         self.all(|c| c.slash.clone())
     }
 
@@ -3004,6 +3048,7 @@ mod tests {
                 title: "Board".into(),
                 icon: "layout-dashboard".into(),
                 view: "board".into(),
+                ..TabDecl::default()
             }],
             status: vec![StatusDecl {
                 id: "clock".into(),

@@ -1,6 +1,4 @@
 ---
-"architect-app" = "minor"
-"architect-command-palette" = "minor"
 "architect-commands" = "minor"
 ---
 

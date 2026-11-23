@@ -19,8 +19,7 @@ the declaration. In this chapter you will:
 Everything here is `architect-settings` (`features/settings`). The default
 build is the model (wasm-clean); feature `store` keeps device and project
 values on disk, `synced` keeps the person's in a CRDT document, `ui` draws
-the page and gives the hooks. The sandbox registers four sections
-(`apps/ui/src/settings.rs`); the derive's full behaviour is pinned by
+the page and gives the hooks. The derive's full behaviour is pinned by
 `features/settings/tests/derive.rs`.
 
 Device-only key/value storage without a page is architect's own

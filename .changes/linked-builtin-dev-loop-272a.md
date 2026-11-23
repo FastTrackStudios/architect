@@ -1,7 +1,5 @@
 ---
 "architect-extensions" = "minor"
-"architect-sandbox-board" = "none"
-"architect-app" = "none"
 "xtask" = "none"
 ---
 

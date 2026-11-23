@@ -19,7 +19,8 @@ out panes.
 `architect-shell` is the frame around it: tabs as a rail, a sidebar or a
 floating pill (with a separate button), drawers, the macOS title bar,
 breadcrumbs and toolbars, the org and workspace switcher, the account, the
-status line. Develop both in the sandbox, `apps/sandbox` (`dx serve`). Design:
+status line. Both are moving to FastTrackStudio/app-shell
+(`app-shell:crates/app-shell`). Design:
 [Workspace](@/architecture/workspace.md), [App shell](@/architecture/app-shell.md)
 and [Composing the UI](@/architecture/composing-the-ui.md).
 
@@ -45,7 +46,7 @@ ws.open(Pane::new("note-1", "note", "Welcome"), Target::Tab)?;
 ws.open(Pane::new("files", "files", "Files"), Target::Dock(Side::Left))?;
 ```
 
-Host, after `apps/ui/src/vault.rs` `VaultPage` (which passes more props):
+Host:
 
 ```rust
 use architect_workspace::{MemoryStore, Screenset, Screensets, FormClass, Side, Target,
@@ -106,7 +107,7 @@ root, with the page as its children; a page adds status items with
    registers the `WORKSPACE_*` commands. A pane's header (back, forward, its
    title, `…`) takes a view's own title and buttons from `HeaderParts`
    (`ViewHeader`): a vault note is renamed there and opens its Properties
-   from it (`apps/ui/src/note_head.rs`), so its name is said once, at the top.
+   from it, so its name is said once, at the top.
 7. `features/workspace/src/host/windows.rs` `WindowSystem`, `Popout`, `Bridge`
    and `features/workspace/src/native.rs` `launch`, `launch_with_fonts`.
 8. `features/shell/src/shell/mod.rs` `AppShell`, `Tab`, `Action`, `Account`,
@@ -131,7 +132,6 @@ its tabs back to the main one.
   the saved layouts (saved over by name, renamed, slotted, deleted, with
   their options and events), a set bringing back pop-out windows, dock
   sizes and visibility, floats and pinned tabs, and the split store.
-- `apps/sandbox/scenarios/workspaces-manage.styx`: the manage sheet, played.
 - `features/workspace/tests/windows.rs`: one document's signal redraws
   another; a pop-out opens and gives its tabs back; a kept layout comes back
   on mount; a pane's status items.
@@ -143,8 +143,7 @@ its tabs back to the main one.
 - `features/workspace/tests/inner_html.rs`: a window's document
   (`native::document_config`, the main window's and every pop-out's) parses
   `dangerous_inner_html` into nodes.
-- The shell has unit tests for form factors and frames only; it is checked by
-  eye in the sandbox, `apps/sandbox`.
+- The shell has unit tests for form factors and frames only.
 
 ## Status
 

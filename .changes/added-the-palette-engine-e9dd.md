@@ -1,9 +1,6 @@
 ---
-"architect-app" = "minor"
-"architect-command-palette" = "minor"
 "architect-commands" = "major"
 "architect-extensions" = "minor"
-"architect-launcher-core" = "minor"
 "architect-palette" = "minor"
 ---
 

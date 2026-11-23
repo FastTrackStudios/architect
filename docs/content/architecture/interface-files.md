@@ -7,8 +7,7 @@ weight = 70
 > **Status: landed (2026-11-03).** The shell's slots:
 > `features/shell/src/shell/chrome.rs` `Chrome`, `Slot`, `Filler`. The
 > files: `features/workspace/src/home.rs` `Home` (feature `home`), its
-> actions (`home::actions`) and its window glue (`home::ui`). The sandbox
-> uses both (`apps/ui/src/lib.rs` `LabApp`). Not yet: the `.state/`
+> actions (`home::actions`) and its window glue (`home::ui`). Not yet: the `.state/`
 > of sidebar widths and folds (the shell keeps them in memory), a
 > `layout.switch` key, a generated guide (#268 H2), the escape-hatch key
 > (H7), cloning a built-in (`WORKSPACES_CLONE`, on its own branch).
@@ -45,7 +44,7 @@ byte, with no chrome and with an empty one.
 
 `Chrome` also carries what others add beside the app's own tabs, status
 items and bar buttons. An extension's tables arrive there through
-`features/extensions/src/interface.rs` `ExtensionUi::chrome`; a layout
+`app-shell:crates/app-shell-extensions/src/interface.rs` `ExtensionUi::chrome`; a layout
 file's through `home::ui::chrome_of`. `Chrome::over` puts one over the
 other: the layout's word beats an extension's claim.
 

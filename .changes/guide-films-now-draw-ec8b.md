@@ -1,6 +1,5 @@
 ---
 "architect-guide" = "minor"
-"architect-sandbox-media" = "minor"
 "architect-workspace" = "minor"
 ---
 

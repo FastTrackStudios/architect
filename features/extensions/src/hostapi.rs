@@ -23,7 +23,7 @@
 //! the app itself) — so the list's authorizer, or a server's gate, can
 //! tell its call from the person's. Each call is a span (`ext.host_call`)
 //! carrying `perm.*` (the capability asked, the decision, the reason and
-//! the principal), set with `architect_telemetry::wide::set` as well; a
+//! the principal), recorded on that span; a
 //! refused or failed call is a line in the extension's log (`EXT_LOGS`).
 //!
 //! What the app knows that the host does not — the organization, the
@@ -62,6 +62,31 @@ use crate::hostui::{Asker, Decorated, Decorations, HostUi, NoUi, Notification};
 use crate::logs::{Level, Logs};
 use crate::manifest::{Capabilities, Manifest, Reach};
 use crate::net::Secrets;
+
+/// What the app's window does when an extension's session ends, each
+/// told its id ([`on_forget`]).
+static FORGETS: Mutex<Vec<fn(&str)>> = Mutex::new(Vec::new());
+
+/// Where a process view's `set_view_state` goes: the window that draws
+/// process views ([`set_view_state_sink`]); none, and the call is
+/// unsupported.
+#[allow(clippy::type_complexity)]
+static VIEW_STATE_SINK: Mutex<Option<fn(&str, &str, &str)>> = Mutex::new(None);
+
+/// Calls `forget` with an extension's id when its session ends: what the
+/// app's window keeps for it goes with it.
+pub fn on_forget(forget: fn(&str)) {
+    let mut all = lock(&FORGETS);
+    if !all.iter().any(|f| std::ptr::fn_addr_eq(*f, forget)) {
+        all.push(forget);
+    }
+}
+
+/// Hands process views' `set_view_state` calls (extension, pane, state)
+/// to `offer`: the window that draws them.
+pub fn set_view_state_sink(offer: fn(&str, &str, &str)) {
+    *lock(&VIEW_STATE_SINK) = Some(offer);
+}
 
 /// The longest secret an extension may store (`store_secret`), bytes.
 pub const MAX_SECRET: usize = 8 * 1024;
@@ -117,25 +142,6 @@ pub trait DataStore: Send + Sync {
     fn keep(&self, id: &str, data: &BTreeMap<String, Value>) -> Result<(), String>;
 }
 
-/// The vault query service's client as a host keeps it: as it is
-/// natively; in a browser, where vox's clients hold `Rc`s and the page
-/// has one thread, wrapped so the host stays `Send` and `Sync` (touched
-/// from another thread, it panics rather than race), #495.
-#[cfg(not(target_family = "wasm"))]
-type HeldQuery = Box<vault_proto::query::VaultQueryClient>;
-#[cfg(target_family = "wasm")]
-type HeldQuery = send_wrapper::SendWrapper<vault_proto::query::VaultQueryClient>;
-
-#[cfg(not(target_family = "wasm"))]
-fn held_query(client: vault_proto::query::VaultQueryClient) -> HeldQuery {
-    Box::new(client)
-}
-
-#[cfg(target_family = "wasm")]
-fn held_query(client: vault_proto::query::VaultQueryClient) -> HeldQuery {
-    send_wrapper::SendWrapper::new(client)
-}
-
 /// Settings' values in memory, for the run.
 #[derive(Debug, Default)]
 pub struct MemoryValues(Mutex<BTreeMap<String, Value>>);
@@ -158,15 +164,12 @@ impl SettingValues for MemoryValues {
     }
 }
 
-/// One `perm.*` field on the wide event (`architect_telemetry::wide::set`,
-/// feature `wide-events`); the span's own fields carry it regardless.
-#[cfg(feature = "wide-events")]
+/// One field (`perm.*`, `ext.*`, `http.*`) on the call's span: recorded
+/// where the span declares it, ignored where it does not.
 fn wide(key: &'static str, value: impl Into<String>) {
-    architect_telemetry::wide::set(key, value.into());
+    let value: String = value.into();
+    tracing::Span::current().record(key, value.as_str());
 }
-
-#[cfg(not(feature = "wide-events"))]
-fn wide(_key: &'static str, _value: impl Into<String>) {}
 
 /// The documents service's client and the scope its server lives in.
 type DocsClient = (
@@ -190,7 +193,11 @@ pub(crate) struct Services {
     /// The app's documents, for the document calls.
     documents: Mutex<Option<Arc<dyn Documents>>>,
     /// The vault's query service, when the app keeps a vault index.
-    vault_query: Mutex<Option<HeldQuery>>,
+    vault_query: Mutex<Option<Arc<dyn crate::vault::VaultQuery>>>,
+    /// Whether the host runs for a share link's guest (`Host::for_guest`).
+    guest: std::sync::atomic::AtomicBool,
+    /// The node's files of a project, as the person reaches them.
+    held_files: Mutex<Option<Arc<dyn crate::held::HeldFilesSource>>>,
     /// The app's editors, for the editor calls (`crate::editor`).
     editors: Mutex<Option<Arc<dyn crate::editor::Editors>>>,
     values: Mutex<Arc<dyn SettingValues>>,
@@ -211,7 +218,6 @@ pub(crate) struct Services {
     ui: Mutex<Option<Arc<dyn HostUi>>>,
     /// The window's own interface, kept for whoever draws it
     /// (`host_ui_view::WindowUi::lend`).
-    #[cfg(feature = "ui")]
     window: Mutex<Option<Arc<dyn std::any::Any + Send + Sync>>>,
     /// What extensions set on rows and tabs.
     decorations: Decorations,
@@ -261,9 +267,11 @@ impl Services {
         if let Some(device) = device {
             device.forget(id);
         }
-        // The folders it was given on iOS are closed again.
-        #[cfg(all(feature = "pickers", target_os = "ios"))]
-        crate::pickers_ios::stop_scopes(id);
+        // What the app's window keeps for it goes too (the folders it
+        // was given on iOS are closed again).
+        for forget in lock(&FORGETS).iter() {
+            forget(id);
+        }
         #[cfg(feature = "net")]
         self.net.forget(id);
         // Its live documents: a later session needs a new answer.
@@ -300,6 +308,8 @@ impl Default for Services {
             app: Mutex::new(None),
             documents: Mutex::new(None),
             vault_query: Mutex::new(None),
+            guest: std::sync::atomic::AtomicBool::new(false),
+            held_files: Mutex::new(None),
             editors: Mutex::new(None),
             values: Mutex::new(Arc::new(MemoryValues::default())),
             data_root: Mutex::new(None),
@@ -309,7 +319,6 @@ impl Default for Services {
             docs_client: Mutex::new(None),
             data_store: Mutex::new(None),
             ui: Mutex::new(None),
-            #[cfg(feature = "ui")]
             window: Mutex::new(None),
             decorations: Decorations::default(),
             device: Mutex::new(None),
@@ -503,8 +512,8 @@ impl Host {
         lock(&self.services().kind_docs).clone()
     }
 
-    /// A vault for extensions: its `documents` and its query service's
-    /// client (`vault_proto::query::VaultQuery`, served wherever the app
+    /// A vault for extensions: its `documents` and its query service
+    /// ([`crate::vault::VaultQuery`], served wherever the app
     /// keeps the vault's index: in process on a desk and a phone, over a
     /// browser's synced index), given together, for one [`VaultScope`], so
     /// a host never queries past the documents it gives. A share guest's
@@ -514,7 +523,7 @@ impl Host {
     pub fn with_vault(
         self,
         documents: Arc<dyn Documents>,
-        queries: vault_proto::query::VaultQueryClient,
+        queries: Arc<dyn crate::vault::VaultQuery>,
         scope: VaultScope,
     ) -> Self {
         self.set_vault(documents, queries, scope);
@@ -525,22 +534,67 @@ impl Host {
     pub fn set_vault(
         &self,
         documents: Arc<dyn Documents>,
-        queries: vault_proto::query::VaultQueryClient,
+        queries: Arc<dyn crate::vault::VaultQuery>,
         scope: VaultScope,
     ) {
         *lock(&self.services().documents) = Some(documents);
         *lock(&self.services().vault_query) = match scope {
-            VaultScope::Person => Some(held_query(queries)),
+            VaultScope::Person => Some(queries),
             VaultScope::Guest => None,
         };
     }
 
-    /// The vault's query service's client, when the app gave one.
+    /// A host that runs for a share link's guest (#629): from now on it
+    /// answers no host-service call that reaches a vault, kept data, a
+    /// file, the device or an app action, whatever an extension's
+    /// capabilities say (`crate::hostcall::guest_check`), and a path an
+    /// extension asks to open goes to the app's own opener alone
+    /// (`Host::set_path_opener`), which opens only what the link lists.
+    ///
+    /// The app that shows a link builds its host this way and gives it no
+    /// documents and no vault. It is what lets the app's own linked views
+    /// draw a guest's content (`crate::embeds::GuestEmbedPolicy`): they
+    /// run in the app's process, and this host is the one they ask.
     #[must_use]
-    pub fn vault_query(&self) -> Option<vault_proto::query::VaultQueryClient> {
-        lock(&self.services().vault_query)
-            .as_ref()
-            .map(|held| (**held).clone())
+    pub fn for_guest(self) -> Self {
+        self.services()
+            .guest
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self
+    }
+
+    /// Whether it runs for a share link's guest ([`Self::for_guest`]).
+    #[must_use]
+    pub fn is_guest(&self) -> bool {
+        self.services()
+            .guest
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// The vault's query service, when the app gave one.
+    #[must_use]
+    pub fn vault_query(&self) -> Option<Arc<dyn crate::vault::VaultQuery>> {
+        lock(&self.services().vault_query).clone()
+    }
+
+    /// The node's files of a project for extensions (`file_list`,
+    /// `file_url`; `crate::held`), as the person reaches them; `None` takes
+    /// them away (signed out). A share guest's host gets none.
+    pub fn set_held_files(&self, source: Option<Arc<dyn crate::held::HeldFilesSource>>) {
+        *lock(&self.services().held_files) = source;
+    }
+
+    /// [`Self::set_held_files`] as a builder.
+    #[must_use]
+    pub fn with_held_files(self, source: Arc<dyn crate::held::HeldFilesSource>) -> Self {
+        self.set_held_files(Some(source));
+        self
+    }
+
+    /// The node's files of a project, when the app gave them.
+    #[must_use]
+    pub fn held_files(&self) -> Option<Arc<dyn crate::held::HeldFilesSource>> {
+        lock(&self.services().held_files).clone()
     }
 
     /// The app's editors, for extensions that may read and change the one
@@ -623,11 +677,7 @@ impl Host {
 
     /// The window's interface, kept with the host for whoever draws it,
     /// made by `make` the first time it is asked for.
-    #[cfg(feature = "ui")]
-    pub(crate) fn window_slot<T: Clone + Send + Sync + 'static>(
-        &self,
-        make: impl FnOnce() -> T,
-    ) -> T {
+    pub fn window_slot<T: Clone + Send + Sync + 'static>(&self, make: impl FnOnce() -> T) -> T {
         let mut slot = lock(&self.services().window);
         if let Some(kept) = slot.as_ref().and_then(|k| k.downcast_ref::<T>()) {
             return kept.clone();
@@ -1148,6 +1198,13 @@ impl ExtensionApi {
         if !matches!(request, HostRequest::Run { .. }) {
             Self::checked(manifest, &may, &request)?;
         }
+        // A share link's guest: nothing of a vault, whatever it may reach.
+        if host.is_guest() {
+            Self::decide(
+                crate::hostcall::GUEST,
+                crate::hostcall::guest_check(manifest, &request),
+            )?;
+        }
         // Health data is the app's own compiled-in extensions' alone (the
         // Health bundle, #371): an installed or a development copy is
         // refused even with the entry in its manifest.
@@ -1184,6 +1241,11 @@ impl ExtensionApi {
                 .app_context()
                 .and_then(|c| c.selection())
                 .unwrap_or(Value::Null)),
+            // For a guest, the app's own opener alone: no extension's
+            // opener is handed a path of the link.
+            HostRequest::Open { path } if host.is_guest() => host
+                .open_with_app(&path)
+                .map_err(|message| HostError::Failed { message }),
             HostRequest::Open { path } => host
                 .open(
                     Opening::Path(path),
@@ -1219,7 +1281,7 @@ impl ExtensionApi {
                 let client = host.vault_query().ok_or_else(|| HostError::Unsupported {
                     what: "the vault's query service: this host has no vault index (none kept, or a share's guest)".to_owned(),
                 })?;
-                let request = vault_proto::query::QueryRequest {
+                let request = crate::vault::QueryRequest {
                     path,
                     source,
                     view,
@@ -1229,14 +1291,23 @@ impl ExtensionApi {
                     // if it does.
                     limit: Some(limit.map_or(QUERY_LIMIT, |n| n.min(QUERY_LIMIT_MAX))),
                 };
-                let answer = client.query(request).await.map_err(|e| HostError::Failed {
-                    message: e.to_string(),
-                })?;
+                let answer = client
+                    .query(request)
+                    .await
+                    .map_err(|message| HostError::Failed { message })?;
                 serde_json::from_str(&answer).map_err(|e| HostError::Failed {
                     message: format!("the query service's answer: {e}"),
                 })
             }
             HostRequest::LiveDocument { path } => self.live_document(&host, manifest, &may, &path),
+            HostRequest::FileList { place, folder } => {
+                let source = host.held_files().ok_or_else(crate::held::unsupported)?;
+                source.list(place, folder).await
+            }
+            HostRequest::FileUrl { place, path } => {
+                let source = host.held_files().ok_or_else(crate::held::unsupported)?;
+                source.url(place, path).await
+            }
             HostRequest::ListDocuments { .. }
             | HostRequest::CreateDocument { .. }
             | HostRequest::EditDocument { .. }
@@ -1527,17 +1598,15 @@ impl ExtensionApi {
                 Ok(Value::Array(listed))
             }
             HostRequest::SetViewState { pane, state } => {
-                #[cfg(feature = "remote")]
-                {
-                    crate::remote::offer_view_state(&self.id, &pane, &state);
-                    Ok(Value::Null)
-                }
-                #[cfg(not(feature = "remote"))]
-                {
-                    let _ = (pane, state);
-                    Err(HostError::Unsupported {
+                let sink = *lock(&VIEW_STATE_SINK);
+                match sink {
+                    Some(offer) => {
+                        offer(&self.id, &pane, &state);
+                        Ok(Value::Null)
+                    }
+                    None => Err(HostError::Unsupported {
                         what: "set_view_state: this host shows no process views".to_owned(),
-                    })
+                    }),
                 }
             }
             HostRequest::Log { text, level } => {

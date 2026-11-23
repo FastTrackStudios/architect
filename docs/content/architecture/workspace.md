@@ -8,8 +8,7 @@ weight = 54
 > The model is `architect-workspace` (`features/workspace/src/model.rs`,
 > `ops.rs`, `screenset.rs`, `store.rs`); the host is its `ui` feature
 > (`features/workspace/src/host/mod.rs` `WorkspaceView`, `View`, `Views`,
-> `TitleRow`), developed in the sandbox's Vault tab
-> (`apps/ui/src/vault.rs`). Pop-out OS windows are the `native`
+> `TitleRow`). Pop-out OS windows are the `native`
 > feature's launcher (`features/workspace/src/native.rs` `launch`); tabs
 > reorder within a bar, a finger held on a tab opens its menu, stacked
 > tabs slide over each other, ⌘1–9 recall screensets for the screen's
@@ -147,50 +146,15 @@ not a scope tab: there is no "Vault" tab. A note opened from anywhere
 while a scope tab is active joins that scope's tabs (the live workspace
 is the scope's).
 
-In the Architect app (`apps/ui/src/decks.rs`, `apps/ui/src/vault.rs`
-`VaultPage`) the general tabs are the vault's ("Write"); a project's
-folder ⌘-clicked or middle-clicked in the navigator opens in a scope tab
-of its own ("Project", its `project.md` opened when nothing was kept),
-drawn by Architect's compact `project` kind: the project's own icon and
-colour from its `project.md`, else the project glyph
-(`apps/ui/src/decks.rs` `tab_kinds`).
 The session and the saved screensets are the device's
 (`<app folder>/decks/`), each scope tab's layout its context's. ⌘1–9 and
-⌃Tab become the scope tabs' once one is open. The sandbox adds a
-Studio-shaped demo, the Setlists extension (`apps/ui/src/setlists.rs`): a
-setlist in the navigator, each song a scope tab in the "Song" screenset
-it ships through `[[deck_templates]]`. Its `[[tab_kinds]]`
-(`apps/ui/src/setlists.toml`) make a song's tab wide (its title over
-"G · 72 bpm", in the song's colour) and its Setlist view a custom tab,
-drawn by the extension's renderer (`setlist_tab`: the setlist glyph and
-how many songs).
+⌃Tab become the scope tabs' once one is open.
 
 A project loaded by `SCOPE_OPEN` with only its type and id
 (`{context: {kind: project, id: "Projects/Album"}}`) opens the same way as
 a middle-click in the navigator. The app's `DecksConfig::resolve` fills
-in its folder before what it kept is read (`apps/ui/src/decks.rs`
-`resolve`). `DecksConfig::on_fresh` is told of every context loaded with
+in its folder before what it kept is read. `DecksConfig::on_fresh` is told of every context loaded with
 nothing kept, from any load, and opens the project's page.
-
-**The sidebar is shared; its selection is each deck's.** One navigator
-serves every deck: its settings, pins, folded rows, width and the vaults
-and providers in it are the same on every deck. What it has selected
-belongs to the deck on show (`apps/ui/src/vault.rs` `follow_deck`). A deck
-starts on its context's row (`deck_home`):
-
-- the vault's deck: the whole navigator, every vault and provider;
-- a project's deck: its row in Projects, which lists the project's
-  contents (Songs, Notes, Sub-projects, Tasks);
-- a provider's context (a setlist's song): the container it is in (its
-  setlist).
-
-What a person selects on a deck stays with that deck when they switch
-away and back. This lasts for the run: a relaunch starts each deck on its
-context's row again, except the first deck, which keeps what the
-navigator had open. A note inside a project's folder on show on the
-project's deck (its page, its songs) leaves the project's row selected
-and does not reveal the note in its vault folder
-(`NavigatorState::set_active_with`).
 
 An app with scope tabs calls `use_decks` beside its `WorkspaceView`
 (giving it the same `Signal<Workspace>` and `Signal<Screensets>`, its

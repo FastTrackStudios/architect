@@ -20,11 +20,11 @@ export function guests() {
   // not fall back to another build.
   const named = process.env.ARCHITECT_WASI_GUESTS;
   for (const dir of named ? [named] : [join(root, 'target/wasi-guest/wasm32-wasip2/debug'), join(root, 'target/wasm32-wasip2/debug')])
-    if (dir && existsSync(join(dir, 'architect_sandbox_wasi_counter.wasm'))) return dir;
+    if (dir && existsSync(join(dir, 'architect_extension_wasi_counter.wasm'))) return dir;
   if (process.env.ALLOW_SKIP === '1') return null;
   throw new Error(
     'the WASI components these tests run are not built: run `cargo nextest run -p architect-extensions --test wasi_web` ' +
-      '(it builds them into target/wasi-guest), or `devenv --profile wasi shell -- cargo build -p architect-sandbox-wasi-counter ' +
+      '(it builds them into target/wasi-guest), or `devenv --profile wasi shell -- cargo build -p architect-extension-wasi-counter ' +
       '-p architect-extension-wasi-hazards --target wasm32-wasip2`, or set ARCHITECT_WASI_GUESTS; ALLOW_SKIP=1 skips them on purpose',
   );
 }

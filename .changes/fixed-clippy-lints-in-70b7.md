@@ -1,6 +1,5 @@
 ---
 "architect-extensions" = "none"
-"architect-app" = "none"
 "architect-workspace" = "none"
 ---
 

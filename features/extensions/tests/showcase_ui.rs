@@ -40,7 +40,7 @@ use serde_json::{Value, json};
 
 fn example(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/showcase")
+        .join("tests/fixtures/examples/showcase")
         .join(name)
 }
 

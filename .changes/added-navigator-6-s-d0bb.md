@@ -1,8 +1,5 @@
 ---
-"architect-app" = "minor"
 "architect-extensions" = "minor"
-"architect-navigator" = "minor"
-"architect-navigator-extension" = "minor"
 "architect-settings" = "minor"
 ---
 

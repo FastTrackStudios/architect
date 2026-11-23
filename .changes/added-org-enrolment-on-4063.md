@@ -1,6 +1,5 @@
 ---
 "architect-accounts" = "minor"
-"architect-desktop" = "minor"
 "crdt" = "minor"
 ---
 

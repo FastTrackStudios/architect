@@ -12,12 +12,12 @@ step asks you to make and the code that answers them. Every code block
 is taken from, or matches, code in this repo, and each chapter ends
 with the architecture pages that cover its subject in full.
 
-The running example is `examples/greeter`: an entity (`Note`), a
-service (`Greeter`) with its error and a stream, an in-memory backend,
-a server, and tests that run one scenario over every wire. It is small
-enough to read in one sitting, and every chapter adds to it or points
-at the larger code that does the same thing for real
-(`apps/auth-server`, and Task and studio in their own repos).
+The running example is a greeter: an entity (`Note`), a service
+(`Greeter`) with its error and a stream, an in-memory backend, a server,
+and tests that run one scenario over every wire. It is small enough to
+hold in your head, and every chapter adds to it or points at the larger
+code that does the same thing for real (`apps/auth-server`, and Studio
+in its own repo).
 
 ## Part 1: the backend half
 
@@ -42,6 +42,11 @@ at the larger code that does the same thing for real
 
 ## Part 2: the app half
 
+The shell, the workspace and the UI kit are moving to
+FastTrackStudio/app-shell, which Studio already runs on
+(`app-shell:crates/app-shell-extensions` draws extensions there);
+chapters 8 and 9 describe the copies still in this repo.
+
 8. [The app shell and the workspace](@/guide/ui.md): mount
    `architect-shell`, give it tabs, sides and a status line, and hand
    `architect-workspace` your views for tab groups, splits, docks,
@@ -65,17 +70,6 @@ at the larger code that does the same thing for real
 13. [Sign-in, permissions and organizations](@/guide/identity.md): the
     identity server, the session and the device, `PermissionsGate`, and
     the organization as the scope of everything.
-14. [Scripts, extensions and canvases](@/guide/extending.md): Luau over
-    the Action List, extensions with manifests and hot reload, process
-    extensions with remote views, and canvases over a view.
-15. [Your own Architect](@/guide/your-own-architect.md): a distribution
-    as code, the extensions you choose compiled in, built for desktop,
-    the web and the node with `cargo xtask dist`.
-
-## On your machine
-
-[The whole stack on your machine](@/guide/local-stack.md): `devenv up`
-starts the auth server, the app (which is also its node) and the web
-app, wired to each other
-and to nothing else, filled from a sanitised mirror of production on a
-credentialed machine and from the demo seed everywhere else.
+14. [Scripts and extensions](@/guide/extending.md): Luau over the
+    Action List, extensions with manifests and hot reload, and process
+    extensions with remote views.

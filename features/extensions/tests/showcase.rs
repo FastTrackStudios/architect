@@ -37,7 +37,7 @@ use serde_json::{Value, json};
 
 fn example(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/showcase")
+        .join("tests/fixtures/examples/showcase")
         .join(name)
 }
 
@@ -431,61 +431,4 @@ fn templater_lite_makes_a_prompted_title_a_safe_file_name() {
     .unwrap();
     // No folder climbed out of, no `:`: one file in Inbox/.
     assert_eq!(out, "Inbox/-.-etc-pass-wd.md");
-}
-
-/// The showcase vault names every showcase extension (#710 L2): opening it
-/// anywhere lists what is missing, with "Install all"; each range takes the
-/// example's version now, so a desk with them loaded has all it needs.
-#[test]
-fn the_showcase_vault_names_every_showcase_extension() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let needs = architect_extensions::vault_needs::read(&root.join("apps/ui/demo-vault")).unwrap();
-    let mut seen = std::collections::BTreeSet::new();
-    for r in &needs.extensions {
-        assert!(seen.insert(r.id.clone()), "{} named twice", r.id);
-    }
-    let mut folders: Vec<std::path::PathBuf> = std::fs::read_dir(root.join("examples/showcase"))
-        .unwrap()
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|p| p.join("extension.toml").is_file())
-        .collect();
-    folders.extend(
-        [
-            "apps/sandbox/extensions/outline",
-            "apps/sandbox/extensions/surface",
-            "apps/sandbox/extensions/metronome",
-            "apps/sandbox/extensions/tidy",
-            "apps/sandbox/kanban",
-            "apps/sandbox/sketch",
-            "apps/sandbox/board",
-            "apps/sandbox/clicker",
-            "apps/sandbox/wasi-counter",
-            "examples/extension/counter",
-            "examples/extension/webview-board/package",
-        ]
-        .iter()
-        .map(|d| root.join(d)),
-    );
-    for folder in folders {
-        let text = std::fs::read_to_string(folder.join("extension.toml")).unwrap();
-        let m: toml::Value = toml::from_str(&text).unwrap();
-        let id = m["id"].as_str().unwrap();
-        let version = semver::Version::parse(m["version"].as_str().unwrap()).unwrap();
-        let r = needs
-            .extensions
-            .iter()
-            .find(|r| r.id == id)
-            .unwrap_or_else(|| {
-                panic!(
-                    "the showcase vault does not name {id} ({})",
-                    folder.display()
-                )
-            });
-        assert!(
-            r.req().matches(&version),
-            "{id} {version} is not in {}",
-            r.version
-        );
-    }
 }

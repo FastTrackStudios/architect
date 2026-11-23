@@ -33,10 +33,6 @@
 //! data in its document ([`doc`]); `ui` brings loaded extensions' sections
 //! onto the settings page ([`ui::use_extension_sections`]).
 
-// A linked-in view's root is a fn pointer compared by Dioxus's props: a
-// stale compare only redraws.
-#![cfg_attr(feature = "ui", allow(unpredictable_function_pointer_comparisons))]
-
 pub mod capabilities;
 pub mod catalog;
 pub mod contrib;
@@ -47,8 +43,10 @@ pub mod disk;
 pub mod editor;
 pub mod events;
 pub mod hostcall;
+
 pub mod index;
 pub mod interop;
+pub mod languages;
 pub mod manifest;
 pub mod package;
 #[cfg(feature = "person-sync")]
@@ -61,6 +59,8 @@ pub mod share_layers;
 pub mod share_needs;
 #[cfg(feature = "host")]
 pub mod share_pick;
+#[cfg(feature = "host")]
+pub mod vault;
 #[cfg(feature = "host")]
 pub mod vault_needs;
 /// `[[favourites]]`: a note type's tabs and primary action.
@@ -101,21 +101,19 @@ mod forward;
 #[cfg(all(feature = "guest", unix))]
 pub mod guest;
 #[cfg(feature = "host")]
+pub mod held;
+#[cfg(feature = "host")]
 pub mod host;
 #[cfg(feature = "host")]
 pub mod host_events;
 #[cfg(feature = "vox")]
 pub mod host_proto;
-#[cfg(feature = "ui")]
-pub mod host_ui_view;
 #[cfg(feature = "host")]
 pub mod hostapi;
 #[cfg(feature = "host")]
 pub mod hostui;
 #[cfg(feature = "host")]
 pub mod install;
-#[cfg(feature = "ui")]
-pub mod interface;
 #[cfg(feature = "host")]
 pub mod interop_actions;
 #[cfg(any(feature = "host", feature = "web"))]
@@ -143,20 +141,6 @@ pub mod net;
 #[cfg(any(feature = "host", feature = "vox"))]
 pub mod node;
 pub mod overlay;
-#[cfg(all(feature = "pickers", target_os = "ios"))]
-pub(crate) mod pickers_ios;
-#[cfg(feature = "scenes")]
-pub mod scene;
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-mod web_scene;
-// Language servers through the host (#512): `Host::open_code`, the
-// `EDITOR_*` actions. Native only.
-#[cfg(all(feature = "remote", unix))]
-pub mod barrier;
-#[cfg(all(feature = "lsp", not(target_family = "wasm")))]
-pub mod lsp;
-#[cfg(feature = "page")]
-pub mod page;
 #[cfg(feature = "host")]
 pub mod points;
 #[cfg(feature = "host")]
@@ -172,22 +156,14 @@ pub mod proto;
 pub mod registries;
 #[cfg(feature = "host")]
 mod registry_actions;
-#[cfg(all(feature = "remote", unix))]
-pub mod remote;
+#[cfg(feature = "scenes")]
+pub mod scene;
 #[cfg(feature = "host")]
 pub mod source;
 #[cfg(feature = "host")]
 pub mod toolbar_actions;
-#[cfg(feature = "ui")]
-pub mod toolbar_editor;
-#[cfg(feature = "ui")]
-pub mod toolbar_ui;
 #[cfg(feature = "host")]
 pub mod toolbars;
-#[cfg(feature = "ui")]
-pub mod typing_ui;
-#[cfg(feature = "ui")]
-pub mod ui;
 #[cfg(feature = "host")]
 pub mod views;
 #[cfg(feature = "wasi")]
@@ -196,8 +172,8 @@ pub mod wasi;
 pub mod watch;
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 pub mod web;
-#[cfg(feature = "ui")]
-pub mod window_ui;
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+mod web_scene;
 #[cfg(feature = "host")]
 pub mod windows;
 #[cfg(feature = "vox")]

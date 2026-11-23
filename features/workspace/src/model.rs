@@ -3,20 +3,7 @@
 
 use facet::Facet;
 
-/// A pane's id: stable and addressable.
-///
-/// The one its maker gave it (a script's `"timer"`, a plugin window's
-/// `"fx:<track>/<slot>"`), or its view and subject (`"studio.song:<id>"`).
-/// Opening an id that is open brings that pane forward instead of making
-/// another.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Facet)]
-pub struct PaneId(pub String);
-
-impl PaneId {
-    pub fn new(id: impl Into<String>) -> Self {
-        Self(id.into())
-    }
-}
+pub use architect_views::PaneId;
 
 /// What shows a pane: a view the app (or an extension) registered
 /// (`"session.mixer"`). A kind the running app does not know keeps its

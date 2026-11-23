@@ -1,8 +1,5 @@
 ---
-"architect-desktop" = "minor"
-"architect-distribution" = "minor"
 "architect-extensions" = "minor"
-"architect-sites" = "minor"
 "crdt" = "minor"
 "vault-collab" = "minor"
 ---

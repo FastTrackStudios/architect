@@ -1108,6 +1108,18 @@ pub(super) fn PaneSlot(pane: PaneId) -> Element {
     let host = use_host();
     let t = host.theme.read().clone();
     let this = use_context_provider(|| ThisPane(Signal::new(pane.clone())));
+    // What a view drawn in it is told of it: its id, state and view state
+    // (`architect_views::PaneHost`), and a paint view the theme.
+    let preview = try_use_context::<super::Previewing>().is_some();
+    use_context_provider(|| {
+        architect_views::PaneHostRef(std::rc::Rc::new(super::SlotPane {
+            this: this.0,
+            host,
+            preview,
+        }))
+    });
+    #[cfg(feature = "paint-ui")]
+    use_context_provider(|| crate::paint::workspace_chrome(this.0));
     if *this.0.peek() != pane {
         let mut current = this.0;
         current.set(pane.clone());

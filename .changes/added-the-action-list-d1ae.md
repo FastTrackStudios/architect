@@ -1,6 +1,5 @@
 ---
 "architect-control" = "minor"
-"architect-desktop" = "minor"
 "architect-guide" = "minor"
 "architect-mcp" = "minor"
 ---

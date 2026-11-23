@@ -51,7 +51,7 @@ use architect_scripting::luau::{Limits, Runtime};
 use architect_scripting::worker::{WorkerGroup, Workers};
 use architect_settings::{Owner, Registry, Section};
 use architect_theme::{Contribution, Problem, Theme, ThemeStore};
-use architect_workspace::{KindError, ViewKinds};
+use architect_views::{KindError, ViewKinds};
 use semver::Version;
 use serde_json::Value;
 
@@ -919,11 +919,7 @@ struct Inner {
     theme_heard: Mutex<Option<architect_theme::Subscription>>,
     /// The editor's language registry: the app's own languages
     /// ([`Host::with_languages`]) and loaded extensions' `[[languages]]`.
-    languages: Mutex<architect_editor::Languages>,
-    /// The language servers it runs (`crate::lsp`), when the app gave
-    /// them.
-    #[cfg(all(feature = "lsp", not(target_family = "wasm")))]
-    language_servers: Mutex<Option<architect_editor::lsp::LanguageServers>>,
+    languages: Mutex<crate::languages::Languages>,
     /// What loaded extensions add to the interface.
     contributions: Contributions,
     /// What starts an extension's tour: the app's ([`Host::on_tour`]).
@@ -1062,9 +1058,7 @@ impl Host {
                 listeners: Mutex::new(Vec::new()),
                 themes: Mutex::new(None),
                 theme_heard: Mutex::new(None),
-                languages: Mutex::new(architect_editor::Languages::new()),
-                #[cfg(all(feature = "lsp", not(target_family = "wasm")))]
-                language_servers: Mutex::new(None),
+                languages: Mutex::new(crate::languages::Languages::new()),
                 contributions: Contributions::new(),
                 tour: Mutex::new(None),
                 toolbars: crate::toolbars::Toolbars::new(),
@@ -1095,7 +1089,7 @@ impl Host {
             .declare(crate::interop::APP, &[crate::hostui::decorations_point()]);
         // The context-menu targets of the features here: the workspace's
         // (a pane, a tab) and the toolbars'.
-        host.declare_context_targets("workspace", &architect_workspace::CONTEXT_TARGETS);
+        host.declare_context_targets("workspace", &architect_views::CONTEXT_TARGETS);
         host.declare_context_targets("toolbars", &crate::toolbar::CONTEXT_TARGETS);
         host
     }
@@ -1260,6 +1254,23 @@ impl Host {
             .path_opener
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(opener));
+    }
+
+    /// Opens `path` with the app's own opener ([`Self::set_path_opener`]),
+    /// asking no extension's: what a guest's host does with a path an
+    /// extension asks to open (`crate::hostapi`).
+    ///
+    /// # Errors
+    ///
+    /// The app set no opener, or its opener refused the path.
+    pub fn open_with_app(&self, path: &str) -> Result<Value, String> {
+        let app = self
+            .inner
+            .path_opener
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        app.map_or_else(|| Err(format!("nothing opens {path}")), |open| open(path))
     }
 
     /// Takes extensions' popups and overlays away with `closer` (the app's
@@ -1451,13 +1462,23 @@ impl Host {
 
     /// The component of view `view` of `extension`, when the copy of it
     /// running is the one linked in (a process copy's is drawn remotely).
-    #[cfg(feature = "linked")]
+    #[cfg(all(feature = "linked", feature = "dioxus"))]
     #[must_use]
     pub fn linked_view(
         &self,
         extension: &str,
         view: &str,
     ) -> Option<fn() -> dioxus::prelude::Element> {
+        self.linked_view_root(extension, view)?
+            .downcast_ref::<fn() -> dioxus::prelude::Element>()
+            .copied()
+    }
+
+    /// The root of view `view` of `extension` as it was linked in (any UI:
+    /// [`crate::linked::ViewRoot`]), when the copy running is that one.
+    #[cfg(feature = "linked")]
+    #[must_use]
+    pub fn linked_view_root(&self, extension: &str, view: &str) -> Option<crate::linked::ViewRoot> {
         if self.get(extension)?.origin != Origin::Builtin {
             return None;
         }
@@ -1466,7 +1487,7 @@ impl Host {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(extension)?
-            .view_root(view)
+            .view_root_any(view)
     }
 
     /// The in-process extensions linked in, built: for their root context.
@@ -1642,11 +1663,11 @@ impl Host {
 
     /// Puts loaded extensions' languages (`[[languages]]`) in `registry`,
     /// the app's (with its own languages already in it, owner
-    /// `architect_editor::languages::APP`): in as each loads, replaced on
+    /// `crate::languages::APP`): in as each loads, replaced on
     /// a reload, out as it unloads or is turned off. Without it the host
     /// keeps a registry of its own.
     #[must_use]
-    pub fn with_languages(self, registry: architect_editor::Languages) -> Self {
+    pub fn with_languages(self, registry: crate::languages::Languages) -> Self {
         *self
             .inner
             .languages
@@ -1655,16 +1676,10 @@ impl Host {
         self
     }
 
-    /// Where the language servers are kept (`crate::lsp`).
-    #[cfg(all(feature = "lsp", not(target_family = "wasm")))]
-    pub(crate) fn servers_slot(&self) -> &Mutex<Option<architect_editor::lsp::LanguageServers>> {
-        &self.inner.language_servers
-    }
-
     /// The language registry the editor asks by file type or fence name:
     /// the app's languages and every loaded extension's.
     #[must_use]
-    pub fn languages(&self) -> architect_editor::Languages {
+    pub fn languages(&self) -> crate::languages::Languages {
         self.inner
             .languages
             .lock()
@@ -2404,8 +2419,6 @@ impl Host {
             store.withdraw(id);
         }
         self.languages().withdraw(id);
-        #[cfg(all(feature = "lsp", not(target_family = "wasm")))]
-        self.stop_language_servers(id);
         self.inner.contributions.withdraw(id);
         self.inner.windows.close_all(id);
         self.services().forget(id);

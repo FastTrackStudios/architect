@@ -1,5 +1,4 @@
 ---
-"architect-navigator" = "patch"
 "vault-live" = "patch"
 "vault-proto" = "patch"
 ---

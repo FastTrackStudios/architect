@@ -29,7 +29,7 @@ use serde_json::{Value, json};
 const NOTE: &str = "- one\n- two\n\n| a | b |\n|---|---|\n| c | d |";
 
 fn outline_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/sandbox/extensions/outline")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sandbox/extensions/outline")
 }
 
 fn host(editor: &Arc<MemoryEditor>) -> (ActionList, Host) {

@@ -103,8 +103,5 @@ impl Extension for ManagerExtension {
             };
             async move { out }
         });
-        #[cfg(feature = "page")]
-        ext.view("manager", crate::page::ManagerView)
-            .view("section", crate::page::ManagerSection);
     }
 }

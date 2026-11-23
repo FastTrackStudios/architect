@@ -1,7 +1,4 @@
 ---
-"architect-app" = "minor"
-"architect-desktop" = "minor"
-"architect-webview" = "minor"
 "architect-workspace" = "minor"
 ---
 

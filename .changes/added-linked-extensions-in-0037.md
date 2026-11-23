@@ -1,18 +1,6 @@
 ---
-"architect-calendar" = "minor"
-"architect-command-palette" = "minor"
 "architect-navigator-api" = "minor"
-"architect-dayplan" = "minor"
-"architect-distribution" = "minor"
 "architect-extensions" = "minor"
-"architect-files-extension" = "minor"
-"architect-notify" = "minor"
-"architect-projects" = "minor"
-"architect-tasks" = "minor"
-"architect-theme-picker" = "minor"
-"architect-threads" = "minor"
-"architect-time-tracker" = "minor"
-"architect-web" = "minor"
 "xtask" = "minor"
 ---
 

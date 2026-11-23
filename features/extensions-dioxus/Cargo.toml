@@ -1,0 +1,60 @@
+[package]
+name = "architect-extensions-dioxus"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "The Dioxus side of Architect extensions: views as components, the hooks a view uses (embed input, pane state, theme, work), deferred linked extensions, and the guest's renderer that serves a process extension's views to its host"
+
+# The runtime (`architect-extensions`) keeps views type-erased and draws
+# nothing; this crate is what an extension written in Dioxus links. The
+# host's chrome (the panes, toolbars and pages that mount the views) is
+# app-shell's (`app-shell-extensions`).
+
+[features]
+default = []
+# A process extension's side (`architect_extensions::guest`): its views
+# rendered in a VirtualDom each and sent to the host, the scenes they
+# paint, `use_theme`, `use_work`.
+guest = [
+    "architect-extensions/guest",
+    "architect-extensions/scenes",
+    "dep:architect",
+    "dep:architect-theme",
+    "dep:architect-scene",
+    "architect-theme/dioxus",
+    "dep:dioxus-html",
+    "dep:tokio",
+    "dep:tracing",
+]
+# What draws `process` views in a window (`process::ProcessViews`).
+process = ["architect-extensions/host"]
+# Paint views (`BuilderExt::paint`, `PaintPane`): a `PaintView` hosted as a
+# Blitz widget linked in, a scene its host composes as a process (with
+# `guest`).
+paint = [
+    "dep:architect-scene",
+    "architect-scene/paint-ui",
+    "dep:blitz-traits",
+]
+
+[dependencies]
+architect-extensions = { workspace = true, features = ["linked-core", "dioxus"] }
+dioxus = { workspace = true }
+serde_json = { workspace = true }
+# A pane's id and what the shell tells a view of its pane (`pane`).
+architect-views = { workspace = true }
+architect = { workspace = true, optional = true }
+architect-theme = { workspace = true, optional = true }
+architect-scene = { workspace = true, optional = true }
+blitz-traits = { workspace = true, optional = true }
+dioxus-html = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["serialize"], optional = true }
+tokio = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+
+[dev-dependencies]
+architect-extensions = { workspace = true, features = ["linked-core", "dioxus"] }
+futures = { workspace = true }
+
+[lints]
+workspace = true

@@ -59,7 +59,7 @@ macro_rules! scope_word {
 mod bar;
 pub mod control;
 #[cfg(feature = "ctx")]
-mod ctx;
+use architect_scene::view as ctx;
 pub mod deck;
 mod drop;
 mod field_focus;
@@ -69,9 +69,9 @@ pub mod guide;
 pub mod home;
 #[cfg(feature = "ui")]
 mod host;
-mod kinds;
+pub(crate) use architect_views::kinds;
 mod layout;
-pub mod meter;
+pub use architect_views::meter;
 mod model;
 mod ops;
 pub mod pacing;
@@ -107,17 +107,12 @@ pub use ctx::{
 };
 pub use guide::{ArrangedGroup, ArrangedSplit, ArrangedWindow, Arrangement, target_selector};
 
-/// The context-menu targets the workspace owns, `(kind, what it is)`:
-/// what an app's extension host declares for it
-/// (`architect_extensions`' `Host::declare_context_targets`).
-pub const CONTEXT_TARGETS: [(&str, &str); 3] = [
-    ("pane", "every pane's tab; its id the pane's"),
-    ("tab", "a tab, past its view kind's rows; its id the pane's"),
-    (
-        "view",
-        "the tabs of one view kind's panes: `view:<kind>`; its id the pane's",
-    ),
-];
+pub use architect_views::CONTEXT_TARGETS;
+pub use architect_views::{
+    Capabilities, Capability, DIOXUS, Hosts, KindError, KindId, KindSpec, PAINT, PROCESS, Part,
+    Placement, Placements, ViewHost, ViewKinds, WEB,
+};
+pub use architect_views::{FRAME_BUDGET, Meters, ViewHealth, ViewMeter, ViewReport, ViewSummary};
 #[cfg(feature = "ui")]
 pub use host::{
     Bridge, Command, ContextEntries, ContextEntry, DeckHandle, DeckResolve, DeckStores,
@@ -131,12 +126,7 @@ pub use host::{
 pub use host::{PaneRoom, use_pane_room, use_pane_space, use_pane_subject};
 #[cfg(feature = "ui")]
 pub use host::{TabKindsUi, TabRender, TabRenderCtx, try_use_tab_kinds, use_tab_kinds};
-pub use kinds::{
-    Capabilities, Capability, DIOXUS, Hosts, KindError, KindId, KindSpec, PAINT, PROCESS, Part,
-    Placement, Placements, ViewHost, ViewKinds, WEB,
-};
 pub use layout::{Direction, Placed, Slide, area_rects, neighbour, scroll_to, slides};
-pub use meter::{FRAME_BUDGET, Meters, ViewHealth, ViewMeter, ViewReport, ViewSummary};
 pub use model::{
     Above, Aliases, Area, Axis, Child, Chrome, ClosedPane, Corner, Dock, Docks, Float, Group,
     GroupAlias, GroupId, History, LinkId, Location, Node, Pane, PaneId, Pin, Rect, Ribbon, Shown,

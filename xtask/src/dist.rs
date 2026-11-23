@@ -11,7 +11,7 @@
 //! | target | how | out |
 //! | --- | --- | --- |
 //! | `desktop` | the window's build, then `scripts/desktop/linux.sh` (an `AppImage`) or `scripts/desktop/macos.sh` (a dmg) | `<Name>-linux-x86_64.AppImage` |
-//! | `node` | `--no-default-features` and `--cfg no_workspace_hack`, as the release's node | the binary |
+//! | `node` | `--no-default-features`, as the release's node | the binary |
 //! | `node-image` | the node in `flake.nix`'s `architect-image-prebuilt` | `<folder>-node.tar` (docker-archive) |
 //! | `web` | the distribution's own web build (below), then `scripts/web-bundle.sh` with it and the node's `distribution` as `/app/distribution.json` | `web/` |
 //! | `web-image` | the bundle in `flake.nix`'s `architect-web-image-prebuilt` | `<folder>-web.tar` |
@@ -125,18 +125,6 @@ fn cargo() -> std::ffi::OsString {
     std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into())
 }
 
-/// The host's target triple (`rustc -vV`).
-fn host() -> Result<String, String> {
-    let out = Command::new("rustc")
-        .arg("-vV")
-        .output()
-        .map_err(|e| format!("rustc -vV: {e}"))?;
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .find_map(|l| l.strip_prefix("host: ").map(str::to_owned))
-        .ok_or_else(|| "rustc -vV named no host".to_owned())
-}
-
 /// Builds the distribution's binary, the window's (`node == false`) or
 /// the node's, and answers its path (cargo's own report of it).
 fn build(opts: &Options, node: bool) -> Result<PathBuf, String> {
@@ -179,9 +167,8 @@ fn build(opts: &Options, node: bool) -> Result<PathBuf, String> {
         cmd.args(["--features", &features.join(",")]);
     }
     if node {
-        // Without the window (no Blitz, wgpu or wayland), and without the
-        // workspace-hack, which would pull the GUI stack's features back
-        // in: the release's node build.
+        // Without the window (no Blitz, wgpu or wayland): the release's
+        // node build.
         cmd.arg("--no-default-features");
         if opts.manifest_path.is_none() {
             // A distribution crate depends on architect-desktop with
@@ -189,10 +176,6 @@ fn build(opts: &Options, node: bool) -> Result<PathBuf, String> {
             // WASI components draw a share's blocks (#488).
             cmd.args(["--features", "vox,node-wasi"]);
         }
-        cmd.arg("--config").arg(format!(
-            "target.{}.rustflags=[\"--cfg\",\"no_workspace_hack\"]",
-            host()?
-        ));
     }
     eprintln!("dist: {cmd:?}");
     let out = cmd

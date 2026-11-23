@@ -1,7 +1,4 @@
 ---
-"architect-app" = "minor"
-"architect-navigator" = "major"
-"architect-navigator-extension" = "minor"
 "vault" = "minor"
 "vault-live" = "minor"
 ---

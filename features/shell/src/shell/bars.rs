@@ -48,7 +48,7 @@ pub(super) fn BottomBar(
                         padding: 4px; border-radius: 27px; background: {t.pill}; border: 1px solid {t.rule}; \
                         box-shadow: {t.shadow_lift};",
                 for tab in tabs {
-                    BarTab { key: "{tab.id}", on: current == Some(tab.id), tab, on_tab, labelled: false }
+                    BarTab { key: "{tab.id}", on: current == Some(tab.id), tab, on_tab, labelled: super::TAB_LABELS() }
                 }
             }
             if let Some(sep) = separate {
@@ -62,13 +62,15 @@ pub(super) fn BottomBar(
 fn BarTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>, labelled: bool) -> Element {
     let t = use_shell().theme;
     let colour = if on { &*t.ink } else { &*t.ink_3 };
-    let (fill, radius, height) = if labelled {
-        ("transparent", 10, "100%")
-    } else if on {
+    // Labelled, the same pill and highlight: the icon smaller over its
+    // name.
+    let (fill, radius, height) = if on {
         (&*t.active, 23, "46px")
     } else {
         ("transparent", 23, "46px")
     };
+    let size = if labelled { 20 } else { 22 };
+    let gap = if labelled { 1 } else { 3 };
     let id = tab.id;
     rsx! {
         button {
@@ -76,10 +78,10 @@ fn BarTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>, labelled: bool
             "data-tab": id,
             "aria-current": if on { "page" } else { "false" },
             style: "position: relative; flex: 1 1 0; height: {height}; display: flex; flex-direction: column; \
-                    align-items: center; justify-content: center; gap: 3px; border: none; border-radius: {radius}px; \
+                    align-items: center; justify-content: center; gap: {gap}px; border: none; border-radius: {radius}px; \
                     background: {fill}; color: {colour}; font-family: {t.font}; font-size: 11px; font-weight: 650;",
             onclick: move |_| on_tab.call(id),
-            {tab.draw(Icon { size: 22, color: colour.into() })}
+            {tab.draw(Icon { size, color: colour.into() })}
             if labelled { span { "{tab.label}" } }
             if let Some(b) = tab.badge.clone() { Badge { text: b } }
         }

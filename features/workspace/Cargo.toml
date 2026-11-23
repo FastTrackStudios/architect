@@ -24,7 +24,7 @@ description = "The workspace: tab groups in splits, docks with ribbons, stacked 
 default = []
 # The contract a view kind mounts through (`ViewCtx`): the host's Action
 # List, a document and its history. Wasm-clean, no Dioxus.
-ctx = ["dep:architect", "dep:crdt", "dep:architect-theme"]
+ctx = ["dep:architect", "dep:crdt", "dep:architect-theme", "dep:architect-scene", "architect-scene/ctx"]
 # Cursors that come with the pane (`pane_space`): the spaces others'
 # pointers are placed in, and the `CURSORS_*` actions. With `ui`, every
 # pane publishes and draws pointers when the app provides a `PaneRoom`.
@@ -44,15 +44,17 @@ hot-reload = ["native", "dioxus-native/hot-reload", "dep:dioxus-devtools"]
 # watched, last-good with a .error beside a broken one, .state/ apart.
 home = ["actions", "dep:serde_json"]
 # A view that paints a scene each frame (`PaintView`, `Painter`, `Marks`).
-paint = ["ctx", "dep:anyrender", "dep:peniko", "dep:architect-scene"]
+paint = ["ctx", "dep:anyrender", "dep:peniko", "architect-scene/paint"]
 # Drawn in-process by Blitz in a pane (`PaintPane`, a `PaintWidget`).
-paint-ui = ["paint", "ui", "dep:blitz-dom", "dep:blitz-traits", "dep:cursor-icon", "dep:dioxus-native-dom"]
+paint-ui = ["paint", "ui", "architect-scene/paint-ui", "dep:blitz-dom", "dep:blitz-traits", "dep:cursor-icon", "dep:dioxus-native-dom"]
 # A host-driven WebGL2 canvas for paint scenes (wasm32 only).
-paint-web = ["paint", "dep:anyrender_vello_hybrid", "dep:vello_gpu", "dep:vello_common", "dep:rustc-hash", "dep:web-sys", "dep:wasm-bindgen"]
+paint-web = ["paint", "architect-scene/paint-web"]
 # Dioxus canvas, DOM input and demand-driven browser frames.
-paint-web-ui = ["paint-web", "dep:dioxus", "dioxus/web", "dep:js-sys"]
+paint-web-ui = ["paint-web", "architect-scene/paint-web-ui", "dep:dioxus", "dioxus/web"]
 
 [dependencies]
+# The view kinds and meters the extension runtime shares with the panes.
+architect-views = { workspace = true }
 # A view's theme tokens from a resolved theme (`ctx`); the Blitz host
 # follows the app's theme store (`ui`).
 architect-theme = { workspace = true, optional = true }
@@ -189,9 +191,6 @@ required-features = ["native"]
 
 [lints]
 workspace = true
-
-[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
-architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [[example]]
 name = "paint_web"

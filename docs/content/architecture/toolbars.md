@@ -13,12 +13,12 @@ weight = 71
 
 **Edit toolbars** turns it on: `TOOLBAR_EDIT` (a toggle, in ⌘K), or the
 row of the same name in a toolbar's context menu (target `toolbar`). Every
-toolbar on show then draws as `features/extensions/src/toolbar_ui.rs`
+toolbar on show then draws as `app-shell:crates/app-shell-extensions/src/toolbar_ui.rs`
 `ToolbarStrip` does in edit mode:
 
 - a **⚙** chip at its start opens the toolbar's settings;
 - a **+** chip before each item and at its end opens the insert menu
-  (`features/extensions/src/toolbar_editor.rs` `InsertMenu`): an
+  (`app-shell:crates/app-shell-extensions/src/toolbar_editor.rs` `InsertMenu`): an
   **Action…** (the action picker), a **Separator**, a **Widget…** (the
   widget picker) or a **Dropdown** (a button with a menu, its settings
   opened to fill it);
@@ -47,9 +47,7 @@ right-click.
 
 The **widget picker** lists every loaded extension's views by extension,
 the category; picking one draws it live at a widget's size
-(`ExtensionView`) before **Insert** puts it in. The sandbox's Board has a
-small one for this, its tempo (`apps/sandbox/board/src/lib.rs`
-`TempoWidget`, view `lab.board/tempo`).
+(`ExtensionView`) before **Insert** puts it in.
 
 ## Settings
 
@@ -130,20 +128,6 @@ A position (`at`, `from`, `to`) may be a number as well as `"2.1"`.
 
 ## Tests
 
-- `apps/sandbox/media/tests/toolbar_editor.rs`: a toolbar built from empty
-  through the UI (an action found by search, a second, a dropdown with a
-  row, the tempo widget previewed; grouped from the context menu, a
-  button dragged into the group, a drag cancelled with Escape, the group
-  dragged past the widget; restyled: label, image icon, fill, rounding,
-  preset), the same after a restart, its dropdown kept in the window, and
-  edit mode, each against a golden.
-- `apps/sandbox/media/tests/typing_toolbar.rs`: the Typing Toolbar on a
-  phone's screen, each against a golden: the capture field's own items
-  (unchanged from the bar before), the Board's chart's chord line (its sharps
-  toggle on, the field keeping the focus through each press, the bar
-  scrolled to its dropdown, opened above it, and the tempo widget), a
-  person's edit read again after a restart, and the editor's strips above
-  the bar.
 - `features/extensions/tests/toolbars.rs`
   `a_toolbar_is_built_from_empty_through_its_actions_and_survives_a_restart`:
   the same through `TOOLBAR_*`.

@@ -26,7 +26,7 @@ use futures::executor::block_on;
 use serde_json::{Value, json};
 
 fn showcase() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/showcase-registry")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/examples/showcase-registry")
 }
 
 fn key() -> String {

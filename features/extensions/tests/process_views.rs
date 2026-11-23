@@ -31,6 +31,7 @@ use architect_extensions::process::{
 use architect_extensions::proto::SOCKET;
 use architect_extensions::wire::{Edit, Frame, MAX_VIEWS, VIEWS_WIRE, WIRE};
 use architect_extensions::{Origin, Package};
+use architect_extensions_dioxus::guest::GuestExt as _;
 use dioxus::prelude::*;
 use futures::StreamExt as _;
 use futures::executor::block_on;

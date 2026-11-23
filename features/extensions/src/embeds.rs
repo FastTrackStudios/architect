@@ -125,6 +125,7 @@ impl Embeds {
                 ..Default::default()
             },
             max_height: None,
+            fill: false,
         };
         self.spec(by.owner, embed, Claim::EmbedType("base_view".to_owned()))
     }
@@ -151,6 +152,41 @@ impl Embeds {
             claim,
             embed,
         })
+    }
+
+    /// The note types the app's own linked extensions draw, each with the
+    /// view that draws it and what its extension declares it reads: every
+    /// `[[embeds]]` of a compiled-in extension (`Origin::Builtin`, not
+    /// overridden by another copy of its id) that claims a note type with
+    /// one of its linked views, in the order they loaded.
+    ///
+    /// What an app whose views are compiled in (a distribution's web app)
+    /// chooses a note's view from, before any separately loaded one.
+    #[cfg(feature = "linked")]
+    #[must_use]
+    pub fn linked_note_views(&self) -> Vec<LinkedNoteView> {
+        self.host
+            .contributions()
+            .embeds()
+            .into_iter()
+            .filter(|by| !by.item.claims.note_type.is_empty())
+            .filter_map(|by| {
+                let view = by.item.view.clone()?;
+                self.host.linked_view_root(&by.owner, &view)?;
+                let loaded = self.host.get(&by.owner)?;
+                Some(LinkedNoteView {
+                    reads: self
+                        .host
+                        .capabilities_of(&loaded.manifest, loaded.origin)
+                        .reads,
+                    extension: by.owner,
+                    view,
+                    note_types: by.item.claims.note_type,
+                    fill: by.item.fill,
+                    max_height: by.item.max_height.unwrap_or(DEFAULT_MAX_HEIGHT),
+                })
+            })
+            .collect()
     }
 
     /// Every claim a loaded extension makes, with its owner and embed:
@@ -195,287 +231,111 @@ impl Host {
     pub fn embeds(&self) -> Embeds {
         Embeds::new(self.clone())
     }
+
+    /// The `[[favourites]]` its linked extensions declare (compiled in,
+    /// running as built-ins), each with who declared it and what its
+    /// capabilities let it run: what an app reads in its own process,
+    /// where a node's listing (`/_ext/favourites.json`) is read otherwise.
+    #[cfg(feature = "linked")]
+    #[must_use]
+    pub fn linked_favourites(&self) -> Vec<architect_favourites::Listed> {
+        let linked = self.linked();
+        self.loaded()
+            .into_iter()
+            .filter(|l| {
+                l.origin == Origin::Builtin && linked.iter().any(|(id, _)| *id == l.manifest.id)
+            })
+            .flat_map(|l| {
+                let by = l.manifest.declarer();
+                l.manifest.favourites.into_iter().map(move |favourites| {
+                    architect_favourites::Listed {
+                        by: by.clone(),
+                        favourites,
+                    }
+                })
+            })
+            .collect()
+    }
+
+    /// Its linked extensions' views, each extension with the ids of the
+    /// views its code draws (`(id, views)`): what a favourite's `{view}`
+    /// of that extension may open in the app's own document.
+    #[cfg(feature = "linked")]
+    #[must_use]
+    pub fn linked_view_ids(&self) -> Vec<(String, Vec<String>)> {
+        self.linked()
+            .into_iter()
+            .filter(|(id, _)| self.get(id).is_some_and(|l| l.origin == Origin::Builtin))
+            .map(|(id, built)| (id, built.view_ids()))
+            .collect()
+    }
 }
 
-#[cfg(feature = "ui")]
-pub use view::{BaseViewEmbed, EmbedAsk, EmbedPages, EmbedView, GuestEmbedView, WidgetView};
+/// A note type's view of a linked extension
+/// ([`Embeds::linked_note_views`]).
+#[cfg(feature = "linked")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkedNoteView {
+    /// The extension.
+    pub extension: String,
+    /// Its view that draws the note.
+    pub view: String,
+    /// The note types the view claims, as declared.
+    pub note_types: Vec<String>,
+    /// Whether the view is the note's page (its embed's `fill`), not a
+    /// card at the note's head.
+    pub fill: bool,
+    /// The most it grows to at a note's head, points (its embed's
+    /// `max_height`, else [`DEFAULT_MAX_HEIGHT`]).
+    pub max_height: u32,
+    /// What its extension may read (`[capabilities] reads`): the app
+    /// hands its view a note's text only with `documents`, a note's files
+    /// only with `files` too.
+    pub reads: Vec<String>,
+}
 
-#[cfg(feature = "ui")]
-mod view {
-    use std::rc::Rc;
+/// Which views draw a guest's content (a share link's note, #629): the
+/// embedding app's choice, in context above [`GuestEmbedView`].
+///
+/// A guest's content is never drawn with a person's reach. A page embed
+/// runs on a host that reaches nothing (`architect_pages::host::AppHost::guest`),
+/// so it always may. A linked view runs in the app's process and asks the
+/// app's host; a process view asks over its own connection. On a desk the
+/// app's host is the person's own session, with their vaults, so neither
+/// draws a guest's content there: that is the default, and what an app
+/// that provides no policy gets.
+///
+/// An app whose host is a guest's ([`Host::for_guest`]: no vault, no
+/// session, every vault request refused) may let its own linked
+/// extensions draw ([`Self::own_linked`]). Those views are compiled into
+/// the app: they are the app itself, as much as the page around them is,
+/// and there is nothing of a person's in the process for them to reach.
+/// What they are handed is still the link's permission: the app gives
+/// them the guest's note, never more than the link's node gave it.
+/// A process view never draws a guest's content.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GuestEmbedPolicy {
+    linked: bool,
+}
 
-    use dioxus::prelude::*;
-    use serde_json::Value;
-
-    use super::{EmbedSpec, Embeds};
-    use crate::contrib::{Claim, EmbedInput};
-    use crate::interface::ExtensionUi;
-    use crate::linked::EmbedContext;
-
-    /// A page embed, as [`EmbedPages`] is asked for it.
-    #[derive(Clone)]
-    pub struct EmbedAsk {
-        pub spec: EmbedSpec,
-        /// What its runs may reach: the extension's capabilities.
-        pub gate: crate::host::Gate,
-        /// What it is given, live.
-        pub input: Signal<EmbedInput>,
-        /// A guest's content (a share link's note, #629): the page runs
-        /// on a host that reaches nothing of the person's, `gate` unused.
-        pub guest: bool,
+impl GuestEmbedPolicy {
+    /// Pages only: what an app that says nothing gets (a desk).
+    #[must_use]
+    pub const fn pages_only() -> Self {
+        Self { linked: false }
     }
 
-    impl std::fmt::Debug for EmbedAsk {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.debug_struct("EmbedAsk")
-                .field("spec", &self.spec)
-                .finish_non_exhaustive()
-        }
+    /// The app's own linked extensions too, on a guest's host.
+    #[must_use]
+    pub const fn own_linked() -> Self {
+        Self { linked: true }
     }
 
-    /// Draws a page embed: `architect-pages` provides it
-    /// (`architect_pages::ui::use_embed_pages`), a sub-document sized to
-    /// its content. `None` leaves it to the extension's own view.
-    #[derive(Clone)]
-    pub struct EmbedPages(pub Rc<dyn Fn(&EmbedAsk) -> Option<Element>>);
-
-    /// The block `claim` claims, drawn by the extension that claims it,
-    /// inline and content-sized; `fallback` (the plain block) when none
-    /// does, or once it unloads.
-    ///
-    /// `source` is the block's text (a fence's body, a note's), `props`
-    /// the host's properties for it (a note's frontmatter, a fence's info
-    /// string); the view is drawn again when either changes. The
-    /// `ExtensionUi` in context says what is loaded.
-    ///
-    /// The person's own content only: a guest's (a share link's note) is
-    /// [`GuestEmbedView`]'s, which never draws with the person's reach.
-    #[component]
-    pub fn EmbedView(
-        claim: Claim,
-        source: String,
-        #[props(default)] props: Value,
-        #[props(default)] fallback: Option<Element>,
-    ) -> Element {
-        embed_view(&claim, source, props, fallback, false)
-    }
-
-    /// A guest's content (a share link's note, #629) that `claim` claims:
-    /// as [`EmbedView`], but never drawn with the person's reach. Only a
-    /// page embed draws it, on a host with no action, no host-service
-    /// call and no vault (`architect_pages::host::AppHost::guest`); a
-    /// linked or process view, which runs with the person's own session,
-    /// does not, and `fallback` shows. A component of its own, not a
-    /// prop, so no caller can forget to say so.
-    #[component]
-    pub fn GuestEmbedView(
-        claim: Claim,
-        source: String,
-        #[props(default)] props: Value,
-        #[props(default)] fallback: Option<Element>,
-    ) -> Element {
-        embed_view(&claim, source, props, fallback, true)
-    }
-
-    // A component's body: its hooks run in the component that calls it.
-    fn embed_view(
-        claim: &Claim,
-        source: String,
-        props: Value,
-        fallback: Option<Element>,
-        guest: bool,
-    ) -> Element {
-        let now = EmbedInput {
-            claim: claim.to_string(),
-            source,
-            props,
-        };
-        let mut input = use_signal(|| now.clone());
-        use_effect(use_reactive!(|now| {
-            if *input.peek() != now {
-                input.set(now);
-            }
-        }));
-        let plain = move || fallback.clone().unwrap_or_else(|| rsx! {});
-        let Some(ui) = try_use_context::<ExtensionUi>() else {
-            return plain();
-        };
-        let _ = ui.revision();
-        let host = ui.host();
-        let Some(spec) = Embeds::new(host.clone()).resolve(claim) else {
-            return plain();
-        };
-        if guest {
-            return draw_guest(&host, spec, input, plain);
-        }
-        draw(&host, spec, input, plain)
-    }
-
-    /// `spec` drawn for a guest's content, given `input`: only by a page
-    /// (its own or its view's), on a host that reaches nothing of the
-    /// person's (`architect_pages::host::AppHost::guest`); else `plain`.
-    /// A linked view runs in the app's process with the person's session,
-    /// a process view with its own connection's: neither can be kept from
-    /// the person's vaults, so neither draws a guest's content.
-    fn draw_guest(
-        host: &crate::host::Host,
-        spec: EmbedSpec,
-        input: Signal<EmbedInput>,
-        plain: impl Fn() -> Element,
-    ) -> Element {
-        if host.get(&spec.extension).is_none() {
-            return plain();
-        }
-        let Some(pages) = try_consume_context::<EmbedPages>() else {
-            return plain();
-        };
-        let key = format!("{}/{}", spec.extension, spec.embed.id);
-        let ask = EmbedAsk {
-            // Unused for a guest: nothing passes.
-            gate: std::sync::Arc::new(|_| Err("a guest's content runs nothing".to_owned())),
-            input,
-            spec,
-            guest: true,
-        };
-        (pages.0)(&ask).map_or_else(plain, |page| {
-            rsx! {
-                div { class: "embed", "data-embed": "{key}", "data-guest": "true", style: "{BOX}", {page} }
-            }
-        })
-    }
-
-    /// An extension's embed `id` mounted by an editor's widget decoration
-    /// (`crate::editor`): drawn as an inline embed is, given `props` (the
-    /// widget's) and `source` (empty); nothing when the extension or the
-    /// embed is gone.
-    #[component]
-    pub fn WidgetView(extension: String, id: String, #[props(default)] props: Value) -> Element {
-        let now = EmbedInput {
-            claim: Claim::EmbedType("widget".to_owned()).to_string(),
-            source: String::new(),
-            props,
-        };
-        let mut input = use_signal(|| now.clone());
-        use_effect(use_reactive!(|now| {
-            if *input.peek() != now {
-                input.set(now);
-            }
-        }));
-        let Some(ui) = try_use_context::<ExtensionUi>() else {
-            return rsx! {};
-        };
-        let _ = ui.revision();
-        let host = ui.host();
-        let Some(spec) = Embeds::new(host.clone()).of(&extension, &id) else {
-            return rsx! {};
-        };
-        draw(&host, spec, input, || rsx! {})
-    }
-
-    /// A base's view of a type an extension adds (`[[base_views]]`, type
-    /// `kind`), drawn by it and given `input` (the view's spec and rows),
-    /// up to `max_height` points tall; `fallback` when no loaded extension
-    /// adds the type, or once it unloads.
-    #[component]
-    pub fn BaseViewEmbed(
-        kind: String,
-        input: crate::contrib::BaseViewInput,
-        #[props(default = u32::MAX)] max_height: u32,
-        #[props(default)] fallback: Option<Element>,
-    ) -> Element {
-        let now = EmbedInput {
-            claim: Claim::EmbedType("base_view".to_owned()).to_string(),
-            source: input.base.clone(),
-            props: serde_json::to_value(&input).unwrap_or_default(),
-        };
-        let mut live = use_signal(|| now.clone());
-        use_effect(use_reactive!(|now| {
-            if *live.peek() != now {
-                live.set(now);
-            }
-        }));
-        let plain = move || fallback.clone().unwrap_or_else(|| rsx! {});
-        let Some(ui) = try_use_context::<ExtensionUi>() else {
-            return plain();
-        };
-        let _ = ui.revision();
-        let host = ui.host();
-        let Some(mut spec) = Embeds::new(host.clone()).base_view(&kind) else {
-            return plain();
-        };
-        spec.max_height = max_height;
-        draw(&host, spec, live, plain)
-    }
-
-    /// `spec` drawn, given `input`: a page's sub-document, a linked view in
-    /// the host's document, or a process's; `plain` when none can be.
-    // `spec` is consumed only with feature `remote` (a process's embed).
-    #[allow(clippy::needless_pass_by_value)]
-    fn draw(
-        host: &crate::host::Host,
-        spec: EmbedSpec,
-        input: Signal<EmbedInput>,
-        plain: impl Fn() -> Element,
-    ) -> Element {
-        let Some(loaded) = host.get(&spec.extension) else {
-            return plain();
-        };
-        let key = format!("{}/{}", spec.extension, spec.embed.id);
-        let max = spec.max_height;
-        if spec.page.is_some()
-            && let Some(pages) = try_consume_context::<EmbedPages>()
-        {
-            let ask = EmbedAsk {
-                gate: crate::host::gate(&loaded.manifest),
-                input,
-                spec: spec.clone(),
-                guest: false,
-            };
-            if let Some(page) = (pages.0)(&ask) {
-                return rsx! {
-                    div { class: "embed", "data-embed": "{key}", style: "{BOX}", {page} }
-                };
-            }
-        }
-        if let Some(view) = spec.embed.view.as_deref()
-            && let Some(root) = host.linked_view(&spec.extension, view)
-        {
-            // In the host's own document: laid out by it, its events its.
-            return rsx! {
-                div { class: "embed", "data-embed": "{key}",
-                    style: "{BOX} max-height: {max}px; overflow-y: auto;",
-                    LinkedEmbed { key: "{key}", root, input }
-                }
-            };
-        }
-        #[cfg(all(feature = "remote", unix))]
-        if let Some(view) = spec.embed.view.clone()
-            && let Some(processes) = try_use_context::<crate::process::Processes>()
-        {
-            return rsx! {
-                div { class: "embed", "data-embed": "{key}", style: "{BOX}",
-                    crate::remote::RemoteEmbed {
-                        key: "{key}",
-                        processes,
-                        extension: spec.extension,
-                        view,
-                        input,
-                        max_height: max,
-                    }
-                }
-            };
-        }
-        plain()
-    }
-
-    /// An embed's box in the host's flow: as wide as the text, as tall as
-    /// what is in it.
-    const BOX: &str = "display: flex; flex-direction: column; width: 100%; flex-shrink: 0;";
-
-    /// A linked-in view, given its input.
-    #[component]
-    fn LinkedEmbed(root: fn() -> Element, input: Signal<EmbedInput>) -> Element {
-        use_context_provider(|| EmbedContext(input));
-        root()
+    /// Whether a linked view may draw a guest's content on `host`: the
+    /// app said so, and `host` runs for a guest. Both, so an app that
+    /// holds a person's session never draws one by a policy set in error.
+    #[must_use]
+    pub fn draws_linked(self, host: &Host) -> bool {
+        self.linked && host.is_guest()
     }
 }

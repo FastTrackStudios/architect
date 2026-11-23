@@ -14,29 +14,6 @@ weight = 67
 > Not yet: dry runs, the typed model services in the Luau library,
 > streams, Luau on the web.
 >
-> **Canvases landed (2026-11-01)** in `architect-canvas`
-> (`features/canvas`): a view's coordinate spaces
-> (`features/canvas/src/space.rs` `Spaces`: time across, lanes down),
-> layers drawn over a view by kind on a plane, passing the pointer
-> through except over the regions they claim
-> (`features/canvas/src/layer.rs` `Layer`, `Overlays`), an
-> immediate-mode UI in ReaImGui's shape (`features/canvas/src/imgui.rs`
-> `Ui`: windows, text, buttons, checkboxes, sliders, progress bars,
-> `SameLine`, ids), and both in front of Luau as `ImGui` and `Canvas`
-> on a live script, a frame at a time
-> (`features/canvas/src/luau.rs` `Session`; scripts gained `defer` and
-> modules, `features/scripting/src/luau.rs` `Runtime::start`, `Live`,
-> `Module`). On Blitz, a layer mounts in its view and a window is a
-> workspace pane (`features/canvas/src/ui.rs` `CanvasLayers`,
-> `window_view`, `use_tool_windows`); an extension declares an overlay
-> in its manifest (`[[overlays]]`, `features/extensions/src/manifest.rs`
-> `OverlayDecl`). The sandbox's arrangement has a marker lane over it
-> (`apps/ui/src/marker_lane.luau`). Drawn as boxes, not through
-> egui: Blitz has no texture widget yet. Not yet: egui (or Dear ImGui)
-> behind the same API, `gfx` images and fonts, the WIT interface,
-> layers from Dioxus views or frame documents, the extension host
-> starting overlays itself, Studio's arrangement publishing its spaces.
->
 > **The runtime landed (2026-11-01)** in `architect-extensions`
 > (`features/extensions`): the manifest (`features/extensions/src/manifest.rs`
 > `Manifest`), the host that loads and reloads extensions as a diff onto
@@ -47,8 +24,7 @@ weight = 67
 > (`features/extensions/src/catalog.rs` `choose`), hot reload by polling
 > (`features/extensions/src/watch.rs` `Watch`), a project's requirements
 > and an organization's approved list (`features/extensions/src/project.rs`
-> `plan`), and the `EXT_*` actions. The sandbox's metronome is one
-> (`apps/sandbox/extensions`). Not yet: overlays, signed
+> `plan`), and the `EXT_*` actions. Not yet: overlays, signed
 > archives, `architect ext dev` as a command.
 >
 > **Processes and remote views landed (2026-11-01)** in the same crate:
@@ -61,11 +37,11 @@ weight = 67
 > (`features/extensions/src/guest.rs` `Guest`: each view a `VirtualDom` on
 > its own thread, its mutations written as the wire's edits by
 > `WireWriter`); `remote` mounts a view in a pane
-> (`features/extensions/src/remote.rs` `RemoteView`, a Blitz sub-document
+> (`app-shell:crates/app-shell-extensions/src/remote.rs` `RemoteView`, a Blitz sub-document
 > filled by `RemoteDocument`, which checks every edit, and a placeholder
 > when the process is gone). The wire is architect's own, versioned
-> (`features/extensions/src/wire.rs` `WIRE`). The sandbox's clicker is one
-> (`apps/sandbox/clicker`); `features/extensions/tests/remote_view.rs` clicks
+> (`features/extensions/src/wire.rs` `WIRE`).
+> `app-shell:crates/app-shell-extensions/tests/remote_view.rs` clicks
 > through a real child process and kills it. Not yet: stdio, lazy start
 > and idle stop, state handed over on a reload, the host service an
 > extension calls back into, pointer, wheel and IME events, the
@@ -82,8 +58,8 @@ weight = 67
 > `Host::watch`). Actions are told where they were invoked from
 > (`crates/architect/src/action_list.rs` `Invocation`). One Rust value
 > runs linked in or as a process (`features/extensions/src/linked.rs`
-> `Extension`). The window side is `features/extensions/src/interface.rs`
-> `use_extension_ui`. The sandbox's Board is one (`apps/sandbox/board`). See
+> `Extension`). The window side is `app-shell:crates/app-shell-extensions/src/interface.rs`
+> `use_extension_ui`. See
 > "Contributions" and "One trait, three ways to run it" below. Not yet:
 > WASM, hooks on a phone.
 >
@@ -111,7 +87,7 @@ documents.
 | 1. **Data** | a manifest and files: themes, keymaps, screensets, settings defaults, frame views with no logic, action presets | everywhere, iOS included | most customisation |
 | 2. **WASM components** | code against `architect:extension`, a WIT world generated from the Action List and the services | Wasmtime: compiled on desk and Android, its interpreter (Pulley) on iOS; the browser's WebAssembly on the web | third-party features |
 | 3. **Scripts** | Luau (through mlua): query, branch, loop, run actions | everywhere (interpreted) | a person's own macros and conditional actions |
-| 3b. **TypeScript** | `kind = "typescript"`: actions and hooks as `.ts`/`.js` modules beside TSX pages, on the pages' runtime with the whole host service, typed by the generated `architect.d.ts` ([Pages as files](@/architecture/pages.md), "Actions as files") | `QuickJS` on desk and iOS (interpreted); a Web Worker on the browser's engine on the web | light extensions with no Rust and no WASM toolchain |
+| 3b. **TypeScript** | `kind = "typescript"`: actions and hooks as `.ts`/`.js` modules beside TSX pages, on the pages' runtime with the whole host service, typed by the generated `architect.d.ts`; its runtime went with the pages crate, so an app brings one | `QuickJS` on desk and iOS (interpreted); a Web Worker on the browser's engine on the web | light extensions with no Rust and no WASM toolchain |
 | 4. **Processes** | a program speaking vox, registering actions as a client does | desk only | heavy or other-language tools (Python, a model, an MCP server) |
 | 5. **Native** | a dynamic library | first-party only | what must be native and is ours (CLAP/VST3 already covers audio) |
 
@@ -412,12 +388,9 @@ architect_extension_wasi::export!(build);
 The crate is a `cdylib` built with
 `cargo build --target wasm32-wasip2` in `devenv --profile wasi shell`
 (the fleet toolchain plus that target: a profile, as an extra target
-changes the rustc path kache shares). The sandbox's WASI Counter
-(`apps/sandbox/wasi-counter`) is one: a counter view and an action that asks
-the app for its themes. With the sandbox's `wasi` feature
-(`cargo run -p architect-sandbox --features wasi`) and the component
-built into `target/wasi-guest`, it runs as a development copy and its
-view is the Vault's "WASI Counter" pane.
+changes the rustc path kache shares). The tests' WASI Counter
+(`features/extensions/tests/wasi-counter`) is one: a counter view and an
+action that asks the app for its themes.
 `features/extensions/tests/wasi.rs` builds it and a component that
 misbehaves on purpose (`features/extensions/tests/wasi-hazards`) and
 checks the view, a refused call, both limits, unload and the cache.
@@ -554,16 +527,9 @@ About three times a native call, and still far inside a frame:
 an extension's action or a view's event is not where the time goes. A
 component doing real work in a loop pays more (an interpreter is
 typically several times slower on hot code); that is what workers are
-for, and they run on the same engine: on the Simulator, the sandbox's
+for, and they run on the same engine: on the Simulator, a
 "Count primes" worker counts the 148933 primes below two million in
 about 13 s while its view answers each click.
-
-The sandbox runs it on the Simulator: `architect-mobile --features wasi`
-(`apps/mobile`, built and bundled by `apps/mobile/ios/build-app.sh`) finds the WASI Counter's component beside its
-executable in its app bundle (or at `ARCHITECT_LAB_WASI_COUNTER`) and
-serves its Action List on a control socket as the desk lab does
-(`FTS_CONTROL_DIR` puts it in a folder on the Mac), so
-`scripts/mac-live-check.sh` drives it ([A live check on a Mac](@/guide/live-check-mac.md)).
 
 **Size and memory.** Wasmtime and Cranelift add about 19 MB to a
 stripped `architect-desktop` built with the dev profile (opt-level 1).
@@ -622,7 +588,7 @@ an opaque origin with its own CSP (`runner.js` `Sandbox`,
 with the page's origin, so it gets none of the page's cookies, storage,
 channels or network. The page fetches the files and hands in the glue as
 text and the core modules as bytes; a page with a CSP names the frame's
-script by its hash (`SANDBOX_HASH`; `apps/sandbox/web/index.html`). Under
+script by its hash (`SANDBOX_HASH`). Under
 node there is no frame, so a node host trusts the extension's JS. The page's side
 (`features/extensions/web/runner.js`, linked in by wasm-bindgen) is the
 native actor: one call at a time, a trap restarting it fresh, its views'
@@ -678,14 +644,6 @@ rest waiting. The messages are the same:
   terminate the worker's Web Worker at once, whether it looks at
   `cancelled()` or not (natively: at its next epoch tick).
 
-**The sandbox.** `just sandbox-web` builds the WASI Counter for `wasm32-wasip2`,
-transpiles it, builds `apps/sandbox/web` (a page that puts the component's
-actions on its own list beside a `THEME_LIST`, mounts its view and shows
-each animation frame's gap) and serves it on :8090. In Firefox the
-counter answers clicks and "Ask the app" reaches the page's list through
-the host service, and counting the primes below 2,000,000 in a worker
-keeps the page at 55 frames a second, its longest frame gap 33 ms.
-
 **Tests.** `features/extensions/web/test/web.test.mjs` runs the
 transpiled components under node (24, JSPI on), each instance in a
 worker thread standing in for a Web Worker: the view and a click, the
@@ -711,20 +669,14 @@ extensions").
 
 ### Linked extensions in the browser
 
-A distribution's web build compiles in the extensions it links, as its
-desktop and iOS builds do (#495). `architect_web::run(<its Distribution>)`
-(`apps/web/src/browser.rs` `run`) is the browser's counterpart of
-`architect_desktop::run` and `architect_mobile::run`; the Architect app's
-own web build starts with `run(architect())`. The app root runs the same
-host the desktop does (`apps/web/src/app/extensions.rs`
-`use_web_extensions`: `Host`, `Extensions::with_linked`,
-`use_extension_ui`) over the page's Action List, so a linked extension's
-actions are in ⌘K, its settings sections on the settings page and its
-views among the workspace's kinds, drawn as Dioxus components in the
-app's own document. A share link is this same app opened as a guest
-([A share link is the app](@/guide/shares.md)), so its guest runs the
-same extensions under the guest profile ([below](#a-share-link-s-guests));
-today the web app still loads none for a guest (#805).
+An app's web build compiles in the extensions it links, as its desktop
+and iOS builds do (#495), and runs the same host over the page's Action
+List (`Host`, `Extensions::with_linked`, and the window side's
+`use_extension_ui` in `app-shell:crates/app-shell-extensions/src/interface.rs`),
+so a linked extension's actions are in ⌘K, its settings sections on the
+settings page and its views among the workspace's kinds, drawn as Dioxus
+components in the app's own document. A share link's guest runs the same
+extensions under the guest profile ([below](#a-share-link-s-guests)).
 
 What changes in a browser:
 
@@ -748,58 +700,11 @@ What changes in a browser:
 `cargo xtask dist web` builds a distribution crate's own wasm when it has
 a `web` feature (`xtask/src/dist.rs` `build_web`).
 
-**Documents, events and data in the browser** (#495 H1, H2, H4):
-
-- **Documents.** The host's documents are the web vault
-  (`apps/web/src/app/documents.rs` `WebDocuments`, the desktop's
-  `VaultDocuments` over the page's `MemorySource`). That is the demo
-  vault in `?demo`, and the signed-in org's vaults otherwise. An edit is
-  `documents::apply_edits`, and a note open in the app shows it.
-  - On the org's vaults a create or an edit is also sent to the node
-    (`Notes::write`). A rename, move or delete is the desktop app's for
-    now: the org lane has no such call.
-- **Events.** The person's own edits are raised as `doc.*` on the app's
-  list (`WebDocuments::raise_on`), the extension's own left out. The
-  host hears the app's events on a page timer, where a desk has
-  `Host::watch`'s thread.
-- **Data** goes to the browser's `localStorage`, one entry per
-  extension and org (`hostapi::DataStore`, `Host::with_data_store`). The
-  demo keeps nothing.
-- **Settings** are the settings page's, kept in the browser by the page
-  (`ui::use_page_setting_values`).
-
-`apps/web/test/app-documents.test.mjs` drives all of it through the
-demo's probe extension (`/app/?demo&probe` only).
-
-**The vault's query service in the browser** (#495, #710's data model).
-Queries run in the page, over the vault index, with the one engine
-(`vault_query::QueryEngine`) served there (`architect::serve_local`); the
-extension host holds only its client (`Host::set_vault`), so
-`query_vault` answers as on a desk (`apps/web/src/app/index_sync.rs`):
-
-- **Signed in**, the index is the node's (`VaultIndexSync` on the org
-  lane): a snapshot of the org's first vault as the person may read it,
-  then the deltas since its revision every two seconds, applied to a
-  `vault_query::Replica` (`Replica::reset` takes a snapshot again when
-  the node no longer keeps the deltas). The browser never holds the
-  vault: an entry is a note's title, properties, tags, links, headings
-  and task lines, no body. Kept in memory; a reload or sign-out drops
-  it.
-- **In the demo**, the index is built in the page from the demo vault,
-  with the one builder (`vault_query::Built` over `DemoNotes`).
-
-For a 10 000-note vault (`apps/web/tests/index_snapshot.rs`,
-`apps/web/test/app-index.test.mjs`): a 2.5 MiB snapshot (260 B a note);
-146 KiB gzipped for the generated notes, which repeat (a real vault
-compresses less); one property edit's delta 279 B (206 B gzipped). In
-Firefox, reading the snapshot takes 37 to 60 ms and the first query 52
-to 105 ms.
-
 ### A share link's guests
 
-A share link is the Architect app opened as a guest of that link
+A share link is the app opened as a guest of that link
 (`Principal::Guest`): the same app, views and extensions, with some
-permissions off ([A share link is the app](@/guide/shares.md)). There is
+permissions off. There is
 no guest renderer and no guest extension set; what a guest can't do is a
 capability it isn't granted.
 
@@ -814,12 +719,21 @@ and signers it trusts, are the link's owner-signed or node-held needs
 file. The guest host scopes the documents and the vault query engine to
 the share: `GUEST_READS`' `documents` is the generic capability.
 
-**Known gap.** The hosts don't load extensions for a guest yet: the web
-app skips them in guest mode and redraws the palette itself
-(`apps/web/src/app/mod.rs` `own_palette`), and on the desktop only a
-page embed draws a guest's note, on `features/pages/src/host.rs`
-`AppHost::guest`. That is a second implementation to remove, not the
-design (#805).
+**A guest runs the app's linked extensions** (#805):
+the same compiled-in extensions as a member's, on a host built for a
+guest (`features/extensions/src/hostapi.rs` `Host::for_guest`). That
+host has no documents, no vault query service and no data store, and it
+refuses every host call that reaches a vault, kept data, files, the
+device or an app action, whatever the manifest says
+(`features/extensions/src/hostcall.rs` `guest_check`, refusals named
+`guest`). A note a linked view asks to open goes to the app's own opener
+alone (`Host::open_with_app`), which opens only a note the link lists.
+Its views draw a guest's note because the app says so
+(`features/extensions/src/embeds.rs` `GuestEmbedPolicy::own_linked`):
+they are the app's own code, and what each is handed is still what the
+link admits and its manifest reads.
+
+**Known gap.** A guest runs no fetched extension yet (#495 G1).
 
 ## Processes over vox
 
@@ -947,10 +861,9 @@ changes.
 
 | GUI | how it themes | live |
 |---|---|---|
-| A process extension's Dioxus view | the host's `:root` CSS variables in its sub-document (`features/extensions/src/remote.rs` `RemoteDocument::set_theme_css`); `var(--brand)`, and an extension's own namespace when the app opts it in (`ThemeStoreProvider { css_namespaces }`) | on every change |
+| A process extension's Dioxus view | the host's `:root` CSS variables in its sub-document (`app-shell:crates/app-shell-extensions/src/remote.rs` `RemoteDocument::set_theme_css`); `var(--brand)`, and an extension's own namespace when the app opts it in (`ThemeStoreProvider { css_namespaces }`) | on every change |
 | A process that paints itself or works out colours | the theme as data (wire 3, below): `Guest::theme()`, `Guest::on_theme`, `guest::use_theme()` give an `architect_theme::Resolved` | as it connects and on every change |
 | A Luau script | `theme` (`features/scripting/src/theme.rs` `ThemeModule`): `theme.color(name)`, `theme.number`, `theme.value`, `theme.scheme`, `theme.revision`, `theme.snapshot()`, `theme.subscribe(fn)` | a frozen snapshot per revision, made again at the first frame after a change |
-| A Luau `ImGui` window | its style from the theme's tokens (`features/canvas/src/imgui.rs` `Style::from_theme`, `Col`), applied again on every change (`Session::set_theme`; `use_script_canvas` follows the store above it); `ImGui.PushStyleColor` overrides one colour | restyled and drawn again on every change |
 
 **The theme as data, on the wire.** The host sends a process the
 resolved tokens, the scheme and the revision
@@ -969,28 +882,6 @@ and made again only when it moves (herdr's `__theme_revision`), so reading
 `theme.color` in a loop costs a table lookup. `theme` is a mutable global
 to Luau's compiler (`Module::live_fields`), so `theme.scheme` is read
 each time, never folded when the chunk loads.
-
-**ImGui's colours** (the table on `Col`): each style colour is the
-theme's `imgui.<name>` token when it has one, else a derivation from the
-shell's tokens.
-
-| `ImGui.Col_` | token | default |
-|---|---|---|
-| `Text` / `TextDisabled` | `imgui.text` / `imgui.text-disabled` | `$ink` / `$ink-3` |
-| `WindowBg` | `imgui.window-bg` | `$sheet` |
-| `FrameBg` / `FrameBgHovered` / `FrameBgActive` | `imgui.frame-bg…` | `$pill`, `mix($pill, $ink, 0.08)`, `mix($pill, $ink, 0.16)` |
-| `Button` / `ButtonHovered` / `ButtonActive` | `imgui.button…` | `mix($pill, $brand, 0.18)`, `0.32`, `0.5` |
-| `SliderGrab` / `SliderGrabActive` | `imgui.slider-grab…` | `$brand`, `mix($brand, $ink, 0.3)` |
-| `CheckMark` | `imgui.check-mark` | `$brand` |
-| `Separator` | `imgui.separator` | `$rule` |
-| `PlotHistogram` (a progress bar) | `imgui.plot-histogram` | `$chart-1` |
-
-**The sandbox's example** is the clicker (`apps/sandbox/clicker`): it contributes
-Clicker Neon and `clicker.*` tokens, its process view styles itself with
-`var(--clicker-face)` and works out a ramp from the theme as data, and
-its `ImGui` window (`apps/sandbox/clicker/window.luau`, the Vault's "Clicker
-window" pane) reads `theme`. `apps/sandbox/clicker/tests/themed.rs` checks
-all of it headless.
 
 ## Immediate-mode UI for scripts (ReaImGui's)
 
@@ -1101,12 +992,10 @@ The same mechanism lets a first-party feature draw on the timeline (a
 lyrics lane, chord symbols over the sections) without the timeline
 knowing about it.
 
-**Two ways to draw one.** A Luau extension's overlay is a script
-(`[[overlays]] script`), drawn through `architect-canvas`
-(`features/canvas/src/layer.rs` `Overlays`, `OverlayDecl`; the view
-mounts `CanvasLayers`). Any extension with views of its own (a process's,
-a WASI component's, a linked one's) can instead name one of them
-(`draws`, #175):
+**How to draw one.** An extension with views of its own (a process's,
+a WASI component's, a linked one's) names one of them (`draws`, #175);
+a Luau overlay script (`[[overlays]] script`) is parsed and checked, and
+its canvas went with `architect-canvas`:
 
 ```toml
 [capabilities]
@@ -1132,7 +1021,7 @@ overlay's spaces reach it coalesced: a view scrolled or zoomed sends one
 update a frame, and only the latest waits while the overlay's view is
 busy.
 
-The view it draws over mounts `features/extensions/src/interface.rs`
+The view it draws over mounts `app-shell:crates/app-shell-extensions/src/interface.rs`
 `ExtensionViewOverlays { view, plane, spaces }` at that plane, filling its
 box, with its coordinate spaces now (`features/extensions/src/overlay.rs`
 `OverlaySpaces`: size, time across, lanes down, scrolled). For each such
@@ -1143,8 +1032,7 @@ the spaces as its embed input whenever they change: `overlay::spaces()`
 reads them, so it draws in the view's terms (a `scene::RemoteScene`
 filling its box, its coordinates the view's). A process that isn't
 running yet, or died, is simply absent; nothing is said over the view.
-The lab's arrangement (`apps/ui/src/arrange.rs`) mounts it beside its Luau
-layers. Test: `features/extensions/tests/remote_overlay.rs` (a mark on a
+Test: `app-shell:crates/app-shell-extensions/tests/remote_overlay.rs` (a mark on a
 lane at a time, following the view as it scrolls, a click let through).
 Not yet: a layer that claims regions to take the pointer there.
 
@@ -1244,19 +1132,6 @@ The worker sees `args`, `worker.progress(done, total, note)`,
 (`Live::woken`); `wake_after(ms)` asks for an animation frame. A
 one-off run waits with `job:join()` or `job:next()`; a view must not.
 
-**Pages** (`docs/content/architecture/pages.md`) spawn a file of their
-own folder by its name and hear from it through callbacks, a frame
-after each: a TSX page's handle says `w.post`, `w.onMessage`,
-`w.onDone`, `w.cancel()`; a Luau page's is a Luau view's worker
-(`features/pages/src/luau.rs`, over `Workers::install_owner` and
-`deliver` in `features/scripting/src/worker.rs`), with `w:on_message`,
-`w:on_progress`, `w:on_done` besides `worker.on_message(w, fn)`. Both
-have `set_timeout` / `set_interval` (a TSX page's `setTimeout`) run on
-the page's thread. The names are the world's `worker` import and `work`
-export, spelled each runner's way; `features/extensions/tests/wasi_wit.rs`
-`the_page_runners_say_the_same_worker_names` fails when a page's
-generated types drift from them.
-
 **Process guests** (`features/extensions/src/work.rs`): a view's thread
 renders one event at a time, so the rule is that a handler starts work
 and returns. `Guest::spawn_work` (`spawn_work`) runs a closure on a
@@ -1268,9 +1143,9 @@ changed (wire 5, `ANSWERED_WIRE`), so the host times each one.
 ### Budgets and degradation
 
 The host measures every frame of a view it does not draw itself
-(`features/workspace/src/meter.rs` `ViewMeter`): a Luau window's time on
+(`features/views/src/meter.rs` `ViewMeter`): a Luau window's time on
 its own thread (`Session::frame_metered`), a process view's time from
-the event to its answering frame (`features/extensions/src/remote.rs`
+the event to its answering frame (`app-shell:crates/app-shell-extensions/src/remote.rs`
 `RemoteView`). Past the budget, the pane keeps its last good frame and
 shows a small busy mark in the shell's theme
 (`features/shell/src/shell/busy.rs` `BusyBadge`); the rest of the app
@@ -1287,14 +1162,7 @@ an extension has its views' p50, p99 and slow count ("Frame health",
 `health_lines`; `ExtensionKind::with_meters`). Linked extensions' views
 are Dioxus components in the app's own document and are not metered.
 
-The sandbox shows all of it with the clicker (`apps/sandbox/clicker`): its
-"Heavy job" pane counts primes in a worker with a live progress bar and
-a spinner that keeps turning; its "Naughty view" spins 300 ms a frame on
-its own thread and is marked busy while every other pane answers; its
-process view counts primes with `use_work` and has a button that blocks
-its own view thread for two seconds, so its pane goes busy and comes
-back. `features/scripting/tests/workers.rs`,
-`features/canvas/tests/responsive.rs` and
+`features/scripting/tests/workers.rs` and
 `features/extensions/tests/workers.rs` measure it.
 
 ## Contributions: what an extension adds to the interface
@@ -1395,7 +1263,7 @@ pattern), `open_doc_kind`, `doc_kind_of`.
 **⌘O's sources.** An `[[openers]]` with a `kind` (no `files`,
 `doc_kinds` or `urls`) is one of ⌘O's sources, the same as the app's own
 (`architect_commands::Opener`): `use_extension_ui` registers each one
-while its extension is loaded (`features/extensions/src/interface.rs`
+while its extension is loaded (`app-shell:crates/app-shell-extensions/src/interface.rs`
 `use_extension_ui`, `Contributions::quick_open`). A query runs its
 `action` with `{query}`; a linked extension's answer is used at once, a
 process's when it arrives (the palette looks again, the last answer
@@ -1405,10 +1273,11 @@ alone, under its title.
 
 **The palette, its keys and its sources (#381).** ⌘K and ⌘O are an
 extension's: the shell keeps the slot (`architect_commands::CommandLayer`)
-and `COMMANDS_SHOW`, and the Command Palette (`features/palette/extension`,
-id `command-palette`) fills it. Three points, withdrawn when their
+and `COMMANDS_SHOW`, and the Command Palette (id `command-palette`; its
+engine is `app-shell:crates/app-shell/src/palette`, its sources
+`app-shell:crates/app-shell-extensions/src/palette.rs`) fills it. Three points, withdrawn when their
 extension is off and read with `EXT_PALETTE`
-(`features/extensions/src/interface.rs` `use_palette` keeps the shell
+(`app-shell:crates/app-shell-extensions/src/interface.rs` `use_palette` keeps the shell
 in step):
 
 ```toml
@@ -1506,12 +1375,12 @@ window: one the person closes stays closed) and closed when it goes;
 `pane` (every pane's header) and `view:<kind>` (that kind's) draw it
 between a pane's title and its menu, through
 `architect_workspace::HeaderTools`. Both are
-`features/extensions/src/toolbar_ui.rs` `ToolbarStrip`: a press runs the
+`app-shell:crates/app-shell-extensions/src/toolbar_ui.rs` `ToolbarStrip`: a press runs the
 action told source `toolbar`, target its place, id its key, and the pane.
 `typing` is a phone's Typing Toolbar over the keyboard, shown while its
 `when` is in force (the page or view kind the focus is in,
 `view:lab.board/chart`; an editor's context, `editor:markdown`), after
-the focused editor's own items: `features/extensions/src/typing_ui.rs`,
+the focused editor's own items: `app-shell:crates/app-shell-extensions/src/typing_ui.rs`,
 `app-shell.md` ("The action bar and the keyboard bar"). The app's own
 toolbars at run time are `Toolbars::provide` (`Source` `provided`): a
 focused editor's items as `typing/<context>`, which a person's file
@@ -1558,17 +1427,16 @@ key = "…", text = "on"}` in Luau, `guest::set_state`, a WASI guest's
 contributed rows, a context menu's row, and a toolbar's button
 (`aria-pressed`, the accent), and follows the state live: a toolbar
 redraws when the contributions change and when anything happens on the
-host's list. The sandbox's metronome (`apps/sandbox/extensions/metronome`) has
-one, `FTS_METRONOME_CLICK`, on a toolbar in the right dock, one in every
-note's header, and in a tab's and a Markdown file's context menus
-(`apps/sandbox/scenarios/extension-toolbars.styx`).
+host's list. A metronome's `FTS_METRONOME_CLICK`, say, can sit on a
+toolbar in the right dock, in a pane's header, and in a tab's context
+menu, ticked in all of them.
 
 **Opening.** `Host::open` takes a file's path, a link or a document
 kind to the first opener that claims it: its view opens through the
 app's view opener (`Host::set_view_opener`), or its action runs with
 `ctx.path` / `ctx.url`. A file opened raises `doc.opened`. In the
 window, a link's Ctrl- or Cmd-click goes there
-(`features/extensions/src/interface.rs` `ExtensionUi::open_link`,
+(`app-shell:crates/app-shell-extensions/src/interface.rs` `ExtensionUi::open_link`,
 `link_press`); `EXT_OPEN` does it from the Action List.
 
 ### File types
@@ -1601,27 +1469,14 @@ They all ask one registry, `features/vault/vault-proto/src/note_types.rs`
 re-exported as `vault::note_types`), process-wide and wasm-clean. `md` is
 always in it. The extension host registers each declared type as it
 loads the manifest (`Host::load`, on a desk, a phone and the web);
-the node (`architect-desktop serve`) registers its distribution's linked
-extensions' types before it reads a vault
-(`apps/distribution/src/lib.rs` `Distribution::file_types`) and those of
-the extensions it loads (`features/extensions/src/node.rs`
-`NodeHost::load`). A type stays registered for the life of the process:
+a node registers those of the extensions it loads
+(`features/extensions/src/node.rs` `NodeHost::load`). A type stays registered for the life of the process:
 its files stay notes when the extension is turned off. `EXT_FILE_TYPES`
 lists `md` and every declared type, with who declared it.
 
-**Its row in the navigator.** A note's row shows a preview and a
-picture. The picture is the first of its `thumbnail`, `feature`,
-`image`, `cover` or `banner` properties (else the first image it
-embeds), for a declared type as for `.md`: a recipe with `image:
-"[[Attachments/Recipes/pancakes.svg]]"` shows it. The preview is its
-body's first words, unless the type names a property with `preview`
-(the Cookbook's `description`); a `text` body that names none shows no
-preview, never its markup (`features/navigator/src/markdown.rs`
-`preview_for`, `vault_proto::note_types::preview_property_of`).
-
 **Its text in the editor.** `[[renderers]]` gives a note type its own
-live preview, as markdown has the editor's: the text stays what is
-edited, and the extension says how its ranges read.
+live preview: the text stays what is edited, and the extension says how
+its ranges read.
 
 ```toml
 [[renderers]]
@@ -1630,14 +1485,12 @@ action = "COOKBOOK_RENDER"   # given {text}, answers {items}
 ```
 
 While such a note is open the app runs the action with its body each time
-the text changes, and draws its answer over every line but the caret's
-(`apps/ui/src/note_editor.rs` `rendered_decorations`): each item a
-`conceal`ed range, a range `replace`d by other words, or a range or a
-`line` in a look (`features/extensions/src/render.rs` `RenderItem`,
-`Look`: heading, strong, muted, accent, chip, chip-accent, code). The
-looks are the app's classes, styled by its theme, never CSS the
-extension sends. A body that is not markdown gets no markdown preview,
-only its renderer's. The Cookbook's: `extensions/cookbook/src/render.rs`.
+the text changes, and draws its answer over every line but the caret's:
+each item a `conceal`ed range, a range `replace`d by other words, or a
+range or a `line` in a look (`features/extensions/src/render.rs`
+`RenderItem`, `Look`: heading, strong, muted, accent, chip, chip-accent,
+code). The looks are the app's classes, styled by its theme, never CSS
+the extension sends.
 
 **Its body.** A declared type's body is markdown unless it says `body =
 "text"`: then the vault reads only its frontmatter and its `[[links]]`,
@@ -1647,10 +1500,8 @@ cookware). One function parses a note by its path for everyone who reads
 one: `features/vault/vault-query/src/moved/obsidian_parse.rs` `parse_note`
 (over `vault_proto::note_types::body_is_markdown`).
 
-An app registers its distribution's types before it reads a vault
-(`apps/distribution/src/lib.rs` `Distribution::install`, the first act of
-the desktop, iOS and web apps' `run`), as the node does, so a vault
-opened at start (the desk's, the web demo's) sees their files as notes
+An app registers its linked extensions' types before it reads a vault,
+as a node does, so a vault opened at start sees their files as notes
 before the extension host loads.
 
 Opening such a file opens a note. An extension that draws its own view
@@ -1762,7 +1613,7 @@ it): run, it opens the window with its arguments as the window's state
 (`features/extensions/src/windows.rs` `Windows`); the host service's
 `window {id, open, state?}` opens or closes one of its own, and an unload
 closes them. The core keeps only the machinery
-(`features/extensions/src/window_ui.rs` `ExtensionWindows`, mounted by
+(`app-shell:crates/app-shell-extensions/src/window_ui.rs` `ExtensionWindows`, mounted by
 `ExtensionOverlays`): a `sheet` is a scrim and a card over the main
 window (the whole screen on a phone), closed by a click outside or its
 own close; a `window` is an OS window of its own through the workspace's
@@ -1813,8 +1664,6 @@ that lights up when the other extension is there (#367): no provider is
 no problem, the extension loads and stays when its provider goes, and a
 call answers `no provider of <service> <req>` (`HostError::NotFound`)
 until one is loaded. A service is in one table or the other, never both.
-Tasks and Projects use each other this way
-(`extensions/tasks/extension.toml`, `extensions/projects/extension.toml`).
 A call is the host service's `service {service, method, args}`,
 the same from every runner: `linked::Handle::service` in Rust (linked or
 process), `host.service(name, method, args)` in Luau, `call-service` in
@@ -1855,11 +1704,17 @@ title = "Keyflow chart"
 page = "pages/kf.tsx"         # or view = "chart": one of its [[views]]
 claims = { fence = ["kf"] }   # also note_type = ["song"], embed_type = ["setlist"]
 max_height = 420              # points; past it, it scrolls (480 when unset)
+fill = false                  # true: a note it claims by type is the view
 ```
 
 (`features/extensions/src/contrib.rs` `EmbedDecl`, `EmbedClaims`,
 `Claim`; checked by `Contribution::check`: one view or one page in its
 package, at least one claim.)
+
+`fill` matters for a note claimed by its `type:`. Unset, the view is a
+card at the note's head, over its text. Set, the view is the note's
+page: the note's own heading, properties and text are out of its way,
+as for a setlist or a song a view draws whole.
 
 **The host's side.** An app asks
 `features/extensions/src/embeds.rs` `Embeds::resolve` (`Host::embeds`)
@@ -1885,21 +1740,8 @@ extension draws one.
 | the view is | it mounts | its size | its input |
 |---|---|---|---|
 | linked in | a component in the host's own document; its events are the document's | laid out by the host's document, up to `max_height` | `linked::use_embed` |
-| a page (TSX/JS on `QuickJS`, Luau) | a `RemoteDocument` sub-document (`features/pages/src/ui.rs` `PageEmbed`, provided by `use_embed_pages`) | its content's, measured | `useEmbed()`; Luau `embed()` |
-| a process's | a `RemoteDocument` sub-document (`features/extensions/src/remote.rs` `RemoteEmbed`) | its content's, measured | `linked::use_embed`, sent as `wire::EMBED_EVENT` to its root |
+| a process's | a `RemoteDocument` sub-document (`app-shell:crates/app-shell-extensions/src/remote.rs` `RemoteEmbed`) | its content's, measured | `linked::use_embed`, sent as `wire::EMBED_EVENT` to its root |
 | a WASI component's | as a process's | its content's, measured | `architect_extension_wasi::embed()` (`features/extensions/wasi-guest/src/lib.rs` `embed`), the same `wire::EMBED_EVENT` |
-
-**Outside the app.** A Site the node builds draws the same claims once
-per block, at build time. A share link is not outside the app (it is the
-web app as a guest, [A share link is the app](@/guide/shares.md)), but its
-build still draws blocks this way for the plain blocks a guest reads,
-a second note renderer to remove (#806). The node draws them (#488, `docs/content/guide/deploy.md`
-"Blocks extensions draw"): a page embed by `architect_sites::PageBlocks`, a
-WASI component's embed view by `architect_sites::ComponentBlocks`, which
-mounts the view in the component's sandbox, sends it the block, and writes
-the edits it answers with as HTML. The sandbox's WASI counter draws a
-```` ```bars ```` fence this way (`apps/sandbox/wasi-counter/src/lib.rs`
-`Bars`; `features/sites/tests/wasi.rs`).
 
 **Content-sized.** A pane's sub-document is as tall as its pane; an
 embed's is laid out at the host's width with its own height left to its
@@ -1928,16 +1770,9 @@ process embed runs on its own thread, its frames timed into the same
 with `BusyBadge` past the budget, while the document around it answers
 as ever. Nothing on the host's UI thread waits for an embed.
 
-**In the sandbox** (`apps/ui/src/note.rs` `NoteBody`): the Vault's
-"A chart in a note" has a ```` ```kf ```` fence the Board draws as a chart
-(`apps/sandbox/board/pages/kf.tsx`, a page embed), and "Amazing Grace" is a
-`type: song` note the Board gives its song card
-(`apps/sandbox/board/src/lib.rs` `SongCard`, a linked embed). Edit a note
-("Edit") and the chart is drawn again and resized; turn the Board off
-(`EXT_DISABLE {"id":"lab.board"}`) and the plain fence comes back.
-`features/pages/tests/embed.rs` and
-`features/extensions/tests/remote_view.rs` check that a claimed fence
-resolves, mounts, takes its content's height and goes when unloaded.
+`app-shell:crates/app-shell-extensions/tests/remote_view.rs` checks that a
+claimed fence resolves, mounts, takes its content's height and goes when
+unloaded.
 
 **The FastTrackStudios editor** renders fences through a registry of
 `FencePlugin`s (`editor_state::plugin`) that return an HTML string,
@@ -1947,705 +1782,12 @@ widget decoration that mounts a Dioxus element (or names a node the
 host attaches a sub-document to) at the fence, a height it is told back
 for its line layout, and the fence's text as it is edited. With that,
 the editor's fence languages are `Embeds::fences`, and each widget an
-`EmbedView`. Until then the sandbox draws its notes itself.
+`EmbedView`. Until then an app draws its notes itself.
 
 **The web host** has no Blitz sub-documents: there an embed's view
 would be drawn by the extension's own Dioxus tree into an element of the
 page (linked views work as they are), or a page's tree rendered into
 a shadow root, its height read with a `ResizeObserver`.
-
-### The playhead and the Now Playing bar
-
-The app has one media service, the playhead (`features/playhead`,
-`architect.playhead`, #589), and one Now Playing bar, the shell's own
-(`architect_shell::AppShell`'s `now_playing`, drawn by
-`architect_playhead::ui::NowPlayingBar`): above a phone's tab bar, at a
-desk's page foot, the same in the web app. Any extension puts what it
-plays on the deck as its **source** and controls it; several can each
-have one; the bar shows the **active** one and lists the rest. Nothing in
-it knows what a source means to its extension.
-
-A source is one extension's queue (`PLAYHEAD_SET`, method `set`):
-
-```json
-{ "name": "Studio", "play": false, "slots": ["click", "open"],
-  "queue": [{ "id": "Setlists/Gig.md#1", "title": "Amazing Grace", "subtitle": "John Newton",
-              "art": "Art/grace.jpg", "duration": 192.5, "media": "Recordings/Amazing Grace.mp3",
-              "sections": [{ "name": "Verse 1", "start": 0, "end": 20, "color": "#2563eb" }],
-              "marks": [{ "at": 1.5, "text": "Amazing grace", "kind": "line" }],
-              "tempo": { "bpm": 72, "at": 0.4, "meter": 3 } }] }
-```
-
-Everything but `queue` is optional. `index` picks the current item (clamped
-to the queue); a `SET` without `index` keeps the item that is current
-when its `id` is still in the queue, else starts at the first, so a view
-that sends the same list again does not send the source back to its
-first song. `time` is where to start, seconds.
-
-Every time in it is seconds from 0 to 24 h
-(`architect_playhead::MAX_SECONDS`, 86 400): an item's `duration`, the
-`SET`'s `time`, a section's `start` and `end`, a mark's `at` and a tempo's
-`at`. A `SET` with one above it is refused whole, as any other invalid
-value is, and a media length above it is not taken. An item's `tempo` is
-its beat for the bar's Click (`architect_playhead::model::Tempo`): `bpm`
-20 to 400 (`BPM`), its first downbeat `at` (0 or more, default 0), and
-`meter` beats a bar, 1 to 16 (`METER`, default 4), the first of each
-accented; one tempo for the whole item.
-
-`slots` is what the bar draws beside its play button
-(`architect_playhead::model::Slot`): at most two (`MAX_SLOTS`), each once,
-of `"click"` (Click on and off: a tick on each beat of the item's
-`tempo`) and `"open"` (the bar's detail: previous, next, the position and
-the sources). The bar always draws `open`, after the others when it is
-not asked for, so the detail is one focus away from the keyboard
-(`features/playhead/src/ui.rs` `slots_drawn`). Click is one app-wide
-setting (`architect_playhead::click`, `set_click`); it is drawn only in
-an app that sounds it (`clicks`, said once by `sounds_click`): the web
-app (`apps/web/src/app/click.rs`), scheduled ahead on the Web Audio clock
-with at most 16 beats a look, its audio context suspended while Click is
-off or nothing plays. Desktop and phone do not sound it and draw no
-Click.
-
-`media` and `art` are vault paths, never URLs: one rule,
-`architect_playhead::model::vault_path`, which the web app's frame host
-re-exports. It refuses a scheme or drive (`:`), a leading `/`, `\`, `?`,
-`#`, `%`, control and invisible format characters, look-alikes of `/` and
-`.` (U+FF0F, U+2215, U+2044, U+FF0E, U+2024, U+FE52), and an empty, `.` or
-`..` segment or one ending in a dot or a space; spaces inside a name are
-kept. The app turns a path into a stream itself, and gives an item a
-length from its media only when it resolved that media
-(`Reading::resolved`). An empty queue removes the source. A `SET` whose
-current item keeps its `id` keeps playing where it was. Without `media`
-an item plays on a silent clock over its `duration`.
-
-An item with media nobody hears here (a native app, a path the web app
-does not stream, a refused `play()`) plays on the silent clock; the state
-says so (`unheard: true`) and the bar shows "Not heard here". One with no
-known length as well never ends on its own, so the deck passes over it
-(the next item plays) or, at the last, stops there; its id is listed in
-the state's `unplayable` and the bar shows "Can't be played". A seek is
-refused while the item's length is unknown, and past its end is clamped
-to it.
-
-Every view gets the same state (`PLAYHEAD_STATE`, `Deck::state`):
-`source`, `name`, `active`, `playing`, `time` at `at` (ms since the
-epoch; extrapolate while `playing`), `rate`, `duration`, `index`,
-`tracks`, `clock` (`media` or `silent`), `unheard`, `unplayable`, `item`,
-`queue`, `slots`, and the share page's flat keys (`title`, `subtitle`, `artist`,
-`sections`).
-
-| Method (action) | Arguments | Who |
-| --- | --- | --- |
-| `set` (`PLAYHEAD_SET`) | the source | an extension: its own; the app names `source` |
-| `play`, `pause`, `next`, `previous` | `source?` | an extension: its own; the app: `source` or the active one |
-| `seek` | `t`, `source?` | the same |
-| `item` | `index` or `id`, `play?`, `source?` | the same |
-| `toggle` | `source?` | the same: play, or pause what plays (a favourite's round button) |
-| `state` | `source?` | reads: an extension its own, the app any |
-| `sources` | none | the app: every source (the bar's switcher); an extension: its own entry and whether it is active, nothing of any other (`Deck::listing_for`) |
-| `activate` | `source` | the app only (the bar's switcher) |
-
-Who calls is the host's to say, never the arguments': every action's
-context carries `caller`, the calling extension's id from the call's
-principal (`architect_extensions::invocation::caller_json`), and an
-extension naming another's source is refused (`not your source`). Playing
-a source makes it the active one and pauses the one before.
-
-It fails closed (`Caller::of_context`): with no `caller`, a call is the
-app's only when its invocation is the app's own (`deck::APP_SOURCES`: the
-app, ⌘K, a menu, a key, a toolbar, an agent over MCP); a hook, a script or
-a context that says nothing is refused. The host runs an extension's
-declared work as that extension (`architect_extensions::host`
-`as_extension`): a preset's target, a hook's action and a hook's script
-carry `Principal::extension(owner, …)`, for whoever ran it, so a preset
-that names `PLAYHEAD_SET {"source": "<another>"}` is `not your source`
-whoever presses it. The app's own sources have ids outside the
-extension-id grammar (the web app's Notes source is `app:notes`), and an
-extension whose id is `vault`, `app` or `playhead` holds none
-(`deck::reserved`).
-
-The same contract reaches every runtime: a linked or process extension
-calls the service (`[uses] "architect.playhead" = "^0.1"`) and hooks the
-app event `playhead.changed` (`[[hooks]] on = "app:playhead.changed"`, with
-`capabilities.events = ["playhead.changed"]`). Each extension hears it per
-owner (`architect_playhead::heard_by`, raised by
-`architect_playhead::raise_changed` through `Host::raise_app_each`): its
-own source's state, and of another source's change only `{active}`,
-whether its own is the active one. A linked view reads
-`architect_playhead::ui::use_playhead`; a web bundle in the web app's
-frame host gets the state as its props and asks `PLAYHEAD_SEEK`, `_PLAY`,
-`_PAUSE`, `_NEXT`, `_PREVIOUS`, `_ITEM` and `_SET` (`architect_playhead::FRAME_ASKS`),
-rate-limited (8 a second and a burst of 16 per frame, 32 and 64 for all
-frames together: `ext_host::take_ask`), as its island's extension. Every
-view of one extension (a setlist, its lyrics, its transport) is handed
-the same source's state, whichever view set it.
-
-A favourite's primary (#607) plays and pauses with `target = { action =
-"PLAYHEAD_TOGGLE" }` (its extension's capabilities name `PLAYHEAD_`) and
-shows Pause by `state = "playing"`: the app keeps each source's playing as
-its extension's own runtime state (`ext:<id>`, key `playing`,
-`architect_playhead::PLAYING_STATE`), so the extension writes nothing.
-Pressed from the bar or ⌘K it is the app's press, on the active source;
-pressed as a favourite's declared target it runs as the extension that
-declared it (`apps/ui/src/favourites.rs` `run_declared` natively,
-`architect_playhead::press_as` in the browser), so it moves that
-extension's own source, the one its face reads.
-
-What is heard is a `Clock` (`architect_playhead::clock`): the web app's
-own audio element (`apps/web/src/app/audio.rs`, the page's
-`media-src 'self'`, Media Session), a silent clock in the native apps
-(audible native playback comes later), and later an engine attached as
-the clock (studio#400, #528). The Media Session shows the item's title,
-subtitle and its source's name on the lock screen, a headset and a car's
-display, for every item, heard or not: a private note's title on the Notes
-source leaves the app that way, by the owner's choice. The playhead is not
-synced state: a
-position is one device's; what a source plays comes from its
-extension's documents, which sync through `crdt::docs`.
-
-### Views that follow playback
-
-A chart whose bar is marked as the song plays, lyrics whose line is: a
-block that follows a playhead (#511). On a published page (a Site, a
-share link) the page has one player, and it is the only clock. How a
-view maps the playhead to its content (a tempo map, LRC timestamps) is
-the view's; the host supplies a monotonic playhead and a seek, nothing
-more.
-
-**Declare it in the markup.** A block drawn at build time (an `[[embeds]]
-page`'s element tree, written out as HTML by `elements_to_html`, a WASI
-component's embed view, or a Rust `BlockRenderer`'s HTML or inline SVG)
-has no script of its own on the page: what it draws is kept by
-allow-lists (`features/sites/src/sanitize.rs`: SVG drawing elements,
-basic HTML, `class`, `aria-*`, `data-*`, geometry, URLs only relative,
-`https:` or `mailto:`, an image only relative or a raster `data:` image),
-and scripts, handlers, forms, SMIL animation and `<foreignObject>` are
-dropped. Its CSS is plain declarations only: no quotes, comments,
-escapes, `var()`, custom properties, at-rules or `position` but
-`static`/`relative`; an SVG `<style>` sheet is flat rules, put under the
-block's own box class (the site wraps every block in a contained box).
-The page's own ids and data attributes (`site-*`, `share-*`,
-`data-site-*`), and ids shadowing the page script's globals
-(`architect`, …), are not a block's to use.
-It follows with attributes alone, which come through as drawn, on HTML
-elements or SVG ones:
-
-| Attribute | On | Means |
-| --- | --- | --- |
-| `data-follow-playhead` | the block's element | its `[data-at]` children follow the playhead |
-| `data-at="12.5"` | a child (a bar, a line) | it starts at this second of the track |
-| `data-media="<url>"` | the block's element, optional | follow this media file only; without it, whatever plays from the block's own page |
-| `data-glide="24.5"` | a child, optional | while it is current it moves this far along x (in its own units, px for HTML), from its `data-at` to the next child's: a playhead line gliding between beats |
-| `data-until="13.1"` | a gliding child, optional | its glide ends here instead of at the next child's `data-at` (the last child, or one that holds before the next) |
-
-The page marks the last child whose `data-at` has passed with
-`aria-current="time"` (style it: `[aria-current="time"]`), centres it in
-the nearest box that scrolls it (its bounding rectangle, so an SVG element
-works too; never the page), and seeks to its second on a click. A block's
-box scrolls sideways when its drawing is wider than the page. An SVG
-element marked current is filled from the theme (`--primary`, at 28%; a
-transparent rect per bar is enough), and hinted under the pointer.
-Keyflow's chart drawn this way needs only a `data-at` per bar from its
-tempo map, as HTML or as its engraved SVG (keyflow#59):
-
-```tsx
-// pages/kf.tsx, an [[embeds]] page: the seconds come from the chart's tempo map.
-<div data-follow-playhead>
-  {bars.map((bar) => <div class="kf-bar" data-at={String(bar.seconds)}>{bar.chord}</div>)}
-</div>
-```
-
-```svg
-<!-- the engraver's SVG: a transparent rect over each played bar -->
-<svg viewBox="0 0 1200 400" data-follow-playhead>
-  <rect class="kf-bar" data-at="0" x="40" y="20" width="270" height="80" fill="transparent"/>
-  <rect class="kf-bar" data-at="2.5" x="310" y="20" width="270" height="80" fill="transparent"/>
-  …
-</svg>
-```
-
-A box inside a box follows its own children: a chart's bars and its
-beats are two boxes in one SVG, the bar at the playhead washed, one beat's
-line marked. With `data-glide` that line moves continuously, as Session's
-cursor does: on every frame while it plays, and exactly where the playhead
-is after a seek or a pause, by a transform of that one element (the item
-left goes back where it is drawn). Its times are the children's own, so a
-tempo change needs nothing more; where the next beat is on another line,
-the glide ends at this line's end (`data-glide` says how far) and the next
-beat shows where it is drawn. A box with gliding children marks them when
-they start (other boxes mark a line 50 ms early, as lyrics are read
-ahead). Studio's charts draw their beats this way
-(`studio:features/setlists/src/follow.rs`).
-
-```svg
-<!-- a beat's line: 0.7 s long, 22 units to the next beat -->
-<g data-follow-playhead>
-  <rect class="kf-beat" data-at="6.252" data-glide="22.2" x="133" y="160" width="1.5" height="40"/>
-  <rect class="kf-beat" data-at="6.958" data-glide="37.5" x="155.2" y="160" width="1.5" height="40"/>
-  …
-</g>
-```
-
-The synced-lyrics block is built this way
-(`features/sites/src/lyrics.rs` `lyrics_html`).
-
-**A playlist and a now-playing view.** A block can make its page a
-player, the way a streaming app's playlist is: a list whose rows play in
-place, a bar at the foot while anything plays, and a view of what plays
-that opens from the bar (studio#445). Attributes again, no script:
-
-| Attribute | On | Means |
-| --- | --- | --- |
-| `data-playlist` | a list | its tracks are the page's queue, in document order (every playlist of the page, one after the other); a tap on one plays it and the page stays; the next one starts without a page load. Playlists one after another with nothing but headings between them (each in its block's box), each with `data-playlist-join` (or the class `studio-setlist`, as Studio wrote a setlist's sets before), are joined into one: each heading becomes a section label of it, keeping its `id`; lists that do not say so stay apart |
-| `data-playlist-section` | a row of it | a section's label (a set's name): never a track; numbering, the queue and next/previous run on through it |
-| `data-track` + `data-media="<url>"` | a row of it | a track: its recording; `aria-current="true"` and `data-state` (`playing` or `paused`) while it is the one playing; a link in it still goes where it says |
-| `data-title`, `data-subtitle` | the row | what the bar and the view say of it |
-| `data-page="<url>"` | the row | the page whose `[data-now-playing]` shows it: a page this link (or site) built, under its mount, ending in `/`, no `_` segment, no query; anything else is ignored (no view, no link). A row with `data-page` and no `data-track` is a song with no recording: in the list, quieter, and a tap opens that page |
-| `data-track-mark`, `data-track-art`, `data-track-title`, `data-track-meta`, `data-track-length`, `data-track-open` | inside a row | its parts as the page's sheet lays them out (number, a square tile, title over one muted line, length, a small link to its page); the player lays the song's art over its `data-track-art` tile when the link has art for its `data-page` (the queue's `art`, from the note's `art:`), and draws the bar's art from the same tile (`data-hue` its colour) |
-| `data-track-more` | a `<button type="button">` in a row | its menu ("…", 44 px): Open chart (the now-playing view, the song made current) and Lyrics when it has them, Song page and downloads; a sheet from the foot on a phone, beside the button on a desk; arrows move, Escape closes |
-| `data-key`, `data-key-size`, `data-track-key`, `data-track-transposed` | the row's `data-track-art` tile | the song's key on its art: the art dimmed under it, the key (`data-track-key`; `data-key-size` `s` or `xs` for a long one) in place of the tile's initials, a corner mark (`data-track-transposed`) when the list plays it in another key; the tile's accessible label says it in words. The player's card shows the art clean |
-| `data-playlist-play` | a button in the list | no longer drawn: a row plays from where it is, the bar plays the list |
-| `data-now-playing` + `data-media="<url>"` | a block's element | what the now-playing view shows while that recording plays: moved in from this page, or fetched from the track's `data-page` (once), with its block's box so its sheet comes too; its `[data-follow-playhead]` boxes follow there |
-| `data-transport` | inside the view | the view brings its own controls: the player's are not drawn under it |
-| `data-progress` | inside the view | the view brings its own position bar: the player's is not drawn above it |
-
-Every playlist of a page is one queue, in document order (a setlist's
-sets play through); the page's own `<audio>`/`<video>` are not queued
-there, and one played by hand ends without starting the list. On a
-playlist's page the bar is a card floating over the page: the song's art,
-its title over its subtitle, **Click**, **Loop** and play, a thin line of
-where it is along its foot; a tap on it (anywhere but a button) opens the
-view: from the top, where it is (a bar to seek on), the view filling the
-width, the controls in one row (Click, previous, play, next, Loop), the
-song's lyrics and its page as icons in its head. **Click** ticks on each
-of the song's beats (its view's `[data-at][data-beat]` marks, `data-beat="1"`
-accented), scheduled ahead on Web Audio against the recording's clock and
-started again after a seek, a pause or a rate change; **Loop** plays the
-section of its view's `data-sections` the playhead is in again and again
-(a seek moves it). Each is disabled for a song with none, and kept for the
-viewer with the player's place. The view's numbers are read from the
-song's page (fetched once, as the view is); nothing of it runs. Back, a swipe down on its head or Escape
-closes it, focus goes back to the bar, and what plays goes on. On a
-phone the view covers the page (modal: the page behind is inert); from
-900 px it is a panel beside the list. A recording the node refuses stops
-the queue and says so in the bar; the lock screen shows the song and its
-buttons work (Media Session).
-
-**An island: an extension's views live on the now-playing view**
-(studio#445). A distribution links in a WASI component as an island
-(`Distribution::island(SiteIsland::new(id, files).progress(view).transport(view).stylesheet(file))`,
-its `architect-ext build-web` folder): the node serves its files, the web
-runtime and a sandbox document from its own `/_ext/` (each path named by
-its content, `nosniff`, immutable; never from a vault or a link), and puts
-`<script type="application/json" id="site-islands">` on a share's pages.
-When the view first opens, the page's player loads the runtime, which
-fetches the component's files itself (pinned by their lock's digest),
-runs it in the sandbox frame, and draws its views into the view's top and
-bottom slots in shadow roots (`view.js`, the share pages' rules). The
-player's own position bar and controls stay until its first frame, and
-whenever it cannot load: a browser without JS Promise Integration (Safari
-before 27, every browser on iOS before it) when the island has no web
-bundle, a node without islands. The island's transport sits in the
-controls' row between the player's Click and Loop, which stay.
-
-**A web view: the same views on every browser.** An island may carry its
-views as a plain web bundle too: wasm-bindgen's `--target web` glue
-(exporting `mount(view)`), its modules and its one `.wasm`, files of its
-folder named `web-*` (its modules import each other as `./<name>.js`: one
-folder, no other path). The node finds it by its files (the one `web-*.js`
-that is no `web-snippet-*.js`; `SiteIsland::web(entry)` names another) and
-puts each file's digest in `site-islands` (`web.files`), with the document
-its frame runs in (`web.webview`). When an island has one, the player draws
-its views from it in every browser, no JS Promise Integration needed: each
-view in a frame of the node's web view document
-(`architect_sites::island::webview_document`, its boot script
-`features/sites/assets/webview.js`), served with `webview_headers`. The page
-fetches the bundle from the node, checks every file against its digest, and
-hands the frame the bytes once (it makes them `blob:` modules, gives the
-glue the wasm as bytes and mounts the view), its theme (the page's CSS
-custom properties, none with a URL, and light or dark), its sheet (pinned as
-above) and where the song is; the frame sends back only the view's asks (the
-same five intents, checked and rate-limited by the page), its height (once a
-frame at most), that it is ready, and answers a heartbeat. A frame that is
-not ready in 15 s, stops answering (taken down 6 to 10 s after it falls
-silent: a ping every 2 s, late after 6 s), reports an error or leaves its
-document (a second load) is taken down for the page's life and the
-player's own bar and controls come back. While the page is hidden (another
-app, a locked phone) neither clock runs against it: the beat starts over
-when the page is shown.
-
-What the heartbeat cannot stop: a frame whose bundle never yields (a
-busy loop). A sandboxed frame is an opaque origin, but a browser may run
-it on the page's own thread (Chromium unless it isolates sandboxed
-frames, WebKit, Firefox for a frame of the page's own site): then the
-page's timers stop with it, the heartbeat never fires, and the page is
-frozen until the browser's own slow-script warning stops the script. In a
-browser that runs it apart, the page stays live and takes the frame down
-6 to 10 s after it falls silent. So a web view's bundle is trusted not to spin, as the island's
-component is: the node operator links it in, pinned by digest.
-
-**A lyrics view** (`SiteIsland::lyrics(view)`, a web bundle's only): the
-now-playing view's lyrics (a phone shell's Lyrics tab) drawn by the
-island, the whole height the words had (the page's position bar gives way
-too; its controls stay). Its frame is started the first time lyrics show
-and is as tall as the place the page gives it, whatever height it says
-(the page owns that size: an orientation change or the bars moving resize
-the frame, and the view measures itself). Besides the playhead it is given
-`lyrics` (`[{at, text}]`, the song's timed lyrics list as the page has it,
-at most 2,000 lines of 300 characters) and `artist` (the row's subtitle);
-nothing the share does not already serve. It shows once ready and only for
-a song with timed lines: before that, for a song without, and for good
-after its frame fails (the rules above), the page's own list (or its "No
-lyrics") is there. Studio's is Session's lyrics panel, fixed to its
-Confidence Monitor.
-
-**In the web app (#495, route A): the same frames beside a note.** The
-node lists its islands at `/_ext/islands.json` (`page_json`, never
-cached; `apps/desktop/src/node/shares.rs` `ISLANDS_LISTING`), and the web
-app (`/app/`) runs their views in frames of the same web view document,
-with nothing of the share page's script: the host is Rust,
-`apps/web/src/ext_host.rs` (the decisions: which listed bundle to
-believe, each file against its digest, the asks, the heartbeat, the
-theme) and `apps/web/src/app/frames.rs` `ExtensionFrame` (the frame, its
-port, its timers). A song note (`tags: [song]`) shows its island's
-progress, transport and lyrics views beside it, driven by the app's own
-playhead over the note's ` ```lrc ` lines (`apps/web/src/app/song.rs`
-`SongViews`); the app's own controls and lyrics show until a view is
-ready and for good if it dies. The frame gets the bundle's bytes, the
-theme's colours and the view's props, never the session token or a
-cookie; its asks are the playhead's intents only, rate-limited (8 a
-second and a burst of 16 per frame, 32 and 64 for all frames together). The digests guard a bundle's files against a
-cache or a mirror that swapped one after the listing was made; they are
-no guard against the node, which is the app's own origin and writes the
-frame's policy in its response headers. The app loads frames only from
-the document whose policy blocks WebRTC: a listing naming the
-`webview-rtc` document is refused with its island, since WebRTC is the
-app's to grant (#614) and it grants none yet (`ext_host.rs`
-`webview_ok`). The app's page allows `frame-src 'self'` and
-nothing else new (`scripts/web-routes.md`). Host calls into a vault over
-the port (a member's org lane, a share's guest) are #495's next step.
-`apps/web/test/app-ext-host.test.mjs` (`just app-ext-host-test`) runs the
-hostile bundles against it.
-
-**A view by a note's type (#495, #589).** An island may claim note types
-for its views, as its manifest's `[[embeds]] view = … claims = {
-note_type = […] }` says (`SiteIsland::embed(view, note_types)`, a web
-bundle's only; listed as `embeds: [{view, note_type}]`). The web app draws
-that view at the head of a note whose `type` property it claims (without
-regard to case; `apps/web/src/app/embed.rs` `NoteEmbed`), in a frame like
-the others. Nothing in the app knows what kind of note it is: the claim
-chooses the view.
-
-- **Which island.** The first island in the listing's order that claims
-  the type draws it, with its first claim of it (`apps/web/src/ext_host.rs`
-  `claimed`). The choice is made from the listing alone: only that
-  island's bundle is fetched and checked, and a note whose type nobody
-  claims fetches nothing.
-- **What of the note it is handed.** `note_props` in
-  `apps/web/src/ext_host.rs` is the one gate between a vault's note and a
-  frame, wherever a view is mounted on a note, and it takes who is
-  viewing (`Audience`; no caller can leave it out). A view gets the note
-  only when its claim names reading it (`SiteIsland::embed_note(view,
-  note_types, properties)`, listed with `reads: ["documents"]` and the
-  `properties` it declares) and its extension declares it too
-  (`SiteIsland::reads`, its manifest's `[capabilities] reads`, listed as
-  the island's `reads`); otherwise `note` is `null`. A signed-in member
-  (and the demo) gets `{path, title, type, properties, body}`, the body
-  without its `%%comments%%`. A share link's guest gets what the sharer
-  shared (#648, #669): `{title, type, properties, body}`, only the
-  declared properties, never a vault path, and the body as the link's
-  node gave it (`GuestNote::source`, below), again without its
-  `%%comments%%` (both through `architect_spaces::view::without_comments`,
-  `features/spaces/src/view.rs`). A guest's note always comes from the
-  node (`ShareGuest::read`), never from a vault file.
-- **The note's files.** A view whose extension declares `reads =
-  ["files"]` too is handed `files: [{path, kind, size, data | text}]`:
-  images (`png`, `jpeg`, `webp`, `gif`) as `data:` URLs, which the app
-  page and the frame already allow (`img-src data:`), and synced lyrics
-  (`.lrc`) as text (`apps/web/src/ext_host.rs` `ViewFile`,
-  `Island::reads_files_of`). Nothing else: audio and video stream through
-  the app's player. At most 2 MiB a file, 8 MiB and 32 files a note
-  (`architect_spaces::view` `VIEW_FILE_MAX`, `VIEW_FILES_TOTAL_MAX`,
-  `VIEW_FILES_MAX`, `within_caps`), each at a vault path
-  (`architect_playhead::model::vault_path`); a file over the cap is left
-  out, never cut short. A member's are what the note and the notes it
-  links reference in their own vault (`apps/web/src/view_files.rs`
-  `member_files`: link and embed targets and frontmatter values, found
-  as the vault finds a name, one step into linked notes so a setlist
-  gets its songs' art). A guest's are only those the link's node listed
-  for the note (`GuestNote::files`, never one the vault has not hashed),
-  each at a URL parsed and normalised as the browser fetches it, on the
-  app's own origin and below the link (`apps/web/src/view_files.rs`
-  `guest_file_url`), fetched with no credentials and no redirect, never
-  read past its listed size, and checked against its `sha256` (a file
-  without one is refused) before it is handed in
-  (`apps/web/src/app/guest.rs`).
-- **What it may ask.** Beside the note, the playhead's state of its
-  extension's source, flat, as `architect.playhead` v0.1 gives a frame
-  (#589). Besides the five intents it may ask `PLAYHEAD_SET` (its source,
-  checked against the contract's limits: a `name`, a `queue` of at most
-  500 items, each with a unique `id`, a `title`, `media` and `art` only as
-  vault-relative paths (`architect_playhead::model::vault_path`, above),
-  a `duration` when it has no media, sections and marks within their
-  limits; `index`, `time` and `play`; anything else refuses the whole
-  source) and `PLAYHEAD_ITEM` (`{id}` or `{index}`, and `play`). A
-  `source` naming another extension is refused (`not your source`). No
-  ask is taken before the frame is ready or while the page is hidden. A
-  refusal's reason, in the contract's words, is on the frame's holder
-  (`data-ext-refused`); the protocol has no answer to an ask. A message
-  may be 64 KiB, checked before it is copied out of the browser.
-- **Its height.** A view at a note's head is as tall as it says, up to
-  60 % of the window (at least 240 px: `ext_host::head_height`); past
-  that it scrolls inside its own box, so a 500-item list is all there
-  without pushing the note away at 390 px wide. `MAX_HEIGHT` (4000 px)
-  stays the most a `size` message may say.
-- **Its source.** The island's extension's own on the app's deck
-  (`architect_playhead`), the same one the Now Playing bar shows and
-  moves; #659's per-view stand-in is gone. Whether `media` is a path the
-  note references is enforced when the web app resolves media from a
-  signed-in vault (#628; the rules at `apps/web/src/app/audio.rs`
-  `media_url`).
-
-A favourite's `{view}` ([Favourites](#favourites)) opens any view its
-extension's island lists (`Island::views`: its share-page slots and its
-claims) the same way, in a pane of its own, with the same props and asks
-(`apps/web/src/app/vault.rs` `FrameView`, `embed.rs` `Embedded`); the
-note it is handed goes through the same gate (`note_props`).
-
-What reaches the network from a web view, and what stops it:
-
-- **By its policy** (`sandbox allow-scripts`, an opaque origin): every
-  fetch, XHR, WebSocket, `EventSource`, WebTransport, beacon and `<a ping>`
-  (`connect-src 'none'`); any script but its own by hash and `blob:`
-  modules (no remote `import()`, no speculation rules); images and fonts
-  but `blob:`/`data:` (so a stylesheet's `url()` loads nothing); media,
-  workers, objects, manifests, `<base>`, forms; popups (`window.open`), top
-  navigation, modals and forms by the sandbox flags.
-- **Child frames:** `frame-src 'none'` stops `blob:`, `data:` and the web
-  view documents as children. An `about:blank` or `srcdoc` child is still
-  made; what keeps a bundle from getting removed APIs back from its fresh
-  global is the sandbox (the child is a new opaque origin: the bundle
-  cannot reach into it) and the policy it inherits (`script-src`: nothing
-  runs in it the frame's own policy would not run).
-- **By its script, before any bundle code runs:** this is the WebRTC
-  control on every engine. `RTCPeerConnection` and its kin are removed
-  (non-configurable `undefined`), by name and by pattern (every own global
-  matching `/^(webkit|moz)?RTC/`, so one an engine adds goes too); the
-  Presentation API is removed; `navigator.sendBeacon` answers `false`. The
-  policy's `webrtc 'block'` is kept as forward-looking only: no engine
-  enforces a `webrtc` directive today (WebKit and Chromium define none).
-- **By its headers:** `x-dns-prefetch-control: off` (no DNS prefetch or
-  preconnect from `<link>`).
-- **By the share page's own policy:** a frame navigating itself can go
-  only where the page's `frame-src` (its `default-src 'self'`) allows, the
-  node. That is what keeps a web view from leaving the node, and it is
-  load-bearing (`apps/desktop/src/node/shares.rs` `content_security_policy`);
-  a navigation away is also the frame's death (above). The node's own
-  routes that change a visitor's state never answer a frame: sign-out
-  (`/s/_signout`) is a form posted from the node's own page, its `Origin`
-  checked (a GET is a page asking; the frame has no `allow-forms`, no
-  `connect-src`, and its Origin would be `null`), on every browser, with or
-  without fetch metadata (Safari 15.4 to 16.3 sends none); sign-in
-  (`/s/_signin`) answers only a same-origin or typed request
-  (`Sec-Fetch-Site`).
-- **Not stopped:** the bundle runs on the page's event loop in Firefox
-  (and may elsewhere): a busy loop in it stalls the share page. The
-  component route (a Worker) did not have this.
-
-**WebRTC is a capability**, never a default. An extension declares
-`capabilities.webrtc = ["peer-connections"]` and its operator grants it
-(`SiteIsland::grant_webrtc`, the distribution's call): only then is its
-view served the other web view document (`webview-rtc.<hash>.html`,
-`WebRtc::Granted`, its own path so the two are never confused or cached
-one for the other), whose script leaves the constructors (its policy says
-`webrtc 'allow'`). A node where no island is granted WebRTC does not serve
-that document at all (a direct GET is a 404). Everything else about the frame is the same
-(opaque origin, `connect-src 'none'`, pinned files, intents only). The
-node chooses it from the island's manifest and the grant; no page, note,
-query or message can. What it exposes: the visitor's IP address to the
-peers and to the STUN/TURN servers the bundle names, and a data channel
-out of the sandbox that no policy meters. The bundle's code is the node
-operator's linked-in island, pinned by digest, the same trust as the
-component.
-
-A bundle built for `wasm32-unknown-unknown` with the pinned rustc uses bulk
-memory, mutable globals, non-trapping float-to-int, reference types, sign
-extension and multi-value (Safari 15 has all six; Studio's build validates
-its module against exactly those with `wasm-opt`), so the floor is the
-frame's own: Safari 15.4 (module scripts from `blob:`, `'wasm-unsafe-eval'`
-from 16; Studio's target is 16.4).
-
-- **The share page's CSP does not change.** The sandbox frame is the
-  node's own document, `/_ext/sandbox.<hash>.html`
-  (`architect_sites::island::sandbox_document`), served with only its own
-  policy: `sandbox allow-scripts` (an opaque origin even opened at the top
-  level: no cookies, no storage), the runtime's `SANDBOX_CSP` (its one
-  script by hash, `blob:` workers, `'wasm-unsafe-eval'`,
-  `connect-src 'none'`), `frame-ancestors 'self'`. A `srcdoc` frame would
-  inherit the page's policy, which allows no wasm; the runtime takes the
-  document's URL (`loadExtension(…, { sandbox })`, `Sandbox`'s `url`). The
-  frame is `sandbox="allow-scripts"` alone: never `allow-same-origin`,
-  navigation, popups, forms or modals.
-- **What it is given and may ask.** Data only, at most a frame a 16 ms, as
-  its views' embed input (`{claim: "playhead", props}`): `time`, `playing`,
-  `duration`, `index`, `tracks`, the song's `title` and `sections` (the
-  view's `data-sections`: `[{name, start, end, color}]`). It may ask only
-  `PLAYHEAD_SEEK` (`{t}`, a finite time within the song), `PLAYHEAD_PLAY`,
-  `PLAYHEAD_PAUSE`, `PLAYHEAD_NEXT`, `PLAYHEAD_PREVIOUS`, each checked by
-  the player; everything else is refused.
-- **Its stylesheet** (`cleanSheet`, `sanitize.js`, the same for every
-  embedder of the web runtime) goes in its views' shadow roots, pinned by
-  its digest (`stylesheetIntegrity`) like the component's files. It is
-  tokenised and parsed as CSS, never pattern-matched; every name is
-  checked unescaped, and what is kept is written out again from its tokens,
-  so a browser reads exactly what was checked. Anything not understood or
-  not allowed refuses it whole. Kept: style rules (nested too), `@media`,
-  `@supports`, `@container`, `@keyframes`, `@property` (`@layer`
-  flattened). Refused: any other at-rule; selectors naming `:host`,
-  `:root`, `::part`, `::slotted`, `:scope`, `html`, `body` or the view's
-  own host and box, and `&` outside a rule (at the top it is the host;
-  Tailwind's `:root, :host { --x }` theme is kept, its custom properties
-  alone, on the box); `attr()`, `image()`, `image-set()`, `element()`,
-  `paint()`; a custom property holding a block (`--x: {…}`, a value the
-  browser keeps, never a rule); `position: fixed`/`sticky`; `!important`
-  on what the box contract sets; animations or transitions that do not
-  end (`infinite`, more than 10 runs, a time past 30 s); a sheet past its
-  bounds (`SHEET_LIMITS`: 256 KB, 4,000 rules, 8 blocks deep, 16
-  brackets or functions deep, 512 tokens a selector list).
-  **A `url()` is never judged as text**: it is resolved as the browser
-  will request it (against the document's base URL), then kept only on
-  the page's origin with a path of exactly its own `/_ext/` folder and
-  one file name (`[A-Za-z0-9._-]`, the island's own file-name rule), no
-  `%`, backslash, whitespace, query, fragment or credentials anywhere in
-  it, and written back as that normalised path. (`%2e%2e`, `.%2E`, `/./`
-  and `//host` mean to the URL parser what a prefix match does not see:
-  the second security review of architect#601.) Tokens a dropped comment
-  brought together are written apart again (CSS Syntax §9), so
-  `url/**/(` never comes back as `url(`.
-  The box contract holds even so: the view's host carries
-  `contain: layout paint style`, `position: relative`, `isolation`,
-  `overflow: hidden`, and no `transform`, `translate`, `scale`, `rotate`,
-  `zoom`, `margin`, `box-shadow`, `outline` or `filter`, inline and
-  `!important` from outside the shadow root (and the share page's own
-  sheet repeats it), and the sheet can select neither the host nor the
-  box. A reader who asked for less motion gets none: a layer before the
-  sheet turns its animations and transitions off, and a layer's
-  `!important` wins over the sheet's.
-  `features/extensions/web/test/sheet-oracle.test.mjs` is this
-  boundary's judge in a real browser: every payload of both security
-  reviews, refused or kept, may not make Firefox request anything but the
-  view's own files (its network log and the server's), hold a `url()`
-  resolving elsewhere, or paint or be hit outside its slot.
-- **Its intents** are capped (8 a second, a burst of 16), and the extension
-  is unloaded 30 s after the view closes.
-
-**What a view brings in is checked twice.** A view from another page is
-fetched only from a page the link built: the node answers its pages with
-`X-Architect-Page: built` (`architect::host::BUILT_PAGE`; a static
-Site's router too), which no vault file is served with, since the
-builder publishes no vault file named `index.html` or `404.html`. Then
-what is imported goes through the share pages' allow-lists again, in the
-page: `sanitize.js` (the port of `sanitize.rs` every live view is held
-to), which every Site's own script carries as `architect.rules`, an SVG `<style>` kept only when every rule is
-under its block's box class, `<use>` only to its own `#id`, images only
-relative or a raster `data:`. A page without the node's runtime (a static
-Site) brings in no view. A page that does not load says why in the view and is asked
-for again next time.
-
-```html
-<div data-playlist>
-  <ol>
-    <li data-playlist-section>Opening Set</li>
-    <li data-track data-media="../Media/Joy.mp4" data-page="../joy/" data-title="Joy to the World" data-subtitle="Chris Tomlin · D · 128 bpm">
-      <span data-track-mark>1</span><span data-track-art data-hue="96" style="background:hsl(96 42% 40%)">JT</span>
-      <span data-track-text><span data-track-title>Joy to the World</span><span data-track-meta>Chris Tomlin · D · 128 bpm</span></span>
-      <span data-track-length>3:51</span><a data-track-open href="../joy/" aria-label="Chart">…</a>
-    </li>
-    <li data-page="../noel/" data-title="Noel">…a song with no recording…</li>
-  </ol>
-</div>
-<!-- on Joy's page -->
-<div data-now-playing data-media="Media/Joy.mp4"><svg>… <g data-follow-playhead data-media="Media/Joy.mp4">…</g></svg></div>
-```
-
-**Or subscribe in script.** A view with a script of its own on the page
-(a view mounted live there later, #488) reads the same player,
-`architect.playhead` (`features/sites/assets/player.js`):
-
-| | |
-| --- | --- |
-| `time`, `playing`, `rate`, `duration` | the playhead now (seconds; `duration` `null` while unknown) |
-| `src`, `page`, `here` | the track playing, its note's page, and whether that page is this one |
-| `seek(t, {src}?)` | go to `t` seconds, of `src` when given (else of this page's media), and play |
-| `play()`, `pause()`, `next()`, `previous()` | the queue |
-| `subscribe(fn)` | `fn(snapshot)` at once and on every change, at most once a frame while playing; returns the unsubscribe |
-| `architect:playhead` | the same snapshot as an event on `document` |
-| `attach(source)` | an outside clock as the playhead's source (below); returns `{ from, changed(), detach() }` |
-
-The snapshot also says `source`: the attached source's `name`, or `null`
-while the page's own media drive it.
-
-**An engine as the clock.** An audio engine running on the page (Studio's,
-in a share link's Reference or Full layer, #528) attaches as the
-playhead's source instead of playing a media element. While it is
-attached, the chart and the lyrics follow it exactly as they follow a
-media element, a click on a bar or a line seeks it, and the page's own
-player yields: its media are paused (one started by hand is paused again)
-and its bar is hidden, since the engine brings its own transport.
-
-```js
-const engine = {
-  name: "studio.engine",
-  time: () => transport.seconds(),     // read each frame while it plays
-  playing: () => transport.isPlaying(),
-  rate: 1,                             // a value or a function, as each of these
-  duration: () => song.seconds,        // null while unknown
-  src: "/s/<code>/Songs/Joy/Media/Proxies/Reference.ogg", // the media it stands in for (optional)
-  seek: (t) => transport.seek(t),      // asked by the page: a click, a block's script
-  play: () => transport.play(),
-  pause: () => transport.pause(),
-  detached: () => {},                  // optional: another source took its place
-};
-const handle = architect.playhead.attach(engine);
-transport.seek(handle.from.time);      // where the page's player was
-transport.on("state", () => handle.changed()); // after a play, pause, seek or end of its own
-// …
-handle.detach();                       // the page's player takes over, at the engine's time
-```
-
-| | |
-| --- | --- |
-| `time`, `playing`, `rate`, `duration` | the clock: values or functions, read on each `changed()` and each frame while it plays |
-| `seek(t)`, `play()`, `pause()` | what the page asks of it; the playhead is read again after each |
-| `src` | the media it stands in for: a block with `data-media` follows it only when that is this; without `src`, the blocks of this page follow it |
-| `name` | in each snapshot's `source` |
-| `detached()` | called when another source is attached in its place (one at a time: an engine's development copy reloading attaches again) |
-
-The handle's `from` is where the page's player was when the source
-attached (`src`, `time`, `playing`), so the song goes on from there.
-`changed()` is the engine's to call when its state changes on its own (a
-play, a pause, a seek from its transport, the end); the page reads it
-each frame while it plays. `next()` and `previous()` do nothing while a
-source is attached. `detach()` gives the clock back: when `src` is one of
-the page's tracks, the page's player selects it at the engine's last time,
-paused. A handle of a source no longer attached does nothing. Tested under
-node with a fake engine (`features/sites/test/player-source.test.mjs`,
-run by `features/sites/tests/player_source.rs`).
-
-**What is not there yet.** The node draws the claimed fences of the
-extensions a build links and of those installed on it, page embeds and
-WASI components (#488); a block drawn so follows the playhead with the
-attributes above and needs nothing more. A view mounted live on a share
-page (a WASI component or a page given the playhead as a host signal) is
-not built: when it is, its host signal is
-`architect.playhead` above, and an engine it runs drives it through
-`attach`. No engine is in Architect: Studio's attaches from its own
-code. The app's setlist pane has its own player
-still; the same queue and playhead there would need the queue
-(`apps/desktop/src/node/shares.rs` `queue`) and the follower moved into a
-crate both sides use, a pane-side clock in place of the page's media
-element, and the embed context (`features/extensions/src/linked.rs`
-`EmbedContext`) carrying the playhead to a linked view.
 
 ### Favourites
 
@@ -2682,18 +1824,11 @@ relative to the open note, and whoever draws the shell resolves it (a
 share link's phone shell its own views; the app's shell its views and its
 Action List). A tab whose target the shell does not know is left out; a
 `state` it does not know shows the first face only. A type that declares
-none keeps the shell's own tabs. A share link's phone shell
-(`features/sites/src/shell.rs`) opens the views `page` (the link's root
-note's page), `search`, `browse`, `player.now` (the now-playing view, as
-a tab) and `player.lyrics`, runs `PLAYER_TOGGLE` and knows the state
-`playing`; its own tabs are Home, Search and Browse.
-
-The app's shell (desktop, phone and browser) opens `page` (the open
+none keeps the shell's own tabs. An app's shell opens `page` (the open
 note), `search` (quick open), a view of the declaring extension's own
 (`<view id>`, or `<its id>/<view id>`) showing the open note, an action it
-has, and a `place` that names a note beside the open one; `player.*` is a
-share page's and is left out there
-([the app shell](@/architecture/app-shell.md#favourites-the-slots-follow-what-is-open)).
+has, and a `place` that names a note beside the open one
+([the app shell](@/architecture/app-shell.md)).
 
 **Who may name what.** A declaration names only what its own extension
 may reach, as every other contribution that names an action does
@@ -2702,8 +1837,7 @@ may reach, as every other contribution that names an action does
 `features/extensions/src/capabilities.rs` `Capabilities::may_run`):
 
 - a view: its own extension's only. Another extension's view, loaded or
-  not, is left out (natively `apps/ui/src/favourites.rs` `opens`; in a
-  browser only the views its own island lists, `Island::views`);
+  not, is left out;
 - an action: one in its own namespace (`action_prefix`: `acme.charts` →
   `ACME_CHARTS_`), or one its `capabilities.actions` names whose effect is
   at most its `capabilities.effect`. A destructive action is never a
@@ -2711,11 +1845,9 @@ may reach, as every other contribution that names an action does
 - anything else is left out, as an unknown target is: no tab, never a
   dead one.
 
-The node lists every declaration of its extensions, read-only and never
-cached, at `GET /_ext/favourites.json` for the app in a browser
-(`apps/desktop/src/node/shares.rs` `FAVOURITES_LISTING`), each with the
+A node can list every declaration of its extensions, each with the
 extension that declared it and what its capabilities let it run
-(`features/favourites/src/lib.rs` `Listed`, `Declarer`), so the browser
+(`features/favourites/src/lib.rs` `Listed`, `Declarer`), so a browser
 applies the same rule (`Declarer::may_target`, `may_open_view_of`). The
 rule is one function, `architect_favourites::may_run`, which
 `Capabilities::may_run` calls too, and `manifest::action_prefix` is
@@ -2724,196 +1856,6 @@ only, so the browser bundle takes it, and nothing is copied to drift. The browse
 listing and 64 declarations. A note type is at most 64 characters. A
 `place` takes no spaces, so a note whose name has one is out of a place's
 reach.
-
-### Share layers
-
-A share link plays to a layer its sharer sets (page, reference, full;
-[how far a link plays](@/guide/deploy.md#how-far-a-link-plays)), and the
-node refuses a file above it. Which files of a song are its reference
-and which its stems is the song's extension's to say, as data, so the
-node needs no code of it:
-
-```toml
-[[share_layers]]
-note_type = "song"                                   # notes with `type: song`
-reference = ["*.session", "Media/Proxies/Reference*", "Media/Peaks/**"]
-full = ["Media/Proxies/**"]                          # the stems
-# page = ["Charts/**"]                               # on every link (as a file no rule names)
-```
-
-(`features/extensions/src/share_layers.rs` `ShareLayersDecl`, checked by
-`Manifest::check`.) A pattern matches an attached file's path relative to
-the folder of the note that attaches it (a file outside it: its vault
-path), whole, in any case and either Unicode form
-(`features/extensions/src/share_layers.rs` `fold`: NFC, lower cased, so
-`Gänse*` is `GÄNSE.ogg` written composed or decomposed, as macOS hands
-either back), as `note_type` is (its spaces trimmed): `*`
-and `?` within one segment, `**` any number of them. A key
-`[[share_layers]]` does not know (`fulll`) is an error: the manifest does
-not load, and on a node every attached file is held back until it is
-fixed. Matching is linear in the
-pattern times the path, and a rule has at most 64 patterns, each at most
-256 bytes with at most 8 `*` (`MAX_PATTERNS`, `MAX_PATTERN_LEN`,
-`MAX_STARS`); a manifest past them does not load. Within one rule the
-lists are tried `page`, `reference`, `full`, and the first that matches
-places the file, so a narrow `reference` pattern carves the reference out
-of a broad `full` one. Across rules (two extensions for one note type,
-or a note with a list of types, `type: [song, live]`) the highest layer
-wins: no rule lowers another's. A file is in the highest layer any note of
-the vault that links it places it in, inside the share's scope or not,
-hidden or not, so a plain note linking a stem never brings it down to the
-page. A held-back file is named in nothing built for the link (the page
-draws no player, link or lyrics of it). While a manifest in the
-extensions folder does not read, placement is unknown and every attached
-file is held back below Full; an uninstalled extension's rules are kept
-until the owner forgets them (`SHARE_LAYERS_FORGET`). A newer version or a
-reinstall that declares fewer `reference`/`full` patterns lowers those
-files at once (a development copy edited the same): the node logs a
-warning listing them and its status shows it until the owner acknowledges
-it (`SHARE_LAYERS_ACKNOWLEDGE`). Declare less only on purpose. The node reads the rules of the extensions installed on it
-(`features/sites/src/installed.rs` `InstalledLayers`, again when the
-folder changes), then a distribution's compiled-in ones
-(`apps/distribution/src/lib.rs` `Distribution::share_layers`, passed to
-`apps/desktop/src/node/mod.rs` `start_with_layers`) and places each file
-(`apps/desktop/src/node/share_layers.rs` `LayerRules`).
-
-## Base view types
-
-Bases (`features/bases`, [Bases](@/features/bases.md)) draws a base's
-table, cards and list itself; any other `type:` a base's view names is
-drawn by the extension that adds it, as an Obsidian plugin adds a Bases
-view. A Bases running as a process (a development copy) holds that view
-inside its own remote view with `embedded::EmbeddedView`, its input the
-`BASE_VIEW_CLAIM` with the rows; the host draws it ([Remote
-views](@/features/remote-views.md), "Holding another extension's view"). Task's calendar, kanban, gantt, heatmap and graph views become such
-extensions (#350).
-
-```toml
-[[base_views]]
-id = "board"                # the base's `type:`; not table, cards or list
-name = "Board"              # in the view picker
-icon = "kanban"             # a lucide name
-# What a view of this type may set in the base's YAML, and how a toolbar
-# edits it: kind = text | number | toggle | property | select (choices).
-options = [{ key = "columnBy", name = "Columns", kind = "property" }]
-# Drawn by one of its [[views]] (view = "…"), by a page in its package
-# (page = "pages/board.tsx"), or — neither — by its code:
-```
-
-```rust,ignore
-fn build(&self, ext: &mut Builder) {
-    ext.base_view("board", BoardView);   // drawn as its view `base.board`
-}
-
-#[component]
-fn BoardView() -> Element {
-    let Some(input) = linked::use_base_view() else { return rsx! {} };
-    // input.base: the .base's path; input.view: the view's spec (type,
-    // name, order, sort, groupBy, filters, limit, options); input.rows:
-    // {columns, groups: [{label, rows: [{path, name, values, formulas}]}]}
-    …
-}
-```
-
-The type is a contribution like the rest (`features/extensions/src/contrib.rs`
-`BaseViewDecl`, `BaseViewOption`; `Contributions::base_views`,
-`Contributions::base_view`): checked at load (an id, not a built-in's; one
-view or one page or neither), merged with what its code adds, and
-withdrawn when the extension unloads, so the view picker lists it only
-while it is on and a view of its type shows why it cannot be drawn
-instead. `linked::Builder::base_view` registers the code that draws a type
-which names no view or page; the manifest's `Manifest::draws` lets that
-`base.<id>` view through the check every built view meets, and a process
-copy serves it like any of its views. Bases mounts it with
-`embeds::BaseViewEmbed` (`Embeds::base_view`), the inline-embed path: a
-linked view in the app's document, a page or a process view as a
-sub-document, given a `BaseViewInput` under the claim
-`embed_type:base_view` (`linked::BASE_VIEW_CLAIM`), drawn again when the
-rows or the view change. A page reads it with `useEmbed()` (its `props`).
-The sandbox's Board adds `board` (`apps/sandbox/board/extension.toml`,
-`apps/sandbox/board/src/lib.rs` `BaseBoard`).
-Tasks adds `kanban` (`extensions/tasks/src/lib.rs` `Kanban`): a column
-per status, a card's arrows moving it on.
-
-## Navigator providers
-
-The navigator (`features/navigator`, [Navigator](@/features/navigator.md))
-is the app's one left sidebar (#356): a list of places beside a list of
-the items in the selected one. Since #443 it holds everything at once:
-every org's vault (under Vaults/) and every extension's provider, each a
-section of the left list: the Tasks extension's Queue is its Inbox row
-(captures and tasks in one list), the Calendar's its Calendar row, the
-Projects extension's its Projects row (projects nested, a project's
-songs, notes, sub-projects and tasks on the right).
-
-```toml
-[[navigator_providers]]
-id = "projects"
-title = "Projects"           # its row in the left list
-icon = "box"                 # the row's icon
-views = ["list", "page"]     # its own [[views]]: one on show selects its row
-actions = "PROJECTS_NAV"     # PROJECTS_NAV_SNAPSHOT (required), _OPEN, _MOVE, _CREATE
-section = "top"              # top (a row, no header) | assets (in Assets/) | section (default)
-position = 3                 # among the same section's, low first
-# visible = false            # left out of the list (and never read)
-# nest = false               # its nodes are the list's groups, not rows under it
-```
-
-```rust,ignore
-use architect_navigator_api::{Item, NavigatorProvider, Node, Open, ProviderFuture, Snapshot};
-
-struct ProjectsNav;
-
-impl NavigatorProvider for ProjectsNav {
-    fn snapshot(&self) -> ProviderFuture<Snapshot> {
-        Box::pin(async {
-            Ok(Snapshot::new("Projects")
-                .node(Node::new("p1", "Album"))
-                .item(Item::new("Tasks/Mix.md", "p1", "Mix it")))
-        })
-    }
-    fn open(&self, item: String) -> ProviderFuture<Open> {
-        Box::pin(async move { Ok(Open::File { path: item }) })
-    }
-    // move_items (a drag onto a node) and create (New) default to an error
-}
-
-fn build(&self, ext: &mut Builder) {
-    ext.navigator("PROJECTS_NAV", ProjectsNav); // its four actions
-}
-```
-
-The provider's requests are actions of its own, named from `actions`
-(`architect_navigator_api::Method`): `_SNAPSHOT` answers a `Snapshot` (its
-title, the `Node` tree, every `Item` with its container), `_OPEN {item}`
-an `Open` (a vault file, one of an extension's views, an action, or
-nothing), `_MOVE {items, to}` moves items into a container, and
-`_CREATE {container, title}` makes one. Declare the ones it answers in
-`[[actions]]`. `linked::Builder::navigator` serves a Rust
-`NavigatorProvider` as those actions, linked in or as a process; a process,
-Luau or page extension answers them itself. The app reads every provider
-the same way, through its actions (`ActionProvider`), every few seconds and
-after each request; an item whose `open` is set opens without asking.
-
-**Licence.** The API is `architect-navigator-api` (`features/navigator-api`),
-MIT OR Apache-2.0. The navigator itself is GPL-3.0-or-later. An extension
-implements the API and never links the GPL crate; the app that draws the
-navigator links it and ships under the GPL.
-
-The declaration is a contribution like the rest
-(`features/extensions/src/contrib.rs` `NavigatorProviderDecl`;
-`Contributions::navigator_providers`, `Contributions::navigator_provider_for`):
-checked at load (an id, `actions`, its snapshot action in its own
-namespace, views it has), withdrawn when it unloads. The app's sidebar
-(`apps/ui/src/vault.rs` `FilesView`) mounts each shown provider beside the
-vaults (`architect_navigator::Mounts`) and selects its row when one of its
-views comes on show. A `Snapshot` can put a count on the row
-(`Snapshot::count`), make its nodes the list's groups (`grouped`), group
-its lists by an item property in its own order (`group_by`), and mark a
-node as another org's or shared (`Node::org`, `Node::shared`). Inside the navigator a provider is
-a `ProviderSource` (`features/navigator/src/provider_source.rs`): nodes as
-folders and items as notes, so the panes, the keys, multi-select, grouping,
-sorting, pins, search, shortcuts and the phone's single pane work the same.
 
 ## Project types
 
@@ -2949,117 +1891,7 @@ registry is `Contributions::project_types` / `Contributions::project_type`;
 the app and other extensions read it with `EXT_PROJECT_TYPES {id?}`
 (`features/extensions/src/contrib_actions.rs`), which answers each type
 with the extension it is `from`. An in-process extension adds types with
-`Builder::contribute(Contribution { project_types, .. })`. The Projects
-extension adds `software` and `client` and creates a project of any
-loaded type ([Projects](@/extensions/projects.md)).
-
-## Capture targets
-
-Architect owns capture (#352, [Capture](@/features/capture.md)): the
-composer, the quick-add parser, the inbox and processing it. An extension
-adds what a capture can **become**:
-
-```toml
-[[capture_targets]]
-id = "task"                        # not `note` or `inbox`: the app's own
-name = "Task"
-icon = "check"
-description = "A task in the vault."
-action = "TASKS_CAPTURE"           # its own action: makes one from a capture
-chips = ["projects", "due", "priority", "tags", "contexts", "recurrence"]
-tokens = [{ prefix = "key:", key = "key" }]   # quick-add words it adds
-```
-
-`action` is the extension's half of the contract. It is run with
-`{title, body, properties, source, inbox}` (`architect_capture::Capture`;
-`properties` hold `TaskNotes`' keys as the parser writes them, with hand-set
-chips laid over them) and answers at least `{path}`, the note it wrote.
-Because `action` is the target's own, it works the same linked in, as a
-process or as a component.
-
-A target is a contribution like the rest (`features/extensions/src/contrib.rs`
-`CaptureTargetDecl`, `CaptureTokenDecl`). At load it is checked for:
-
-- an id of lowercase letters, digits, `-` and `_`, and none of
-  `BUILTIN_CAPTURE_TARGETS`;
-- an action of its own, or one its capabilities reach;
-- whole tokens.
-
-It is withdrawn when the extension unloads, and a target two extensions add
-is the first loaded's. The registry is `Contributions::capture_targets`, and
-the app reads it with `EXT_CAPTURE_TARGETS`
-(`features/extensions/src/contrib_actions.rs`), each target answered with
-the extension it is `from`. Capture offers the targets after its own note
-(`CAPTURE_TARGETS`), puts their tokens into the parser, and runs a target's
-action for `CAPTURE_ADD {target}` and `INBOX_PROCESS`.
-
-## Tours
-
-Every extension can ship a guided tour (#379), so a new one is easy to
-explore and shows off what it adds:
-
-```toml
-[[tours]]
-id = "projects-tour"                      # the scenario's own id
-title = "Projects"                        # "Take the Projects tour"
-description = "The projects list, a new project and a project's page."
-scenario = "tours/projects-tour.styx"     # in its package
-```
-
-The scenario is a guide scenario ([Guide media](@/architecture/guide-media.md)),
-the format of the app's own tours and films: hidden setup steps that run an
-action (`do @run{id PROJECTS_OPEN}`), then a step a person reads, ringed on
-a `target` (`@css".projects-roadmap"`, `@id"capture-title"`, a tab, a
-pane, a palette row). A linked extension lists the file among its `files`
-(`features/extensions/src/linked.rs` `Extension`); a package on disk has it
-in its folder.
-
-It is checked at load (`features/extensions/src/manifest.rs` `Manifest`
-`tours`, `features/extensions/src/contrib.rs` `TourDecl`), and a broken one
-fails the load like a broken manifest:
-
-- an id of lowercase letters, digits, `-`, `_` and `.`, a title, and a
-  `.styx` file inside its package;
-- the file reads as a scenario, its `id` is the tour's, and a person sees
-  at least one of its steps;
-- it plays **as the extension**: every action a step runs is its own or one
-  its capabilities reach (`Rules::reaches`). A check only reads, and the
-  guide runs only read-only checks. The Navigator asks for `LAB_GO` and
-  `WORKSPACES_LOAD` to show the Vault with a note in front.
-
-A tour that only opens views is `safe true` and may play over the person's
-own vault; one that changes things (the sandbox Board's pins) is not, and
-plays only in the app's playground. Seed nothing into the person's notes:
-ring the field and let them type.
-
-It is a contribution like the rest: withdrawn when the extension is turned
-off, and a tour two extensions add is the first loaded's. The registry is
-`Contributions::tours`. The Architect app (`apps/ui/src/guide.rs`
-`use_extension_tours`) offers each running extension's tours beside its own
-(`architect_guide::tour::Tours::offer`), and starts them from:
-
-- **the extensions manager**: "Take the tour" on the extension's page, and
-  the `tour` op (`MANAGER_RUN {kind: extension, id, op: tour}`), through
-  `Host::on_tour` / `Host::start_tour`; its tours are listed under "Tours";
-- **after an install**: `Extensions::install` and `Extensions::enable` tell
-  the host's list `TURNED_ON` (`extensions.turned_on`, the extension's id),
-  and the app invites the person once (`Tours::invite`: a card with "Take
-  the tour" and "Not now"), remembering it in `tours-invited`;
-- **actions**: `TOURS_LIST` (each tour's id, title, description, the
-  extension that ships it, its row "Take the Projects tour", and where the
-  person left it) and `TOUR_START {id | extension, step?, restart?}`, which
-  resumes where they stopped (`tour-places.json`). Both are ⌘K rows like
-  any action, and the app gives the palette a source of tour rows
-  (`Commands::register_source`, prefix `tours:`): "Take the Projects
-  tour" and the rest, picked as `TOUR_START`. `TOUR_START` with no tour
-  named opens ⌘K on them.
-
-Each first-party tour plays as a test (`apps/sandbox/media/tests`
-`architect_tours.rs` over the Architect app and its demo vault, and
-`scenarios.rs` `every_tour_plays_as_a_scenario` for the sandbox's Board):
-every setup runs and every target must be on screen, so a tour that rots
-fails CI. `sandbox-media <path to the .styx>` films one
-(`SANDBOX_MEDIA_APP=architect` over the Architect app).
+`Builder::contribute(Contribution { project_types, .. })`.
 
 ## One trait, three ways to run it
 
@@ -3086,16 +1918,13 @@ time, the same linked in or not.
   "WASI components" below); a `linked::Extension` built to
   `wasm32-wasip2` is a later step.
 
-`apps/sandbox/board/tests/both_ways.rs` runs the sandbox's Board both ways and
-checks they add the same things, run the same hook and read the same
-context menu's target. `cargo xtask builtins` (CI) builds every built-in
+`cargo xtask builtins` (CI) builds every built-in
 extension crate (an `extension.toml` with a `[source]` beside a
 `Cargo.toml`) both ways: its `--lib`, linked in, and its `--bin`, the
 process. WASI is not a third way for these crates yet: the WASI runner
 runs components built against `architect-extension-wasi`, and a
 `linked::Extension` exported as a component is the step still to come
-(#272). `apps/sandbox/board/tests/bench.rs` measures the sandbox's WASI
-component beside the Board's linked and process rows.
+(#272).
 
 ### A built-in's development copy, from its source
 
@@ -3103,15 +1932,17 @@ Every user-facing feature is a linked extension (#272), and any of them
 can be swapped for a development copy in a running app, and back. A
 built-in says where its crate is:
 
+<!-- doc-check: off (a path in FastTrackStudios/app-shell) -->
 ```toml
 [source]
-git = "https://github.com/FastTrackStudios/architect"
+git = "https://github.com/FastTrackStudios/app-shell"
 rev = "main"
-path = "apps/sandbox/board"
-# bin = "architect-sandbox-board"   # its [entry] path's file name unless given
+path = "crates/app-shell-extensions/theme-picker"
+# bin = "theme-picker"   # its [entry] path's file name unless given
 ```
+<!-- doc-check: on -->
 
-`EXT_CLONE {"id": "lab.board"}` (no `as`) then does what
+`EXT_CLONE {"id": "theme.picker"}` (no `as`) then does what
 `features/extensions/src/source.rs` describes:
 
 1. **Writes its crate** to `<dev folder>/<id>`: from the app's own copy
@@ -3138,22 +1969,21 @@ path = "apps/sandbox/board"
    fingerprints the crate's sources (not `target/`, its program or its
    lockfile); a change rebuilds it, and a good build restarts its process
    on the new program. A build that fails keeps the last good program
-   running and says why: a problem in `APP_STATUS` (`lab.board: its build
+   running and says why: a problem in `APP_STATUS` (`theme.picker: its build
    failed: src/lib.rs:12:5: error[E0425]: … (the last good build runs)`,
    its file), its error lines in `EXT_LOGS` (source `build`), and
    "failed: …" on the page. `EXT_INFO` and `EXT_CLONE` answer the build
    (`build`: `building`, `built` with `took_ms`, `failed` with `error`).
 
-`apps/sandbox/board/tests/dev_loop.rs` (ignored: it builds the crate) runs
-the whole loop: clone, first build, an edit swapped in, a break kept on
-the last good build, back to the built-in.
+The removed Architect app's Board example ran the whole loop in a test:
+clone, first build, an edit swapped in, a break kept on the last good
+build, back to the built-in.
 
 ### What each runner costs
 
-The Board's `LAB_BOARD_STATE` action and its `board` view's frame, and
-the nearest equivalents on the scripted runners
-(`apps/sandbox/board/tests/bench.rs`, ignored: run it with `--ignored
---nocapture`):
+An example extension's state action and its view's frame, and the
+nearest equivalents on the scripted runners (measured on the removed
+Architect app's Board example):
 
 | runner | what | n | p50 | p99 |
 |---|---|---:|---:|---:|
@@ -3197,9 +2027,7 @@ would close the connection). An older process holds every view's request
 for as long as it runs, so its host opens at most `MAX_VIEWS` of its views
 over its connection's life, closed ones counted, then says to restart or
 rebuild it. Before this, the 65th view at once waited forever, and a
-process stopped showing views after 64 opens: the benchmark
-(`apps/sandbox/board/tests/bench.rs`) started it again every 50; it no longer
-does. `features/extensions/tests/process_views.rs` shows 100 views at once,
+process stopped showing views after 64 opens. `features/extensions/tests/process_views.rs` shows 100 views at once,
 400 more opened and closed, 256 at once, the 257th refused, and the
 place a closed one leaves taken again.
 
@@ -3228,18 +2056,10 @@ host kernels.
 
 | built-in | crate | adds | its dev copy |
 |---|---|---|---|
-| `theme.picker` | `features/theme/picker` | ⌘K's "Choose a theme…" and "Light or dark", ⌘O's `theme:` | `EXT_CLONE` (`features/theme/picker/tests/dev_loop.rs`); both ways in `features/theme/picker/tests/both_ways.rs` |
+| `theme.picker` | `app-shell:crates/app-shell-extensions/theme-picker` | ⌘K's "Choose a theme…" and "Light or dark", ⌘O's `theme:` | both ways in its `tests/both_ways.rs` |
 | `manager` (the extensions page) | `features/extensions/src/manager` | `MANAGER_*`, its views, its settings section, ⌘O's `ext:` | none yet: its kinds are the app's Rust values (below) |
-| `lab.board` | `apps/sandbox/board` | the sandbox's example: a tab, a status item, openers, hooks | `EXT_CLONE` (`apps/sandbox/board/tests/dev_loop.rs`) |
-| `settings` (the settings page) | `features/settings/sheet` | the window ⌘, opens (`APP_SETTINGS`, reserved), the point `settings.sections` | `EXT_CLONE` (`features/settings/sheet/tests/dev_loop.rs`); both ways in `features/settings/sheet/tests/both_ways.rs` |
+| `settings` (the settings page) | `app-shell:crates/app-shell-extensions` (`settings_sheet`) | the window ⌘, opens (`APP_SETTINGS`, reserved), the point `settings.sections` | both ways in app-shell-extensions' `tests/settings_sheet.rs` |
 
-`apps/sandbox/media/tests/builtins.rs` checks that the default lab looks
-the same as before these moved: the main window's document at the end of
-four scenarios (the Inbox, settings on Appearance and on Extensions, ⌘O's
-`ext:`) against `apps/sandbox/media/tests/golden/`, recorded from the base
-(each element's mount-order id, `data-dioxus-id`, aside). The only
-differences are the theme picker's and the settings page's own rows in
-the extensions list and in ⌘O's `ext:`.
 
 **The settings page** is the settings extension's window over the
 core's frame. Every section arrives as an item of `settings.sections`:
@@ -3424,16 +2244,14 @@ panes and taking no input (`scene::OverlayLayer`, `OverlayWidget`, put
 there by `remote::RemoteView` given `overlay`, which `interface`'s
 extension view reads from `Host::capabilities`). It draws each of the
 view's scenes at its element's place in the window. The element in the
-pane keeps its size and its input. Test:
-`apps/sandbox/sketch/tests/sketch.rs`
-`a_scene_is_clipped_to_its_pane_unless_it_may_draw_over_the_app`.
+pane keeps its size and its input.
 
 `pick`, `prompt` and `menu` wait for the person: the call answers when
 they do. A path picked is one the extension may then read for the run (a
 save, or inside a folder picked: write), past `capabilities.folders`.
 On a desk the pickers are the platform's own (rfd: the portal on Linux,
 the system's panels on macOS and Windows), and a photo pick is a file
-picker for images. On iOS (#708, `features/extensions/src/pickers_ios.rs`)
+picker for images. On iOS (#708, `app-shell:crates/app-shell-extensions/src/pickers_ios.rs`)
 they are UIKit's: `UIDocumentPickerViewController` opens a file as the
 app's own copy and a folder through its security scope (kept for the
 run); a save is a folder picked and the suggested `name` in it (iOS saves
@@ -3453,13 +2271,7 @@ Every runtime makes the same calls: Luau's `host.notify`,
 (`features/extensions/wit/extension.wit`; the Rust guest's
 `features/extensions/wasi-guest/src/lib.rs` `host::notify` and the
 rest); a process's `guest::host` and a linked extension's
-`linked::Handle::host` with the requests themselves; and a page's
-`ui` and `clipboard` (`ui.notify`, `ui.pick`, `ui.input`, `ui.confirm`,
-`ui.pickOne`, `ui.menu(items, at?)`, `ui.decorate`, `ui.call`,
-`clipboard.read()`, `clipboard.write(text)` in TSX; the same names in a
-Luau page), through `PageHost::host_call` (`features/pages/src/api.rs`),
-which runs `EXT_PAGE_CALL` as the page's extension. A page's `notify`
-reaches the same toasts when it is an extension's page.
+`linked::Handle::host` with the requests themselves.
 
 **The app answers** through its `HostUi`
 (`features/extensions/src/hostui.rs`; `Host::set_ui`):
@@ -3471,7 +2283,7 @@ reaches the same toasts when it is an extension's page.
   answers it was given (`FakeUi::answer`), or a text prompt's default, a
   confirm's yes, a list's first choice, a menu's first item that may be
   chosen, a picker cancelled;
-- the window's, `features/extensions/src/host_ui_view.rs` `WindowUi`:
+- the window's, `app-shell:crates/app-shell-extensions/src/host_ui_view.rs` `WindowUi`:
   `HostUiLayer` (mounted by `ExtensionOverlays`) draws toasts at the
   window's corner, a prompt as a dialog, a menu at its point, and lends
   the host its `WindowUi` unless the app gave a `HostUi` of its own
@@ -3491,7 +2303,7 @@ set at run time with `decorate` (`Host::decorations`,
 `hostui::Decorations`: one decoration an extension a target, gone when
 it unloads). `Host::decorations_of(target)` is both, in order; a file
 tree draws them after a row's name with `host_ui_view::Decorations
-{host, target}` (`features/extensions/tests/host_ui_view.rs`, its golden
+{host, target}` (`app-shell:crates/app-shell-extensions/tests/host_ui_view.rs`, its golden
 `badged-file-row.html`), and the workspace's tabs through
 `architect_workspace::TabBadges`, which `use_extension_ui` provides.
 `EXT_DECORATIONS` lists them all, with who set each.
@@ -3503,9 +2315,7 @@ declarative (`[[context]]`, "Contributions").
 
 Tests: `features/extensions/tests/host_ui.rs` (Luau, refusals, a picked
 file, `EXT_PAGE_CALL`, a headless host), `features/extensions/tests/wasi.rs`
-(`a_component_notifies_copies_asks_and_gets_the_answers_back`),
-`features/pages/tests/host_ui.rs` (a TSX page on `QuickJS` and a Luau
-page).
+(`a_component_notifies_copies_asks_and_gets_the_answers_back`).
 
 ## The device: OS notifications, the camera, photos, health (#709)
 
@@ -3567,13 +2377,12 @@ for an extension that is not built in (a service call) is refused
 to a note.
 
 **Signing.** A phone's build is signed with the app's own entitlements
-(`apps/mobile/ios/Architect.entitlements`: HealthKit with an empty
+(HealthKit with an empty
 `healthkit.access`, so no clinical health records, and no background
 delivery), each only where the App Store profile allows it, with the
 profile's identity; never the profile's whole set, which for HealthKit
-offers clinical records and background delivery.
-`apps/mobile/ios/sign-entitlements.py` makes the set and checks the signed
-app carries exactly it (`deploy-testflight.sh`). A Simulator build is
+offers clinical records and background delivery; the app's release
+tooling checks the signed app carries exactly that set. A Simulator build is
 signed ad hoc with no entitlements, and HealthKit there answers
 `Missing com.apple.developer.healthkit entitlement`. A desk and a browser answer every device
 call `unsupported` until they have a `Device` of their own: the shape is
@@ -3626,7 +2435,7 @@ host asleep past several runs runs a hook once, then on from then.
 |---|---|---|
 | `doc.created`, `doc.saved`, `doc.deleted` | `{path}` | the layer that did it: `Host::raise_doc`, or `events::DocEvent::raise_on` the app's Action List (a `Changed` event the host hears through `Host::watch`; the document store raises them there without depending on extensions) |
 | `doc.renamed` | `{from, to}` | the same |
-| `app.focused`, `app.blurred` | `{window}` | `Host::focus`, or the list topic of the same name (the sandbox's window does: `apps/ui/src/screen.rs` `use_window_chrome`) |
+| `app.focused`, `app.blurred` | `{window}` | `Host::focus`, or the list topic of the same name (an app's window raises it) |
 
 The detail is JSON, so a Luau hook reads `event.detail.path`; an
 action's invocation has it as text (`ctx.detail`). `EXT_EMIT {event,
@@ -3660,10 +2469,8 @@ transport.* events").
 `HostRequest::Raise { name, detail }`: the host defines `<its id>.<name>`
 the first time (`Host::raise_own`) and raises it, so another extension
 hears it as `app:<its id>.<name>` under the same `capabilities.events`
-grant. Navigator raises `navigator.nav-item-changed`,
-`navigator.selection-changed`, `navigator.pinned-files-changed` and
-`navigator.metadata-changed` (`features/navigator/extension/src/lib.rs`
-`EVENTS`). Raising needs no grant: an extension's events are its own.
+grant. A navigator, for one, raises `navigator.selection-changed`.
+Raising needs no grant: an extension's events are its own.
 
 **Hooks made at run time.** The host service's `subscribe {on | every |
 at, action | script, function?}` adds a hook, checked as a manifest's
@@ -3674,10 +2481,7 @@ runtime makes them: Luau's `host.subscribe{ on = "doc.saved", action =
 (`features/extensions/src/luau_host.rs`); the WIT world's `subscribe`
 and `unsubscribe` imports (`features/extensions/wit/extension.wit`; the
 Rust guest's `host::subscribe`); a process's and a linked extension's
-host requests; a page's `events.subscribe(hook)`, `events.unsubscribe`,
-`events.list()` in TSX and Luau (`features/pages/src/js/prelude.js`,
-`features/pages/src/luau.rs`), as its extension. They go when it
-unloads.
+host requests. They go when it unloads.
 
 **Timers in a WASI view.** The world has the host's clock as an import
 (`now`) and a `tick` export: the guest keeps its timers
@@ -3725,8 +2529,7 @@ Tests: `features/extensions/tests/events.rs` (on a fake clock: an
 on the host and on the list, the window's focus, a typed app event and
 its refusals; a background extension started by a hook, kept by an
 action, stopped idle, started again), `features/extensions/tests/wasi.rs`
-(`a_views_interval_runs_on_the_hosts_clock_and_a_hook_it_made_runs`),
-`features/pages/tests/events.rs` (a TSX and a Luau page subscribing).
+(`a_views_interval_runs_on_the_hosts_clock_and_a_hook_it_made_runs`).
 
 ## Documents: list, create, edit, rename, move, delete, watch
 
@@ -3801,51 +2604,6 @@ whose documents are `crdt` documents uses
 changed it (`authors`). With no documents given, the calls answer
 `unsupported`; `read_document` falls back to `AppContext::document`.
 
-**The person's vault** (#706). The Architect app, on the desk and on
-iOS, gives extensions the vault it opened:
-`architect_navigator::documents::VaultDocuments` (feature `documents`)
-over the one `VaultSource` its navigator and editors use
-(`apps/ui/src/notes.rs` `source`, set on the host by `on_source` once a
-vault is open, the first run's choice too). Its documents are the
-vault's notes (`.md`) by their vault paths; a path with a hidden part
-(`.obsidian/…`) is none, and a create or rename onto a path that is
-another note's on a case- or normalisation-blind file system
-(`Notes/Café.md`, `notes/cafe\u{301}.md`) is refused everywhere, so a
-vault behaves the same on the desk and on iOS. A create, an edit, a
-rename (the links that named it follow) and a delete (to the vault's
-`.trash`) go through that source, so an open note hears an extension's
-edit and merges it into its typing (`vault_doc::merge3`, two forks of
-one Loro document, property by key and the body character by
-character). No write goes through a symlink (a linked folder out of the
-vault: `vault_live::own::through_symlink`), and a note is written whole
-(a temporary file renamed over it). An edit's `DocEdit`s apply with a
-Loro document's semantics (`documents::apply_edits`) and are written by
-compare-and-swap (`VaultSource::save_if`, under the vault's write lock):
-if the person saved since the extension read the note, the two are
-merged and written again, so no one's characters are lost. A file keeps
-no authorship or undo of its own: the open note takes the change as
-one edit. An edit that changes nothing writes nothing and raises no
-`doc.saved` (`documents::Edited::changed`), so a format-on-save hook is
-not heard again.
-
-`VaultDocuments::raise_on(&app_list)` raises the person's own changes
-as `doc.*` on the app's list, which the host hears (`Host::watch`):
-typing as it is saved, a new note, a rename, move or delete in the
-navigator (a folder's: each note in it), an edit made outside the app.
-What an extension's call changes (a rename's relinked notes too) is
-left out there: the host raised its event. They go out in ticks
-(`documents::TICK`, 100 ms): the same event twice in one tick once, at
-most `documents::PER_TICK` (64) a tick and the rest in the next, so a
-git pull or a sync reaches every hook in order without flooding it. A
-`changed:doc.*` list topic is no way around `reads`: the host raises a
-document event as itself only, and a hook on `changed:doc.saved` is a
-document event's hook (`events::is_doc_event`). An org's other vaults
-(`@org/…`) are not documents yet. The sandbox with no vault on disk
-keeps its in-memory spaces, `notes` and `archive`
-(`apps/ui/src/extensions.rs` `documents`). The web app's host is
-#495's; it gives the same shape (a `Documents` over its vault and the
-person's edits raised as `doc.*` on the list).
-
 **A note's parsed metadata** is the read-only action `VAULT_METADATA`
 (`features/vault/vault-obsidian/src/metadata.rs` `metadata`): `{path}`
 answers one note's headings `{level, text, line}`, list items `{line,
@@ -3888,12 +2646,8 @@ transport gets the same check, and calls a `DocumentStore` and a
 `DocumentsServer` over the app's `Documents` (`AsStore`), each
 extension's data (`FileData`) and its own gate (`HostGate`) with
 `architect::serve_local` on a runtime of its own, the same on the desk
-and iOS. A browser's host does the same in the page today (`serve_local`
-in wasm, on `spawn_local`) over `WebDocuments`
-(`apps/web/src/app/documents.rs`): the signed-in web app's copy of the
-vault, whose creates and edits reach the node through `Notes::write`
-(rename, move and delete are the desktop's until the org lane has
-them); the demo is the same over its vault in memory. The rule stays
+and iOS. A browser's host does the same in the page (`serve_local` in
+wasm, on `spawn_local`) over the app's own `Documents`. The rule stays
 one implementation: when the node serves `DocumentsServer` on the org
 lane, the browser's host swaps the transport under the same
 `DocumentsClient`, not the code. What is not wasm-clean is only below the
@@ -3906,29 +2660,40 @@ renamed over it), readable by its owner only (0600), one change at a
 time per extension; a file that does not parse is an error, never read
 as empty, so a write never wipes it. Settings are the settings page's,
 kept in the app's device values. Both survive a restart
-(`features/navigator/tests/documents.rs`
-`what_an_extension_keeps_survives_a_restart`;
-`features/extensions/tests/documents.rs`
+(`features/extensions/tests/documents.rs`
 `an_extensions_data_is_written_whole_privately_and_never_wiped`).
 
-The sandbox's `lab.tidy` (`apps/sandbox/extensions/tidy`, beside its registry; the
-lab runs it as a development copy with `ARCHITECT_LAB_TIDY=1`) makes,
-tidies, renames, files away and watches notes: `LAB_TIDY_NEW`,
-`LAB_TIDY_TIDY` (one transaction), `LAB_TIDY_RENAME`, `LAB_TIDY_FILE`,
-`LAB_TIDY_WATCH`, `LAB_TIDY_LIST`.
-
-Tests: `features/navigator/tests/documents.rs` (`lab.tidy` in a vault
-on disk: lists, creates, tidies, renames and files notes; the person's
-save, new note, rename and delete heard once each; an edit merged into
-an open note's typing; its data after a restart),
-`features/vault/vault/tests/actions.rs` (`VAULT_METADATA`),
-`features/extensions/tests/documents.rs` (`lab.tidy` in the
-sandbox's spaces: creates, tidies as one undo step, renames, files and
-hears each; the person's concurrent typing merges with its transaction;
-refused without `reads` / `writes`), `features/pages/tests/documents.rs`
-(a TSX and a Luau page on an app's own `Documents`),
-`features/extensions/tests/wasi_wit.rs` (the typed imports are the
+Tests: `features/vault/vault/tests/actions.rs` (`VAULT_METADATA`),
+`features/extensions/tests/documents.rs` (an extension in in-memory
+spaces: creates, tidies as one undo step, renames, files and hears each;
+the person's concurrent typing merges with its transaction; refused
+without `reads` / `writes`), `features/extensions/tests/wasi_wit.rs` (the typed imports are the
 calls).
+
+## A project's files on the org's node
+
+An engine an extension runs in the app (Studio's, in a browser) streams a
+project: it lists a folder and range-reads its files. The member's own
+project, not only a share link's: two host calls, each needing
+`reads = ["files"]` alone (`features/extensions/src/held.rs`).
+
+| call | Luau `host.` | answer |
+|---|---|---|
+| `file_list {place, folder?}` | `file_list(place, folder?)` | `{place, folder, files: [{path, size, sha256, url}], expires_us}` |
+| `file_url {place, path}` | `file_url(place, path)` | `{url, expires_us}` |
+
+A place is `vault:<name>` (one of the org's vaults) or `root:<id>` (a
+root the node holds). Every `url` is absolute, read with `Range` and no
+header until `expires_us` (a short-lived read ticket in its query); then
+ask again. The host checks the capability (`hostcall::check`, and
+`features/extensions/web/check.js` in a page) and hands the call to the
+app's `HeldFilesSource` (`Host::set_held_files`). The node decides what
+the person may read: `features/files/src/held.rs` `HeldFiles`, served
+under the org lane's gate (a member reads what their role lets them;
+another org's person, a share link's guest and no bearer read nothing; a
+hidden file and a symlink are nowhere). A host whose app gives no source,
+a guest's included, answers `unsupported`, so a guest reads only what its link lists, through
+the link (`<link>_files.json`).
 
 ## The vault's query service
 
@@ -4164,29 +2929,15 @@ headless host and for tests. With the FastTrackStudios editor
 - registers the slash rows with `palette::register_actions` and runs
   them from `on_action`.
 
-`apps/ui/src/note_editor.rs` does all of it for a Vault note's Edit
-mode. A Blitz document may have no HTML parser (a headless one has
+A Blitz document may have no HTML parser (a headless one has
 none), so the native renderer draws gutter markers and mounted widgets
 itself, never from HTML.
 
-**The sandbox.** `apps/sandbox/extensions/outline` (`lab.outline`, Luau, loaded
-with `ARCHITECT_LAB_OUTLINE=1`): Tab and Shift-Tab indent and outdent a
-list item and move between a table's cells (past the last, a new row),
-`LAB_OUTLINE_MARK` marks each TODO, numbers the list items in the gutter
-and mounts its `count` embed, a slash row inserts a table, and a toolbar
-of `when = "editor:note"` indents from the Typing Toolbar. Open the
-`note-outline` note and press Edit; `LAB_EDITOR_STATE` is what the
-extension reads, `LAB_EDITOR_SELECT` puts the caret.
-
-Tests: `features/extensions/tests/editor.rs` (`lab.outline` on a
+Tests: `features/extensions/tests/editor.rs` (an outliner extension on a
 `MemoryEditor`: the keys by node, one undo step leaving the person's
 typing, decorations that follow edits and go when it unloads, a widget
 naming its own embed, refusals without `reads` / `writes`, of a stale or
 out-of-bounds edit, of a key without `writes`),
-`features/pages/tests/editor.rs` (a TSX and a Luau page),
-`apps/sandbox/media/tests/note_editor.rs` (the sandbox's note editor: Tab and
-Shift-Tab in a table and a list, Ctrl-Z of one indent, the marked-up
-note's golden, `note-editor-marked.html`),
 `features/extensions/tests/wasi_wit.rs` (the typed imports are the
 calls); in the editor repository, `editor:features/ui/tests/native_ext.rs`
 and `editor:crates/editor-state/src/ext.rs`'s tests.
@@ -4195,8 +2946,8 @@ and `editor:crates/editor-state/src/ext.rs`'s tests.
 
 Languages are installed by extensions while they are on; their grammars
 are linked into the app (#512). The editor asks a registry by
-file type or fence name (`features/editor/src/languages.rs` `Languages`,
-[the Editor page](@/features/editor.md)); the app puts its own languages
+file type or fence name (`features/editor/src/languages.rs` `Languages`);
+the app puts its own languages
 in it and gives it to the host (`Host::with_languages`), and an extension
 adds to it:
 
@@ -4240,8 +2991,7 @@ is turned off, and editors on screen draw again.
 
 1. **The grammar.** It is linked into the binary: a grammar file
    (`grammar = "x.wasm"`) is refused at load, saying so, because the
-   editor's tree-sitter cannot load a grammar at run time ([the Editor
-   page](@/features/editor.md) says why). Pick one:
+   editor's tree-sitter cannot load a grammar at run time. Pick one:
    - one the editor has compiled in (Rust, TypeScript, JavaScript, Python,
      JSON, Bash, Markdown): `grammar = "linked"` (the default) and an id or
      a fence that names it;
@@ -4269,11 +3019,10 @@ person granted it (a server is a program on their computer): the host
 starts it, one per language and workspace root, while a code editor of
 the language is open, restarts it with backoff when it dies, and stops
 it when the last editor closes or the extension is turned off
-(`features/extensions/src/lsp.rs`, `Host::open_code`; the
-[Editor page](@/features/editor.md) "Language servers"). Its
-diagnostics are drawn in the code editor; hover, completions, go to
-definition, format and rename are the `EDITOR_*` actions, for keys, ⌘K
-and agents (`features/extensions/tests/language_servers.rs`).
+(the language-server client went with the Architect app; an app
+brings one). Its diagnostics are drawn in the code editor; hover, completions,
+go to definition, format and rename are the `EDITOR_*` actions, for
+keys, ⌘K and agents.
 
 ### An editor in your view
 
@@ -4282,7 +3031,7 @@ A linked extension mounts the editor's component from `architect-editor`
 and hears its changes through `on_transaction`
 (`features/extensions/tests/editor_view.rs`). A process extension's remote
 view, a WASI view and a page have no way to mount one yet: they draw
-through the edit stream into `features/extensions/src/remote.rs`
+through the edit stream into `app-shell:crates/app-shell-extensions/src/remote.rs`
 `RemoteDocument`, which has no host-drawn elements (#512).
 
 ## The network and secrets
@@ -4374,7 +3123,7 @@ its store (in memory for the run otherwise).
 own (two threads, `ext-net`), so a fetch works from whichever executor
 asks — a component's thread, a script's, a page's. The client is
 `architect-extensions`' feature `net` (reqwest), which the app turns on
-(`apps/desktop/Cargo.toml`), not its UI crates: reqwest reaches
+in its binary's crate, not its UI crates: reqwest reaches
 tower-http, which `cargo xtask boundaries` keeps out of them. A build
 without it keeps secrets and answers a fetch `unsupported`. In a browser
 (`web::WebHost`) the browser's own `fetch` sends it, where CORS lets it;
@@ -4399,7 +3148,7 @@ document hooks need `reads = ["documents"]`, declared, made at run time
 and granted), `features/extensions/tests/wasi.rs`
 (`a_component_fetches_from_its_host_and_is_refused_another`, and
 `a_component_makes_edits_lists_and_reads_a_document` for the document
-imports), `features/pages/tests/net.rs` (a TSX and a Luau page).
+imports).
 
 ## Server-side parts on the node
 
@@ -4448,7 +3197,7 @@ hosts (each redirect checked). Its secrets go into a request's headers
 (`{{secret:client_secret}}`), put in by the host, never readable by the
 script (["The network and secrets"](#the-network-and-secrets)). The
 deployment that names the extension, by pinned version, hash and
-signature through Nix, is the node's consent (`docs/content/guide/deploy.md`).
+signature through Nix, is the node's consent.
 
 **One implementation.** `NodeActions` (`features/extensions/src/node.rs`) is one
 `#[architect::rpc]` service:
@@ -4499,8 +3248,8 @@ extension does not open a device itself. It asks the host, and the host
 checks each port against the manifest's `capabilities.ports` as a person
 granted them; the consent screen lists them like `hosts`. The ports are the
 app's: it gives the host an `architect_input::PortBackend`
-(`Host::with_ports`). The sandbox gives OSC over UDP (`architect_input::UdpOsc`)
-and a virtual MIDI port (`apps/ui/src/surfaces.rs` `lab_ports`). A
+(`Host::with_ports`): OSC over UDP (`architect_input::UdpOsc`), say,
+and a virtual MIDI port. A
 system MIDI backend (`midir`, CoreMIDI) is the app's to add behind the same
 trait. The model is `features/input/src/ports.rs` and the host side is
 `features/extensions/src/ports.rs`.
@@ -4571,9 +3320,7 @@ A control surface is a contribution, not code. The app offers **targets**
 `architect_input::Target` with a `TargetKind` (an id, a range and how many
 instances there are) and implements read, write, an optional label (a
 track's name, for a scribble strip), touch and observe. Studio offers track
-volumes, FX parameters and the transport (studio#381); the sandbox offers its
-metronome's tempo and the theme's accent hue (`apps/ui/src/surfaces.rs`
-`lab_targets`). Offering targets declares the point `control.surfaces`. An
+volumes, FX parameters and the transport (studio#381). Offering targets declares the point `control.surfaces`. An
 extension contributes a surface to it as an `architect_input::SurfaceDesc`:
 
 ```toml
@@ -4622,12 +3369,6 @@ description, a port it may not open, or one that would not open). That
 reason is also a line in its log. When the item goes, its surface stops
 and its port closes.
 
-**The sandbox**: `lab.surface` (`apps/sandbox/extensions/surface`, loaded with
-`ARCHITECT_LAB_SURFACE=1`) is an OSC surface. A device at `127.0.0.1:9000`
-that sends `/lab/tempo` and `/lab/hue` (0–1) to port 9001 moves the
-tempo and the accent's hue, and is sent both back. It is also an OSC
-echo on `127.0.0.1:9010` that hears on 9011.
-
 **Where it runs**: only on the native host. In a browser (`web::WebHost`)
 the port calls answer `unsupported`: a browser has no UDP, and Web MIDI is
 not wired yet. Each call is the `ext.host_call` span with `perm.capability`
@@ -4639,10 +3380,10 @@ localhost UDP, is started again by a message, and answers through both.
 What no hook takes waits for `port_receive`. A port outside its
 capabilities is refused, and so are another extension's port, `ports`
 with none, a bad entry and a surface on a port it may not open. A fake
-eight-fader surface moves lab targets with feedback, banks and pickup.
+eight-fader surface moves test targets with feedback, banks and pickup.
 `features/input/tests/surface.rs` tests the engine: banks, feedback,
 touch, pickup and an encoder. `features/input/tests/ports.rs` tests OSC
-over UDP. `features/pages/tests/ports.rs` has a TSX and a Luau page.
+over UDP.
 
 ## The extensions manager
 
@@ -4652,8 +3393,7 @@ a registry of kinds (`ItemKind`: list, get, run an op). It comes with
 extensions (any runner, which copy runs and the way back to the
 built-in), Luau scripts and their hooks, workers (process extensions'
 processes), themes and the interface files (layouts and `keys.json`)
-(`features/extensions/src/manager/kinds.rs`), and pages, from
-`architect-pages` (`features/pages/src/manage.rs` `PagesKind`). An app adds a kind of its
+(`features/extensions/src/manager/kinds.rs`). An app adds a kind of its
 own — audio plugins, a page kind, WASI components — by implementing
 `ItemKind` and calling `Manager::register`. Agents get every operation
 as `MANAGER_KINDS`, `MANAGER_LIST {kind?, query?}`, `MANAGER_GET {kind,
@@ -4663,7 +3403,7 @@ outside asks the person first (`Manager::confirm_on`).
 The manager is itself a linked-in extension
 (`features/extensions/src/manager/extension.rs` `ManagerExtension`,
 id `manager`), overridable by a development copy. Its page
-(`features/extensions/src/page.rs` `ManagerPage`, feature `page`, in
+(`app-shell:crates/app-shell-extensions/src/page.rs` `ManagerPage`, feature `page`, in
 architect-ui's components and the theme's variables) is a settings
 section and a workspace view (`use_manager_page`, `ManagerView`: it
 fills its pane, the list and the item's page each scrolling on their
@@ -4861,18 +3601,14 @@ hash and signature, and that the archive is what its entry says
 (`features/extensions/archive/src/registry.rs` `check`) — and is the
 registry's CI.
 
-### A third party's extension in the Architect app
+### A third party's extension in an app
 
-The Architect app (not only the sandbox) searches and installs from
-registries kept by `Registries` (`features/extensions/src/registries.rs`,
-`Extensions::with_registries`):
+An app searches and installs from registries kept by `Registries`
+(`features/extensions/src/registries.rs`, `Extensions::with_registries`):
 
 - **the store's index**, `extensions/index.toml` in architect's own
-  repository, beside the first-party extensions (`apps/distribution/src/lib.rs`
-  `STORE_REGISTRY`, `STORE_DIR`, `store`: every distribution's unless it says
-  otherwise, `Distribution::registry` adding its own; given with
-  `Registries::with_builtin` by `apps/ui/src/extensions.rs` `app_registries`:
-  always there, never written, never removed). It is a git registry in a
+  repository, given with `Registries::with_builtin`: always there, never
+  written, never removed. It is a git registry in a
   folder of a repository (`GitRegistry::in_dir`, `Registry::in_dir`): only
   that folder is checked out (sparse, about 3 MB). A publisher lists its
   extension there by pull request; its archives are signed with the org
@@ -5057,9 +3793,7 @@ What cannot be installed is said, never forced:
 `Extensions::open_vault` plans it (`features/extensions/src/vault_needs.rs`
 `VaultNeeds`: the `Plan`, the refused archives, a file that does not
 read); `EXT_NEEDS {folder}` answers the same to an agent. The app draws it
-over the Vault for the vault, or for the project on show
-(`apps/ui/src/extensions.rs` `VaultNeedsBanner`, with `MissingExtensions`),
-planned on a thread of its own and again only while a registry's refresh
+over the vault, or over the project on show, planned on a thread of its own and again only while a registry's refresh
 could change it: each required one, each optional one, each that cannot be
 had with why, and **Install all**. Its previews (`Extensions::previews_for`)
 are one consent prompt, listing in words what each asks, and what was
@@ -5112,10 +3846,8 @@ Other people (the vault's other members, a share's guests) are not in a
 person's record: grants never transfer. They get the vault's (or link's)
 needs list and are prompted once.
 
-The sync client's local index keeps `.architect/` (only that top-level
-dot-folder: `vault_sync_client::SYNCED_DOT`), and vault-live's manifest
-lists it; both are tested (`features/vault/vault-sync-client/src/lib.rs`,
-`features/vault/vault-live/src/sync.rs`).
+vault-live's manifest lists `.architect/` (the only top-level dot-folder
+it syncs; `features/vault/vault-live/src/sync.rs`).
 
 Tests: `features/extensions/tests/person_sync.rs`.
 

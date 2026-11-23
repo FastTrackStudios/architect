@@ -1,7 +1,4 @@
 ---
-"architect-a2ui" = "minor"
-"architect-desktop" = "minor"
-"architect-app" = "minor"
 "architect-mcp" = "minor"
 ---
 

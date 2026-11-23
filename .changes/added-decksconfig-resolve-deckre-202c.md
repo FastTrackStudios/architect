@@ -1,5 +1,4 @@
 ---
-"architect-navigator" = "minor"
 "architect-workspace" = "minor"
 ---
 

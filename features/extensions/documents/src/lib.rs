@@ -14,7 +14,7 @@
 //!   that extension may read or change the documents
 //!   (`reads`/`writes = ["documents"]`), so every transport gets the same
 //!   check. Below the gate it calls a [`DocumentStore`] (the vault:
-//!   `architect_navigator::documents::VaultDocuments`; an in-memory one in
+//!   `navigator::documents::VaultDocuments` (FastTrackStudios/navigator); an in-memory one in
 //!   tests and the demo, [`MemoryStore`]) and a [`DataStore`] (each
 //!   extension's own data).
 //!

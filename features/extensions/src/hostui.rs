@@ -406,7 +406,7 @@ impl Decorations {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn system_clipboard_read() -> Result<Option<String>, HostError> {
     // iOS has no clipboard tools: the general pasteboard (#710 H8).
-    #[cfg(all(feature = "ui", target_os = "ios"))]
+    #[cfg(all(feature = "uikit", target_os = "ios"))]
     {
         // SAFETY: UIKit's general pasteboard, read from any thread.
         let text = unsafe { objc2_ui_kit::UIPasteboard::generalPasteboard().string() };
@@ -451,7 +451,7 @@ pub fn system_clipboard_read() -> Result<Option<String>, HostError> {
 pub fn system_clipboard_write(text: &str) -> Result<(), HostError> {
     use std::io::Write as _;
     // iOS has no clipboard tools: the general pasteboard (#710 H8).
-    #[cfg(all(feature = "ui", target_os = "ios"))]
+    #[cfg(all(feature = "uikit", target_os = "ios"))]
     {
         // SAFETY: UIKit's general pasteboard, written from any thread.
         unsafe {

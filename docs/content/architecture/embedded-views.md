@@ -6,10 +6,10 @@ weight = 68
 
 > **Status: the contract and the registry landed (architect#220); the
 > `web` kind is built for desks and browsers (#222, [Web views](#web-views)).** The
-> model is `features/workspace/src/kinds.rs` (`ViewKinds`, `KindSpec`,
+> model is `features/views/src/kinds.rs` (`ViewKinds`, `KindSpec`,
 > `ViewHost`, `Placement`, `Capability`, `KindError`), wasm-clean in
 > `architect-workspace`'s default build; the contract a kind mounts
-> through is `features/workspace/src/ctx.rs` `ViewCtx` (feature `ctx`).
+> through is `features/scene/src/view.rs` `ViewCtx` (feature `ctx`).
 > The workspace's own `View` is the built-in `dioxus` kind
 > (`features/workspace/src/host/mod.rs` `View`, `Views::resolve`), and an
 > extension's `[[views]] kind` is checked when it loads
@@ -23,9 +23,7 @@ weight = 68
 > `paint-web`. Other kinds and hosts remain separate work: raw wgpu (#221), ImGui from Luau (#223), Frame surfaces (#224, in
 > FastTrackStudios/frame; a minimal `frame.surface` provider is the
 > frame-view crate), Dioxus in-process and remote (#225), generative
-> UI (#226). Its A2UI payload landed in #228:
-> [A2UI](@/features/a2ui.md) (`features/a2ui/src/lib.rs`), drawn as a
-> `dioxus` view.
+> UI (#226).
 
 A workspace pane shows a **view**: `"session.mixer"`, `"vault.note"`. What
 *draws* a view is its **kind**. Until now there was one, a Dioxus
@@ -70,7 +68,7 @@ app's `ViewKinds` at startup.
 
 ## The registry
 
-`features/workspace/src/kinds.rs` `ViewKinds` holds one `KindSpec` per
+`features/views/src/kinds.rs` `ViewKinds` holds one `KindSpec` per
 kind:
 
 | Field | Meaning |
@@ -99,7 +97,7 @@ comes back, the same as a view the app does not have.
 
 ## The contract: `ViewCtx`
 
-`features/workspace/src/ctx.rs` `ViewCtx` is what every kind is given when
+`features/scene/src/view.rs` `ViewCtx` is what every kind is given when
 it mounts. It has no Dioxus and no clock of its own, so it builds on wasm,
 in a plugin and in a test.
 
@@ -114,7 +112,7 @@ in a plugin and in a test.
 | `theme` (`ThemeTokens`) | the theme as tokens by name, for a kind that does not draw in a DOM | `ShellTheme` in context |
 | `input` (`InputSink`) | pointer, wheel, touch, keys, IME and focus (`ViewInput`), pushed by the host and drained by the kind | DOM events |
 | `clock` (`FrameClock`) | the host's clock and a per-frame budget; `Frame::over` says when to skip work | the window's frame |
-| `extras` (`Extras`) | typed handles a host adds: the canvas host's publisher for the `Spaces` a view draws in (`features/canvas/src/space.rs` `Spaces`), a frame engine; shared typed data, `HostData<T>` (`Extras::with_data`, read with `ViewCtx::data`) | Dioxus context |
+| `extras` (`Extras`) | typed handles a host adds: a frame engine; shared typed data, `HostData<T>` (`Extras::with_data`, read with `ViewCtx::data`) | Dioxus context |
 
 `HostData<T>` is one value of the host's type, shared between the host
 and the view: `read` and `update` under a lock, a `version` that moves on
@@ -139,7 +137,7 @@ from the same hooks; a non-Blitz host (a plugin window) builds the
 
 ## Paint views
 
-`features/workspace/src/paint/mod.rs` is the `paint` kind's model (feature
+`features/scene/src/paint/mod.rs` is the `paint` kind's model (feature
 `paint`: `anyrender` and `peniko`, no Dioxus, wasm-clean). A `PaintView`
 is given the pane's `ViewCtx` and answers three questions: what an input
 event changes (`input`), what this frame looks like (`paint`, an
@@ -150,13 +148,13 @@ physical pixels, and times each frame into `FrameStats` (the last 1024;
 `FrameStats::summary` is the count, p50, p99 and the slowest, on the
 host's `FrameClock`). `Marks` is a display list a view can paint from and
 hit-test from, so what is drawn and what the pointer finds are one list:
-`features/workspace/src/paint/tests.rs`
+`features/scene/src/paint/tests.rs`
 `paint_and_hit_testing_read_one_list` rasterises 10 000 rectangles and
 overlapping bars on the CPU at 1× and 2× and checks the pixel under every
 probe against what `hit` finds there, before and after live input
 restyles one.
 
-Feature `paint-ui` is the Blitz host (`features/workspace/src/paint/widget.rs`):
+Feature `paint-ui` is the Blitz host (`features/scene/src/paint/widget.rs`):
 
 - `PaintWidget` is a Blitz custom widget around a `Painter`. Blitz gives
   it its events in the element's own coordinates (they become
@@ -178,13 +176,13 @@ Feature `paint-ui` is the Blitz host (`features/workspace/src/paint/widget.rs`):
   existing view's `ViewCtx::theme` and request a frame; read tokens during
   input or paint rather than caching them only at construction. A custom
   host can update a `Painter` with `Painter::set_theme`. Mounted Blitz
-  document tests in `features/workspace/src/paint/widget/document_tests.rs`
+  document tests in `features/workspace/src/paint/document_tests.rs`
   check both paths against CPU-rendered pixels and confirm they return idle;
   the external wake path is exercised at 1× and 2× display scale.
 - A press or a tab gives the widget the focus. While it has it the
   window's IME is on, so composed text reaches the view.
 
-Feature `paint-web` provides `features/workspace/src/paint/web.rs`
+Feature `paint-web` provides `features/scene/src/paint/web.rs`
 `WebPaintSurface`, a host-driven WebGL2 canvas on wasm. The host creates
 a `Painter` with a `ViewCtx` for `ViewHost::Web`, passes it and the canvas
 to `WebPaintSurface::new`, and registers `KindSpec::paint_web` if it uses
@@ -215,7 +213,7 @@ Open `paint_web_test.html` in a WebGL2 browser; the page says whether it
 passed. Frame counts establish skipped host submissions, not GPU utilization.
 
 Feature `paint-web-ui` adds the Dioxus browser adapter in
-`features/workspace/src/paint/web_ui.rs`. Create one `WebPaintMount` per
+`features/scene/src/paint/web_ui.rs`. Create one `WebPaintMount` per
 pane with a factory that returns a `Painter` configured for `ViewHost::Web`,
 and render `WebPaintPane { mount, theme }` inside a sized parent. Pass updated
 theme tokens as the `theme` prop. Keep `WebPaintMount::wake_handle` and call
@@ -248,7 +246,7 @@ mounted as a `PaintPane`, so it takes the pane's input and draws in the
 window's scene. Its `ctx.extras` holds the pane's `PaintWake`, which it
 calls after its own data changes. The app registers the kind
 (`KindSpec::paint`) for `Host::load` to accept the view. Test:
-`features/extensions/tests/linked_paint.rs`. With feature `paint-ui` it is
+`app-shell:crates/app-shell-extensions/tests/linked_paint.rs`. With feature `paint-ui` it is
 drawn in-process. Served as a process (`guest`), the same view records its
 frames there, and they cross as layers (`features/extensions/src/scene.rs`
 `remote_paint_root`; [Remote views](@/features/remote-views.md), "Scenes"). A Frame
@@ -270,15 +268,14 @@ up, focus, composed text, and the pointer leaving
 `architect_workspace::paint::left_view`; a `kind = "process"` program
 gets it as a move to NaN, which one built before it reads as a move
 that hits nothing). A process view is told its pane's id and state
-(`features/extensions/src/remote.rs` `RemotePaneView`,
+(`app-shell:crates/app-shell-extensions/src/remote.rs` `RemotePaneView`,
 `linked::PANE_CLAIM`), which a view reads with `linked::use_pane_state`
 either way, and where it was in it (`linked::use_view_state`: zoom,
 scroll, selection, a mode, as one string the pane keeps,
 `architect_workspace::Pane::view_state`), given back when its program
 restarts or its pane moves or pops out; `ViewState::set` keeps a new
 one (in a process, the host call `set_view_state`, taken only by a pane
-showing that extension's view). Test: `apps/sandbox/sketch/tests/paint_parity.rs` (one view
-both ways, the same log). In a process the `ViewCtx`'s `ActionList` is
+showing that extension's view). In a process the `ViewCtx`'s `ActionList` is
 the app's actions the extension may run, each run through its host
 (`guest::app_actions`, the host call `actions`), and the view is drawn
 under a root that gives it the app's theme store and a document whose
@@ -328,49 +325,9 @@ kind the app has no provider for refuses the load with its reason,
 (it has: dioxus)`, a loaded copy stays as it was, and nothing of the new
 one lands (`features/extensions/tests/view_kinds.rs`).
 
-## The sandbox's gallery
-
-The sandbox's Vault keeps one pane of each kind it shows in a screenset,
-"Embedded views" (⌘3, the palette's "Load screenset: Embedded views", or
-`WORKSPACES_LOAD {"name": "Embedded views"}` over MCP and the CLI): a
-Dioxus component, a Luau script's ImGui window, a Frame surface, the
-A2UI surfaces and a paint view, each naming its kind
-(`apps/ui/src/embedded.rs`). The paint pane (`apps/ui/src/paint.rs`)
-draws a 100 × 100 grid of rectangles: the pointer lights the one under it,
-a press picks one, the arrow keys move the pick and typed or composed text
-is kept, all in the pane's typed host data (`PaintState`). The line under
-the grid and `LAB_PAINT_STATE` read it, with the pane's frame count and
-p50 / p99 times. The
-Frame surface is FastTrackStudios/frame's `frame-surface` program, a
-process extension the sandbox loads when it finds it
-(`ARCHITECT_LAB_FRAME_SURFACE`, beside the sandbox, or on the `PATH`); the sandbox
-declares the `frame.surface` kind itself and never links Frame. It shows
-the sandbox's Frame document, `apps/sandbox/surfaces/drive.frame`
-(`ARCHITECT_LAB_FRAME_DOCUMENT` names another), and a save to it reloads
-the surface. The document's knob is bound to the sandbox's drive and its meter
-follows the drive: `LAB_FRAME_SET {"drive": 0.9}` turns the knob and moves
-the meter to -0.6 dB, turning the knob by hand sets the drive, and
-`LAB_FRAME_STATE` reads the drive, the level, the document and how many
-times it was read in. The extension's own actions (`FRAME_SURFACE_LOAD`,
-`FRAME_SURFACE_PARAM_SET`, `FRAME_SURFACE_FEED`, `FRAME_SURFACE_STATE`) are
-Action List actions too, so MCP and the CLI can drive the surface
-directly.
-
-The A2UI pane opens on the release demo (`LAB_A2UI_DEMO`): a form with a
-version and a channel, a list of tasks to tick, and a Ship it button. An
-agent rendered it, so the button's `LAB_RELEASE_SHIP` waits for the
-person's yes before it runs, and its answer is written back into the
-surface. The surface can be patched live, for example
-`A2UI_PATCH {"messages": [{"updateDataModel": {"surfaceId": "release",
-"path": "/tasks/2", "value": {"title": "Notarize the build", "done":
-false}}}]}` over MCP adds a task. Scenario:
-[`apps/sandbox/scenarios/embedded-views.styx`](https://github.com/FastTrackStudios/architect/blob/main/apps/sandbox/scenarios/embedded-views.styx).
-
-![The Embedded views screenset: a Dioxus swatch picked, the Luau ImGui window's button pressed, the Frame surface's knob turned up with its meter following, and the A2UI release surface patched with a task and shipped after a confirmation](https://raw.githubusercontent.com/FastTrackStudios/architect/media/embedded-views.gif)
-
 ## Web views
 
-The `web` kind (#222; `features/workspace/src/kinds.rs` `KindSpec::web`)
+The `web` kind (#222; `features/views/src/kinds.rs` `KindSpec::web`)
 lets an extension ship a full TypeScript/npm app, its built files, and
 show it in a pane: the whole DOM, canvas, WebGL and any npm library, with
 real accessibility. On iOS it is the one way installed code runs at full
@@ -442,9 +399,9 @@ why the runtime does it everywhere).
 
 | Host | How | Status |
 |---|---|---|
-| Desk (Blitz) | a wry child web view of the pane's OS window (`features/webview/src/desk.rs` `use_desk_web_views`, `architect-app` feature `webview`), its files over the `architect-ext://<id>/` protocol, `window.architect` put in by its initialisation script | run on Linux under X11 and XWayland; macOS (WKWebView) and Windows (WebView2) are written against wry's API and untested |
+| Desk (Blitz) | a wry child web view of the pane's OS window (the desk host went with the Architect app; an app on the shell provides it), its files over the `architect-ext://<id>/` protocol, `window.architect` put in by its initialisation script | run on Linux under X11 and XWayland; macOS (WKWebView) and Windows (WebView2) are written against wry's API and untested |
 | Web | `<iframe sandbox="allow-scripts">` with no same-origin: an opaque origin with no cookies, storage or parent; a `MessagePort` handed over on its first load only (`features/extensions/web/webview-host.js` `mountWebView`; a frame that navigates itself is stopped); the app's bundle installs the runtime itself (`webview-runtime.js`, the same file) | tested in headless Firefox (`features/extensions/web/test/webview.test.mjs`, in `browser.yml` after a merge and nightly); the web app mounts it once it hosts extensions (#495) |
-| iOS | the desk host itself (#785): wry's Apple backend makes a `WKWebView` child of the pane's `UIView`, with the same `architect-ext://` protocol and bridge (`window.webkit.messageHandlers`), turned on by `apps/mobile` feature `webview` (`apps/ui/src/extensions.rs` allows `use_desk_web_views` on iOS) | run on the iOS Simulator (iPhone 16e, iOS 27) with `examples/extension/webview-board`; not in the release build yet, and not run on a phone |
+| iOS | the desk host itself (#785): wry's Apple backend makes a `WKWebView` child of the pane's `UIView`, with the same `architect-ext://` protocol and bridge (`window.webkit.messageHandlers`), turned on by the app | run on the iOS Simulator (iPhone 16e, iOS 27); not run on a phone |
 
 On a desk, a loop on the window's thread reads the pane's holder element
 every frame (16 ms) and moves the native view there (`set_bounds` takes
@@ -491,8 +448,8 @@ So on Linux under Wayland the app can run under XWayland while web views
 are wanted: in a build with `webview`, `ARCHITECT_WEBVIEW_X11=1` drops
 `WAYLAND_DISPLAY` for the window's event loop only, when the run opens the
 window (never for `serve`, the CLI or MCP), and puts it back for the
-processes the app starts (`apps/desktop/src/app.rs`,
-`architect_workspace::native::RESTORE_WAYLAND_DISPLAY`). Without it the
+processes the app starts
+(`architect_workspace::native::RESTORE_WAYLAND_DISPLAY`). Without it the
 pane says so. What XWayland costs: no fractional scaling (blurry at 1.25×
 and 1.5×), XIM instead of text-input-v3 for fcitx5 and IBus, and the
 clipboard going through xwayland-satellite. The
@@ -504,8 +461,7 @@ measurement above is its floor with copies.
 macOS needs nothing of this: wry's child is a `WKWebView` subview of the
 window's content view, positioned and clipped by `set_bounds`. Windows,
 from reading wry: a WebView2 controller parented to the window's `HWND`,
-its custom protocol served as `http://architect-ext.<id>/`
-(`features/webview/src/desk.rs` handles both).
+its custom protocol served as `http://architect-ext.<id>/`.
 
 ## Kinds, hosts and the security model
 

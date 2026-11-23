@@ -7,7 +7,7 @@ weight = 85
 The [previous chapter](@/guide/ui.md) put an app in architect's frame. This
 one is the parts catalogue: every primitive architect ships for drawing an
 app, what it is for, and a minimal `rsx!` for each, taken from real code
-(the sandbox, `apps/sandbox`, the components' own stories, and the crates' docs).
+(the components' own stories and the crates' docs).
 Reach for these before writing your own; each already renders in Blitz.
 
 There are two families, styled two ways:
@@ -126,17 +126,6 @@ The frame does not read these tokens: it takes a `ShellTheme` (its `ink`,
 `rule`, `accent`, `pill`, `font`, …) on `AppShell` and `WorkspaceView`.
 Read it in your own frame-level views with `use_shell().theme`.
 
-### The showcase
-
-`features/ui/showcase` is a desktop app that renders
-`architect_ui::showcase::Showcase`, every component on one page, for
-checking styling and theme behaviour:
-
-```sh
-cd features/ui/showcase
-dx serve --platform desktop
-```
-
 ## The shell's primitives
 
 `architect-shell` (`features/shell`, feature `ui`). The frame itself
@@ -165,7 +154,7 @@ Page {
 When a page has more to say, a `Toolbar` groups its buttons: `separate`
 for a tool on its own, `joined` for tools in one pill; `Tool::menu` opens a
 `Menu`, `Tool::more` is the ⋯. On a desk, `crumbs` is the breadcrumb before
-the title. From the sandbox's item page (`apps/ui/src/pages.rs` `ItemPage`):
+the title. An item page:
 
 ```rust
 Page {
@@ -264,7 +253,7 @@ if let Some(g) = w.active_group() {
 }
 ```
 
-That is the sandbox's "Mix" screenset (`apps/ui/src/vault.rs` `mix_workspace`).
+That is a "Mix" screenset.
 
 ![a stacked group scrolled sideways, panes sliding over each other and leaving their spines](https://raw.githubusercontent.com/FastTrackStudios/architect/media/stacked-tabs.gif)
 
@@ -364,7 +353,7 @@ commands.show(architect_commands::Overlay::QuickOpen);
 ```
 
 - `CommandLayer`: the palette slot. The Command Palette extension
-  (`architect-command-palette`, `features/palette/extension`) draws ⌘K
+  (`architect-palette`, `features/palette`) draws ⌘K
   (every command; arguments asked a step at a time; `@`, `#`, `?`
   prefixes) and ⌘O (every opener at once) in it; with no palette
   installed, nothing shows.
@@ -430,9 +419,7 @@ What is honest to say about it today (`features/story/README.md`):
 about 40 stories, all `architect-ui`'s own; no app mounts `Lookbook`; the
 snapshot and parity harnesses work but nothing runs them as a gate. The
 frame's primitives (shell, workspace, commands, settings) have no stories
-yet: browse those in the sandbox, and check them at phone, tablet and desk size
-in `features/ui/ui-snapshot` (`features/ui/ui-snapshot/src/scenes.rs`, with
-pixel probes in `features/ui/ui-snapshot/tests/pixel_probes.rs`).
+yet.
 
 ## Where to read more
 

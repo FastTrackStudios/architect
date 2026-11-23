@@ -130,8 +130,7 @@ jobs:
           echo "tags=$tags" >> "$GITHUB_OUTPUT"
           echo "### architect image: \`$tags\`" >> "$GITHUB_STEP_SUMMARY"
 
-      # Without the window (no Blitz, wgpu or wayland), and without the
-      # workspace-hack, which would pull the GUI stack's features back in.
+      # Without the window (no Blitz, wgpu or wayland).
       - name: Build the node
         id: build
         run: |
@@ -139,7 +138,7 @@ jobs:
           dir="${CI_CACHE_DIR:-$RUNNER_TEMP}/architect-node/$RUNNER_NAME/target"
           mkdir -p "$dir"
           # The Architect distribution's node, as any distribution's is
-          # built (xtask/src/dist.rs: --no-default-features, no_workspace_hack).
+          # built (xtask/src/dist.rs: --no-default-features).
           devenv shell -- cargo xtask dist node --target-dir "$dir" --out "$RUNNER_TEMP/dist" \
             | tee "$RUNNER_TEMP/dist-node.txt"
           bin="$(sed -n 's/^node=//p' "$RUNNER_TEMP/dist-node.txt")"

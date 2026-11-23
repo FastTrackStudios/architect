@@ -680,10 +680,42 @@ impl Host {
 #[derive(Clone, Copy)]
 struct ThisPane(Signal<PaneId>);
 
+/// A pane slot as its view's [`architect_views::PaneHost`].
+pub(super) struct SlotPane {
+    pub(super) this: Signal<PaneId>,
+    pub(super) host: Host,
+    pub(super) preview: bool,
+}
+
+impl SlotPane {
+    fn handle(&self) -> PaneHandle {
+        PaneHandle {
+            id: (self.this)(),
+            host: self.host.clone(),
+            preview: self.preview,
+        }
+    }
+}
+
+impl architect_views::PaneHost for SlotPane {
+    fn id(&self) -> PaneId {
+        (self.this)()
+    }
+    fn state(&self) -> String {
+        self.handle().state()
+    }
+    fn view_state(&self) -> String {
+        self.handle().view_state()
+    }
+    fn set_view_state(&self, value: String) {
+        self.handle().set_view_state(value);
+    }
+}
+
 /// Under a card in a phone's tab switcher: the view drawn again, scaled
 /// down, while the pane itself may be drawn too.
 #[derive(Clone, Copy)]
-struct Previewing;
+pub(super) struct Previewing;
 
 /// The pane this component draws, inside a [`View`]'s render.
 #[must_use]

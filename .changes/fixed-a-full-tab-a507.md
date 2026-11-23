@@ -1,11 +1,6 @@
 ---
-"architect-app" = "patch"
 "architect-extensions" = "patch"
-"architect-media" = "patch"
-"architect-navigator" = "patch"
-"architect-navigator-extension" = "patch"
 "architect-shell" = "patch"
-"architect-web" = "patch"
 "architect-workspace" = "patch"
 ---
 

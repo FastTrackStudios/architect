@@ -33,7 +33,10 @@ pub const BASES_ACTIONS: &str = "BASES_";
 /// Art, chart images and synced lyrics, read-only and size-capped
 /// (`architect_spaces::view`): from the person's own vault, or for a
 /// share link's guest only from what the link shares. Handed in with the
-/// note, so it needs [`DOCUMENTS`] too.
+/// note, so it needs [`DOCUMENTS`] too. And a project's files the org's
+/// node holds, through the host calls `file_list` and `file_url`
+/// (`crate::held`): listed and read by range as the person may, with this
+/// alone.
 pub const FILES: &str = "files";
 /// The editor being typed in (`crate::editor`): its text, selection and
 /// the block the cursor is in (`reads`); edit it, take keys in it, draw

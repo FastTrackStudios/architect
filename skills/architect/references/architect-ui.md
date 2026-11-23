@@ -13,9 +13,9 @@ Crate `architect-ui` (`features/ui/architect-ui`); house rules in `features/ui/A
 | Embedded CSS | `THEME_CSS`, `UTILITIES_CSS` consts | `features/ui/architect-ui/src/lib.rs` |
 | `sheet` | the phone's bottom sheet and its parts, Task's Linear-style sheets in architect's theme tokens (#445): `BottomSheet`, `SheetClose`, `SheetGroup`, `SheetSection`, `SheetRow`, `SheetSelect`, `SheetSwitch`, `SheetToggle`, `SheetChip`, `SheetSearch`, `SheetCheckRow`; `SheetTheme`, `use_sheet_theme`, `wash` | `features/ui/architect-ui/src/sheet.rs` |
 | `prelude` | flat re-export of components, theme, layout, typography | `features/ui/architect-ui/src/prelude.rs` |
-| Showcase | single-screen component board; desktop app around it | `features/ui/architect-ui/src/showcase.rs` `Showcase`; `features/ui/showcase` |
+| Showcase | single-screen component board; desktop app around it | `features/ui/architect-ui/src/showcase.rs` `Showcase`|
 | Stories | `#[story]` registrations | `features/ui/architect-ui/src/stories.rs` |
-| `ui-snapshot` | PNG render, diff CLI, pixel probes | `features/ui/ui-snapshot/src/main.rs`, `features/ui/ui-snapshot/tests/pixel_probes.rs` |
+| `ui-snapshot` | PNG render, diff CLI, pixel probes | — |
 | `architect-story-*` | story registry, macros, shell, snapshots, parity, fuzz | `features/story/README.md` |
 
 ## Wire-up checklist (Dioxus app)
@@ -33,7 +33,7 @@ Crate `architect-ui` (`features/ui/architect-ui`); house rules in `features/ui/A
 
 **Theme knobs.** `allow_layout_scale` is off by default; when off, `--spacing` is pinned to `0.25rem`. Turn it on only when the theme should resize `gap-*`, `px-*`, `size-*`. Tokens are CSS vars (`--background`, `--primary`, `--signal-*`, `--sidebar-*`); the Rust consts in `tokens` wrap them as `var(...)` strings for inline styles.
 
-**Showcase.** `architect_ui::showcase::Showcase` is the visual parity board (dark by default; `renderer` labels the top bar). Run it from `features/ui/showcase` with `dx serve --platform desktop` (package `architect-ui-showcase`, desktop is its default feature).
+**Showcase.** `architect_ui::showcase::Showcase` is the visual parity board (dark by default; `renderer` labels the top bar).
 
 **Command, Menubar, ContextMenu.** `Menubar*` and `ContextMenu*` wrap `dioxus_primitives`; `Command*` (`CommandDialog`, `CommandInput`, `CommandList`, `CommandGroup`, `CommandItem`, `CommandEmpty`, `CommandSeparator`, `CommandShortcut`) hand-rolls Escape, overlay click and focus, and fuzzy-scores via `combobox::fuzzy_best_score` (nucleo). None of them consumes `ActionInfo` yet: feed them from `ActionList::infos()` yourself.
 
@@ -53,7 +53,7 @@ Before writing a widget in an app, check this list: consumers have re-implemente
 - **Dead CSS is silent:** an architect-ui-only class renders unstyled downstream unless `UTILITIES_CSS` is injected or the crate scanned.
 - **`assets/utilities.css` is generated and committed.** After any class change run `just ui-css` (needs `tailwindcss` on PATH) and commit; `just ui-css-check` compares the working tree to the index, and CI does not run it.
 - **Snapshot and parity gates are local-only.** CI runs fmt, check, clippy, test, boundaries, docs and a wasm check of the UI crates the web app mounts (shell, workspace, commands, settings, navigator, orgs, accounts, theme, guide, capture, the editor's `web` view; not their Blitz `native` features nor the story crates); nothing in CI runs `ui-snapshot` or parity.
-- **`ui-snapshot check` fails on a fresh tree** for scenes without a reference PNG ("NO REFERENCE"); `features/ui/ui-snapshot/tests/reference` holds only the icons scene.
+- **`ui-snapshot check` fails on a fresh tree** for scenes without a reference PNG ("NO REFERENCE")
 - **Debug builds:** story rendering panics in debug, and `features/ui/architect-ui/tests/snapshots.rs` is ignored under `debug_assertions`. Run story VRT with `cargo test --release -p architect-ui`; refresh baselines with `FTS_STORY_UPDATE_SNAPSHOTS=1`.
 - **Parity needs a release showcase build plus Xvfb, xdotool and ImageMagick;** its tests in `features/ui/architect-ui/tests/parity.rs` are `#[ignore]`d.
 - **Wasm:** the UI and story crates are native-only in CI.

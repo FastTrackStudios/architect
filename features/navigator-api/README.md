@@ -3,7 +3,7 @@
 The navigator's provider API, **MIT OR Apache-2.0**: what a page or an extension implements to
 fill the app's one left sidebar, the navigator, with its own containers and items (#356).
 
-The navigator itself (`architect-navigator`, a port of Notebook Navigator) is GPL-3.0-or-later.
+The navigator itself (a port of Notebook Navigator, FastTrackStudios/navigator) is GPL-3.0-or-later.
 This crate is the boundary: an MIT crate implements `NavigatorProvider` from here and never links
 the GPL one. Only the app that draws the navigator links it.
 

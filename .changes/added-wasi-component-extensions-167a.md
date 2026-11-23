@@ -1,9 +1,6 @@
 ---
 "architect-extensions" = "minor"
 "architect-extension-wasi" = "minor"
-"architect-app" = "minor"
-"architect-desktop" = "minor"
-"architect-sandbox-wasi-counter" = "none"
 "architect-extension-wasi-hazards" = "none"
 ---
 

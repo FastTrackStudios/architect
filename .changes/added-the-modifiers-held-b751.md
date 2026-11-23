@@ -1,6 +1,5 @@
 ---
 "architect-extensions" = "patch"
-"architect-sandbox-sketch" = "patch"
 "architect-scene" = "major"
 "architect-workspace" = "patch"
 ---

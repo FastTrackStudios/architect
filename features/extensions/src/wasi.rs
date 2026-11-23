@@ -1099,7 +1099,7 @@ impl Recipe {
         if let Some(missing) = m
             .views
             .iter()
-            .find(|v| v.kind == architect_workspace::DIOXUS && !views.contains(&v.id))
+            .find(|v| v.kind == architect_views::DIOXUS && !views.contains(&v.id))
         {
             return Err(format!(
                 "its manifest declares view {} it does not render",

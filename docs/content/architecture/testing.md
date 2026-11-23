@@ -34,7 +34,7 @@ async fn list_sorted_by_name_ascending() {
 }
 ```
 
-Run with `cargo test -p example-greeter` (the reference feature's
+Run with `cargo test -p <your-feature>` (a feature's
 `tests/round_trip.rs`).
 
 ### One scenario, every wire

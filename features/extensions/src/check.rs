@@ -31,7 +31,7 @@ use std::time::Duration;
 
 use architect::action::ActionList;
 use architect_settings::Section;
-use architect_workspace::ViewKinds;
+use architect_views::ViewKinds;
 use facet::Facet;
 
 use crate::Origin;
@@ -342,10 +342,6 @@ impl Checker {
         }
         #[cfg(all(feature = "process", unix))]
         let processes = self.process_runner(&host, manifest.kind, report);
-        // Kept alive for the whole check; read only when remote views are
-        // rendered (a node with `process` and without `remote`).
-        #[cfg(all(feature = "process", unix, not(feature = "remote")))]
-        let _ = &processes;
         if let Err(error) = host.load(package, Origin::Dev) {
             load_problem(&error, report);
             return;
@@ -358,25 +354,34 @@ impl Checker {
                 elements: None,
                 note: None,
             };
-            if view.kind == architect_workspace::DIOXUS && manifest.kind == Kind::Process {
-                #[cfg(all(feature = "remote", unix))]
-                match processes
-                    .as_ref()
-                    .map(|p| self.render_remote(p, &manifest.id, &view.id))
-                {
-                    Some(Ok(elements)) => {
-                        check.rendered = true;
-                        check.elements = Some(elements);
+            if view.kind == architect_views::DIOXUS && manifest.kind == Kind::Process {
+                #[cfg(all(feature = "process", unix))]
+                match (frame_renderer(), processes.as_ref()) {
+                    (None, _) => {
+                        check.note = Some(
+                            "this build renders no process views (no window renderer set)"
+                                .to_owned(),
+                        );
                     }
-                    Some(Err(why)) => {
-                        report.problem("view", why).field = Some(format!("views[{}]", view.id));
+                    (Some(_), None) => {
+                        check.note = Some("this build runs no process extensions".to_owned());
                     }
-                    None => check.note = Some("this build runs no process extensions".to_owned()),
+                    (Some(render), Some(p)) => {
+                        match self.render_remote(p, &manifest.id, &view.id, render) {
+                            Ok(elements) => {
+                                check.rendered = true;
+                                check.elements = Some(elements);
+                            }
+                            Err(why) => {
+                                report.problem("view", why).field =
+                                    Some(format!("views[{}]", view.id));
+                            }
+                        }
+                    }
                 }
-                #[cfg(not(all(feature = "remote", unix)))]
+                #[cfg(not(all(feature = "process", unix)))]
                 {
-                    check.note =
-                        Some("this build renders no process views (feature `remote`)".to_owned());
+                    check.note = Some("this build renders no process views".to_owned());
                 }
             } else {
                 check.note = Some(format!(
@@ -417,12 +422,13 @@ impl Checker {
 
     /// Opens view `view` of process extension `id` and applies its first
     /// frame: how many elements it made.
-    #[cfg(all(feature = "remote", unix))]
+    #[cfg(all(feature = "process", unix))]
     fn render_remote(
         &self,
         processes: &crate::process::Processes,
         id: &str,
         view: &str,
+        render: FrameRenderer,
     ) -> Result<u32, String> {
         use crate::process::State;
         let deadline = std::time::Instant::now()
@@ -456,11 +462,7 @@ impl Checker {
                 Err(_) => std::thread::sleep(Duration::from_millis(10)),
             }
         };
-        let (events, _) = futures::channel::mpsc::unbounded();
-        let mut doc = crate::remote::RemoteDocument::new(events);
-        doc.apply(frame)
-            .map_err(|why| format!("view {view} did not render: {why}"))?;
-        let elements = crate::remote::element_count(doc.document());
+        let elements = render(frame).map_err(|why| format!("view {view} did not render: {why}"))?;
         if elements == 0 {
             return Err(format!("view {view} drew nothing"));
         }
@@ -641,4 +643,28 @@ fn load_problem(error: &LoadError, report: &mut CheckReport) {
 #[must_use]
 pub fn folder(path: &str) -> PathBuf {
     std::path::absolute(path).unwrap_or_else(|_| PathBuf::from(path))
+}
+
+/// Renders a process view's first frame in a document of the window's
+/// kind, answering how many elements it drew: what `EXT_CHECK` renders a
+/// process view with (app-shell-extensions' remote document sets it).
+#[cfg(all(feature = "process", unix))]
+pub type FrameRenderer = fn(crate::wire::Frame) -> Result<u32, String>;
+
+#[cfg(all(feature = "process", unix))]
+static FRAME_RENDERER: std::sync::Mutex<Option<FrameRenderer>> = std::sync::Mutex::new(None);
+
+/// Sets what renders process views' frames for a check.
+#[cfg(all(feature = "process", unix))]
+pub fn set_frame_renderer(render: FrameRenderer) {
+    *FRAME_RENDERER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(render);
+}
+
+#[cfg(all(feature = "process", unix))]
+fn frame_renderer() -> Option<FrameRenderer> {
+    *FRAME_RENDERER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }

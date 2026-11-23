@@ -5,8 +5,8 @@ weight = 53
 +++
 
 > **Status: first cut landed (2026-10-31)** in `architect-shell`
-> (`features/shell`), with a sandbox to develop it in (`apps/sandbox`, the
-> Architect app on made-up data; it and the iOS app run under `dx serve`). Task's shell is the
+> (`features/shell`); the shell is moving to FastTrackStudio/app-shell
+> (`app-shell:crates/app-shell`). Task's shell is the
 > reference; Studio is the second app on it.
 
 Task has a shell people like: on a phone, the screen's name large at the
@@ -146,7 +146,7 @@ Its items come from three places:
   A page or view says it may hold the focus with `use_typing_scope`
   (`view:<kind>`), wired to its box's `onfocusin`/`onfocusout`; every
   workspace pane does (`features/workspace/src/host/group.rs` `PaneSlot`).
-  `architect-extensions` fills it (`features/extensions/src/typing_ui.rs`):
+  `architect-extensions` fills it (`app-shell:crates/app-shell-extensions/src/typing_ui.rs`):
   the editor's items as the built-in toolbar of its context
   (`typing/<context>`, `features/extensions/src/toolbars.rs`
   `Toolbars::provide_editor`), then every extension's `[[toolbars]] where =
@@ -201,10 +201,9 @@ up only when the person asks for it, as in any iOS app:
   (`features/shell/src/shell/keyboard.rs` `TapStroke`: past `TAP_SLOP` it
   is a scroll), and its release brings the keyboard up when a field has
   the focus (`tap_raises`). The shell's root hears its own
-  (`KeyboardTaps`, `use_keyboard_taps`); the Architect app hears every
-  finger at the window (`apps/ui/src/screen.rs` `WindowTaps`), since its
-  sheets, ⌘K and settings are beside the shell and keep their clicks from
-  bubbling. A press that becomes a scroll, and an `autofocus`
+  (`KeyboardTaps`, `use_keyboard_taps`); an app whose sheets, ⌘K and
+  settings sit beside the shell hears every finger at the window instead,
+  since those keep their clicks from bubbling. A press that becomes a scroll, and an `autofocus`
   (a note opening), give the field the focus and no keyboard: Blitz asks
   winit's view to become the first responder whenever a field is focused,
   and `features/shell/src/shell/keyboard/ios.rs` refuses it unless a tap
@@ -284,31 +283,13 @@ A declared tab's press is made once for its note, type and target and
 kept for the root's life (`Presses`, `use_presses`), not again on every
 render of the root.
 
-The Architect app's default set is Inbox, Vault, Project and Schedule, with
-Capture as the round button (`apps/ui/src/favourites.rs` `default_set`).
-Each opens its real surface in the Vault's workspace (`Surface`): the
-inbox deck, the last note shown, the projects list, and the calendar's
-day. The Go menu, ⌘K and ⌃⌘1–4 go to the same four. The loaded
-extensions' declarations are read there too (`declared`, `opens`): `page`
-is the open note, `search` quick open, a view of the declaring extension's
-own (`<view>` or `<its id>/<view>`) that view on the open note, an
-`{action}` one the app has that the declaring extension may run
-([who may name what](@/architecture/extensions.md#favourites)), a
-`{place}` a note beside the open one; the open note comes from the Vault's
-page (`VaultFocus`). A primary's state is on while its extension keeps
-runtime state of that name (`EXT_STATE_SET`, `state_on`: its own, source
-`ext:<id>`).
-
-The app in a browser takes the same path (`apps/web/src/app/favourites.rs`):
-its own set is Vault, Files, Search and New note, and the declarations come
-from the node (`GET /_ext/favourites.json`, read by
-`apps/web/src/favourites.rs` `listing`, each with the extension that
-declared it, held to the same rule); any view the declaring extension's
-island lists opens in a frame of its own as a tab of the workspace
-(`apps/web/src/app/vault.rs` `open_frame`), handed the open note and its
-playhead source as a claimed view is
-([a view by a note's type](@/architecture/extensions.md#views-that-follow-playback)), `browse`
-opens the navigator, and a browser knows no state yet (the first face).
+An app's default set is its own. The loaded extensions' declarations are
+read there too (`declared`, `opens`): a view of the declaring extension's
+own (`<view>` or `<its id>/<view>`), an `{action}` one the app has that the
+declaring extension may run
+([who may name what](@/architecture/extensions.md#favourites)). A primary's
+state is on while its extension keeps runtime state of that name
+(`EXT_STATE_SET`, `state_on`: its own, source `ext:<id>`).
 
 The person orders the tabs (Task's Customize: drag to move, hide, bring
 back), per device. The first four are the bar; the rest are in the left
@@ -427,8 +408,7 @@ app on the shell gets it:
   calls `WindowChrome::on_drag`). Linux and Windows draw the same in-app
   row (52pt without a `WindowChrome`); on a Mac the traffic lights are
   AppKit's, put in the row by `features/shell/src/shell/mac.rs`
-  `fit_traffic_lights`, which the sandbox calls from
-  `apps/ui/src/screen.rs` `use_window_chrome` after each resize.
+  `fit_traffic_lights`, which an app calls after each resize.
   A pane popped out to a window of its own gets the same row: on a Mac
   its launcher makes the title bar transparent, puts the traffic lights
   in it and hands the pop-out a `TitleRow`
@@ -509,9 +489,7 @@ need it to work.
 A tap on a text field brings the keyboard up, so a pull-down only
 counts when it starts on the bar itself, not on a field in it.
 
-Each scene is checked at the three sizes in `features/ui/ui-snapshot`
-(`features/ui/ui-snapshot/src/scenes.rs`) with pixel probes, the way the
-components are today.
+Each scene is to be checked at the three sizes with pixel probes.
 
 ## Moving the apps onto it
 

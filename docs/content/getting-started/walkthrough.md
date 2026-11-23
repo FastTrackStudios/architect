@@ -4,11 +4,11 @@ description = "Define an entity and a service, write a backend, serve it, consum
 weight = 15
 +++
 
-This walks the entire architect flow against the reference feature,
-`examples/greeter` (`examples/greeter/src/lib.rs`,
-`examples/greeter/src/main.rs`, `examples/greeter/tests/round_trip.rs`).
-Each step points at the real file, so you can read the working code
-alongside.
+This walks the entire architect flow on one small feature, a greeter:
+an entity, a service with its error and a stream, an in-memory backend, a
+server and one test scenario run over every wire. `cargo xtask feature
+new <name>` scaffolds the same shape, and `apps/auth-server` is the
+full-size server built this way.
 
 ## The mental model
 
@@ -31,7 +31,7 @@ choose, at the edge, how a client reaches the backend.
 
 ## 1. Define the entity
 
-One plain struct (`examples/greeter/src/lib.rs`, section 1):
+One plain struct:
 
 ```rust
 #[architect::entity(table_name = "notes", repo, events)]
@@ -109,7 +109,7 @@ Write one backend that holds both and routes internally
 
 ## 4. Serve it: one backend, every wire
 
-`examples/greeter/src/main.rs` is the whole server:
+The whole server:
 
 ```rust
 #[derive(architect::Config)]
@@ -134,7 +134,7 @@ to `EngineHost::new(router, gate, bind)`, which checks every vox lane
 ([EngineHost](@/features/engine-host.md)). Try it:
 
 ```sh
-GREETER_BIND=127.0.0.1:4040 cargo run -p example-greeter
+GREETER_BIND=127.0.0.1:4040 cargo run   # your server's binary
 curl -XPOST localhost:4040/greeter/greet -d '{"name":"cody"}'
 curl -N   localhost:4040/greeter/greeted            # Server-Sent Events
 ```
@@ -147,7 +147,7 @@ serves the same router over a vox memory link (native only; see
 
 The generated clients implement the service trait, so a screen, a CLI or
 a test takes `impl Greeter` and cannot tell which wire it is on.
-`examples/greeter/tests/round_trip.rs` runs one scenario on each:
+One test runs one scenario on each:
 
 ```rust
 async fn scenario(client: &impl Greeter) {
@@ -207,11 +207,7 @@ cycle / missing-provider / conflict diagnostics); see
 
 ## 7. Test it
 
-```sh
-cargo test -p example-greeter
-```
-
-runs the scenario in process, over vox and over HTTP, plus the SSE
+Run one scenario in process, over vox and over HTTP, plus the SSE
 stream. For a feature that has to hold on every wire, copy the shape of
 `apps/auth-server/tests/surfaces.rs` (one scenario over direct,
 `LocalServer`, WebSocket, iroh and HTTP). See
@@ -223,5 +219,5 @@ stream. For a feature that has to hold on every wire, copy the shape of
 ([the layout](@/architecture/layout.md)): the contract in `src/lib.rs`, an
 in-memory backend behind the `memory` flag, `vox` / `ui` flags, a `spec/`
 and a passing scenario test, and wires it into the workspace. Rename the
-placeholder entity, flesh out the backend, and copy
-`examples/greeter/src/main.rs` when you need a server.
+placeholder entity, flesh out the backend, and add a server like the
+one in step 4 when you need one.

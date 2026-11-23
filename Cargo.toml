@@ -10,7 +10,6 @@
 resolver = "2"
 # The standard distribution (#631) is a workspace of its own: it links the
 # core extensions from their repos and patches architect back to this one.
-exclude = ["dist/standard"]
 members = [
     # ── the umbrella crate ────────────────────────────────────────────
     "crates/architect",
@@ -18,6 +17,7 @@ members = [
     "features/atom",
     "features/form",
     "features/input",
+    "features/views",
     "features/permissions",
     "features/permissions/proto",
     "features/mcp",
@@ -27,10 +27,6 @@ members = [
     "crates/architect-rpc-derive",
     "crates/architect-action-derive",
     # ── the reference example ─────────────────────────────────────────
-    "examples/greeter",
-    "examples/scripting",
-    "examples/extension/host",
-    "examples/extension/counter",
     # ── apps ──────────────────────────────────────────────────────────
     "apps/auth-server",
     "apps/mock-oauth",
@@ -45,7 +41,6 @@ members = [
     # ── crdt ──────────────────────────────────────────────────────────
     "features/crdt/crdt",
     "features/crdt/crdt-derive",
-    "features/crdt/crdt-seaorm",
     "features/crdt/tests/derive",
     # ── ui ────────────────────────────────────────────────────────────
     "features/ui/architect-ui",
@@ -55,87 +50,40 @@ members = [
     "features/settings",
     "features/settings/derive",
     "features/orgs",
-    "features/capture",
     "features/accounts",
     "features/scripting",
     "features/extensions",
+    "features/extensions-dioxus",
     "features/extensions/documents",
-    "features/webview",
     "features/process-view",
     "features/extensions/wasi-guest",
     "features/extensions/archive",
     "features/extensions/tests/wasi-hazards",
-    "features/canvas",
-    "features/a2ui",
-    "features/pages",
+    "features/extensions/tests/wasi-counter",
     "features/files",
-    "features/files/extension",
-    "features/navigator",
-    "features/navigator/extension",
     "features/navigator-api",
     "features/palette",
     "features/editor",
-    "features/palette/extension",
-    "features/attachments",
     "features/spaces",
-    "features/ui/showcase",
-    "features/ui/ui-snapshot",
     "features/shell",
     "features/theme",
     "features/favourites",
-    "features/media",
-    "features/theme/picker",
-    "features/settings/sheet",
     "features/guide",
     "features/presence",
     "features/devices",
     # ── vault (from Task, #333): notes, properties, the index ─────────
     "features/vault/vault",
-    "features/bases",
     "features/vault/vault-proto",
     "features/vault/vault-live",
     "features/vault/vault-query",
     "features/vault/vault-obsidian",
-    "features/vault/vault-entity",
     "features/vault/vault-doc",
     "features/vault/vault-collab",
-    "features/vault/vault-sync-client",
     # ── links and tags (from Task, #333) ──────────────────────────────
-    "features/links/links",
-    "features/links/links-proto",
-    "features/tags/tag",
-    "features/tags/tag-proto",
     # ── sites: a vault published as a static site (#364) ─────────────
-    "features/sites",
-    "apps/cli",
     # ── the Architect app (apps/ui, its desktop, mobile and web) ──────
-    "apps/ui",
-    "apps/desktop",
-    "apps/distribution",
-    "apps/mobile",
-    "apps/web",
     # ── the dev sandbox: made-up data and example extensions ──────────
-    "apps/sandbox",
-    "apps/sandbox/clicker",
-    "apps/sandbox/board",
-    "apps/sandbox/kanban",
-    "apps/sandbox/pane-events",
-    "apps/sandbox/sketch",
-    "apps/sandbox/wasi-counter",
-    "apps/sandbox/web",
-    "apps/sandbox/media",
     # ── first-party extensions (#368) ─────────────────────────────────
-    "extensions/projects",
-    "extensions/tasks",
-    "extensions/time-tracker",
-    "extensions/dayplan",
-    "extensions/calendar",
-    "extensions/cookbook",
-    "extensions/mealplan",
-    "features/threads",
-    "features/playhead",
-    "features/notify",
-    "features/updates",
     # ── story (component workbench) ───────────────────────────────────
     "features/story/architect-story-core",
     "features/story/architect-story-macros",
@@ -143,15 +91,9 @@ members = [
     "features/story/architect-story-shell",
     "features/story/architect-story-snapshots",
     "features/story/architect-story-parity",
-    "features/story/architect-story-fuzz",
     # ── telemetry ─────────────────────────────────────────────────────
     "features/telemetry",
     # ── launcher ──────────────────────────────────────────────────────
-    "features/launcher/architect-launcher-core",
-    "features/launcher/architect-launcher-ui",
-    "features/launcher/architect-launcher-providers",
-    # ── the fleet's feature union (hakari + `cargo xtask fleet-deps`) ──
-    "workspace-hack",
     # ── repo tooling ──────────────────────────────────────────────────
     "xtask",
 ]
@@ -190,32 +132,14 @@ lettre = { version = "0.11", default-features = false, features = ["smtp-transpo
 # vault (from Task, #333) — notes, properties (frontmatter), links, tags
 # and the vault index. Crate names are Task's, so Task re-points by path.
 vault = { path = "features/vault/vault" }
-architect-bases = { path = "features/bases" }
-architect-projects = { path = "extensions/projects" }
-architect-tasks = { path = "extensions/tasks" }
-architect-time-tracker = { path = "extensions/time-tracker" }
-architect-calendar = { path = "extensions/calendar" }
-architect-dayplan = { path = "extensions/dayplan" }
-architect-cookbook = { path = "extensions/cookbook" }
-architect-mealplan = { path = "extensions/mealplan" }
 # Threads (#348): comments on any entity, a built-in extension.
-architect-threads = { path = "features/threads" }
-architect-playhead = { path = "features/playhead", default-features = false }
 # Notify (#348): notifications and the centre, a built-in extension.
-architect-notify = { path = "features/notify" }
-architect-updates = { path = "features/updates" }
 vault-proto = { path = "features/vault/vault-proto", default-features = false }
 vault-live = { path = "features/vault/vault-live" }
 vault-obsidian = { path = "features/vault/vault-obsidian" }
 vault-query = { path = "features/vault/vault-query" }
-vault-entity = { path = "features/vault/vault-entity" }
 vault-doc = { path = "features/vault/vault-doc" }
 vault-collab = { path = "features/vault/vault-collab" }
-vault-sync-client = { path = "features/vault/vault-sync-client" }
-links = { path = "features/links/links" }
-links-proto = { path = "features/links/links-proto", default-features = false }
-tag = { path = "features/tags/tag" }
-tag-proto = { path = "features/tags/tag-proto" }
 # The editor's document model and markdown pass, at the editor pin above
 # (through `architect-editor`'s `state`).
 editor-state = { git = "https://github.com/FastTrackStudios/editor", rev = "6817dc2c709fbb5a7858229592bbbc85eed49528", default-features = false }
@@ -245,22 +169,16 @@ auth-client = { path = "features/auth/auth-client" }
 auth-ui = { path = "features/auth/auth-ui" }
 crdt = { path = "features/crdt/crdt" }
 crdt-derive = { path = "features/crdt/crdt-derive" }
-crdt-seaorm = { path = "features/crdt/crdt-seaorm" }
 # Renamed on extraction (member manifests + their consumers renamed to
 # match): fts-ui → architect-ui, fts-story-* → architect-story-*,
 # task-telemetry → architect-telemetry.
 architect-ui = { path = "features/ui/architect-ui" }
 architect-telemetry = { path = "features/telemetry" }
-architect-ui-showcase = { path = "features/ui/showcase" }
-ui-snapshot = { path = "features/ui/ui-snapshot" }
 # guide media: scenarios as films, tests and tours.
 architect-guide = { path = "features/guide" }
 architect-presence = { path = "features/presence" }
 architect-theme = { path = "features/theme" }
 architect-favourites = { path = "features/favourites" }
-architect-media = { path = "features/media" }
-architect-theme-picker = { path = "features/theme/picker" }
-architect-settings-sheet = { path = "features/settings/sheet" }
 # story — the component workbench (stories, snapshots, parity, fuzz).
 architect-story-core = { path = "features/story/architect-story-core" }
 architect-story-macros = { path = "features/story/architect-story-macros" }
@@ -268,14 +186,10 @@ architect-story-runtime = { path = "features/story/architect-story-runtime" }
 architect-story-shell = { path = "features/story/architect-story-shell" }
 architect-story-snapshots = { path = "features/story/architect-story-snapshots" }
 architect-story-parity = { path = "features/story/architect-story-parity" }
-architect-story-fuzz = { path = "features/story/architect-story-fuzz" }
 # launcher — the app launcher (core engine, providers, dioxus UI).
 # Renamed on vendoring: launcher-core → architect-launcher-core,
 # launcher-ui → architect-launcher-ui, providers →
 # architect-launcher-providers.
-architect-launcher-core = { path = "features/launcher/architect-launcher-core" }
-architect-launcher-ui = { path = "features/launcher/architect-launcher-ui" }
-architect-launcher-providers = { path = "features/launcher/architect-launcher-providers" }
 
 # ── Facet reflection + vox RPC — the rc.7 fleet ───────────────────────
 # Caret ranges: the version is a FLOOR, the lockfile holds the exact one.
@@ -370,43 +284,31 @@ nucleo-matcher = "0.3"
 palette = "0.7.6"
 linkme = "0.3"
 architect-shell = { path = "features/shell", default-features = false }
+architect-views = { path = "features/views" }
 architect-workspace = { path = "features/workspace" }
 architect-scene = { path = "features/scene" }
 architect-commands = { path = "features/commands" }
 # The palette and launcher engine (MIT): sources, items, ranking.
 architect-palette = { path = "features/palette" }
 # The Command Palette, ⌘K and ⌘O as a built-in extension (MIT).
-architect-command-palette = { path = "features/palette/extension", default-features = false }
 architect-settings = { path = "features/settings" }
 architect-settings-derive = { path = "features/settings/derive" }
 architect-orgs = { path = "features/orgs" }
-architect-capture = { path = "features/capture" }
 architect-accounts = { path = "features/accounts" }
 architect-scripting = { path = "features/scripting" }
 architect-extensions = { path = "features/extensions" }
+architect-extensions-dioxus = { path = "features/extensions-dioxus" }
 architect-documents = { path = "features/extensions/documents" }
-architect-webview = { path = "features/webview" }
 architect-process-view = { path = "features/process-view" }
 architect-extension-wasi = { path = "features/extensions/wasi-guest" }
 architect-extension-archive = { path = "features/extensions/archive" }
-architect-canvas = { path = "features/canvas" }
-architect-a2ui = { path = "features/a2ui" }
-architect-pages = { path = "features/pages" }
-architect-sites = { path = "features/sites" }
 architect-files = { path = "features/files" }
-architect-files-extension = { path = "features/files/extension" }
-# The sidebar: a port of Notebook Navigator. GPL-3.0-or-later, the one GPL
-# crate (features/navigator/README.md): an app that links it ships under the GPL.
-architect-navigator = { path = "features/navigator" }
-architect-navigator-extension = { path = "features/navigator/extension" }
-# The navigator's provider API: MIT OR Apache-2.0, what MIT pages and
-# extensions implement without linking the GPL navigator.
+# The navigator's provider API: MIT OR Apache-2.0, what pages and
+# extensions implement. The navigator itself (GPL-3.0-or-later, a port of
+# Notebook Navigator) is a repo of its own: FastTrackStudios/navigator.
 architect-navigator-api = { path = "features/navigator-api" }
-architect-attachments = { path = "features/attachments" }
 architect-devices = { path = "features/devices" }
 architect-spaces = { path = "features/spaces" }
-architect-app = { path = "apps/ui" }
-architect-distribution = { path = "apps/distribution" }
 # iOS: the UIScene lifecycle the mobile app adopts (apps/mobile).
 objc2 = "0.6"
 objc2-ui-kit = "0.3"
@@ -422,7 +324,7 @@ nice-plug = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch 
 nice-plug-dioxus = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch = "fts-baseview-03" }
 atomic_float = "1.1"
 
-# ── Rendering / snapshot gate (features/ui/ui-snapshot) ───────────────
+# ── Rendering / snapshot gate (the story snapshots and parity) ────────
 anyrender = "0.14"
 anyrender_vello_cpu = "0.18"
 peniko = "0.6"
@@ -456,7 +358,7 @@ hex = "0.4"
 serde_json = "1.0"
 toml = "0.8"
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
-# xtask fleet-deps: the resolver cargo-hakari uses, per platform.
+# xtask feature-tests: the resolved package graph.
 guppy = "0.19"
 thiserror = "2.0"
 # `serde` because architect-launcher-core derives Serialize/Deserialize on

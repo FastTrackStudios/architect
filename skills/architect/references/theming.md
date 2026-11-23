@@ -27,9 +27,7 @@ working set.
   (`--arrange-item-edge`).
 - A view that paints gets roles of its own (`editor.background`,
   `editor.syntax.chord`, …) with defaults over architect's tokens, set as
-  the app's `App` layer, and reads them as a `FromResolved` slice. The
-  sandbox's Keyflow editor is the example (`apps/ui/src/keyflow.rs`
-  `EDITOR_TOKENS`, `EditorColours`).
+  the app's `App` layer, and reads them as a `FromResolved` slice.
 
 ## Recipes
 
@@ -49,8 +47,6 @@ use_hook(|| {
 // The OS's light/dark: theme.set_system(..) at start and on WindowEvent::ThemeChanged.
 rsx! { ThemeStoreProvider { AppShell { /* no theme: follows the store */ } } }
 ```
-
-The sandbox does exactly this: `apps/ui/src/theme.rs`.
 
 **A view's own slice, redrawn only when it changes.**
 
@@ -129,7 +125,7 @@ entry, never a failed load.
 - `ImGui`: `use_script_canvas` follows the store above it (restyle and a
   frame on every change); headless, `Session::start_themed` then
   `Session::set_theme` on each change. `Style::from_theme` maps tokens
-  (`imgui.<col>` first, else derived; `features/canvas/src/imgui.rs`
+  (`imgui.<col>` first, else derived
   `Col`). Scripts override with `ImGui.PushStyleColor(ctx,
   ImGui.Col_Button, theme.color('x'))`.
 
@@ -156,8 +152,7 @@ Keys: `appearance.theme` (`id` or `light,dark`), `appearance.mode`,
 app with no account to sync the person's layer with yet:
 `Persist::local(&store, "my-app", delay)` keeps the device's layer in
 `<app dir>/appearance.json` and the person's in `<app dir>/person.loro`
-(features `store` + `synced`); the sandbox does that
-(`apps/ui/src/theme.rs` `use_lab_theme`).
+(features `store` + `synced`).
 
 ## Pitfalls
 
@@ -192,7 +187,7 @@ app with no account to sync the person's layer with yet:
 - `document::Style` is inserted once: a sheet built from the theme's
   values keeps the first theme. Write the sheet with `var(--…)` only and
   set the values as variables on the view's root from a `use_themed`
-  slice (`apps/ui/src/keyflow.rs` `EditorStyles`).
+  slice.
 - A store change made off the UI thread (an action, the watcher) reaches
   Dioxus on the next turn, through `use_theme_store`'s channel. Don't
   read the store in render and expect it to subscribe: read

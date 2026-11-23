@@ -1,5 +1,4 @@
 ---
-"architect-canvas" = "minor"
 "architect-extensions" = "minor"
 "architect-scripting" = "minor"
 "architect-shell" = "minor"
