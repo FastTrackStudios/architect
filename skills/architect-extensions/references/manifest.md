@@ -9,7 +9,6 @@ what the parser refuses. Derived from the serde structs and their checks:
 Docs: `docs/content/extensions/authoring.md` (the walkthrough), `docs/content/architecture/extensions.md` (the long form),
 `docs/content/features/extensions.md` (the contributions table),
 `docs/content/architecture/embedded-views.md` (view kinds, web views),
-`docs/content/architecture/pages.md` (`page =` views),
 `docs/content/architecture/extensibility.md`,
 `docs/content/architecture/settings-page.md` (`[[sections]]`),
 `docs/content/architecture/toolbars.md` (`[[toolbars]]`),
@@ -56,7 +55,6 @@ script = "click.luau"
 id = "panel"
 title = "Metronome"
 icon = "timer"
-page = "pages/panel.tsx"
 home = "right"
 
 [[sections]]
@@ -136,7 +134,7 @@ Top-level keys of `features/extensions/src/manifest.rs` `Manifest`.
 The action prefix is the id upper-cased with each run of other
 characters one `_`: `acme.metronome` → `ACME_METRONOME_`
 (`Manifest::action_prefix`). Every `[[actions]] id` starts with it,
-unless listed in `reserved`. Example: app-shell-extensions' `extensions/settings.toml` (FastTrackStudios/app-shell)
+unless listed in `reserved`. Example: `app-shell:crates/app-shell-extensions/extensions/settings.toml`
 (`reserved = ["APP_SETTINGS"]`).
 
 There is no `publisher` key. Who signed a package is the archive's
@@ -161,11 +159,9 @@ Every package path (`entry.path`, `wasm.component`, `source.path`,
 scripts, pages, themes) must stay in the package: no `..`, not absolute
 (`ManifestError::BadPath`). `[source]` refuses unknown keys.
 
-Examples: `apps/sandbox/clicker/extension.toml` (process),
-`apps/sandbox/wasi-counter/extension.toml` (`[wasm]`),
-`extensions/tasks/extension.toml` (`[entry]` + `[source]`),
-`examples/showcase/recipe-scaler/extension.toml` (`typescript`),
-`examples/extension/webview-board/package/extension.toml` (`data`).
+Examples: `features/extensions/tests/wasi-counter/extension.toml` (`[wasm]`),
+`features/extensions/tests/fixtures/examples/showcase/recipe-scaler/extension.toml` (`typescript`),
+`features/extensions/tests/fixtures/examples/extension/webview-board/package/extension.toml` (`data`).
 
 ## `[[actions]]`
 
@@ -200,9 +196,9 @@ name = "Open the web view board"
 preset = { action = "EXT_VIEW_OPEN", args = '{"extension": "demo.webview-board", "view": "board"}' }
 ```
 
-Examples: `examples/extension/registry/hello/extension.toml` (script),
-`examples/extension/webview-board/package/extension.toml` (preset),
-`examples/showcase/bank-link/extension.toml` (`runs = "node"`).
+Examples: `features/extensions/tests/fixtures/examples/extension/registry/hello/extension.toml` (script),
+`features/extensions/tests/fixtures/examples/extension/webview-board/package/extension.toml` (preset),
+`features/extensions/tests/fixtures/examples/showcase/bank-link/extension.toml` (`runs = "node"`).
 
 ## `[[views]]` and view kinds
 
@@ -216,7 +212,6 @@ is `<extension id>/<view id>` (`ViewDecl::workspace_kind`).
 | `icon` | string | `""` | Lucide name |
 | `kind` | string | `"dioxus"` | the view kind that draws it |
 | `document` | string | none | a frame document in the package (a data view) |
-| `page` | string | none | TSX/JS, `.luau` elements or `.a2ui.json` page |
 | `src` | string | none | the HTML file a `web` view opens; required for `web`, refused otherwise |
 | `program` | string | none | the program in the package a `process` view runs; required for `process`, refused otherwise; must be in `capabilities.programs` |
 | `args` | string list | `[]` | the `program`'s arguments; only a `process` view has them; `{{setting:<key>}}` puts in one of its own settings (a change restarts the program), never a secret |
@@ -225,7 +220,7 @@ is `<extension id>/<view id>` (`ViewDecl::workspace_kind`).
 | `width`, `height` | float (points) | none | a popup's, overlay's or float's size |
 | `on_unload` | `placeholder` \| `close` | `placeholder` | its panes when it unloads |
 
-`kind` values the app registers (`features/workspace/src/kinds.rs`
+`kind` values the app registers (`features/views/src/kinds.rs`
 `DIOXUS`, `PAINT`, `WEB`, `PROCESS`): `dioxus` (a process's or linked Dioxus view,
 drawn remotely or in the app's document), `paint` (a scene recorded each
 frame), `web` (its own HTML/CSS/JS, #222), `process` (a program in the
@@ -235,26 +230,24 @@ A kind the app has no provider for refuses the load
 (`host::LoadError::ViewKind`).
 
 - **Remote views**: the default `dioxus` kind in a `process` or `wasm`
-  extension; nothing extra to declare. `apps/sandbox/clicker/extension.toml`.
-- **Paint**: `kind = "paint"`. `apps/sandbox/sketch/extension.toml` (`graph`).
+  extension; nothing extra to declare. `features/extensions/tests/wasi-counter/extension.toml`.
+- **Paint**: `kind = "paint"`.
 - **Scenes** are not a view kind: a remote view's element painted as an
   anyrender scene (`features/extensions/src/scene.rs`). No manifest key.
-  `apps/sandbox/sketch/extension.toml` (`sketch`, `arrangement`).
 - **Web views**: `kind = "web"` plus `src`.
-  `examples/extension/webview-board/package/extension.toml`.
+  `features/extensions/tests/fixtures/examples/extension/webview-board/package/extension.toml`.
 - **Process views**: `kind = "process"` plus `program` (and `args`), any
   extension kind, with `capabilities.programs` naming the program. The
   app's process-view pane runs it from the package and shows its GPU
-  frames, whichever copy is loaded; Linux only, elsewhere the pane says
-  why (`features/extensions/src/process_view.rs`,
+  frames, whichever copy is loaded; Linux and macOS, elsewhere the pane
+  says why (`features/extensions/src/process_view.rs`,
   `docs/content/architecture/process-views.md`).
-  `examples/extension/process-view/package/extension.toml`.
-- **Page views**: `page = …`. `examples/showcase/recipe-scaler/extension.toml`.
 - **Held views** (one extension's view inside another's remote view,
   #764): there is no `embeddable` or `holds` key. The holding view renders
   a placeholder at run time (`features/extensions/src/embedded.rs`
-  `VIEW_ATTR`, `EmbeddedView`); the held view runs with its own
-  capabilities. Test: `features/extensions/tests/remote_embedded.rs`.
+  `VIEW_ATTR`; `features/extensions-dioxus/src/embedded.rs` `EmbeddedView`);
+  the held view runs with its own capabilities. Test:
+  `app-shell:crates/app-shell-extensions/tests/remote_embedded.rs`.
 
 <!-- doc-check: off -->
 ```toml
@@ -297,8 +290,8 @@ plane = "over"
 script = "ruler.luau"
 ```
 
-Examples: `examples/extension/registry/hello/extension.toml` (script);
-`draws` only in `features/extensions/tests/remote_overlay.rs`.
+Examples: `features/extensions/tests/fixtures/examples/extension/registry/hello/extension.toml` (script);
+`draws` only in `app-shell:crates/app-shell-extensions/tests/remote_overlay.rs`.
 
 ## `[[workers]]`
 
@@ -320,9 +313,8 @@ title = "Count primes"
 script = "workers/primes.luau"
 ```
 
-Examples: `apps/sandbox/clicker/extension.toml` (script),
-`apps/sandbox/wasi-counter/extension.toml` (entry),
-`examples/showcase/timers/extension.toml`.
+Examples: `features/extensions/tests/wasi-counter/extension.toml` (entry),
+`features/extensions/tests/fixtures/examples/showcase/timers/extension.toml` (script).
 
 ## `[[hooks]]`: schedules, document events, app events
 
@@ -355,14 +347,14 @@ script = "echo.luau"
 function = "heard"
 ```
 
-Examples: `apps/sandbox/extensions/surface/extension.toml`,
-`examples/showcase/timers/extension.toml` (schedules),
-`examples/showcase/surface/extension.toml`.
+Examples: `features/extensions/tests/fixtures/sandbox/extensions/surface/extension.toml`,
+`features/extensions/tests/fixtures/examples/showcase/timers/extension.toml` (schedules),
+`features/extensions/tests/fixtures/examples/showcase/surface/extension.toml`.
 
 **`[background]`** (`features/extensions/src/events.rs` `BackgroundDecl`):
 `idle` (duration string, default `"5m"`, at least `1s`). The extension
 starts on its first event, stops when idle. Refused for `kind = "data"`.
-Example: `apps/sandbox/extensions/surface/extension.toml`.
+Example: `features/extensions/tests/fixtures/sandbox/extensions/surface/extension.toml`.
 
 ## `[[sections]]`: settings
 
@@ -403,9 +395,7 @@ max = 10
 default = 1
 ```
 
-Examples: `apps/sandbox/clicker/extension.toml`,
-`extensions/calendar/extension.toml` (`choices`),
-`examples/showcase/settings-theme/extension.toml`.
+Example: `features/extensions/tests/fixtures/examples/showcase/settings-theme/extension.toml`.
 
 ## Interface contributions
 
@@ -416,22 +406,22 @@ one kind may not share an id.
 
 | table | keys (type) | example |
 |---|---|---|
-| `[[openers]]` `OpenerDecl` | `id`, `kind`, `title`, `prefix`, `action`, `open` (strings); `files`, `doc_kinds`, `urls` (string lists; `urls` are regexes); `view` | `examples/showcase/openers-sampler/extension.toml` |
-| `[[doc_kinds]]` `DocKindDecl` | `id` (`<app>.<kind>`), `name`, `files`, `icon`, `view`, `schema` (default 1; no migrations). A vault file of its first `files` extension that is a document file of the kind syncs between the person's devices and through the org's node like a note, while the extension is compiled in, installed or loaded in the app's window (a development copy too; gone when it unloads or reloads without it, unless another source still declares it: `DocKindDecl::to_doc_kind`, `apps/desktop/src/node/kinds.rs` `follow`) | `apps/sandbox/board/extension.toml` |
-| `[[tabs]]` `TabDecl` | `id`, `title`, `icon`, `view` (all required in effect) | `apps/sandbox/board/extension.toml` |
-| `[[status]]` `StatusDecl` | `id`, `text`, `icon`, `hint`, `side` (`left`/`right`, default `right`), `action` | `examples/showcase/toolbar-sampler/extension.toml` |
-| `[[menus]]` `MenuDecl` | `menu` (menu title), `action` | `extensions/projects/extension.toml` |
-| `[[context]]` `ContextDecl` | `target` (`pane`, `tab`, `view:<kind>`, `file`, `file:<ext>`, `doc:<kind>`, `link`, `selection`, `toolbar`, `toolbar-item`), `action`, `title` | `apps/sandbox/extensions/metronome/extension.toml` |
-| `[[bar]]` `BarDecl` | `action`, `title`, `icon`: a phone's action bar | `extensions/calendar/extension.toml` |
+| `[[openers]]` `OpenerDecl` | `id`, `kind`, `title`, `prefix`, `action`, `open` (strings); `files`, `doc_kinds`, `urls` (string lists; `urls` are regexes); `view` | `features/extensions/tests/fixtures/examples/showcase/openers-sampler/extension.toml` |
+| `[[doc_kinds]]` `DocKindDecl` | `id` (`<app>.<kind>`), `name`, `files`, `icon`, `view`, `schema` (default 1; no migrations). A vault file of its first `files` extension that is a document file of the kind syncs between the person's devices and through the org's node like a note, while the extension is compiled in, installed or loaded in the app's window (a development copy too; gone when it unloads or reloads without it, unless another source still declares it: `DocKindDecl::to_doc_kind`) | — |
+| `[[tabs]]` `TabDecl` | `id`, `title`, `icon`, `view` (all required in effect) | test: `features/extensions/tests/contributions.rs` |
+| `[[status]]` `StatusDecl` | `id`, `text`, `icon`, `hint`, `side` (`left`/`right`, default `right`), `action` | `features/extensions/tests/fixtures/examples/showcase/toolbar-sampler/extension.toml` |
+| `[[menus]]` `MenuDecl` | `menu` (menu title), `action` | test: `features/extensions/tests/contributions.rs` |
+| `[[context]]` `ContextDecl` | `target` (`pane`, `tab`, `view:<kind>`, `file`, `file:<ext>`, `doc:<kind>`, `link`, `selection`, `toolbar`, `toolbar-item`), `action`, `title` | `features/extensions/tests/fixtures/sandbox/extensions/metronome/extension.toml` |
+| `[[bar]]` `BarDecl` | `action`, `title`, `icon`: a phone's action bar | `features/extensions/tests/fixtures/examples/showcase/toolbar-sampler/extension.toml` |
 | `[[slots]]` `SlotDecl` | `slot` (`ribbon`, `left`, `right`, `tabs`, `status`, `title`), `view` | test: `features/extensions/tests/contributions.rs` |
-| `[[keys]]` `KeyDecl` | `chord` (`⌘K`, `A`), `action`, `when` (`view:<view>`: only while that view has the focus) | `features/palette/extension/extension.toml` |
-| `[[palette_views]]` `PaletteViewDecl` | `overlay` (`palette` or `quick-open`), `view` | `features/palette/extension/extension.toml` |
-| `[[palette_sources]]` `PaletteSourceDecl` | `id` (`a-z 0-9 - _`), `title`, `action`, `run`, `ranking` (`open` default, or `commands`) | `examples/showcase/openers-sampler/extension.toml` |
-| `[[keymaps]]` (editor-ext `KeymapEntry`) | `key` (`Mod-Enter`), `action`, `when` (`editor` or `node:<kind>`); needs `writes = ["editor"]` | `apps/sandbox/extensions/outline/extension.toml` |
-| `[[slash]]` (editor-ext `SlashEntry`) | `label`, `action`, `group`, `desc`, `icon`; needs `writes = ["editor"]` | `examples/showcase/templater-lite/extension.toml` |
+| `[[keys]]` `KeyDecl` | `chord` (`⌘K`, `A`), `action`, `when` (`view:<view>`: only while that view has the focus) | test: `features/extensions/tests/interop.rs` |
+| `[[palette_views]]` `PaletteViewDecl` | `overlay` (`palette` or `quick-open`), `view` | test: `features/extensions/tests/interop.rs` |
+| `[[palette_sources]]` `PaletteSourceDecl` | `id` (`a-z 0-9 - _`), `title`, `action`, `run`, `ranking` (`open` default, or `commands`) | `features/extensions/tests/fixtures/examples/showcase/openers-sampler/extension.toml` |
+| `[[keymaps]]` (editor-ext `KeymapEntry`) | `key` (`Mod-Enter`), `action`, `when` (`editor` or `node:<kind>`); needs `writes = ["editor"]` | `features/extensions/tests/fixtures/sandbox/extensions/outline/extension.toml` |
+| `[[slash]]` (editor-ext `SlashEntry`) | `label`, `action`, `group`, `desc`, `icon`; needs `writes = ["editor"]` | `features/extensions/tests/fixtures/examples/showcase/templater-lite/extension.toml` |
 | `[[languages]]` `LanguageDecl` | `id`, `name`, `extensions`, `fences`, `grammar` (`linked`, `linked:<name>`), `highlights`, `comment`, `[languages.server]` `command`/`args` | none in this repo; see `features/editor/src/languages.rs` `Language` |
-| `[[tab_kinds]]` `TabKindDecl` | `id`, `title`, `scope` (bool), `width` (`compact`/`wide`), `icon`, `colour`, `subtitle`, `views`, `menu` (`{label, action}` list) | `apps/ui/src/setlists.toml` |
-| `[[deck_templates]]` `DeckTemplateDecl` | `context`, `screenset`, `layout` (JSON file) | `apps/ui/src/setlists.toml` |
+| `[[tab_kinds]]` `TabKindDecl` | `id`, `title`, `scope` (bool), `width` (`compact`/`wide`), `icon`, `colour`, `subtitle`, `views`, `menu` (`{label, action}` list) | — |
+| `[[deck_templates]]` `DeckTemplateDecl` | `context`, `screenset`, `layout` (JSON file) | — |
 
 ```toml
 [[openers]]
@@ -475,11 +465,10 @@ which document it shows from its pane's state (`use_pane().state()`).
 or, for one linked in, one of its `Extension::files` (`Toolbars::embedded_image`).
 An SVG `image` is drawn in the item's ink as an icon is, so it follows the
 theme: its `currentColor` is the ink, and with `tint = true` every colour
-it was drawn in too (a monochrome glyph in a fixed grey; `Toolbars::tinted`;
-`apps/sandbox/sketch/icons/nudge.svg`).
+it was drawn in too (a monochrome glyph in a fixed grey; `Toolbars::tinted`).
 An `icon` is a Lucide name the shell knows (`named_icon`); an unknown one draws
-a puzzle piece. Examples: `examples/showcase/toolbar-sampler/extension.toml`,
-`apps/sandbox/extensions/metronome/extension.toml`.
+a puzzle piece. Examples: `features/extensions/tests/fixtures/examples/showcase/toolbar-sampler/extension.toml`,
+`features/extensions/tests/fixtures/sandbox/extensions/metronome/extension.toml`.
 
 The desk's **ribbon** is a shell slot (`[[slots]] slot = "ribbon"`) and
 where `[[tabs]]` show; there is no separate ribbon table.
@@ -502,12 +491,10 @@ this repo declares one.
 | `id` | string | required in effect | unique |
 | `title` | string | `""` | |
 | `view` | string | none | one of its `[[views]]` |
-| `page` | string | none | a page file in the package |
 | `claims` | `{ fence, note_type, embed_type }` string lists | `{}` | at least one claim; matched in any case |
 | `max_height` | integer (points) | none | not 0; past it the embed scrolls |
-| `fill` | bool | `false` | for a `note_type` claim: the view is the note's page (the web app hides the note's heading, properties and text), not a card at its head |
+| `fill` | bool | `false` | for a `note_type` claim: the view is the note's page, not a card at its head |
 
-Exactly one of `view` and `page`.
 
 ```toml
 [[embeds]]
@@ -517,114 +504,8 @@ view = "bars"
 claims = { fence = ["bars"] }
 ```
 
-Examples: `examples/showcase/chart/extension.toml` (page, fence),
-`apps/sandbox/wasi-counter/extension.toml` (view),
-`examples/showcase/dataview-lite/extension.toml`.
-
-## `[[base_views]]`
-
-`features/extensions/src/contrib.rs` `BaseViewDecl`, `BaseViewOption`.
-
-| key | type | notes |
-|---|---|---|
-| `id` | string | the base's `type:`; not `table`, `cards`, `list` |
-| `name`, `icon` | string | |
-| `options` | list of `{ key, name, kind, choices, default }` | `kind`: `text` (default), `number`, `toggle`, `property`, `select`; `default` is JSON text |
-| `view` | string | one of its `[[views]]` |
-| `page` | string | a page file |
-
-At most one of `view` and `page`; neither means its code draws it
-(`base.<id>`, `Builder::base_view`).
-
-```toml
-[[base_views]]
-id = "kanban"
-name = "Kanban"
-icon = "layout-dashboard"
-options = [{ key = "columnBy", name = "Columns", kind = "property", default = '"status"' }]
-```
-
-Examples: `extensions/tasks/extension.toml`,
-`examples/showcase/openers-sampler/extension.toml`.
-
-## `[[navigator_providers]]`
-
-`features/extensions/src/contrib.rs` `NavigatorProviderDecl`.
-
-| key | type | default | notes |
-|---|---|---|---|
-| `id` | string | required in effect | |
-| `title`, `icon` | string | `""` | |
-| `views` | string list | `[]` | its views that switch the navigator to it |
-| `actions` | string | required in effect | prefix; `<actions>_SNAPSHOT` must be its action |
-| `section` | string | `""` (`section`) | `top`, `assets` or `section` |
-| `position` | integer | none | order within its section |
-| `visible` | bool | `true` | |
-| `nest` | bool | `true` | |
-
-```toml
-[[navigator_providers]]
-id = "projects"
-title = "Projects"
-icon = "box"
-views = ["list", "page"]
-actions = "PROJECTS_NAV"
-section = "top"
-position = 3
-```
-
-Example: `extensions/projects/extension.toml`.
-
-## `[[project_types]]`
-
-`features/extensions/src/contrib.rs` `ProjectTypeDecl`,
-`ProjectPropertyDecl`.
-
-| key | type | notes |
-|---|---|---|
-| `id` | string | `a-z 0-9 - _` |
-| `name`, `icon`, `description` | string | |
-| `properties` | list of `{ key, name, kind, choices, default }` | `kind`: `text`, `number`, `date`, `toggle`, `link`, `list`, `select`; keys unique |
-| `template` | string | a markdown file in the package |
-| `folders` | string list | made in a new project |
-| `views` | string list | its own views a new project opens with |
-
-Examples: `extensions/projects/extension.toml`,
-`examples/showcase/openers-sampler/extension.toml`.
-
-## `[[capture_targets]]`
-
-`features/extensions/src/contrib.rs` `CaptureTargetDecl`.
-
-| key | type | notes |
-|---|---|---|
-| `id` | string | `a-z 0-9 - _`; not `note` or `inbox` |
-| `name`, `icon`, `description` | string | |
-| `action` | string | makes one from a capture |
-| `chips` | string list | properties offered, in order |
-| `tokens` | list of `{ prefix, key }` | quick-add words; both required |
-
-```toml
-[[capture_targets]]
-id = "task"
-name = "Task"
-icon = "check"
-action = "TASKS_CAPTURE"
-chips = ["projects", "due", "priority", "tags"]
-```
-
-Examples: `extensions/tasks/extension.toml`,
-`examples/showcase/openers-sampler/extension.toml`.
-
-## `[[tours]]`
-
-`features/extensions/src/contrib.rs` `TourDecl`: `id` (`a-z 0-9 - _ .`,
-equal to the scenario's own id), `title` (required), `description`,
-`scenario` (a `.styx` file in the package). The scenario is read and
-checked at load; a broken tour fails the load.
-
-Examples: `extensions/projects/extension.toml`,
-`extensions/tasks/extension.toml`.
+Examples: `features/extensions/tests/wasi-counter/extension.toml` (view),
+`features/extensions/tests/fixtures/examples/showcase/dataview-lite/extension.toml`.
 
 ## `[[windows]]`, `[[points]]`, `[[contribute."<point>"]]`
 
@@ -651,8 +532,8 @@ schema when the point's owner loads; a bad item is left out and reported
 (`APP_STATUS`), never a failed load
 (`features/extensions/src/points.rs`).
 
-Examples: app-shell-extensions' `extensions/settings.toml` (FastTrackStudios/app-shell) (windows, points),
-`apps/sandbox/extensions/surface/extension.toml`
+Examples: `app-shell:crates/app-shell-extensions/extensions/settings.toml` (windows, points),
+`features/extensions/tests/fixtures/sandbox/extensions/surface/extension.toml`
 (`[[contribute."control.surfaces"]]`).
 
 ## Services: `[provides]`, `[requires]`, `[uses]`
@@ -679,8 +560,7 @@ follows the `daw` engine's).
 "architect.projects" = "^0.1"
 ```
 
-Examples: `extensions/tasks/extension.toml`,
-`examples/showcase/services/extension.toml` (`[requires]`).
+Example: `features/extensions/tests/fixtures/examples/showcase/services/extension.toml` (`[requires]`).
 
 ## Themes and tokens
 
@@ -690,8 +570,7 @@ last part with `_` as `-` (`lab.clicker` → `clicker.`), each value a
 literal or an expression over the app's tokens (`mix($card, $brand,
 0.22)`).
 
-Examples: `apps/sandbox/clicker/extension.toml`,
-`examples/showcase/settings-theme/extension.toml`.
+Example: `features/extensions/tests/fixtures/examples/showcase/settings-theme/extension.toml`.
 
 ## `[[data]]`
 
@@ -738,8 +617,8 @@ unknown key in `[capabilities]` is ignored like any other.
 A secret needs `capabilities.hosts` non-empty. A request names it as
 `{{secret:<id>}}` in a header value.
 
-Examples: `examples/showcase/secrets-fetch/extension.toml`,
-`examples/showcase/bank-link/extension.toml`.
+Examples: `features/extensions/tests/fixtures/examples/showcase/secrets-fetch/extension.toml`,
+`features/extensions/tests/fixtures/examples/showcase/bank-link/extension.toml`.
 
 ## Platforms
 
@@ -748,7 +627,7 @@ Examples: `examples/showcase/secrets-fetch/extension.toml`,
 means everywhere. An unknown value is kept with a warning
 (`Manifest::warnings`). Elsewhere the extension is listed ("macOS only")
 and never loaded. Example:
-`examples/showcase-registry/packages/mac-only/extension.toml`.
+`features/extensions/tests/fixtures/examples/showcase-registry/packages/mac-only/extension.toml`.
 
 ## `[[share_layers]]`
 
@@ -772,7 +651,7 @@ reference = ["Media/Proxies/Reference*", "Media/Peaks/**", "*.session"]
 full = ["Media/Proxies/**"]
 ```
 
-No package in this repo; tests in `apps/desktop/tests/shares.rs`.
+No package in this repo; the format's tests are in `features/extensions/src/share_layers.rs`.
 
 ## Not built yet
 

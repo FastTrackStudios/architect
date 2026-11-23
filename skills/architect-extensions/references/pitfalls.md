@@ -20,7 +20,7 @@ Docs: `docs/content/extensions/authoring.md` (the walkthrough), `docs/content/ar
 - **Fix:**
   - Bound futures with `MaybeSend`, not `Send`: `features/extensions/src/linked.rs` `MaybeSend` is `Send` natively and nothing on wasm; `ActionFuture` and `HostFuture` follow the same split. The framework's own is `crates/architect/src/connect/mod.rs` `MaybeSend`.
   - Keep a wasm-only client in `send_wrapper::SendWrapper` behind a `cfg(target_family = "wasm")` type alias, as `features/extensions/src/hostapi.rs` (`HeldQuery`) and `features/extensions/src/node.rs` (`NodeLane` for `SendWrapper<NodeActionsClient>`) do. Touched from another thread it panics rather than racing.
-  - Give a browser host a spawner: `Host::with_spawn` with `wasm_bindgen_futures::spawn_local`. Without one, `default_spawn` in `features/extensions/src/host.rs` drops the work and logs `ext.spawn: no spawner in this browser host`. `apps/web/src/app/extensions.rs` is the reference.
+  - Give a browser host a spawner: `Host::with_spawn` with `wasm_bindgen_futures::spawn_local`. Without one, `default_spawn` in `features/extensions/src/host.rs` drops the work and logs `ext.spawn: no spawner in this browser host`.
 - **Source:** commits "a browser's host keeps the vault query client in a SendWrapper" and "the host builds for a browser again" (#495); the code comments above. Not in `docs/content`.
 
 ### 3. Action ids must start with the extension's prefix
@@ -32,10 +32,9 @@ Docs: `docs/content/extensions/authoring.md` (the walkthrough), `docs/content/ar
 
 ### 4. Cross-extension reads inside `refresh`
 
-- **Cause:** two extensions that read each other's services from their `refresh` (Calendar → Day Plans → Calendar) recurse.
+- **Cause:** two extensions that read each other's services from their `refresh` (A → B → A) recurse.
 - **Symptom:** a stack overflow at load or on the first refresh.
-- **Fix:** read the other extension's service outside `refresh`, as Calendar's `refresh_plans` does.
-- **Source:** `docs/content/extensions/calendar.md` (its views); `docs/content/extensions/day-plans.md`.
+- **Fix:** read the other extension's service outside `refresh`, in a step of its own after the refresh.
 
 ## Views
 
@@ -44,20 +43,18 @@ Docs: `docs/content/extensions/authoring.md` (the walkthrough), `docs/content/ar
 - **Cause:** Dioxus re-renders a component when its props or the signals it reads change. A component that reads a process-wide cache (not a signal) with the same props is never drawn again.
 - **Symptom:** the data changes (logs, `EXT_*` reads show it) but the view keeps its first picture.
 - **Fix:** pass the cache's revision as a prop, and move the revision whenever the cache changes.
-- **Source:** `docs/content/extensions/calendar.md` ("The views take the cache's revision as a prop, so they draw again when it moves").
 
 ### 6. refresh → bump → effect loops
 
 - **Cause:** an effect keyed on a revision calls an action that refreshes the cache and bumps the revision, which fires the effect again.
 - **Symptom:** the whole app freezes at full CPU with no log line.
 - **Fix:** `refresh` moves the revision only on a real change; views read the cache and do not call refreshing actions from an effect.
-- **Source:** `docs/content/extensions/day-plans.md` ("`refresh` moves the revision only when the vault changed, so a view that reads again when the revision moves never loops"). The freeze symptom is not written in `docs/content`.
 
 ### 7. Blitz draws `<select>` (and date inputs) blank
 
 - **Cause:** linked and process views draw through Blitz, not a browser; `select` and `input type="date"` have no widget there.
 - **Symptom:** an empty box or a dot where the picker should be, on desktop and iOS only (the web app is a browser).
-- **Fix:** chips or a popover of buttons (`features/capture/src/ui/process.rs` `TaskShape`).
+- **Fix:** chips or a popover of buttons.
 - **Source:** `skills/architect/references/blitz-quirks.md` ("Layout and text"). Read the whole table: `placeholder` draws nothing, `ch` is unsupported, `title` shows no tooltip, `translate` moves in device pixels, `onresize` never fires, `env(safe-area-inset-*)` is missing, `overflow: hidden` clips drawing but not hits.
 
 ### 8. No `style { … }` node in a linked view
@@ -65,14 +62,14 @@ Docs: `docs/content/extensions/authoring.md` (the walkthrough), `docs/content/ar
 - **Cause:** a `style` element mounted in the extensions banner beside the workspace broke Blitz's layout tree.
 - **Symptom:** a panic at first layout: `layout_parent … does not point at its layout container`.
 - **Fix:** load sheets once at app level with `document::Style`, and style the view with inline styles over the theme's variables (`var(--border)`, `var(--card)`). Remember `document::Style` is inserted once and never updated, so a sheet built from theme values goes stale (`docs/content/architecture/theming.md`).
-- **Source:** the comment in `features/extensions/src/page.rs` `MissingExtensions`. Not in `docs/content`.
+- **Source:** the comment in `app-shell:crates/app-shell-extensions/src/page.rs` `MissingExtensions`. Not in `docs/content`.
 
 ### 9. Raw HTML in a process view
 
-- **Cause:** a remote view's edits are checked when applied (`features/extensions/src/remote.rs`): `dangerous_inner_html` is refused on any element but `<style>`.
+- **Cause:** a remote view's edits are checked when applied (`app-shell:crates/app-shell-extensions/src/remote.rs`): `dangerous_inner_html` is refused on any element but `<style>`.
 - **Symptom:** the whole view fails: "a view may not set raw HTML".
-- **Fix:** build markup with elements. `style { dangerous_inner_html: CSS }` is allowed and stays inside the view's own sub-document. Pages forbid `dangerous_inner_html` everywhere (`docs/content/architecture/pages.md`).
-- **Source:** `features/extensions/src/remote.rs`; commit "a process view draws like a linked one in its pane" (#655).
+- **Fix:** build markup with elements. `style { dangerous_inner_html: CSS }` is allowed and stays inside the view's own sub-document.
+- **Source:** `app-shell:crates/app-shell-extensions/src/remote.rs`; commit "a process view draws like a linked one in its pane" (#655).
 
 ### 10. Web views: a native child, its own network blocked
 
@@ -96,7 +93,7 @@ From `docs/content/architecture/embedded-views.md` ("Web views"):
 
 - **Cause:** main runs `cargo nextest run --workspace` with the unified features; a `[[test]]` with `required-features`, or a test under a `cfg(feature …)` that is off there, is never built.
 - **Symptom:** `cargo xtask feature-tests` fails PR fast checks ("add a [[pass]] (or a [[skip]] with its reason) to feature-tests.toml"); before that check existed, such a test sat broken unnoticed (#299).
-- **Fix:** add a `[[pass]]` to `feature-tests.toml` (packages, `package/feature` list, optional `env`, `workspace = true` for a member high in the graph) or a `[[skip]]` with `package`, `file` and `reason`. A pass that runs nothing new and a stale skip also fail. See `testing-showcase.md` in this skill.
+- **Fix:** add a `[[pass]]` to `feature-tests.toml` (packages, `package/feature` list, optional `env`, `workspace = true` for a member high in the graph) or a `[[skip]]` with `package`, `file` and `reason`. A pass that runs nothing new and a stale skip also fail. See `testing.md` in this skill.
 - **Source:** `xtask/src/feature_tests.rs`; `docs/content/guide/testing.md` ("What CI runs").
 
 ### 13. Tests that skip quietly
@@ -111,7 +108,6 @@ From `docs/content/architecture/embedded-views.md` ("Web views"):
 - **Cause:** a linked extension's statics are shared by every test in one process.
 - **Symptom:** tests pass alone and fail together.
 - **Fix:** run with `cargo nextest` (one process per test), not `cargo test`.
-- **Source:** `docs/content/extensions/calendar.md` (its tests).
 
 ## Install and platforms
 
@@ -128,26 +124,25 @@ From `docs/content/architecture/embedded-views.md` ("Web views"):
 - A vault's `.architect/extensions/*.archext` cannot introduce a new publisher; only the org key or the installed copy's signer.
 - A share link refuses development copies and unsigned installs.
 - `EXT_DEV` is refused unless development installs are on (or the build is a debug build).
-- **Source:** `docs/content/architecture/extensions.md` ("Where a vault and a project name them", "A share link's extensions", "A third party's extension in the Architect app"); `install-lifecycle.md` in this skill.
+- **Source:** `docs/content/architecture/extensions.md`; `install-lifecycle.md` in this skill.
 
 ### 17. Platform gaps you will hit
 
-- **Web**: the web app runs linked extensions, installed TypeScript actions and pages, and Luau actions and hooks (luau-web in Web Workers, #812); WASI waits on #495. mlua's Luau never builds for the browser: Luau code there must use only what `features/pages/src/web/luau_runtime.luau` gives (no live overlays or Luau pages), and a `worker.spawn` runs when first waited on (`apps/web/src/app/extensions.rs`).
+- **Web**: a browser host runs linked extensions, and Luau or TypeScript actions and hooks only through the runner its app registers for the kind (Web Workers; luau-web for Luau, #812); WASI waits on #495. mlua's Luau never builds for the browser: Luau code there has no live overlays, and a `worker.spawn` runs when first waited on.
 - **iOS**: no processes; WASM is interpreted by Pulley (lower-tested; a 64 MiB reservation with no guard); installed WASM rests on App Review guideline 2.5.2 (`cargo xtask dist ios --no-wasi` is the fallback build).
 - **Tooling**: the component tooling is young (WASI 0.3, async components, needs Wasmtime 46+); old WIT versions are kept forever, so design WIT changes as additions.
-- **Source:** `docs/content/architecture/extensions.md` ("On each platform", "Risks"); `docs/content/guide/showcase.md`.
+- **Source:** `docs/content/architecture/extensions.md` ("On each platform", "Risks").
 
 ### 18. `document::Style` in a process view (fixed)
 
 - **Was:** a process copy's view unstyled while the linked copy was fine: its `VirtualDom` had no document for `document::Style` to reach.
-- **Now:** every view a process serves is drawn under `guest`'s root, which gives it a document whose `document::Style` is a `style` element its host applies, the app's theme store (`architect_theme::try_use_theme`, `use_resolved`) holding the host's theme, and in a paint view's `ViewCtx` the actions it may run (`guest::app_actions`, the host call `actions`). A `style` element inline still works. Test: `apps/sandbox/sketch/tests/paint_parity.rs` `a_process_view_has_the_theme_its_styles_and_its_actions`.
+- **Now:** every view a process serves is drawn under `guest`'s root, which gives it a document whose `document::Style` is a `style` element its host applies, the app's theme store (`architect_theme::try_use_theme`, `use_resolved`) holding the host's theme, and in a paint view's `ViewCtx` the actions it may run (`guest::app_actions`, the host call `actions`). A `style` element inline still works.
 - **Still:** a linked extension's `Extension::files` are not sent by its process copy: put files its toolbars read in its package.
 - **Source:** #840, #844.
 
 ## Before calling an extension done
 
-1. `architect-desktop extensions check <folder>` (or `EXT_CHECK`) passes: manifest, scripts, load, each view rendered once.
+1. `EXT_CHECK` (or `architect-ext check`) passes: manifest, scripts, load, each view rendered once.
 2. Its tests run under `cargo nextest`, and any gated test is registered in `feature-tests.toml`.
-3. The web build compiles if the crate is linked into the web app.
-4. Screenshots at 390 px, light and dark, on the local stack.
-5. The showcase row it moves is updated with its evidence.
+3. The web build compiles if the crate is linked into a web app.
+4. Screenshots at 390 px, light and dark, in the app that hosts it.
