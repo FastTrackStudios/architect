@@ -150,6 +150,8 @@ jobs:
         id: xtask
         if: ${{ !cancelled() }}
         env:
+          # Set, so .cargo/config.toml's mold linker (not on the runner) is not.
+          RUSTFLAGS: -C force-frame-pointers=yes
           CARGO_TARGET_DIR: target/xtask
         run: cargo build -q -p xtask
       # Main's Lint xtasks that read sources and the resolved graph: every
