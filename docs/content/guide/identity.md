@@ -79,7 +79,7 @@ the whole pass instead, `features/devices/src/account.rs` `pass` (or
 `drive`): it registers, holds the account's shared org, and lets the
 account's other devices into the node's `Admission`, which the
 [documents chapter](@/guide/documents.md)'s `NodeAccess` checks for
-device-to-device sync. See [Devices](@/architecture/devices.md).
+device-to-device sync.
 
 ## 3. Permissions: gate every call
 

@@ -17,9 +17,6 @@ a person, a script or CI reaches the same list from the command line
 5. read the exit codes;
 6. prove parity with one test, which `cargo xtask surfaces` requires.
 
-The sandbox wires all of it: `apps/desktop/src/lib.rs`, run as
-`architect-desktop actions …`.
-
 ## 1. One shape, two renderings
 
 MCP's five generic tools (`actions`, `describe`, `run`, `batch`, `watch`)
@@ -84,9 +81,9 @@ let serving = Control::new("task", surface)?.serve_if_wanted()?; // keep it aliv
 
 A desk app that serves MCP for a model running elsewhere gets it from the
 socket: `architect_mcp::bridge::serve_stdio_via(&socket)` is MCP on stdio
-whose every tool call is a request to the running app
-(`architect-desktop mcp`; `--app <socket>` for another running sandbox's, as
-the iOS sandbox's, which has no stdio of its own).
+whose every tool call is a request to the running app (an app's `mcp`
+subcommand; `--app <socket>` for another running app's, as an iOS app's,
+which has no stdio of its own).
 
 ## 3. The `actions` command
 
@@ -133,9 +130,7 @@ chain steps with `batch`. An app whose actions live in its components
 (registered by hooks, answered on the window's thread) mounts its root in
 a headless document: `architect_guide::run::Headless`
 (`features/guide/src/run.rs`), pumped while the request runs
-(`architect_control::cli::Headless::pump`). The sandbox is that:
-`apps/desktop/src/lib.rs` `HeadlessLab`, and
-`architect-desktop --headless` keeps it running, serving its socket.
+(`architect_control::cli::Headless::pump`).
 
 ## 4. Who the caller is
 
@@ -159,7 +154,7 @@ sheet (`features/commands/src/confirm.rs` `ConfirmSheet`), and once the
 person allows it the same command with `--ticket <T>` runs it, once. A
 `batch` step takes `ticket` too. The sheet names the CLI's principal as
 the caller, so give the surface one a person recognises
-(`service:cli` in the sandbox).
+(`service:cli`, say).
 
 ## 5. Exit codes
 
@@ -201,10 +196,8 @@ the server's surface on a socket of its own and asks both faces the same
 things: the tool set against the protocol's methods, the listing and both
 resources, every action's `describe`, a run of every read-only action,
 the runs you add, an unknown action, a stray parameter, and `watch`.
-Copies to read: `examples/scripting/tests/mcp.rs` `mcp_and_the_cli_agree`,
-`apps/desktop/tests/actions.rs` (the headless lab, pumped while the
-check runs) and `features/mcp/tests/parity.rs` (every failure kind, the
-CLI's exit codes, headless mode and the MCP bridge).
+The copy to read is `features/mcp/tests/parity.rs` (every failure kind,
+the CLI's exit codes, headless mode and the MCP bridge).
 
 `cargo xtask surfaces` (CI) fails when a crate serves MCP and not the CLI
 or the reverse, when one that serves either has no `Parity` test, or when
@@ -220,9 +213,7 @@ window, every architect app can give through its list (#268):
   list: the app's own opening (a template), architect's rules (inspect
   first, change safely, themes, workspaces, extensions, the dev loop),
   then every action by area with its effect and arguments. `keep_written`
-  writes it again whenever an action comes or goes. The sandbox's:
-  `apps/desktop/src/lib.rs` `keep_guide_written`, its opening
-  `apps/desktop/src/AGENTS.preamble.md`.
+  writes it again whenever an action comes or goes.
 - **`APP_STATUS`**: one read of what is on screen and what is wrong. Its
   parts are the list's `StatusBoard` sections (the workspace host's, the
   theme's) and its `Problems` (the theme files', the extensions', each
@@ -241,28 +232,11 @@ window, every architect app can give through its list (#268):
   refreshes, frame-time and input-to-frame percentiles. `drive` feeds it
   input meanwhile (`{"Wheel": {"at": [x, y], "dy": 1, "turn": 20}}`,
   `{"Drag": {"from": [x, y], "reach": [dx, dy], "period": 1.0}}`, window
-  points) through its own event handler. `just frames` runs the sandbox's
-  Sketch timelines with it, linked and as a process
+  points) through its own event handler
   ([Remote views](@/features/remote-views.md), "Frames").
 - **`EXT_CHECK {folder}`**: an extension loaded once on its own and each
-  view rendered once, `ok` or the exact problem;
-  `architect-desktop extensions check <folder>` does it with no window
-  and exits nonzero when it fails. **`EXT_CLONE`** and
+  view rendered once, `ok` or the exact problem. **`EXT_CLONE`** and
   **`WORKSPACES_CLONE`** copy what the app ships before it is changed.
-- **The app from a checkout.** `cargo run --release -p architect-desktop
-  -- install` installs this build as the app: on a Mac bundled, made into
-  a disk image, signed with the Developer ID, notarized and stapled as a
-  release is, in `/Applications` (`--user`: `~/Applications`), the disk
-  image kept in `target/desktop/`; on Linux the binary and a desktop
-  entry under `~/.local`. It links the command onto `PATH`
-  (`~/.local/bin/architect`), so `architect dev …` runs from any folder
-  (`apps/desktop/src/install.rs`).
-- **An instance of its own.** `architect-desktop dev` starts an Architect
-  apart from the person's (its own settings, vault, socket and secrets;
-  `ARCHITECT_DEV=1` does it from the environment), with only the
-  extensions asked for and a note open; `dev list`, `dev stop`. Its
-  printed `socket` is what `actions --app` drives
-  (`apps/desktop/src/dev.rs`).
 - **Safety at the door.** An argument name an action does not take is
   refused with the names it takes; a destructive call from outside is
   `confirmation_required` (exit code 7), never a dialog. The escape hatch,

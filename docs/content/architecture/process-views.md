@@ -153,7 +153,7 @@ it, as a `web` view names its `src`. `Manifest::check`
 (`features/extensions/src/manifest.rs`) holds that a `process` view names
 a `program`, that only a `process` view names one (or `args`), and that
 it is a path in the package (no `..`, nothing absolute). The `process`
-kind is the app's (`features/workspace/src/kinds.rs` `PROCESS`,
+kind is the app's (`features/views/src/kinds.rs` `PROCESS`,
 `KindSpec::process`), registered on every platform, so the extension
 loads everywhere.
 
@@ -224,7 +224,7 @@ itself, on another wgpu) would each need a host client. A setting in an
 argument needs nothing of the program but its command line, and the
 restart is what such programs already do for a new show.
 
-**Starting it.** `ExtensionView` (`features/extensions/src/interface.rs`)
+**Starting it.** `ExtensionView` (`app-shell:crates/app-shell-extensions/src/interface.rs`)
 asks `ProcessViews`, which the app provides with
 `architect_process_view::extension::use_process_views`. Each pane first
 checks the view (`features/extensions/src/process_view.rs` `launch`):

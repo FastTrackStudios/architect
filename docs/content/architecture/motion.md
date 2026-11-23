@@ -71,8 +71,8 @@ motion reads:
 the OS's preference, read on macOS from `NSWorkspace`); `reduced_motion`
 is what holds. Reduced, every `to` jumps to its end (and calls its
 `to_then`), and every coast stops where it is. A virtual clock ignores the
-OS, so a film is the same on every machine. The sandbox's Settings ›
-Appearance › Reduce motion is the setting (`apps/ui/src/lib.rs`).
+OS, so a film is the same on every machine. An app's Reduce motion
+setting turns the motions off.
 
 ## What moves
 
@@ -104,13 +104,11 @@ and then acts sees the close).
 
 `opacity` changes nothing in the layout, and a relatively placed box's
 `left` moves only that box: the tabs slide by `left`, in points (a
-`translate` moves by device pixels, half as far on a 2x screen;
-`apps/sandbox/media/tests/tab_slide.rs` drags a tab at 2x). A clipped box's
+`translate` moves by device pixels, half as far on a 2x screen). A clipped box's
 `width` lays out only that box's row (the tree inside keeps its size). A
 paragraph keeps the lines of its own width while its neighbours move
 (the FTS Blitz fork's `fts-measure-2026-11`; before it a note drew the
-lines of the zero width a parent measured it at, a word per line, #152;
-`apps/sandbox/media/tests/reflow.rs` checks the films' every frame). A stacked pane is placed by `left` in an
+lines of the zero width a parent measured it at, a word per line, #152). A stacked pane is placed by `left` in an
 absolutely positioned strip. Blitz has no `requestAnimationFrame`; the
 wall clock's `FRAME` wakes the motions, and `FTS_FPS_LOG=1` (the FTS Blitz
 fork's `blitz-shell`) logs frames and their cost each second.
@@ -132,9 +130,9 @@ from a component that is going, a tab dropped into another bar); they end
 once the component that made it goes, and every method on a motion whose
 component has gone does nothing.
 
-## Measured in the sandbox
+## Measured
 
-The sandbox (`apps/desktop`) driven with real pointer and wheel events,
+The Architect app (since removed) driven with real pointer and wheel events,
 recorded at the display's capture rate (about 29 fps):
 
 | Interaction | What was seen |
@@ -146,8 +144,7 @@ recorded at the display's capture rate (about 29 fps):
 | Stacked tabs, two wheel notches | the next pane slides part of the way over the one before it and stays there: a small scroll is a small move |
 
 Those were filmed before the springs were timed to Obsidian (below).
-The sandbox's films (`sandbox-media … --keep-frames`, 20 fps on the virtual
-clock), their raw frames compared before and after the tuning, against
+The app's films (20 fps on the virtual clock), their raw frames compared before and after the tuning, against
 Obsidian's (about 29 fps):
 
 | Film | Before (progress each 50 ms) | After | Obsidian |
@@ -167,13 +164,9 @@ the same (a negative `dx` brings what is to the right into view).
 ## In the films
 
 `architect-guide`'s `@scroll` is a trackpad's flick (quick, coasting to a
-stop) in pixel deltas, as macOS sends them. The sandbox's scenarios film the
-motion: `apps/sandbox/scenarios/stacked-tabs.styx` (a small scroll, a long
-one, a spine pressed), `apps/sandbox/scenarios/tab-reorder.styx` (the tabs
-making room), `apps/sandbox/scenarios/workspace-docks-ribbon.styx` (the
-sidebar folding and opening), `apps/sandbox/scenarios/workspace-split-drag.styx`
-(the highlight following, the split growing in, the divider, the close
-folding back).
+stop) in pixel deltas, as macOS sends them, so a scenario can film the
+motion: a small scroll of stacked tabs and a long one, the tabs making room,
+the sidebar folding and opening, a split growing in under the highlight.
 
 ## The reference: Obsidian
 

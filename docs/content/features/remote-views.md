@@ -21,14 +21,11 @@ developed and restarted apart from the app, but needs real UI. Design:
 on views rendered remotely; the manifest side is
 [Extensions](@/features/extensions.md).
 
-Example: `examples/extension`, a registry with a Luau extension and a process extension loaded by a small host, hot-reloaded on save; walked through in [Write an extension, end to end](@/getting-started/extension.md).
-
-<!-- media: remote-view-clicker — the sandbox's Clicker in a Vault pane: clicking it, then kill -9 on its process, the placeholder with the reason, Start again and the counter back -->
+Walked through in [Write an extension, end to end](@/getting-started/extension.md).
 
 ## A minimal example
 
-The extension, `architect-extensions` with `guest`, from
-`apps/sandbox/clicker/src/main.rs`:
+The extension, `architect-extensions` with `guest`:
 
 ```rust
 use architect_extensions::guest::{Guest, GuestError};
@@ -41,12 +38,11 @@ fn main() -> Result<(), GuestError> {
 }
 ```
 
-Its manifest, `apps/sandbox/clicker/extension.toml`, has `kind = "process"`, an
+Its manifest, `extension.toml`, has `kind = "process"`, an
 `[entry]` with the program's path, its `[[actions]]` and a `[[views]]` entry
 with `id = "counter"`.
 
-The app, with `ui` and `remote` (desk only), after `apps/ui/src/extensions.rs`
-and `apps/ui/src/vault.rs`:
+The app, with `ui` and `remote` (desk only):
 
 ```rust
 use architect_extensions::process::{ProcessRunner, Processes};
@@ -79,9 +75,9 @@ View::new("clicker", "Clicker", |_| rsx! {
    default), `Processes`.
 5. `features/extensions/src/guest.rs` `Guest` (`view`, `action`, `serve`) and
    `WireWriter`: Dioxus mutations to wire edits, on the extension's side.
-6. `features/extensions/src/remote.rs` `RemoteDocument`: a Blitz document that
+6. `app-shell:crates/app-shell-extensions/src/remote.rs` `RemoteDocument`: a Blitz document that
    checks and applies each edit within its caps and forwards events.
-7. `features/extensions/src/remote.rs` `RemoteView`: the pane's component;
+7. `app-shell:crates/app-shell-extensions/src/remote.rs` `RemoteView`: the pane's component;
    follows the process and shows the placeholder.
 
 When the pane mounts, `RemoteView` waits for the process to be running, then
@@ -97,9 +93,7 @@ placeholder, and follows the process when it restarts.
 
 Every kind of input reaches the view's handlers (wire 7, `INPUT_WIRE` in
 `features/extensions/src/wire.rs`), in a process view, a WASI view
-(`features/extensions/wit/extension.wit` `event-data`), a TSX or Luau
-page (`features/pages/src/api.rs` `PageEvent`: `dx`, `dy`, `pointer_id`,
-`pointer_type`, `buttons`, `scroll_top`) and in a browser
+(`features/extensions/wit/extension.wit` `event-data`) and in a browser
 (`features/extensions/src/web.rs` `Pane`):
 
 | Handler | Carries |
@@ -189,7 +183,7 @@ held view runs as its own extension, with its own capabilities; the holder
 reaches nothing of it but its place and its input. At most 64 held views
 (`MAX_EMBEDDED`), each input at most 1 MB; a placeholder that names no view
 fails the holder, not the app. Test:
-`features/extensions/tests/remote_embedded.rs`. Not yet: a page view (TSX,
+`app-shell:crates/app-shell-extensions/tests/remote_embedded.rs`. Not yet: a page view (TSX,
 Luau) held this way, and a held view inside a held view's own document
 (each is drawn by the host, one level deep is what's tested).
 
@@ -269,14 +263,11 @@ rsx! {
   re-sends its whole scene for every frame it records; a view that pans
   a lot should use `RemoteScene` with a transform.
 
-The example is `apps/sandbox/sketch`: freehand drawing with pan and zoom,
-a link graph whose nodes drag (a paint view through `Builder::paint`),
-and a 50-track arrangement. It stands in for Excalidraw, Canvas and the
-graph view.
+The removed Architect app's Sketch extension was the example: freehand
+drawing with pan and zoom, a link graph whose nodes drag (a paint view
+through `Builder::paint`), and a 50-track arrangement.
 
-Measured (`cargo test -p architect-sandbox-sketch --test sketch
-arrangement_budget -- --ignored --nocapture`; debug build, THEBATTLESHIP;
-50 tracks of 40 clips, 2,000 fills):
+Measured on it (debug build; 50 tracks of 40 clips, 2,000 fills):
 
 | | |
 |---|---|
@@ -320,8 +311,7 @@ Four things are the host's own:
   hovered or pressed (`Region::hover_layer`, `Region::press_layer`): one
   the view sends once with `visible: false`, its content redrawn as
   hovered (a notehead in the hover colour, not a box over it), drawn in
-  the region's layer's space with no word to the view (batch version 3;
-  `apps/sandbox/sketch` `Timeline`'s drag box). The host hit-tests them with each
+  the region's layer's space with no word to the view (batch version 3). The host hit-tests them with each
   layer placed as its animations place it now, sets the cursor and draws
   the highlight, and the view hears `RegionEvent::Enter`, `Leave`,
   `Press` and `Release` by id, each just after `Modifiers(id, mods)`
@@ -332,9 +322,8 @@ Four things are the host's own:
   event. It still focuses the view, as a press anywhere else in it does:
   the scene's element takes the keyboard focus and the view hears
   `Focus(true)`, so the key typed after a first click on a chord is the
-  view's (`features/extensions/src/remote.rs` `RemoteDocument`; a linked
-  `PaintPane` is focused by Blitz; tested linked and as a process in
-  `apps/sandbox/sketch/tests/paint_parity.rs`).
+  view's (`app-shell:crates/app-shell-extensions/src/remote.rs` `RemoteDocument`; a linked
+  `PaintPane` is focused by Blitz).
 - **Drags.** A region's `Drag` turns the pointer's movement along an axis
   (at most one per axis: a fader one, a box two) into a `host.` value,
   scaled, clamped and stepped. A layer bound to that value follows the
@@ -383,7 +372,7 @@ older peer still does: a host never opens an older process with
   - a batch applies after every edit before its attribute and before
     every edit after it, in the same frame;
   - a batch no edit names, a name with no batch, or a number sent twice
-    fails the view (`features/extensions/tests/scene_bytes.rs`).
+    fails the view (`app-shell:crates/app-shell-extensions/tests/scene_bytes.rs`).
 - **Back-pressure** is the view's frames': one stream, in order. The
   view's thread awaits each frame's send, and while the host has not
   answered an event, the moves after it are coalesced (see Input above).
@@ -414,9 +403,8 @@ the first seven operations alone, `ASO\x02` once it animates, writes a
 value or carries regions, which a host that reads only the first version
 refuses whole.
 
-Measured (`cargo test -p architect-sandbox-sketch --test sketch --
---nocapture`, `cargo test -p architect-scene --test engine --
---nocapture`; debug build with optimizations, voyager):
+Measured (the Sketch extension's tests, and `cargo test -p architect-scene
+--test engine -- --nocapture`; debug build with optimizations):
 
 | | |
 |---|---|
@@ -438,12 +426,10 @@ composite, present, waiting for an image included), the display's
 refresh, the first input and the first batch it shows. The summary (`Report`): presented fps, refreshes dropped, the
 interval, work, draw and render, input to frame and batch to frame, at
 p50, p95, p99 and the most. `drive` feeds the window wheel or drag input
-through its own event handler, so a run needs no OS input. `just frames`
-(`scripts/frames.sh`) runs the sandbox's Sketch (`timeline`, 2,000 clips;
-`timeline-20k`; `arrangement`) linked in (`architect-sandbox`) and as a
-process (`architect-desktop dev --extension`), playing,
-wheeling, panning and dragging, each in an instance of its own, and
-prints a table. On the owner's ultrawide: `WIDTH=5120 HEIGHT=1440 just frames`.
+through its own event handler, so a run needs no OS input. The removed
+Architect app ran its Sketch (`timeline`, 2,000 clips; `timeline-20k`;
+`arrangement`) linked in and as a process, playing, wheeling, panning and
+dragging, each in an instance of its own; the numbers below are from it.
 
 Measured on voyager (MacBook Pro, M1 Max; its built-in display at
 120 Hz, which is what it reports; the window 2560 × 1640 pixels; the
@@ -507,7 +493,7 @@ a process on one engine) send their own frames, so an edit made in one
 reaches the others' frames at different moments. State that is a value is
 already shown together: every pane reads the engine's table when it
 composes. A change of layout (a strip opening wide, a row's tint) is each
-view's own frame. For those, views join a group (`features/extensions/src/barrier.rs`):
+view's own frame. For those, views join a group (`app-shell:crates/app-shell-extensions/src/barrier.rs`):
 
 ```rust
 rsx! {
@@ -527,13 +513,13 @@ stuck pane costs its group a delay of at most that, never a frozen frame.
 A frame with no epoch, or of a view in no group, is applied at once; a
 view that unmounts leaves its group. The rule is the host's and the
 attributes are DOM edits, so it is the same for a process, a WASI
-component and a page. Test: `features/extensions/tests/remote_barrier.rs`
+component and a page. Test: `app-shell:crates/app-shell-extensions/tests/remote_barrier.rs`
 (two process views, one answering each edit 30 ms late: never shown apart;
 without the barrier, apart for those 30 ms at every edit).
 
 ## Tests to read
 
-- `features/extensions/tests/remote_view.rs` (the test binary starts itself
+- `app-shell:crates/app-shell-extensions/tests/remote_view.rs` (the test binary starts itself
   again as the extension): clicks go through the sub-document and the count
   comes back; the extension's action runs over vox; `kill -9` leaves the app
   running and the placeholder shows why; Start again brings it back;
@@ -548,7 +534,7 @@ without the barrier, apart for those 30 ms at every edit).
   `dangerous_inner_html` is its sheet, any other element's still fails the
   view; `RemoteView` is keyed by extension and view, so a pane that goes on
   to another process view opens that one.
-- `features/extensions/tests/remote_input.rs`: a press holds the pointer
+- `app-shell:crates/app-shell-extensions/tests/remote_input.rs`: a press holds the pointer
   over another element; a release lost outside the pane is a cancel, or a
   `pointerup` in a view with no cancel handler; a pointer that leaves with
   no button held lets go; focus leaving mid-composition ends it; the round
@@ -556,40 +542,29 @@ without the barrier, apart for those 30 ms at every edit).
   moves are coalesced to the latest; a finger is a touch and a touch
   pointer; a wheel reaches the view and scrolls its list; an input method
   composes into a field, the window's IME on and its caret area in window
-  coordinates. `features/pages/tests/js.rs`
-  `a_tsx_page_gets_pointer_wheel_and_composition_events`.
-- `features/extensions/tests/remote_embedded.rs`: a process view holds
+  coordinates.
+- `app-shell:crates/app-shell-extensions/tests/remote_embedded.rs`: a process view holds
   another extension's view, drawn by that extension's own process at the
   placeholder's place, taking its own clicks and redrawn with the
   holder's new input; a placeholder naming no view fails the holder.
 - `features/extensions/web/test/rust-pane.test.mjs` (`just ext-pane-browser`):
   `web::Pane` in headless Firefox gets a `click` and a `contextmenu` sent
-  as `PointerEvent`s and passes them on as mouse data
-  (`apps/sandbox/pane-events`).
+  as `PointerEvent`s and passes them on as mouse data.
 - `features/scene/tests/anim.rs`, `region.rs`, `engine.rs`: what an
   animation, a region or a drag evaluates to; when a host draws, rests
   and is woken; what crosses and what is refused; the engine's writer
   timed beside a host composing, with a counting allocator.
-  `features/workspace/src/paint/anim_tests.rs`: one view linked in and
+  `features/scene/src/paint/anim_tests.rs`: one view linked in and
   across the wire composes the same at every clock and every frame of a
   drag, and fails the same way.
-- `apps/sandbox/sketch/tests/sketch.rs`: a stroke drawn in the process is
-  in the window's scene; panning and zooming send the transform, not the
-  scene, and tell the view no new size; a graph node drags in a paint
-  view served by its process; a scene is clipped to its pane unless the
-  extension may draw over the app, where it lands at its window place;
-  an oversized, unbalanced or unknown scene fails the view, not the app;
-  a pan's round trip stays inside `REMOTE_BUDGET`; the timeline's playback,
-  its fader, its drag box and its meter cost the process nothing a frame,
-  and a seek wakes the window a resting view is in.
-  `features/extensions/src/scene.rs` tests: a scene crosses once and then
+- `features/extensions/src/scene.rs` tests: a scene crosses once and then
   by its hash; both sides forget the same scenes, by count and by bytes;
   transforms round-trip; a stray pop, a scene too deep, too large or out
   of range is refused; framing clips unless overlay.
 
 ## Status
 
-Done in architect on Unix desks; the sandbox runs the clicker. Not yet: a stdio
+Done in architect on Unix desks. Not yet: a stdio
 transport, starting lazily and stopping when idle, handing state over on a
 reload, a host service extensions call back into, Windows, `mounted`
 measurements, images (the sub-document has no net provider, so not even a

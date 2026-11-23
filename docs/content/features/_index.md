@@ -33,13 +33,8 @@ When a page and the code disagree, the code is right.
 - [The document file](@/features/document-file.md): `crdt::file`, one durable file per document.
 - [Org sync driver](@/features/org-sync.md): `OrgSyncs`, `OrgDocs`, `Placement`.
 - [Peer to peer](@/features/peer-to-peer.md): pairwise exchange, iroh, device admission, share links.
-- [Devices](@/features/devices.md): the account's devices, per-org enrolment, pairing by code or QR, revoking, one admission table.
 - [Presence and collaborative text](@/features/presence-and-text.md): `Here`, `Roster`, places, `TextBinding`, `crdt(text)`.
 - [Blobs](@/features/blobs.md): content-addressed bytes fetched on demand, pinned and collected.
-- [Files](@/features/files.md): `architect-files`, an org's files with versions, quota and access.
-- [Attachments](@/features/attachments.md): `architect-attachments`, files attached to documents and records, offline first, access following the parent.
-- [Bases](@/features/bases.md): `architect-bases`, a vault's `.base` files as table, cards and list views, view types extensions add, `BASES_*`.
-- [Media](@/features/media.md): `architect-media`, media items and collections read from frontmatter, the native list that plays on the Now Playing card.
 
 ## Identity
 
@@ -55,15 +50,9 @@ When a page and the code disagree, the code is right.
 - [Menus](@/features/menus.md): `MenuBar` from the commands, native and in the window.
 - [Workspace and shell](@/features/workspace-and-shell.md): tab groups, docks, pop-out windows, screensets, the app frame.
 - [Atom and forms](@/features/atom-and-forms.md): the optimistic store, the offline call queue, validated fields.
-- [Editor](@/features/editor.md): `architect-editor`, the one door to the editor repository; the language registry, `[[languages]]`, the `syntax.*` theme tokens.
-- [Capture](@/features/capture.md): one quick-add parser, the composer, a capture window on a system-wide shortcut, the vault inbox and processing it, `[[capture_targets]]`, `CAPTURE_*` and `INBOX_*`.
 
 ## Extending
 
 - [Scripting](@/features/scripting.md): Luau over the Action List, saved scripts as actions.
 - [Extensions](@/features/extensions.md): run-time packages from registries, hot reload, project requirements.
-- [Canvas overlays and ImGui-shaped UI](@/features/canvas.md): drawing over a view in its coordinates; tool windows for scripts.
 - [Remote views](@/features/remote-views.md): a process extension's Dioxus views in workspace panes.
-- [Navigator](@/features/navigator.md): folders beside notes in the sidebar, a port of Notebook Navigator (GPL-3.0), as a built-in extension.
-- [A2UI: agents' generated UI](@/features/a2ui.md): an agent's form, list or approval drawn with architect-ui from a catalog, kept in Loro, its buttons asking before any write.
-- [Sites](@/features/sites.md): a vault published as a static site, extensions drawing their blocks, hosted by the architect server.

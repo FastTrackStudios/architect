@@ -288,7 +288,7 @@ a service nor a mount covers: OAuth redirects, server-rendered pages.
   ```sh
   ARCHITECT_BUILD_REV=$(git rev-parse HEAD) \
   ARCHITECT_BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
-  cargo build --release -p example-greeter
+  cargo build --release -p auth-server
   ```
 
 - `.web(Some(bundle))` serves a built SPA as the fallback;

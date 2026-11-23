@@ -117,7 +117,7 @@ the [document file](@/features/document-file.md) does this for you.
 Done in architect. Not yet: undo that survives reopening a document (Loro's
 undo manager cannot be seeded). The hooks have no tests of their own. Never
 hold a strong `CrdtDoc` inside a Loro subscription closure (it deadlocks on
-drop); `skills/architect/references/crdt-peer-sync.md` lists the pitfalls.
+drop).
 
 - **Task** serves documents with `DocRegistry`
   (`task:apps/server/src/app_docs.rs`) without `with_permissions`, and uses the

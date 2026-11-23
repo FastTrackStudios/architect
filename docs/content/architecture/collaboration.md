@@ -93,8 +93,9 @@ pluggable `Persistence`, and typed `LoroRepo<E>` CRUD views per entity.
 - **Opening** — `CrdtDoc::open(doc_id, persistence)` for one store per
   doc; `CrdtDoc::open_shared(doc_id, Arc<dyn Persistence>)` when one
   device database sits behind many docs. On a SeaORM server,
-  `crdt-seaorm` (`features/crdt/crdt-seaorm`) provides
-  `SeaOrmPersistence` over its own `crdt_doc` / `crdt_update` tables;
+  an app provided `SeaOrmPersistence` over its own `crdt_doc` /
+  `crdt_update` tables (`crdt-seaorm`, removed from architect with the
+  server half);
   compose its `Migrator` into the feature's migrator (or run it alone
   when CRDT bytes are all the database holds).
 - **`DocPresence` / `PresenceHost` / `PresencePeer`** — who's here,

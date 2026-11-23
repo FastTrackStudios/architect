@@ -91,7 +91,7 @@ once: who a node serves, and the router each connection gets.
 
 | Item | What it is |
 | --- | --- |
-| `Admission` | The devices the node lets in, by endpoint id (`architect_devices`, [Devices](@/architecture/devices.md)): the owner's other devices (kept current by the account pass, `architect_devices::account::pass`) open any document and sweep; a paired device opens the documents its scopes name. Read on every call, so a revoked device is refused on its next call, and its live sessions end. |
+| `Admission` | The devices the node lets in, by endpoint id (`architect_devices`): the owner's other devices (kept current by the account pass, `architect_devices::account::pass`) open any document and sweep; a paired device opens the documents its scopes name. Read on every call, so a revoked device is refused on its next call, and its live sessions end. |
 | `Shares` | The live links the node has handed out. `share(endpoint, doc_id)` mints a key and returns a `DocLink`; `revoke` and `revoke_doc` close them. |
 | `NodeAccess` | Both, answering the three questions: who the caller is (`caller`: the link's `Principal::Guest` when the call presents a live key, otherwise `Principal::Host` of the proved endpoint), whether they may call at all (it is the gate's `PermissionEngine`: admitted devices and live guests only, and anyone asking to pair when it takes pairings), and which documents they may open (`admits`, for `DocRegistry::with_authorizer`: an account device any, a paired device its scopes', a guest the link's). `NodeAccess::pairing(pairings)` also serves `DevicePairing`. |
 | `node_router(registry, catalog, access, remote)` | `DocSync` and `DocPeer` over the registry, behind that gate, for the connection from `remote`. |

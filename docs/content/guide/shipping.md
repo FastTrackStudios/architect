@@ -81,18 +81,11 @@ still pins) in `GRANDFATHERED`, and that list must never grow. Tag from
 Pushing a `v*` tag runs `.github/workflows/release.yml` on the
 self-hosted `thebattleship-release` runners. The notes are the change
 files added since the previous tag (`scripts/release-notes.sh`, `just
-release-notes`). Architect, the app, is released from the same tag
-(#431):
+release-notes`):
 
 | Job | What the release gets |
 | --- | --- |
 | `release` | the GitHub release, as a DRAFT, with its notes and `release-facts.json`: whether the release migrates data (a change file's `Data-Migration:` line, `.changes/README`), signed with the rest by `sums` so a deployer can trust it |
-| `node` | `ghcr.io/fasttrackstudios/architect:<X.Y.Z>`, `:sha-<short>`, `:latest` (the headless node, [deploy](@/guide/deploy.md)), and `architect-node-<tag>-x86_64-linux.tar.gz` |
-| `web` | `ghcr.io/fasttrackstudios/architect-web:<X.Y.Z>`, `:sha-<short>`, `:latest` (the site, the docs and the web app, [the web front end](@/guide/web.md)), and `architect-web-<X.Y.Z>.tar.gz`, what the server serves. Waits for `release` only: the site's `/download` names the release's files by convention and checks them in the browser |
-| `linux` | `Architect-linux-x86_64.AppImage` (`scripts/desktop/linux.sh`) and `latest-linux.json`: the version, the AppImage's URL and its sha256, for the updater |
-| `macos` | `Architect-macos-arm64.dmg`, Developer-ID signed and notarized (`scripts/desktop/macos.sh`), and `latest-macos.json`. Built on airlock; on while the repo variable `ARCHITECT_MACOS_RELEASE` is `true` |
-| `ios` | the Architect app for iPhone and iPad (`apps/mobile`) on TestFlight, marketing version `X.Y.Z` and a unix-time build number, noted in the release's notes (`.github/workflows/ios.yml`). Built on airlock; it never holds the release, and the repo variable `ARCHITECT_IOS_RELEASE` set to `false` turns it off |
-| `nix-bump` | a PR (branch `chore/nix-desktop-<tag>`) pointing the flake's `architect-desktop` at the new AppImage, for the highest release only; it warns instead of failing |
 | `sums` | `SHA256SUMS` over exactly the assets the jobs above report (each reports its files' sha256 as a job output), refusing an asset no job made, a missing one or one changed after upload (`scripts/release-sums.sh`); `SHA256SUMS.minisig` signed with the org key when the `release-signing` environment has `FTS_RELEASE_MINISIGN_KEY`; then it publishes the draft. Nothing reads a release whose assets are not signed |
 
 **When `sums` refuses** (the release stays a draft, nothing is published),
@@ -102,10 +95,6 @@ it names the asset:
   an asset no job reported. Look at it in the draft. If it is a leftover of
   an earlier attempt of a job that has since re-run, delete it (`gh release
   delete-asset vX.Y.Z <name> --yes`), then re-run `sums`. The Mac job's
-  `Architect-macos-arm64.dmg` and `latest-macos.json` are deleted by `sums`
-  itself when `macos` did not report them (it is continue-on-error, so a
-  failed or skipped Mac build never blocks the release; the run log says
-  so).
 - **"… its build job made …"** (a digest that changed after upload):
   re-run the job that made the asset (it uploads with `--clobber` and
   reports the new digest), then re-run `sums`.
@@ -117,10 +106,6 @@ highest stable tag. A hotfix on an older line, or a re-run, never moves
 Latest. `scripts/release-dry-run.sh` (`release-dry-run.yml`, on PRs that
 touch these mechanics) exercises all of this on a throwaway draft.
 
-`:latest` goes only to the highest release. Packages pushed with
-`GITHUB_TOKEN` start private on GHCR, so each image is made public once
-in the org's package settings. A Windows build is a follow-up.
-
 An app that ships binaries adds its own release workflow that builds,
 checksums and signs them, and the binaries update themselves through
 `architect::release` (feature `release`): it finds the newest
@@ -128,79 +113,6 @@ checksums and signs them, and the binaries update themselves through
 `SHA256SUMS` against the key the app compiles in, the asset's hash and
 a `--version` smoke test, then swaps the binary atomically
 ([signed self-update](@/architecture/release.md)).
-
-### The desktop app on Nix
-
-The flake's `architect-desktop` (also `default`, x86_64-linux) is the
-release's own AppImage run in an FHS env (`nix/desktop/package.nix`),
-so installing it compiles nothing:
-
-```sh
-nix run github:FastTrackStudios/architect            # the newest pinned release
-nix run github:FastTrackStudios/architect/v0.12.0    # a given tag
-```
-
-In a NixOS or home-manager configuration, add the flake as an input
-and install its package:
-
-```nix
-inputs.architect.url = "github:FastTrackStudios/architect";
-# then, in a module that has `inputs` and `pkgs`:
-environment.systemPackages = [ inputs.architect.packages.${pkgs.stdenv.hostPlatform.system}.architect-desktop ];
-```
-
-It installs the app's desktop entry and icon, so it shows in app
-launchers. The version and hash live in `nix/desktop/source.json`;
-`nix/desktop/update.sh [<tag>]` rewrites them from a release's
-`latest-linux.json`, and the release's `nix-bump` job opens that PR.
-
-Updates reach a Nix user two ways, and the newer one runs. The store
-is read-only, so the launcher (`nix/desktop/launch.sh`) sets
-`ARCHITECT_UPDATE_DIR` (default
-`${XDG_DATA_HOME:-$HOME/.local/share}/architect/updates`, kept when
-already set) for the app's updater to write a downloaded
-`Architect-linux-x86_64.AppImage` and its `version` file into. At each
-start it runs whichever is newer, the store's image or the downloaded
-one (`nix/desktop/choose.sh`), with `APPIMAGE` set to that file: a flake
-bump (`nix flake update architect`) is never shadowed by an older
-download, and an in-app update runs without waiting for the flake. The
-store's image wins a tie, a release beats a nightly of the same
-`X.Y.Z`, and a missing or unreadable `version` means the store's.
-`nix/desktop/test-choose.sh` (the flake's
-`checks.x86_64-linux.architect-desktop-choose`) covers the choice.
-
-### The iOS app on TestFlight
-
-`apps/mobile/ios/deploy-testflight.sh` builds the phone app for release
-(`apps/mobile/ios/build-app.sh --device --release`: cargo with Xcode's
-toolchain, the app icon and launch colour compiled from
-`apps/mobile/ios/Assets.xcassets`), signs it with the Apple Distribution
-identity and the `FTS Architect App Store` profile, validates it with App
-Store Connect and uploads it. It takes Studio's environment
-(`KEYCHAIN`/`KEYCHAIN_PW`, the `ASC_*` key from
-`~/.appstoreconnect/config.env`, `PROFILE_NAME`, `DX_BUNDLE_ID`,
-`MARKETING_VER`, `BUILD_NO`), so airlock serves both apps:
-
-```sh
-KEYCHAIN=fts-build.keychain KEYCHAIN_PW=fts-build MARKETING_VER=0.12.2 \
-  apps/mobile/ios/deploy-testflight.sh --dry-run    # build, sign, validate; no upload
-ruby apps/mobile/ios/testflight-status.rb           # the builds App Store Connect has, read-only
-```
-
-The release's `ios` job runs it for every tag; `gh workflow run ios.yml
--R FastTrackStudios/architect -f tag=vX.Y.Z` ships an existing tag (add
-`-f dry_run=true` to stop before the upload). A build reaches testers
-only once someone with App Store Connect access adds them to a TestFlight
-group: the job adds no tester and submits nothing for review.
-`apps/mobile/ios/app-icon.sh` redraws the icon from
-`apps/desktop/icons/architect.svg`.
-
-The standard distribution (#631, #640: Architect with Studio's setlists
-and studio-views linked in) builds the same way with
-`DIST_MANIFEST=dist/standard/Cargo.toml`. Add `--build-only` to stop before
-signing; it reads no secret, identity or profile. `ios.yml` still ships
-the plain app. It switches with one `DIST_MANIFEST` line once the core
-list pins a Studio release that builds for iOS (studio#492).
 
 ### The site
 
@@ -214,11 +126,10 @@ Every page is prerendered, so none needs a server when it is requested:
 | Page | From |
 | --- | --- |
 | `/` | the landing page; its words are in `apps/site/src/content/landing.ts`, its design tokens in `apps/site/src/styles/tokens.css`, its font in `apps/site/public/fonts` |
-| `/download` | the release's tag: each file's link follows from it (`apps/site/src/lib/release-assets.ts`), and the page asks GitHub's API which files are up, with their sizes and sha256; also the Nix one-liner above and how to check a download against the signed `SHA256SUMS` |
+| `/download` | the release's tag: each file's link follows from it (`apps/site/src/lib/release-assets.ts`), and the page asks GitHub's API which files are up, with their sizes and sha256, and how to check a download against the signed `SHA256SUMS` |
 | `/changelog` | the last releases' notes (the GitHub release bodies, which are `scripts/release-notes.sh`'s output) |
-| `/extensions` | the store's index, `extensions/index.toml`. While it lists nothing, the page is built from `examples/registry/index.toml` and says it is an example |
+| `/extensions` | the store's index, `extensions/index.toml` |
 | `/docs/` | `docs/content`, built by `architect site build --base /docs/` |
-| `/app/` | the web app ([the web front end](@/guide/web.md)) |
 
 `apps/site/scripts/data.ts` reads the releases and the index when the
 site is built and writes `apps/site/src/data/*.json`, which is

@@ -1,6 +1,6 @@
 +++
-title = "Scripts, extensions and canvases"
-description = "Let people and models add to the app without rebuilding it: Luau scripts over the Action List as one undo step, extensions with manifests, registries and hot reload, process extensions with remote views, and ImGui-shaped canvases over a view."
+title = "Scripts and extensions"
+description = "Let people and models add to the app without rebuilding it: Luau scripts over the Action List as one undo step, extensions with manifests, registries and hot reload, and process extensions with remote views."
 weight = 130
 +++
 
@@ -15,13 +15,7 @@ You will:
 2. load extensions from manifests: built in, installed from a registry, or
    a development copy that reloads when its files are saved;
 3. run a process extension whose view is drawn in another process and shown
-   in a pane;
-4. let a script draw over a view and open tool windows with an ImGui-shaped
-   API.
-
-The sandbox runs all four: its metronome (`apps/sandbox/extensions/metronome`), its
-clicker (`apps/sandbox/clicker`), and a marker lane over its arrangement
-(`apps/ui/src/marker_lane.luau`).
+   in a pane.
 
 ## 1. Scripts: `architect-scripting`
 
@@ -95,14 +89,13 @@ a failure's line (`ScriptError { kind, line, message }`) are in
 function (ReaScript's `reaper.defer`), which the host calls one frame at a
 time (`Runtime::start`, `Live::frame`).
 
-Example: `examples/scripting`, a task board scripted from Luau, saved scripts as actions and the board over MCP; walked through in [Script an app, end to end](@/getting-started/scripting.md).
+A task board scripted from Luau, its saved scripts as actions and the board over MCP, is walked through in [Script an app, end to end](@/getting-started/scripting.md).
 
 ## 2. Extensions: `architect-extensions`
 
 An extension is a package: an `extension.toml` manifest and its files. It
 adds what the app's own features add (actions, settings sections, views,
-openers, keys, overlays, document data) without a rebuild. The sandbox's
-metronome:
+openers, keys, overlays, document data) without a rebuild. A metronome:
 
 ```toml
 id = "fts.metronome"
@@ -129,7 +122,6 @@ control = "switch"
 default = true
 ```
 
-(`apps/sandbox/extensions/metronome/extension.toml`, shortened.)
 
 - **Kinds.** `data` (settings, presets, keys; runs nothing) and `luau`
   (scripts on the scripting runtime) run built in. `process` (a program
@@ -144,8 +136,8 @@ default = true
 
 ### Load them
 
-The sandbox's root component, `apps/ui/src/extensions.rs` `LabExtensions`,
-trimmed:
+In a Dioxus app's root component (`use_extension_sections` is
+`app-shell:crates/app-shell-extensions/src/ui.rs`'s), trimmed:
 
 ```rust
 let sections = use_extension_sections();                  // their settings on the settings page
@@ -174,8 +166,7 @@ let extensions = use_hook(|| {
   to `git`), `ReaPackSource` (a ReaPack `index.xml`). `install(id, &VersionReq::STAR)`
   installs from the sources; `EXT_SEARCH` and `EXT_INSTALL` do the same from
   ⌘K or MCP.
-- **Hot reload.** Call `reload_changed()` on a timer (the sandbox polls every
-  500 ms). A reload is a diff: kept actions keep their ids, settings keep
+- **Hot reload.** Call `reload_changed()` on a timer (every 500 ms, say). A reload is a diff: kept actions keep their ids, settings keep
   their values, and on any failure nothing is swapped and the last good copy
   keeps running.
 - **A project's needs.** A document can carry the extensions it needs
@@ -186,16 +177,13 @@ let extensions = use_hook(|| {
 `features/extensions/tests/metronome.rs` installs, runs, edits and reloads
 the metronome.
 
-![the metronome switched on: its section on the settings page and its action in ⌘K](https://raw.githubusercontent.com/FastTrackStudios/architect/media/extension-metronome-load.gif)
-<!-- media: extension-hot-reload — the metronome's extension.toml edited and saved while the sandbox runs, its settings section changing without a restart -->
-
-Example: `examples/extension`, a registry with a Luau extension and a process extension loaded by a small host, hot-reloaded on save; walked through in [Write an extension, end to end](@/getting-started/extension.md).
+A registry with a Luau extension and a process extension, loaded by a host and hot-reloaded on save, is walked through in [Write an extension, end to end](@/getting-started/extension.md).
 
 ### Process extensions and remote views
 
 A `process` extension is a program of its own. It declares its views and
-actions in its manifest (`apps/sandbox/clicker/extension.toml`: `kind = "process"`,
-`[entry] path`, `[[views]] id = "counter"`), and its `main` serves them
+actions in its manifest (`kind = "process"`, `[entry] path`,
+`[[views]] id = "counter"`), and its `main` serves them
 (`features/extensions/src/guest.rs` `Guest`, feature `guest`):
 
 ```rust
@@ -211,14 +199,15 @@ fn main() -> Result<(), GuestError> {
 
 The app adds the runner to its host
 (`Host::new(…).with_runner(ProcessRunner::new()?.with_processes(processes()))`,
-feature `process`) and shows a view in a pane with `RemoteView` (feature
-`remote`), as the sandbox's Vault does:
+feature `process`) and shows a view in a pane with app-shell's
+`RemoteView` (`app-shell:crates/app-shell-extensions/src/remote.rs`,
+feature `remote`):
 
 ```rust
 View::new("clicker", "Clicker", |_| rsx! {
-    architect_extensions::remote::RemoteView {
-        processes: crate::extensions::processes(),
-        extension: crate::extensions::CLICKER,
+    app_shell_extensions::remote::RemoteView {
+        processes: app_shell_extensions::processes(),
+        extension: CLICKER,
         view: "counter",
     }
 })
@@ -231,96 +220,25 @@ view's `VirtualDom` runs in the extension's process; its edits arrive over
 vox as frames that `RemoteView` applies to a Blitz sub-document, and the
 pane's keys and clicks go back. The applier trusts nothing: an edit naming
 a node it does not have fails the view, not the app.
-`features/extensions/tests/remote_view.rs` drives it end to end.
-
-<!-- media: remote-view-clicker-restart — the Clicker pane drawn by another process: clicked, its process killed, the pane saying why, Start again restoring it -->
+`features/extensions/tests/process_views.rs` serves a process's views.
 
 Not yet: pointer, wheel and scroll events and IME into a remote view, stdio
 as a transport, state handed over on a reload, Windows.
 
-## 3. Canvases: `architect-canvas`
-
-A script or an extension can draw **over** another view (markers over an
-arrangement, a guide over a chart) and open its own tool windows, in the
-shape REAPER's ReaImGui made familiar. The sandbox's marker lane draws flags
-over its arrangement and opens a window of sliders that tune them:
-
-```lua
-local ImGui = require 'imgui' '0.10'
-local ctx = ImGui.CreateContext('Markers')
-local lane = Canvas.Layer('lab.arrange', 'over', 'markers')
-
-local function loop()
-  local spaces = Canvas.Spaces(lane)
-  if spaces then
-    local x = Canvas.TimeToX(lane, 24)
-    Canvas.Line(lane, x, 0, x, spaces.height, 0xF59E0B88, 1)
-    local hovered, clicked = Canvas.Region(lane, 'marker:Chorus', x, 0, 60, 18)
-  end
-  local visible, open = ImGui.Begin(ctx, 'Marker lane', true)
-  if visible then
-    _, height = ImGui.SliderInt(ctx, 'Height', height, 12, 56, '%d pt')
-    ImGui.End(ctx)
-  end
-  if open then defer(loop) end
-end
-defer(loop)
-```
-
-(`apps/ui/src/marker_lane.luau`, shortened.)
-
-- **Spaces.** The view publishes its coordinate spaces (`Spaces`: time
-  across, lanes down, already scrolled and zoomed). A layer draws in those,
-  so `TimeToX` lands on the same second however the view is zoomed.
-- **The pointer passes through** except over the regions a layer claims
-  (`Canvas.Region` → `hovered, clicked, held, context`).
-- **A window is a workspace pane:** docked, tabbed, floated or stacked like
-  any other, laid out at its pane's size; closing its pane gives `open ==
-  false` once.
-- **Frames come on change**, not on a timer: a press, a release, a resize.
-
-On Blitz the app wires it in four places (`apps/ui/src/arrange.rs`,
-`apps/ui/src/vault.rs`):
-
-```rust
-let _canvases = architect_canvas::ui::use_canvases();          // once, at the page
-architect_canvas::ui::use_tool_windows(workspace);              // windows become panes
-// in the Views:
-views.view(architect_canvas::ui::window_view());
-// per script:
-use_script_canvas(Runtime::new(list), ActionCaller::app(), source, args, "Marker lane".into(), style);
-```
-
-and the view being drawn over publishes its spaces
-(`canvases.publish("lab.arrange", Some(&spaces))`) and mounts
-`CanvasLayers { view, plane }` as a child of its positioned root.
-`features/canvas/tests/marker_lane.rs` runs the same script without a UI.
-
-An extension declares an overlay in its manifest (`[[overlays]] id, view,
-plane, script`, Luau only). Today the app starts it as a `Session` itself;
-the host starting overlays is still to come.
-
-<!-- media: canvas-marker-lane-overlay — the marker lane drawn over the arrangement: flags at markers, a lane wash, a flag clicked moving the playhead -->
-![the marker lane's ImGui window floating, then docked as a pane, its sliders changing the overlay](https://raw.githubusercontent.com/FastTrackStudios/architect/media/canvas-tool-window-docked.gif)
-
-Shapes are drawn as boxes: Blitz has no texture widget yet, so there is no
-egui or `<canvas>` behind the API.
-
 ## Where Task and Studio are
 
-Scripting, the extensions runtime, process extensions and canvases are
-architect-side and running in the sandbox. Studio's arrangement publishing its
-spaces (so scripts can draw over the real one), Studio's JSFX, a `wasm`
-runner and the WIT interface, and Task and Studio installing extensions
-are still to come.
+Scripting, the extensions runtime and process extensions are
+architect-side; Studio runs its features as extensions on them, drawn by
+app-shell. A `wasm` runner and the WIT interface, and Task installing
+extensions, are still to come.
 
 ## Where to read more
 
 - [Extensions and scripts](@/architecture/extensions.md): the layers, the
   API as the Action List, scripts for agents, remote views, processes, hot
-  reload, ImGui, overlays, capabilities, registries.
+  reload, capabilities, registries.
 - [Extensibility](@/architecture/extensibility.md): swapping a feature's
   implementation at build time (in-tree or a third-party crate), the other
   axis of extending an app.
-- `skills/architect/references/commands-mcp.md` (the scripting, canvas and
+- `skills/architect/references/commands-mcp.md` (the scripting and
   extensions sections).

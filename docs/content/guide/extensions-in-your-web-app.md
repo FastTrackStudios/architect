@@ -14,11 +14,9 @@ Two npm packages cover it:
   the desktop runs into a sandbox in your page, calls its actions with types, and draws its views.
 - `@fasttrackstudio/architect-cli` is the build tool (`architect-ext build-web`). It depends on jco.
 
-The runtime is the browser host Architect's own web app uses (`features/extensions/web/runner.js` and
+The runtime is the browser host (`features/extensions/web/runner.js` and
 `features/extensions/web/instance.js`; see [extensions, "On the web"](@/architecture/extensions.md)),
-with a host you implement instead of Architect's. A working page is `examples/web-counter`: Vite and
-TypeScript, the sandbox's WASI Counter, nothing but the public API, tested in headless Firefox under
-the CSP below.
+with a host you implement. A page needs nothing but the public API, and runs under the CSP below.
 
 ## Install and build
 
@@ -49,7 +47,7 @@ Serve the output folder as static files. Your bundler needs no plugin.
 
 ## Load it, pinned
 
-From `examples/web-counter/src/main.ts`:
+A page's `main.ts`:
 
 ```ts
 import { isSupported, loadExtension, memoryHost, mountView } from '@fasttrackstudio/architect';
@@ -234,8 +232,8 @@ root** of its own. It returns `{ rendered, input, unmount }`. React has `Archite
 
 The view's edits are the remote-view wire's (see [embedded views](@/architecture/embedded-views.md)).
 `features/extensions/web/view.js` applies them as a port of `features/extensions/src/web.rs` `Pane`.
-It follows the share pages' rules (`features/sites/src/sanitize.rs`, ported to
-`features/extensions/web/sanitize.js`), made stricter for a live view in someone else's page:
+Its rules (`features/extensions/web/sanitize.js`) are strict, as a live view in someone
+else's page needs:
 
 - **No code.** No `<script>`, frames, `<object>`, `<foreignObject>`, SMIL animation or `<form>`. No
   `on…` handler or `dangerous_inner_html` (the frame fails).
@@ -322,8 +320,7 @@ Even with all of the above, a page that loads an extension accepts that:
 
 ## Your CSP
 
-Start from `default-src 'none'`. `examples/web-counter/index.html` uses this and its test runs under
-it:
+Start from `default-src 'none'`:
 
 ```text
 default-src 'none';

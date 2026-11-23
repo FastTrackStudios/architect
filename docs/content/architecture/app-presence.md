@@ -14,8 +14,7 @@ weight = 56
 > menu bar with the sandbox), Linux (`features/presence/src/linux.rs`:
 > StatusNotifierItem, Unity's launcher entry, XDG autostart; checked to
 > build, not yet run on a desktop) and Windows (the window's life and the
-> Run key; no tray yet, and not compiled here). The sandbox uses it
-> (`apps/ui/src/presence.rs`).
+> Run key; no tray yet, and not compiled here).
 
 Task and Studio each hand-rolled how their app lives off screen: Task's
 tray menu and its LaunchAgent with `--background`

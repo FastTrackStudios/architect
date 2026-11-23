@@ -101,9 +101,7 @@ use_pane_space(ViewSpace::mapped(
 
 Selections with a range in a declared space are washed in the person's colour
 the same way. Not yet: remote carets in an extension's own editor, and the navigator's
-"who has this open". The Architect app mounts the room
-(`apps/ui/src/cursors.rs` `use_app_cursors`) over a channel of its own until
-it joins a vault's presence channel, so nobody else is on it yet.
+"who has this open". An app mounts the room over a presence channel of its own.
 
 ## Code tour
 

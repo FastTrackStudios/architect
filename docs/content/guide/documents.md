@@ -226,7 +226,7 @@ architect_devices::serve(&endpoint, access.devices.clone(), move |remote| {
 - **A paired device.** A device on nobody's account redeems a pairing offer
   (a six-digit code or a `fts-pair:` ticket) made with
   `NodeAccess::pairing(Pairings::new(...))`, and may sync the documents the
-  offer named. See [Devices](@/architecture/devices.md).
+  offer named.
 - **On the LAN.** Bind the endpoint with `PeerLookup::Lan` or
   `PeerLookup::N0AndLan`, advertise with `advertise_name(&endpoint, "Cody's laptop")`,
   and browse with `LanBrowser::new(endpoint.id())?.events()`
@@ -236,29 +236,14 @@ architect_devices::serve(&endpoint, access.devices.clone(), move |remote| {
 
 `features/crdt/crdt/tests/p2p.rs` is all three over real iroh endpoints.
 
-**A document file in a vault syncs like a note.** The app's node keeps
-each vault note as a document; a vault file of a kind an extension declares
-is one too, so a Keyflow `.session` in a vault reaches the person's other
-devices, and the org's node, with no sync host of its own. The extension
-declares the kind in its manifest (`[[doc_kinds]]` with `files` and an
-optional `schema`); the node registers it while the extension is compiled
-in, installed, or loaded in the app's window — a development copy
-(`architect-desktop dev --extension <folder>`, `EXT_DEV`, `EXT_CLONE`)
-among them (`apps/desktop/src/node/kinds.rs` `ExtensionKinds`, into the
-shared `features/crdt/crdt/src/kinds.rs` `SharedDocKinds`; the window's
-extension host's contributions are followed by `kinds::follow` into
-`Parts::loaded_kinds`). It takes the kind off when the extension is
-uninstalled, unloaded, or reloaded without it — unless another of those
-still declares it. Such a file is listed by the id in its
-header (`features/crdt/crdt/src/file/mod.rs` `DocFile::peek`), opened with
-the file itself as its storage, its `main` branch, and attached to as a
-note is, under the vault's write guard for the file; another device makes
-it empty, of the same lineage, before the first session fills it
-(`features/vault/vault-collab/src/lib.rs` `VaultCollab::register_document`).
-`apps/desktop/tests/node.rs` `an_extensions_document_syncs_between_two_nodes_like_a_note`
-is two nodes doing it. An app edits the node's copy
-(`apps/desktop/src/node/mod.rs` `Running::document`), not the file: the file
-has one writer at a time.
+**A document file of an extension's kind.** An extension declares a kind
+in its manifest (`[[doc_kinds]]` with `files` and an optional `schema`);
+the app registers it while the extension is compiled in, installed or
+loaded (`features/crdt/crdt/src/kinds.rs` `SharedDocKinds`). Such a file
+is listed by the id in its header (`features/crdt/crdt/src/file/mod.rs`
+`DocFile::peek`) and opened with the file itself as its storage, its
+`main` branch. An app edits the node's copy, not the file: the file has
+one writer at a time.
 
 **An extension edits the node's copy.** The extension that owns the kind
 never opens the file either. It names the document by its vault path and
@@ -288,31 +273,9 @@ the registry's authorizer and the vault's write guard decide
 (`features/extensions/src/live.rs` `ExtensionDocSync`). The app gives its
 host the node's documents with `Host::set_kind_documents`
 (`features/extensions/src/live.rs` `RegistryDocuments` over a
-`VaultCollab`). The Architect app does it as its node starts
-(`apps/desktop/src/node/mod.rs` `Running::kind_documents`, handed to the
-window's host by `apps/ui/src/extensions.rs` `on_host`): a path is in the
-node's one vault, or, when it holds several, its first folder names the
-vault (`apps/desktop/src/node/mod.rs` `vault_path`), and a session attaches
-under the vault's write guard. `features/extensions/tests/live_documents.rs`
-is a process extension editing a `.session` in a vault and following the
-node's edits, a linked one that may only read, and the refusals;
-`apps/desktop/tests/node.rs`
-`the_windows_extension_edits_the_nodes_copy_of_its_document` is the same
-against a running node.
-
-Deleting such a file deletes the document everywhere, as a note's delete
-does. A file the node listed and finds gone at its next listing
-(`features/vault/vault-collab/src/lib.rs` `VaultCollab::notice_deletes`,
-after `apps/desktop/src/node/catalog.rs` `VaultCatalog::notes`) sets the
-document's tombstone (`meta.deleted`), which reaches every other holder and
-removes its file there. A deleted document is kept under the node's
-`crdt/deleted-documents/`, which also says the id is deleted: a peer that
-still lists it, a later sweep or a restart never makes its file again
-(`features/vault/vault-collab/src/documents.rs`). A file of it put back (a
-restore) is the document again on its next open. One deleted while nobody
-had it open is tombstoned as soon as a peer's history reaches it.
-`apps/desktop/tests/node.rs` `an_extensions_document_deleted_on_one_node_is_deleted_on_the_other`
-is two nodes doing it.
+`VaultCollab`). `features/extensions/tests/live_documents.rs` is a process
+extension editing a `.session` in a vault and following the node's edits,
+a linked one that may only read, and the refusals.
 
 One document is one file per node. A copy carries the id it was copied
 from: while the first file is there the copy is not listed or synced (and
@@ -448,8 +411,8 @@ let saved = files.put(irs.id, "Cab/4x12.wav", &wav, Save::create_only()).await?;
 
 The server mounts `FilesServer` on each org's lane behind the gate, with
 `ConfinedEngine` so only members reach it; the org comes from the lane,
-never from an argument. `skills/architect/references/files.md` has the
-mount, and `features/files/tests/files.rs` the whole loop.
+never from an argument. `features/files/tests/files.rs` is the whole
+loop.
 
 ## Where Task and Studio are
 
@@ -470,5 +433,3 @@ byte face of `architect-files` are not built yet.
   repositories, hooks, `DocRegistry`, schema migrations.
 - [Peers](@/architecture/peers.md): pairwise exchange, devices and links.
 - [Blobs](@/architecture/blob.md): `Fetcher`, serving, pins and collection.
-- `skills/architect/references/crdt-peer-sync.md` and
-  `skills/architect/references/files.md`.

@@ -7,9 +7,8 @@ weight = 30
 ## Crate map
 
 architect itself lives in `crates/architect` (facade) +
-`crates/` (its proc-macros); `examples/greeter` is the reference
-feature a real project would copy, and `cargo xtask feature new <name>`
-scaffolds one.
+`crates/` (its proc-macros); `cargo xtask feature new <name>` scaffolds
+a feature.
 
 | Crate | Path | Role |
 |-------|------|------|
@@ -17,8 +16,7 @@ scaffolds one.
 | `architect-derive` | `crates/architect-derive` | The `#[derive(Entity)]` / `#[derive(JsonField)]` proc-macro. |
 | `architect-rpc-derive` | `crates/architect-rpc-derive` | `#[architect::service]` / `rpc` / `http` — sync/async trait → vox service + `Layer` token + HTTP router + HTTP client. |
 | `architect-action-derive` | `crates/architect-action-derive` | `#[architect::actions]` — named-command traits with menu/CLI metadata. |
-| `crdt`, `crdt-seaorm`, `crdt-derive` | `features/crdt/` | Loro CRDT layer + its SeaORM persistence — the local-first feature every `#[architect(crdt)]` entity builds on. |
-| `example-greeter` | `examples/greeter` | The reference feature + server: entity, service, backend, every wire, the tests. Copy this. |
+| `crdt`, `crdt-derive` | `features/crdt/` | Loro CRDT layer — the local-first feature every `#[architect(crdt)]` entity builds on. |
 | `auth-proto`, `auth`, `auth-db`, `auth-client`, `auth-ui`, `architect-auth` | `features/auth/` | The identity feature — see [the auth feature](@/architecture/auth.md). |
 | `auth-server` | `apps/auth-server` | The identity server: the generated faces plus the OAuth/OIDC and page plugins. |
 | `xtask` | `xtask` | `cargo xtask feature new <name>` scaffolds a feature; tags, mirror, fleet tooling. |
