@@ -1,6 +1,4 @@
 ---
-"architect-pages" = "minor"
-"architect-web" = "minor"
 "xtask" = "none"
 ---
 

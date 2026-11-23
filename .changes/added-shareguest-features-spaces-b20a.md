@@ -1,6 +1,4 @@
 ---
-"architect-desktop" = "minor"
-"architect-sites" = "minor"
 "architect-spaces" = "minor"
 ---
 

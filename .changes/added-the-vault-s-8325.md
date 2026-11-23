@@ -1,5 +1,4 @@
 ---
-"architect-web" = "minor"
 "vault-query" = "minor"
 ---
 

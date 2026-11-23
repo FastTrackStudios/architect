@@ -1,6 +1,5 @@
 ---
 "architect-extensions" = "minor"
-"architect-playhead" = "minor"
 "architect-scene" = "minor"
 "architect-workspace" = "minor"
 ---

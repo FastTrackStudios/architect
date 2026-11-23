@@ -1,6 +1,5 @@
 ---
 "architect-accounts" = "minor"
-"architect-app" = "minor"
 "xtask" = "minor"
 ---
 

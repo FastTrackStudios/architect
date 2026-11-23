@@ -1,5 +1,4 @@
 ---
-"architect-desktop" = "minor"
 "crdt" = "minor"
 ---
 

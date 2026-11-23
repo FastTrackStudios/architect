@@ -1,6 +1,5 @@
 ---
 "architect-extensions" = "minor"
-"architect-sandbox-sketch" = "minor"
 "architect-workspace" = "minor"
 ---
 

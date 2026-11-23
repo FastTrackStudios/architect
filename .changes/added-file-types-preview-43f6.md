@@ -1,8 +1,5 @@
 ---
-"architect-app" = "minor"
-"architect-cookbook" = "minor"
 "architect-extensions" = "minor"
-"architect-navigator" = "minor"
 "vault-proto" = "minor"
 ---
 

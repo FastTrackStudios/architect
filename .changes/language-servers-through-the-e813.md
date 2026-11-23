@@ -1,5 +1,4 @@
 ---
-"architect-app" = "minor"
 "architect-editor" = "minor"
 "architect-extensions" = "minor"
 ---

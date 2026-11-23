@@ -1,8 +1,5 @@
 ---
-"architect-app" = "minor"
-"architect-navigator" = "minor"
 "architect-shell" = "minor"
-"architect-web" = "minor"
 "architect-workspace" = "minor"
 ---
 

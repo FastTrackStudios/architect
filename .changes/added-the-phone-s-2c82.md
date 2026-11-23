@@ -1,6 +1,4 @@
 ---
-"architect-app" = "minor"
-"architect-capture" = "minor"
 "architect-shell" = "minor"
 ---
 

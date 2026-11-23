@@ -1,7 +1,4 @@
 ---
-"architect-app" = "minor"
-"architect-desktop" = "minor"
-"architect-web" = "minor"
 "auth-server" = "minor"
 "xtask" = "minor"
 ---

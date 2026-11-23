@@ -1,5 +1,4 @@
 ---
-"architect-desktop" = "minor"
 "vault-collab" = "minor"
 ---
 

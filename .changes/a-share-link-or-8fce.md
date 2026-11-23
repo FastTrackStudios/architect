@@ -1,6 +1,4 @@
 ---
-"architect-desktop" = "patch"
-"architect-sites" = "patch"
 "vault-obsidian" = "patch"
 ---
 

@@ -1,5 +1,4 @@
 ---
-"architect-web" = "minor"
 "xtask" = "none"
 ---
 

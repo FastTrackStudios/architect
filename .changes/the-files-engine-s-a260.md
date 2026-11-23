@@ -1,7 +1,5 @@
 ---
 "architect" = "minor"
-"architect-app" = "patch"
-"architect-desktop" = "minor"
 "architect-files" = "minor"
 ---
 

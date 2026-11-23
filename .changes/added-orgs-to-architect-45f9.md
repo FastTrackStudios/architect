@@ -1,6 +1,5 @@
 ---
 "architect-accounts" = "minor"
-"architect-app" = "minor"
 "architect-orgs" = "minor"
 ---
 

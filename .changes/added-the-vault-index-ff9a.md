@@ -1,5 +1,4 @@
 ---
-"architect-desktop" = "minor"
 "vault" = "minor"
 "vault-live" = "minor"
 "vault-obsidian" = "minor"

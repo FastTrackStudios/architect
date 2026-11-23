@@ -1,6 +1,4 @@
 ---
-"architect-app" = "minor"
-"architect-sandbox-media" = "minor"
 "architect-shell" = "minor"
 "architect-workspace" = "minor"
 ---

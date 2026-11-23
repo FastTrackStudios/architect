@@ -1,9 +1,6 @@
 ---
 "architect-accounts" = "minor"
-"architect-desktop" = "minor"
-"architect-distribution" = "minor"
 "architect-extensions" = "minor"
-"architect-sites" = "minor"
 "architect-spaces" = "minor"
 "vault-obsidian" = "minor"
 ---

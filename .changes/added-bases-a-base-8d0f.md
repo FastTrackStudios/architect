@@ -1,8 +1,5 @@
 ---
-"architect-bases" = "minor"
 "architect-extensions" = "minor"
-"architect-sandbox-board" = "minor"
-"architect-app" = "minor"
 "vault" = "minor"
 "vault-live" = "minor"
 "vault-obsidian" = "minor"

@@ -1,8 +1,5 @@
 ---
-"architect-app" = "minor"
-"architect-desktop" = "minor"
 "architect-process-view" = "minor"
-"architect-sandbox" = "minor"
 "architect-workspace" = "minor"
 ---
 

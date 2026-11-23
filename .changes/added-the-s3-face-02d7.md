@@ -1,5 +1,4 @@
 ---
-"architect-desktop" = "minor"
 "architect-files" = "minor"
 ---
 

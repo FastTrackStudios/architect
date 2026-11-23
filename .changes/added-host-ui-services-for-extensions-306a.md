@@ -1,6 +1,5 @@
 ---
 "architect-extensions" = "minor"
-"architect-pages" = "minor"
 "architect-workspace" = "minor"
 ---
 

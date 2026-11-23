@@ -1,5 +1,4 @@
 ---
-"architect-sandbox-sketch" = "none"
 "architect-workspace" = "none"
 ---
 

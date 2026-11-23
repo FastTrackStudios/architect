@@ -1,7 +1,5 @@
 ---
-"architect-app" = "minor"
 "architect-commands" = "minor"
-"architect-desktop" = "minor"
 "architect-extensions" = "minor"
 "architect-shell" = "minor"
 "architect-workspace" = "minor"

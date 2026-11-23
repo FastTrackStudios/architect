@@ -3,7 +3,6 @@
 "architect-commands" = "minor"
 "architect-shell" = "minor"
 "architect-extensions" = "minor"
-"architect-app" = "minor"
 "architect-mcp" = "patch"
 ---
 

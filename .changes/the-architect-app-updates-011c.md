@@ -1,7 +1,5 @@
 ---
 "architect" = "minor"
-"architect-distribution" = "minor"
-"architect-updates" = "minor"
 "xtask" = "minor"
 ---
 

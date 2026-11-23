@@ -1,5 +1,4 @@
 ---
-"architect-app" = "minor"
 "architect-commands" = "minor"
 ---
 

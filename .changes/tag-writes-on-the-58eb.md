@@ -1,5 +1,4 @@
 ---
-"tag" = "minor"
 "vault" = "minor"
 "vault-obsidian" = "minor"
 ---

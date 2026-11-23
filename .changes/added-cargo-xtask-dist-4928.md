@@ -1,5 +1,4 @@
 ---
-"architect-mobile" = "minor"
 "xtask" = "minor"
 ---
 

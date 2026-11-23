@@ -1,10 +1,5 @@
 ---
-"architect-app" = "minor"
-"architect-desktop" = "minor"
-"architect-distribution" = "minor"
 "architect-extensions" = "minor"
-"architect-navigator" = "minor"
-"architect-web" = "minor"
 "vault" = "minor"
 "vault-live" = "minor"
 "vault-obsidian" = "minor"

@@ -1,6 +1,4 @@
 ---
-"architect-app" = "minor"
-"architect-cookbook" = "minor"
 "architect-extensions" = "minor"
 ---
 

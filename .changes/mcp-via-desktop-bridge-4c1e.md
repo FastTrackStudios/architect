@@ -1,6 +1,4 @@
 ---
-"architect-desktop" = "patch"
-"architect-mobile" = "none"
 "xtask" = "none"
 ---
 

@@ -1,8 +1,6 @@
 ---
-"architect-canvas" = "major"
 "architect-commands" = "major"
 "architect-extensions" = "major"
-"architect-app" = "major"
 "architect-settings" = "major"
 "architect-shell" = "major"
 "architect-theme" = "major"

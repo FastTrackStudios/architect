@@ -1,5 +1,4 @@
 ---
-"architect-app" = "patch"
 "architect-extensions" = "patch"
 "architect-process-view" = "patch"
 "architect-workspace" = "patch"
