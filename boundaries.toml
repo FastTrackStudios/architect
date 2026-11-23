@@ -521,14 +521,6 @@ package = "architect-ui"
 layer = "L4"
 
 [[row]]
-package = "architect-ui-showcase"
-layer = "L4"
-
-[[row]]
-package = "ui-snapshot"
-layer = "L4"
-
-[[row]]
 package = "auth-ui"
 layer = "L4"
 note = "sibling of auth; fold in as a ui flag"

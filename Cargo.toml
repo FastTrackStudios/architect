@@ -67,8 +67,6 @@ members = [
     "features/palette",
     "features/editor",
     "features/spaces",
-    "features/ui/showcase",
-    "features/ui/ui-snapshot",
     "features/shell",
     "features/theme",
     "features/favourites",
@@ -178,8 +176,6 @@ crdt-derive = { path = "features/crdt/crdt-derive" }
 # task-telemetry → architect-telemetry.
 architect-ui = { path = "features/ui/architect-ui" }
 architect-telemetry = { path = "features/telemetry" }
-architect-ui-showcase = { path = "features/ui/showcase" }
-ui-snapshot = { path = "features/ui/ui-snapshot" }
 # guide media: scenarios as films, tests and tours.
 architect-guide = { path = "features/guide" }
 architect-presence = { path = "features/presence" }
@@ -333,7 +329,7 @@ nice-plug = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch 
 nice-plug-dioxus = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch = "fts-baseview-03" }
 atomic_float = "1.1"
 
-# ── Rendering / snapshot gate (features/ui/ui-snapshot) ───────────────
+# ── Rendering / snapshot gate (the story snapshots and parity) ────────
 anyrender = "0.14"
 anyrender_vello_cpu = "0.18"
 peniko = "0.6"
