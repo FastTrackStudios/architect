@@ -108,6 +108,11 @@ pub use ctx::{
 pub use guide::{ArrangedGroup, ArrangedSplit, ArrangedWindow, Arrangement, target_selector};
 
 pub use architect_views::CONTEXT_TARGETS;
+pub use architect_views::{
+    Capabilities, Capability, DIOXUS, Hosts, KindError, KindId, KindSpec, PAINT, PROCESS, Part,
+    Placement, Placements, ViewHost, ViewKinds, WEB,
+};
+pub use architect_views::{FRAME_BUDGET, Meters, ViewHealth, ViewMeter, ViewReport, ViewSummary};
 #[cfg(feature = "ui")]
 pub use host::{
     Bridge, Command, ContextEntries, ContextEntry, DeckHandle, DeckResolve, DeckStores,
@@ -121,12 +126,7 @@ pub use host::{
 pub use host::{PaneRoom, use_pane_room, use_pane_space, use_pane_subject};
 #[cfg(feature = "ui")]
 pub use host::{TabKindsUi, TabRender, TabRenderCtx, try_use_tab_kinds, use_tab_kinds};
-pub use architect_views::{
-    Capabilities, Capability, DIOXUS, Hosts, KindError, KindId, KindSpec, PAINT, PROCESS, Part,
-    Placement, Placements, ViewHost, ViewKinds, WEB,
-};
 pub use layout::{Direction, Placed, Slide, area_rects, neighbour, scroll_to, slides};
-pub use architect_views::{FRAME_BUDGET, Meters, ViewHealth, ViewMeter, ViewReport, ViewSummary};
 pub use model::{
     Above, Aliases, Area, Axis, Child, Chrome, ClosedPane, Corner, Dock, Docks, Float, Group,
     GroupAlias, GroupId, History, LinkId, Location, Node, Pane, PaneId, Pin, Rect, Ribbon, Shown,

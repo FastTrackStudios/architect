@@ -880,5 +880,6 @@ fn w() {}
 fn load(root: &Path) -> Result<guppy::graph::PackageGraph, String> {
     let mut cmd = guppy::MetadataCommand::new();
     cmd.current_dir(root);
-    guppy::graph::PackageGraph::from_command(&mut cmd).map_err(|e| format!("{}: {e}", root.display()))
+    guppy::graph::PackageGraph::from_command(&mut cmd)
+        .map_err(|e| format!("{}: {e}", root.display()))
 }
