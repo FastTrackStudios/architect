@@ -63,6 +63,31 @@ use crate::logs::{Level, Logs};
 use crate::manifest::{Capabilities, Manifest, Reach};
 use crate::net::Secrets;
 
+/// What the app's window does when an extension's session ends, each
+/// told its id ([`on_forget`]).
+static FORGETS: Mutex<Vec<fn(&str)>> = Mutex::new(Vec::new());
+
+/// Where a process view's `set_view_state` goes: the window that draws
+/// process views ([`set_view_state_sink`]); none, and the call is
+/// unsupported.
+#[allow(clippy::type_complexity)]
+static VIEW_STATE_SINK: Mutex<Option<fn(&str, &str, &str)>> = Mutex::new(None);
+
+/// Calls `forget` with an extension's id when its session ends: what the
+/// app's window keeps for it goes with it.
+pub fn on_forget(forget: fn(&str)) {
+    let mut all = lock(&FORGETS);
+    if !all.iter().any(|f| std::ptr::fn_addr_eq(*f, forget)) {
+        all.push(forget);
+    }
+}
+
+/// Hands process views' `set_view_state` calls (extension, pane, state)
+/// to `offer`: the window that draws them.
+pub fn set_view_state_sink(offer: fn(&str, &str, &str)) {
+    *lock(&VIEW_STATE_SINK) = Some(offer);
+}
+
 /// The longest secret an extension may store (`store_secret`), bytes.
 pub const MAX_SECRET: usize = 8 * 1024;
 
@@ -193,7 +218,6 @@ pub(crate) struct Services {
     ui: Mutex<Option<Arc<dyn HostUi>>>,
     /// The window's own interface, kept for whoever draws it
     /// (`host_ui_view::WindowUi::lend`).
-    #[cfg(feature = "ui")]
     window: Mutex<Option<Arc<dyn std::any::Any + Send + Sync>>>,
     /// What extensions set on rows and tabs.
     decorations: Decorations,
@@ -243,9 +267,11 @@ impl Services {
         if let Some(device) = device {
             device.forget(id);
         }
-        // The folders it was given on iOS are closed again.
-        #[cfg(all(feature = "pickers", target_os = "ios"))]
-        crate::pickers_ios::stop_scopes(id);
+        // What the app's window keeps for it goes too (the folders it
+        // was given on iOS are closed again).
+        for forget in lock(&FORGETS).iter() {
+            forget(id);
+        }
         #[cfg(feature = "net")]
         self.net.forget(id);
         // Its live documents: a later session needs a new answer.
@@ -293,7 +319,6 @@ impl Default for Services {
             docs_client: Mutex::new(None),
             data_store: Mutex::new(None),
             ui: Mutex::new(None),
-            #[cfg(feature = "ui")]
             window: Mutex::new(None),
             decorations: Decorations::default(),
             device: Mutex::new(None),
@@ -652,11 +677,7 @@ impl Host {
 
     /// The window's interface, kept with the host for whoever draws it,
     /// made by `make` the first time it is asked for.
-    #[cfg(feature = "ui")]
-    pub(crate) fn window_slot<T: Clone + Send + Sync + 'static>(
-        &self,
-        make: impl FnOnce() -> T,
-    ) -> T {
+    pub fn window_slot<T: Clone + Send + Sync + 'static>(&self, make: impl FnOnce() -> T) -> T {
         let mut slot = lock(&self.services().window);
         if let Some(kept) = slot.as_ref().and_then(|k| k.downcast_ref::<T>()) {
             return kept.clone();
@@ -1577,17 +1598,15 @@ impl ExtensionApi {
                 Ok(Value::Array(listed))
             }
             HostRequest::SetViewState { pane, state } => {
-                #[cfg(feature = "remote")]
-                {
-                    crate::remote::offer_view_state(&self.id, &pane, &state);
-                    Ok(Value::Null)
-                }
-                #[cfg(not(feature = "remote"))]
-                {
-                    let _ = (pane, state);
-                    Err(HostError::Unsupported {
+                let sink = *lock(&VIEW_STATE_SINK);
+                match sink {
+                    Some(offer) => {
+                        offer(&self.id, &pane, &state);
+                        Ok(Value::Null)
+                    }
+                    None => Err(HostError::Unsupported {
                         what: "set_view_state: this host shows no process views".to_owned(),
-                    })
+                    }),
                 }
             }
             HostRequest::Log { text, level } => {

@@ -39,8 +39,9 @@ use std::time::{Duration, Instant};
 use architect::action::{ActionCaller, ActionError, ActionList, ActionMeta, Effect};
 use architect_extensions::host::{Host, SharedSections};
 use architect_extensions::process::Processes;
-use architect_extensions::remote::REMOTE_BUDGET;
-use architect_extensions::remote::RemoteDocument;
+/// A process view's frame budget, from the event to its frame (the
+/// window's, app-shell-extensions' `remote::REMOTE_BUDGET`).
+const REMOTE_BUDGET: Duration = Duration::from_millis(33);
 use architect_extensions::wasi::{Limits, Pool, QUEUE, WasiRunner, WorkerStatus};
 use architect_extensions::wire::{Edit, EventData, Frame, Pointer, ViewEvent};
 use architect_extensions::{Origin, Package};
@@ -322,10 +323,57 @@ fn next(frames: &mut futures::channel::mpsc::UnboundedReceiver<Frame>) -> Frame 
     }
 }
 
+/// What a view's frames have shown, as text: the window's document is
+/// app-shell's (`app-shell-extensions`), so here each text node is kept
+/// in the order it was made, its text updated in place, and read in that
+/// order (as a document's text content reads, for these flat views).
+#[derive(Default)]
+struct RemoteDocument {
+    texts: Vec<(Option<u64>, String)>,
+}
+
+impl RemoteDocument {
+    fn new(_events: ()) -> Self {
+        Self::default()
+    }
+
+    fn apply(&mut self, frame: Frame) -> Result<(), String> {
+        let (Frame::Edits { edits } | Frame::Batches { edits, .. }) = frame else {
+            return Err(format!("{frame:?}"));
+        };
+        // The text node the last edit left on top, by its index here.
+        let mut top: Option<usize> = None;
+        for e in edits {
+            match e {
+                Edit::CreateText { value } => {
+                    self.texts.push((None, value));
+                    top = Some(self.texts.len() - 1);
+                }
+                Edit::SetId { id } => {
+                    if let Some(t) = top
+                        && self.texts[t].0.is_none()
+                    {
+                        self.texts[t].0 = Some(id);
+                    }
+                }
+                Edit::PushId { id } => {
+                    top = self.texts.iter().position(|(i, _)| *i == Some(id));
+                }
+                Edit::SetText { value } => {
+                    if let Some(t) = top {
+                        self.texts[t].1 = value;
+                    }
+                }
+                Edit::CreateElement { .. } | Edit::Child { .. } | Edit::Clone => top = None,
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+}
+
 fn text(doc: &RemoteDocument) -> String {
-    let d = doc.document();
-    let main = d.query_selector("main").unwrap().unwrap();
-    d.get_node(main).unwrap().text_content()
+    doc.texts.iter().map(|(_, t)| t.as_str()).collect()
 }
 
 /// The ids of the elements that listen for clicks, in order.
@@ -375,8 +423,7 @@ fn the_counter_loads_its_view_renders_and_its_actions_run() {
     let process = app.processes.get(COUNTER).expect("a local process");
     assert!(process.is_local());
     let mut session = process.open("counter").unwrap();
-    let (events, _) = futures::channel::mpsc::unbounded();
-    let mut doc = RemoteDocument::new(events);
+    let mut doc = RemoteDocument::new(());
     let first = next(&mut session.frames);
     let buttons = clickable(&first);
     doc.apply(first).unwrap();
@@ -675,8 +722,7 @@ fn a_views_interval_runs_on_the_hosts_clock_and_a_hook_it_made_runs() {
 
     let process = app.processes.get(HAZARDS).expect("a local process");
     let mut session = process.open("ticker").unwrap();
-    let (events, _) = futures::channel::mpsc::unbounded();
-    let mut doc = RemoteDocument::new(events);
+    let mut doc = RemoteDocument::new(());
     doc.apply(next(&mut session.frames)).unwrap();
     assert!(text(&doc).contains("ticks: 0"), "{}", text(&doc));
     let stats = app.components.get(HAZARDS).unwrap();
@@ -743,8 +789,7 @@ fn a_worker_job_keeps_the_view_within_its_frame_budget() {
     );
     let process = app.processes.get(COUNTER).unwrap();
     let mut session = process.open("counter").unwrap();
-    let (events, _) = futures::channel::mpsc::unbounded();
-    let mut doc = RemoteDocument::new(events);
+    let mut doc = RemoteDocument::new(());
     let first = next(&mut session.frames);
     let add = clickable(&first)[0];
     doc.apply(first).unwrap();
@@ -779,7 +824,8 @@ fn a_worker_job_keeps_the_view_within_its_frame_budget() {
             if let Some(p) = shown.split("Counting primes: ").nth(1) {
                 seen.insert(p.split('%').next().unwrap_or("").to_owned());
             }
-            if shown.contains(&format!("component{count}")) {
+            // Its count, a text node of its own.
+            if doc.texts.iter().any(|(_, t)| *t == count.to_string()) {
                 break;
             }
         }

@@ -33,9 +33,6 @@
 //! data in its document ([`doc`]); `ui` brings loaded extensions' sections
 //! onto the settings page ([`ui::use_extension_sections`]).
 
-// A linked-in view's root is a fn pointer compared by Dioxus's props: a
-// stale compare only redraws.
-#![cfg_attr(feature = "ui", allow(unpredictable_function_pointer_comparisons))]
 
 pub mod capabilities;
 pub mod catalog;
@@ -112,16 +109,12 @@ pub mod host;
 pub mod host_events;
 #[cfg(feature = "vox")]
 pub mod host_proto;
-#[cfg(feature = "ui")]
-pub mod host_ui_view;
 #[cfg(feature = "host")]
 pub mod hostapi;
 #[cfg(feature = "host")]
 pub mod hostui;
 #[cfg(feature = "host")]
 pub mod install;
-#[cfg(feature = "ui")]
-pub mod interface;
 #[cfg(feature = "host")]
 pub mod interop_actions;
 #[cfg(any(feature = "host", feature = "web"))]
@@ -132,8 +125,6 @@ pub mod luau_calls;
 /// handed (a WASI component's `invoke`, a TypeScript action's `ctx`).
 #[cfg(any(feature = "host", feature = "web"))]
 pub use invocation::{caller_json, invocation_json};
-#[cfg(all(feature = "remote", unix))]
-pub mod barrier;
 #[cfg(any(feature = "linked-core", all(feature = "guest", unix)))]
 pub mod linked;
 #[cfg(feature = "doc-sync")]
@@ -151,10 +142,6 @@ pub mod net;
 #[cfg(any(feature = "host", feature = "vox"))]
 pub mod node;
 pub mod overlay;
-#[cfg(feature = "page")]
-pub mod page;
-#[cfg(all(feature = "pickers", target_os = "ios"))]
-pub(crate) mod pickers_ios;
 #[cfg(feature = "host")]
 pub mod points;
 #[cfg(feature = "host")]
@@ -170,24 +157,14 @@ pub mod proto;
 pub mod registries;
 #[cfg(feature = "host")]
 mod registry_actions;
-#[cfg(all(feature = "remote", unix))]
-pub mod remote;
 #[cfg(feature = "scenes")]
 pub mod scene;
 #[cfg(feature = "host")]
 pub mod source;
 #[cfg(feature = "host")]
 pub mod toolbar_actions;
-#[cfg(feature = "ui")]
-pub mod toolbar_editor;
-#[cfg(feature = "ui")]
-pub mod toolbar_ui;
 #[cfg(feature = "host")]
 pub mod toolbars;
-#[cfg(feature = "ui")]
-pub mod typing_ui;
-#[cfg(feature = "ui")]
-pub mod ui;
 #[cfg(feature = "host")]
 pub mod views;
 #[cfg(feature = "wasi")]
@@ -198,10 +175,6 @@ pub mod watch;
 pub mod web;
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 mod web_scene;
-#[cfg(feature = "ui")]
-pub mod theme_ui;
-#[cfg(feature = "ui")]
-pub mod window_ui;
 #[cfg(feature = "host")]
 pub mod windows;
 #[cfg(feature = "vox")]

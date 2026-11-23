@@ -27,6 +27,8 @@ guest = [
     "dep:tokio",
     "dep:tracing",
 ]
+# What draws `process` views in a window (`process::ProcessViews`).
+process = ["architect-extensions/host"]
 # Paint views (`BuilderExt::paint`, `PaintPane`): a `PaintView` hosted as a
 # Blitz widget linked in, a scene its host composes as a process (with
 # `guest`).

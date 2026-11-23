@@ -31,7 +31,7 @@ host = ["dep:wgpu", "dep:ash", "architect-workspace/paint-ui", "dep:dioxus", "de
 # Extensions' `kind = "process"` views (#838, `extension`): any
 # extension's view drawn by the pane, whichever copy is loaded; the app
 # provides `architect_extensions::interface::ProcessViews` with it.
-extension = ["host", "dep:architect-extensions", "architect-extensions/ui"]
+extension = ["host", "dep:architect-extensions", "architect-extensions/host", "dep:architect-extensions-dioxus", "architect-extensions-dioxus/process"]
 # The lab's demo scene (`demo::Orbits`); with `guest`, its program.
 demo = []
 
@@ -59,6 +59,7 @@ wgpu_context = { version = "0.10", optional = true }
 futures-timer = { workspace = true, optional = true }
 architect = { workspace = true, optional = true, features = ["action-list"] }
 architect-extensions = { workspace = true, optional = true }
+architect-extensions-dioxus = { workspace = true, optional = true }
 
 [lints]
 workspace = true

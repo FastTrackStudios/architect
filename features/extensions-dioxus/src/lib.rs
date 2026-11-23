@@ -30,6 +30,8 @@ pub mod overlay;
 #[cfg(feature = "paint")]
 mod paint_pane;
 pub mod pane;
+#[cfg(feature = "process")]
+pub mod process;
 #[cfg(feature = "guest")]
 pub mod scene;
 #[cfg(feature = "guest")]
