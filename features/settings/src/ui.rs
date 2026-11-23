@@ -8,7 +8,7 @@
 //! The page's frame is the core's ([`SettingsSheet`]: what a window
 //! draws); the sheet itself, "Settings…" (`APP_SETTINGS`, ⌘,) and the
 //! sections it lists are the settings extension's
-//! (`features/settings/sheet`, the point `settings.sections`), so it can
+//! (app-shell-extensions' `settings_sheet`, the point `settings.sections`), so it can
 //! be turned off, cloned and swapped. [`SettingsPage`] is what stays in
 //! the core: the palette's `#`. A search hit opens its section, scrolls
 //! to its row and pulses it. `use_settings::<T>()` is a derived section's

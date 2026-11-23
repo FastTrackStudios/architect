@@ -1436,23 +1436,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "architect-settings-sheet"
-version = "0.1.0"
-dependencies = [
- "architect",
- "architect-extensions",
- "architect-extensions-dioxus",
- "architect-settings",
- "architect-shell",
- "architect-theme",
- "dioxus",
- "futures",
- "futures-timer",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
 name = "architect-shell"
 version = "0.1.0"
 dependencies = [

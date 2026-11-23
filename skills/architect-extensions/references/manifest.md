@@ -136,7 +136,7 @@ Top-level keys of `features/extensions/src/manifest.rs` `Manifest`.
 The action prefix is the id upper-cased with each run of other
 characters one `_`: `acme.metronome` → `ACME_METRONOME_`
 (`Manifest::action_prefix`). Every `[[actions]] id` starts with it,
-unless listed in `reserved`. Example: `features/settings/sheet/extension.toml`
+unless listed in `reserved`. Example: app-shell-extensions' `extensions/settings.toml` (FastTrackStudio/app-shell)
 (`reserved = ["APP_SETTINGS"]`).
 
 There is no `publisher` key. Who signed a package is the archive's
@@ -651,7 +651,7 @@ schema when the point's owner loads; a bad item is left out and reported
 (`APP_STATUS`), never a failed load
 (`features/extensions/src/points.rs`).
 
-Examples: `features/settings/sheet/extension.toml` (windows, points),
+Examples: app-shell-extensions' `extensions/settings.toml` (FastTrackStudio/app-shell) (windows, points),
 `apps/sandbox/extensions/surface/extension.toml`
 (`[[contribute."control.surfaces"]]`).
 
