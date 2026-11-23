@@ -1591,21 +1591,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "architect-theme-picker"
-version = "0.1.0"
-dependencies = [
- "architect",
- "architect-extensions",
- "architect-extensions-dioxus",
- "architect-settings",
- "architect-theme",
- "facet",
- "futures",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
 name = "architect-ui"
 version = "0.1.0"
 dependencies = [

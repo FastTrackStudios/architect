@@ -3261,10 +3261,10 @@ host kernels.
 
 | built-in | crate | adds | its dev copy |
 |---|---|---|---|
-| `theme.picker` | `features/theme/picker` | ⌘K's "Choose a theme…" and "Light or dark", ⌘O's `theme:` | `EXT_CLONE` (`features/theme/picker/tests/dev_loop.rs`); both ways in `features/theme/picker/tests/both_ways.rs` |
+| `theme.picker` | FastTrackStudios/app-shell's `crates/app-shell-extensions/theme-picker` | ⌘K's "Choose a theme…" and "Light or dark", ⌘O's `theme:` | both ways in its `tests/both_ways.rs` |
 | `manager` (the extensions page) | `features/extensions/src/manager` | `MANAGER_*`, its views, its settings section, ⌘O's `ext:` | none yet: its kinds are the app's Rust values (below) |
 | `lab.board` | `apps/sandbox/board` | the sandbox's example: a tab, a status item, openers, hooks | `EXT_CLONE` (`apps/sandbox/board/tests/dev_loop.rs`) |
-| `settings` (the settings page) | FastTrackStudio/app-shell's `crates/app-shell-extensions` (`settings_sheet`) | the window ⌘, opens (`APP_SETTINGS`, reserved), the point `settings.sections` | both ways in app-shell-extensions' `tests/settings_sheet.rs` |
+| `settings` (the settings page) | FastTrackStudios/app-shell's `crates/app-shell-extensions` (`settings_sheet`) | the window ⌘, opens (`APP_SETTINGS`, reserved), the point `settings.sections` | both ways in app-shell-extensions' `tests/settings_sheet.rs` |
 
 `apps/sandbox/media/tests/builtins.rs` checks that the default lab looks
 the same as before these moved: the main window's document at the end of
