@@ -42,15 +42,13 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-#[cfg(feature = "dioxus")]
-use dioxus::prelude::Element;
 use serde_json::Value as Json;
 
 use crate::contrib::{Contribution, StateWrite};
 
 /// A view's root as the runtime keeps it: what draws the view, in the UI
-/// the app links. With feature `dioxus` it is a Dioxus component
-/// (`fn() -> Element`, [`Builder::view`], [`Builder::view_root`]); the
+/// the app links. A Dioxus extension's is a component (`fn() -> Element`,
+/// `architect_extensions_dioxus::BuilderExt::view`); the
 /// runtime itself only stores, lists and hands it on.
 pub type ViewRoot = Arc<dyn std::any::Any + Send + Sync>;
 
@@ -291,23 +289,6 @@ pub trait Extension: Send + Sync + 'static {
     fn build(&self, ext: &mut Builder);
 }
 
-/// A paint view's pane: a `V`, hosted as a Blitz widget, its wake in
-/// its `ctx.extras`.
-#[cfg(feature = "paint-ui")]
-fn paint_root<V>() -> Element
-where
-    V: architect_workspace::paint::PaintView + Default,
-{
-    use architect_workspace::paint::{PaintMount, PaintPane};
-    use dioxus::prelude::*;
-    let mount = use_hook(|| {
-        let mount = PaintMount::new(|_| V::default());
-        let wake = mount.wake_handle();
-        mount.extras(architect_workspace::Extras::default().with(wake))
-    });
-    rsx! { PaintPane { mount } }
-}
-
 /// What an [`Extension`] builds.
 #[derive(Clone, Default)]
 pub struct Builder {
@@ -315,7 +296,7 @@ pub struct Builder {
     pub(crate) views: BTreeMap<String, ViewRoot>,
     /// What draws a view in its process copy, where that differs from
     /// `views` (a paint view: a `scene::RemoteScene`).
-    #[cfg(all(feature = "guest", feature = "paint"))]
+    #[cfg(feature = "guest")]
     pub(crate) remote_views: BTreeMap<String, ViewRoot>,
     pub(crate) contribution: Contribution,
     pub(crate) context: Vec<Provide>,
@@ -366,61 +347,19 @@ impl Builder {
         self
     }
 
-    /// Its view `id` (one of its manifest's `[[views]]`), drawn by `root`.
-    #[cfg(feature = "dioxus")]
-    pub fn view(&mut self, id: impl Into<String>, root: fn() -> Element) -> &mut Self {
-        self.view_any(id, Arc::new(root))
-    }
-
     /// Its view `id`, drawn by `root` in whatever UI the app links (a
-    /// Dioxus component is `fn() -> Element`: [`Self::view`]).
+    /// Dioxus component is `fn() -> Element`: `BuilderExt::view`).
     pub fn view_any(&mut self, id: impl Into<String>, root: ViewRoot) -> &mut Self {
         self.views.insert(id.into(), root);
         self
     }
 
-    /// Its paint view `id` (one of its manifest's `[[views]]`, `kind =
-    /// "paint"`), drawn by a `V` made for each pane it opens in (feature
-    /// `paint`, #591).
-    ///
-    /// `V` records an anyrender scene for the pane's size and scale
-    /// (`architect_workspace::paint::PaintView::paint`) and is given the
-    /// pane's input in its own logical pixels: pointer, wheel, touch,
-    /// keys and composed text (`PaintView::input`). It is hosted as a
-    /// Blitz widget in the pane (`architect_workspace::paint::PaintPane`).
-    /// A frame is drawn after input that changed something, every frame
-    /// while it says it is `animating`, and when it asks: its
-    /// `ctx.extras` holds the pane's `PaintWake`.
-    #[cfg(feature = "paint")]
-    // Each of the two places it goes is behind a feature of its own.
-    #[allow(clippy::redundant_clone)]
-    pub fn paint<V>(&mut self, id: impl Into<String>) -> &mut Self
-    where
-        V: architect_workspace::paint::PaintView + Default,
-    {
-        let id = id.into();
-        #[cfg(feature = "paint-ui")]
-        self.views
-            .insert(id.clone(), Arc::new(paint_root::<V> as fn() -> Element));
-        #[cfg(feature = "guest")]
-        self.remote_views.insert(
-            id.clone(),
-            Arc::new(crate::scene::remote_paint_root::<V> as fn() -> Element),
-        );
-        let _ = id;
-        self
-    }
-
-    /// The code that draws its base view type `id` (one of its manifest's
-    /// `[[base_views]]` that names no `view` or `page`): drawn as view
-    /// `base.<id>`, given the base's rows ([`use_base_view`]), linked in or
-    /// as a process.
-    #[cfg(feature = "dioxus")]
-    pub fn base_view(&mut self, id: &str, root: fn() -> Element) -> &mut Self {
-        self.views.insert(
-            format!("{}{id}", crate::contrib::BASE_VIEW_PREFIX),
-            Arc::new(root),
-        );
+    /// What draws its view `id` in its process copy, where that differs
+    /// from what draws it linked in (a paint view: a scene the host
+    /// composes, `architect_extensions_dioxus::BuilderExt::paint`).
+    #[cfg(feature = "guest")]
+    pub fn remote_view_any(&mut self, id: impl Into<String>, root: ViewRoot) -> &mut Self {
+        self.remote_views.insert(id.into(), root);
         self
     }
 
@@ -433,13 +372,11 @@ impl Builder {
         self
     }
 
-    /// A value its views read with `use_context`, provided at the app's
-    /// root when it is linked in. It stays until the app ends.
-    #[cfg(feature = "dioxus")]
-    pub fn context<T: Clone + 'static>(&mut self, make: fn() -> T) -> &mut Self {
-        self.context.push(Arc::new(move || {
-            dioxus::prelude::provide_context(make());
-        }));
+    /// What runs at the app's root when it is linked in, before its first
+    /// view is drawn: what provides its views' root context
+    /// (`architect_extensions_dioxus::BuilderExt::context`).
+    pub fn provide_with(&mut self, provide: Provide) -> &mut Self {
+        self.context.push(provide);
         self
     }
 
@@ -460,7 +397,7 @@ impl Builder {
     pub fn view_ids(&self) -> Vec<String> {
         #[allow(unused_mut)]
         let mut ids: Vec<String> = self.views.keys().cloned().collect();
-        #[cfg(all(feature = "guest", feature = "paint"))]
+        #[cfg(feature = "guest")]
         for id in self.remote_views.keys() {
             if !ids.contains(id) {
                 ids.push(id.clone());
@@ -473,16 +410,6 @@ impl Builder {
     #[must_use]
     pub const fn contribution(&self) -> &Contribution {
         &self.contribution
-    }
-
-    /// Its view `id`'s component.
-    #[cfg(feature = "dioxus")]
-    #[must_use]
-    pub fn view_root(&self, id: &str) -> Option<fn() -> Element> {
-        self.views
-            .get(id)
-            .and_then(|root| root.downcast_ref::<fn() -> Element>())
-            .copied()
     }
 
     /// Its view `id`'s root, as it was given ([`ViewRoot`]).
@@ -566,7 +493,7 @@ impl ViewState {
             return;
         }
         #[cfg(feature = "guest")]
-        if crate::guest::in_process() {
+        if in_process() {
             let request = crate::hostcall::HostRequest::SetViewState {
                 pane: self.pane.clone(),
                 state: value,
@@ -652,38 +579,18 @@ pub fn use_pane_state() -> Option<(String, String)> {
     Some((text("pane"), text("state")))
 }
 
-#[cfg(feature = "paint-pane")]
-mod paint_pane {
-    use dioxus::prelude::*;
-
-    /// A view's [`PaintView`](architect_workspace::paint::PaintView) in its
-    /// own Dioxus view, the same code linked in or as a process: linked, it
-    /// is `architect_workspace::PaintPane`; in a process, the host composes
-    /// what it draws (`crate::scene::RemotePaint`), with the same `ViewCtx`
-    /// (the theme, `mount`'s extras and its `PaintWake`) and the same input.
-    ///
-    /// Mount it among the view's own elements, as `PaintPane` is: it fills
-    /// its parent.
-    #[component]
-    pub fn PaintPane(mount: architect_workspace::paint::PaintMount) -> Element {
-        #[cfg(feature = "guest")]
-        if crate::guest::in_process() {
-            return rsx! { crate::scene::RemotePaint { mount } };
-        }
-        rsx! { architect_workspace::paint::PaintPane { mount } }
-    }
-}
-
-#[cfg(feature = "paint-pane")]
-pub use paint_pane::{PaintPane, PaintPaneProps};
-
 #[cfg(feature = "guest")]
 impl crate::guest::Guest {
-    /// `extension` served as a process: its views, its actions (told
-    /// where they were invoked from) and what it adds past its manifest,
-    /// sent as the host connects.
+    /// `extension` served as a process: its views (each drawn by what
+    /// `runner` makes of its root; a root it makes nothing of is left
+    /// out), its actions (told where they were invoked from) and what it
+    /// adds past its manifest, sent as the host connects. A Dioxus
+    /// extension's: `architect_extensions_dioxus::guest::GuestExt::extension`.
     #[must_use]
-    pub fn extension(extension: &dyn Extension) -> Self {
+    pub fn extension_with(
+        extension: &dyn Extension,
+        runner: &dyn Fn(&ViewRoot) -> Option<crate::guest::ViewRunner>,
+    ) -> Self {
         struct Wire;
         impl Sink for Wire {
             fn contribute(&self, contribution: Contribution) {
@@ -706,16 +613,14 @@ impl crate::guest::Guest {
         let built = Builder::of(extension);
         built.handle.connect(Arc::new(Wire));
         let mut guest = Self::new();
-        let component = |root: &ViewRoot| root.downcast_ref::<fn() -> Element>().copied();
         for (id, root) in &built.views {
-            if let Some(root) = component(root) {
-                guest = guest.view(id.clone(), root);
+            if let Some(run) = runner(root) {
+                guest = guest.view_with(id.clone(), run);
             }
         }
-        #[cfg(feature = "paint")]
         for (id, root) in &built.remote_views {
-            if let Some(root) = component(root) {
-                guest = guest.view(id.clone(), root);
+            if let Some(run) = runner(root) {
+                guest = guest.view_with(id.clone(), run);
             }
         }
         for (id, run) in built.actions {
@@ -729,6 +634,22 @@ impl crate::guest::Guest {
         }
         guest
     }
+}
+
+/// Provided at the root of every view a process serves (by the guest's
+/// renderer, `architect_extensions_dioxus::guest`): what [`in_process`]
+/// finds.
+#[cfg(feature = "dioxus")]
+#[derive(Clone, Copy)]
+pub struct InProcess;
+
+/// Whether the component calling it is drawn by a process for its host
+/// (a view `guest::Guest` serves), not linked into an app: one view's code
+/// picks the element that works where it runs (`linked::PaintPane`).
+#[cfg(feature = "dioxus")]
+#[must_use]
+pub fn in_process() -> bool {
+    dioxus::prelude::try_consume_context::<InProcess>().is_some()
 }
 
 /// What Bases gave this view, when it draws a base's view of a type its

@@ -809,6 +809,7 @@ dependencies = [
  "architect",
  "architect-commands",
  "architect-extensions",
+ "architect-extensions-dioxus",
  "architect-palette",
  "architect-settings",
  "dioxus",
@@ -1070,10 +1071,18 @@ dependencies = [
 name = "architect-extensions-dioxus"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "architect-extensions",
+ "architect-scene",
+ "architect-theme",
+ "architect-workspace",
+ "blitz-traits",
  "dioxus",
+ "dioxus-html",
  "futures",
  "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1129,6 +1138,7 @@ name = "architect-files-extension"
 version = "0.1.0"
 dependencies = [
  "architect-extensions",
+ "architect-extensions-dioxus",
  "architect-navigator-api",
  "dioxus",
  "futures-timer",
@@ -1254,6 +1264,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-extensions",
+ "architect-extensions-dioxus",
  "architect-navigator",
  "architect-settings",
  "chrono",
@@ -1452,6 +1463,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-extensions",
+ "architect-extensions-dioxus",
  "architect-settings",
  "architect-shell",
  "architect-theme",
@@ -1633,6 +1645,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-extensions",
+ "architect-extensions-dioxus",
  "architect-settings",
  "architect-theme",
  "facet",

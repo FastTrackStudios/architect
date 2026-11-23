@@ -146,15 +146,7 @@ guest = [
     "dep:vox-core",
     "dep:vox-stream",
     "dep:tokio",
-    "dioxus",
-    # Its views' events arrive serialised (`guest.rs`): dioxus-html's
-    # `serialize` (the node's build, without the window, gets it from
-    # nothing else).
-    "dep:dioxus-html",
     "dep:tracing",
-    # The host's theme as the app's theme store in its views
-    # (`architect_theme::try_use_theme`), as linked in.
-    "architect-theme/dioxus",
 ]
 # WASI components (`wasi`, desktop, Android and iOS): Wasmtime with the
 # component model, Cranelift compiling, epoch interruption and a memory
@@ -376,7 +368,7 @@ hex = { workspace = true }
 architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked", "manager", "wasi", "net", "person-sync", "node", "paint-ui", "doc-sync"] }
 # The Dioxus side, for the tests that draw views (a dev-dependency back on
 # this crate: integration tests only, one copy of it).
-architect-extensions-dioxus = { path = "../extensions-dioxus" }
+architect-extensions-dioxus = { path = "../extensions-dioxus", features = ["guest", "paint"] }
 # tests/linked_paint.rs: a linked paint view's widget painted, as the
 # window's renderer does.
 blitz-paint = { workspace = true, features = ["custom-widget"] }

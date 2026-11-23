@@ -27,6 +27,7 @@ use architect_extensions::install::Installs;
 use architect_extensions::interop::WindowKind;
 use architect_extensions::linked::{Builder, Extension, Handle};
 use architect_extensions::{Manifest, ManifestError, Origin, Package};
+use architect_extensions_dioxus::BuilderExt as _;
 use architect_settings::Registry;
 use architect_workspace::{Popout, WindowId, WindowSystem, Windows};
 use dioxus::prelude::*;

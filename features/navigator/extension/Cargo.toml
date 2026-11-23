@@ -16,6 +16,8 @@ name = "architect-navigator"
 path = "src/main.rs"
 
 [dependencies]
+# Its views as Dioxus components (`BuilderExt::view`).
+architect-extensions-dioxus = { workspace = true, features = ["guest"] }
 architect-navigator = { workspace = true, features = ["ui"] }
 # The trait and the guest (its process copy); an app adds `linked`.
 architect-extensions = { workspace = true, features = ["guest"] }

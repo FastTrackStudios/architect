@@ -34,6 +34,7 @@ use architect_extensions::process::{ProcessRunner, Processes, Restart};
 use architect_extensions::proto::SOCKET;
 use architect_extensions::remote::{RemoteView, mounted_views};
 use architect_extensions::{Origin, Package};
+use architect_extensions_dioxus::guest::GuestExt as _;
 use blitz_dom::{BaseDocument, Document as _, DocumentConfig};
 use blitz_traits::events::{
     BlitzImeEvent, BlitzKeyEvent, BlitzPointerEvent, BlitzPointerId, BlitzWheelDelta,

@@ -23,6 +23,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use architect_extensions::linked::{Builder, Extension, Handle};
+use architect_extensions_dioxus::BuilderExt as _;
 use architect_navigator::state::Drag;
 use architect_navigator::state::{Made, MergeSeparator, NewKind, NewNote, Paint};
 use architect_navigator::template::{CommandLocation, TemplateCommand};

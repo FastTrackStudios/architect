@@ -22,6 +22,7 @@ use std::time::Duration;
 use architect_extensions::hostcall::HostRequest;
 use architect_extensions::linked::{Builder, Extension, Handle};
 use architect_extensions::manifest::{SectionDecl, section_of};
+use architect_extensions_dioxus::BuilderExt as _;
 use architect_settings::{
     Registry, ScopedValues, SettingsChange, SettingsHandle, SettingsSheet as Sheet, SheetTheme,
     try_use_settings,
@@ -246,7 +247,7 @@ fn SheetView() -> Element {
     });
     use_context_provider(move || h);
     // Out of process: the host's theme, and the values the app has now.
-    let resolved = architect_extensions::guest::use_theme();
+    let resolved = architect_extensions_dioxus::guest::use_theme();
     let shell = use_signal(|| {
         <architect_shell::ShellTheme as architect_theme::FromResolved>::from_resolved(
             &resolved.clone().unwrap_or_default(),

@@ -19,6 +19,8 @@ path = "src/main.rs"
 # The trait (`linked-core`): linked into an app, a browser's too (#495);
 # off the browser also its process copy (`guest`, vox and tokio).
 architect-extensions = { workspace = true, features = ["linked-core"] }
+# Its views as Dioxus components (`BuilderExt::view`).
+architect-extensions-dioxus = { workspace = true }
 # Its navigator provider (MIT; never the GPL navigator itself).
 architect-navigator-api = { workspace = true, features = ["extensions"] }
 dioxus = { workspace = true }
@@ -30,4 +32,5 @@ workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 architect-extensions = { workspace = true, features = ["guest"] }
+architect-extensions-dioxus = { workspace = true, features = ["guest"] }
 

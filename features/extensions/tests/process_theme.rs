@@ -20,12 +20,13 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use architect::action::ActionList;
-use architect_extensions::guest::{Guest, use_theme};
+use architect_extensions::guest::Guest;
 use architect_extensions::host::{Host, SharedSections};
 use architect_extensions::process::{ProcessRunner, Processes, Restart};
 use architect_extensions::proto::SOCKET;
 use architect_extensions::wire::{Edit, Frame, THEMED_WIRE, WIRE, WIRE_MIN};
 use architect_extensions::{Origin, Package};
+use architect_extensions_dioxus::guest::{GuestExt as _, use_theme};
 use architect_theme::{Appearance, LayerKind, ThemeStore};
 use dioxus::prelude::*;
 use futures::StreamExt as _;

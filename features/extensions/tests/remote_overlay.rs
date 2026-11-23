@@ -30,8 +30,10 @@ use architect_extensions::interface::{ExtensionViewOverlays, use_extension_ui};
 use architect_extensions::overlay::{Lane, OverlaySpaces, TimeAxis};
 use architect_extensions::process::{ProcessRunner, Processes, Restart};
 use architect_extensions::proto::SOCKET;
-use architect_extensions::scene::{Affine, PaintScene as _, RemoteScene, RenderCommand, Scene};
+use architect_extensions::scene::{Affine, PaintScene as _, RenderCommand, Scene};
 use architect_extensions::{Origin, Package};
+use architect_extensions_dioxus::guest::GuestExt as _;
+use architect_extensions_dioxus::scene::RemoteScene;
 use blitz_dom::{Document as _, DocumentConfig};
 use blitz_traits::events::{
     BlitzPointerEvent, BlitzPointerId, Modifiers, MouseEventButton, MouseEventButtons, Point,

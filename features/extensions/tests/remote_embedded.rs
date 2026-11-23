@@ -33,6 +33,7 @@ use architect_extensions::remote::{RemoteDocument, RemoteView, mounted_views};
 use architect_extensions::wire::{Edit, Frame, Value};
 use architect_extensions::{Origin, Package};
 use architect_extensions_dioxus::EmbeddedView;
+use architect_extensions_dioxus::guest::GuestExt as _;
 use blitz_dom::{BaseDocument, Document as _, DocumentConfig};
 use blitz_traits::events::{
     BlitzPointerEvent, BlitzPointerId, Modifiers, MouseEventButton, MouseEventButtons, Point,

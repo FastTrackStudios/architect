@@ -26,6 +26,8 @@ use std::sync::{Mutex, PoisonError};
 use architect_extensions::hostcall::HostRequest;
 #[cfg(feature = "extension")]
 use architect_extensions::linked::{Builder, Extension, Handle};
+#[cfg(feature = "extension")]
+use architect_extensions_dioxus::BuilderExt as _;
 use architect_palette::{Item, Recents, rank};
 #[cfg(feature = "extension")]
 use dioxus::prelude::*;

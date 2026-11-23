@@ -7,6 +7,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use architect_extensions::linked::{Builder, Extension};
+use architect_extensions_dioxus::BuilderExt as _;
 use architect_extensions_dioxus::deferred::{Defer, Deferred, Loading};
 use dioxus::prelude::*;
 use futures::executor::block_on;

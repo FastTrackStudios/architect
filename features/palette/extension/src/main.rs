@@ -4,6 +4,7 @@
 //! (`EXT_CLONE {"id":"command-palette"}`). Run by hand it says so and exits.
 
 use architect_extensions::guest::{Guest, GuestError};
+use architect_extensions_dioxus::guest::GuestExt as _;
 
 fn main() -> Result<(), GuestError> {
     Guest::extension(&architect_command_palette::CommandPalette).serve()

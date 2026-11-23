@@ -21,7 +21,7 @@ default = ["extension"]
 # The extension: its manifest's `Extension` value, linked in or run as a
 # process (`guest`). Off, the crate is its views over an app's `Commands`
 # alone (`views`), for an app with no extension host (the web app, #495).
-extension = ["dep:architect-extensions"]
+extension = ["dep:architect-extensions", "dep:architect-extensions-dioxus"]
 
 [dependencies]
 # The engine it ranks with.
@@ -31,6 +31,8 @@ architect-commands = { workspace = true, features = ["ui"] }
 # The trait (`linked-core`): linked into an app, a browser's too (#495);
 # off the browser also its process copy (`guest`). An app adds `linked`.
 architect-extensions = { workspace = true, features = ["linked-core"], optional = true }
+# Its views as Dioxus components (`BuilderExt::view`).
+architect-extensions-dioxus = { workspace = true, optional = true }
 dioxus = { workspace = true }
 serde_json = { workspace = true }
 
@@ -47,4 +49,5 @@ workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 architect-extensions = { workspace = true, features = ["guest"], optional = true }
+architect-extensions-dioxus = { workspace = true, features = ["guest"], optional = true }
 

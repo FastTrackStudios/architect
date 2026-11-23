@@ -15,6 +15,7 @@
 use std::sync::Mutex;
 
 use architect_extensions::linked::{Builder, Extension};
+use architect_extensions_dioxus::BuilderExt as _;
 use architect_workspace::paint::peniko::kurbo::{Affine, Circle};
 use architect_workspace::paint::peniko::{Color, Fill};
 use architect_workspace::paint::{PaintScene as _, PaintView, Scene};

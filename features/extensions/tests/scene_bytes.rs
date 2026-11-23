@@ -17,10 +17,10 @@
 
 use std::sync::Arc;
 
-use architect_extensions::guest::WireWriter;
 use architect_extensions::remote::RemoteDocument;
 use architect_extensions::scene::{LAYERS_ATTR, layers_marker, layers_value, outbox};
 use architect_extensions::wire::{Batch, Edit, Frame, Value};
+use architect_extensions_dioxus::guest::WireWriter;
 use architect_scene::layers::Layer;
 use architect_scene::ops::Sender;
 use dioxus::core::{ElementId, WriteMutations as _};

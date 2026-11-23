@@ -50,6 +50,8 @@ use serde_json::Value as Json;
 
 use architect_extensions::linked::{Builder, Extension, Handle};
 
+use crate::BuilderExt as _;
+
 /// What [`Defer::load`] gives back: the extension, built.
 #[cfg(not(target_family = "wasm"))]
 pub type Loading = Pin<Box<dyn Future<Output = Builder> + Send>>;
