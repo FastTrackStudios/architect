@@ -257,6 +257,8 @@ architect-ui = { workspace = true, optional = true }
 architect-workspace = { workspace = true, optional = true }
 # The view kinds and meters, shared with the panes.
 architect-views = { workspace = true }
+# Fuzzy matching for the index (the palette's engine, no UI).
+architect-palette = { workspace = true }
 facet = { workspace = true }
 # `VaultQueryClient`, which the host answers `query_vault` with (feature
 # `host`): the wire contract only, wasm-clean.

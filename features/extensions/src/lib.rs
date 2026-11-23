@@ -47,7 +47,7 @@ pub mod disk;
 pub mod editor;
 pub mod events;
 pub mod hostcall;
-mod fuzzy;
+
 pub mod languages;
 #[cfg(feature = "host")]
 pub mod vault;

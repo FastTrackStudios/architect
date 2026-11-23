@@ -35,7 +35,7 @@
 //! A `ReaPack` repository's `index.xml` reads into the same entries
 //! ([`crate::reapack`]).
 
-use crate::fuzzy::fuzzy;
+use architect_palette::fuzzy;
 use semver::{Version, VersionReq};
 use serde::Deserialize;
 

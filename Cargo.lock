@@ -994,6 +994,7 @@ dependencies = [
  "architect-favourites",
  "architect-guide",
  "architect-input",
+ "architect-palette",
  "architect-permissions",
  "architect-scene",
  "architect-scripting",
@@ -1408,6 +1409,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-commands",
+ "architect-palette",
  "architect-settings",
  "architect-settings-derive",
  "architect-shell",
