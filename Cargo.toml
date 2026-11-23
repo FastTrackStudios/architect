@@ -61,8 +61,6 @@ members = [
     "features/extensions/tests/wasi-hazards",
     "features/extensions/tests/wasi-counter",
     "features/files",
-    "features/navigator",
-    "features/navigator/extension",
     "features/navigator-api",
     "features/palette",
     "features/editor",
@@ -305,12 +303,9 @@ architect-process-view = { path = "features/process-view" }
 architect-extension-wasi = { path = "features/extensions/wasi-guest" }
 architect-extension-archive = { path = "features/extensions/archive" }
 architect-files = { path = "features/files" }
-# The sidebar: a port of Notebook Navigator. GPL-3.0-or-later, the one GPL
-# crate (features/navigator/README.md): an app that links it ships under the GPL.
-architect-navigator = { path = "features/navigator" }
-architect-navigator-extension = { path = "features/navigator/extension" }
-# The navigator's provider API: MIT OR Apache-2.0, what MIT pages and
-# extensions implement without linking the GPL navigator.
+# The navigator's provider API: MIT OR Apache-2.0, what pages and
+# extensions implement. The navigator itself (GPL-3.0-or-later, a port of
+# Notebook Navigator) is a repo of its own: FastTrackStudios/navigator.
 architect-navigator-api = { path = "features/navigator-api" }
 architect-devices = { path = "features/devices" }
 architect-spaces = { path = "features/spaces" }

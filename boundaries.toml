@@ -263,14 +263,9 @@ package = "architect-guide"
 layer = "L0"
 
 [[row]]
-package = "architect-navigator"
-layer = "L0"
-note = "GPL-3.0-or-later, with its extension the only GPL crates (a port of Notebook Navigator)"
-
-[[row]]
 package = "architect-navigator-api"
 layer = "L0"
-note = "the navigator's provider API, MIT OR Apache-2.0: what pages and extensions implement without linking the GPL navigator (#356)"
+note = "the navigator's provider API, MIT OR Apache-2.0: what pages and extensions implement; the GPL navigator is FastTrackStudios/navigator (#356)"
 
 [[row]]
 package = "architect-files"
@@ -442,11 +437,6 @@ layer = "L4"
 note = "the web view kind's hosts (#222): the extensions' interface and the workspace's panes"
 
 [[row]]
-package = "architect-navigator"
-features = ["ui"]
-layer = "L4"
-
-[[row]]
 package = "architect-a2ui"
 features = ["ui"]
 layer = "L4"
@@ -455,11 +445,6 @@ layer = "L4"
 package = "architect-theme"
 features = ["dioxus"]
 layer = "L4"
-
-[[row]]
-package = "architect-navigator-extension"
-layer = "L4"
-note = "Navigator, a built-in extension: the navigator's view, actions and settings; linked in, or its own process (guest). GPL-3.0-or-later, as the crate it links"
 
 [[row]]
 package = "architect-bases"

@@ -1163,40 +1163,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "architect-navigator"
-version = "0.1.0"
-dependencies = [
- "architect",
- "architect-commands",
- "architect-documents",
- "architect-extensions",
- "architect-navigator",
- "architect-navigator-api",
- "architect-settings",
- "architect-shell",
- "architect-theme",
- "blitz-dom",
- "blitz-traits",
- "chrono",
- "dioxus",
- "dioxus-native",
- "facet",
- "futures",
- "futures-channel",
- "futures-timer",
- "futures-util",
- "lucide-dioxus",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "tokio",
- "unicode-normalization",
- "vault",
- "vault-doc",
- "vault-proto",
-]
-
-[[package]]
 name = "architect-navigator-api"
 version = "0.1.0"
 dependencies = [
@@ -1204,26 +1170,6 @@ dependencies = [
  "futures",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "architect-navigator-extension"
-version = "0.1.0"
-dependencies = [
- "architect",
- "architect-extensions",
- "architect-extensions-dioxus",
- "architect-navigator",
- "architect-settings",
- "chrono",
- "dioxus",
- "futures",
- "futures-channel",
- "futures-timer",
- "serde",
- "serde_json",
- "tempfile",
- "toml 0.8.2",
 ]
 
 [[package]]

@@ -7,7 +7,7 @@
 //! What it serves is the one implementation, `DocumentsServer`, over:
 //!
 //! - [`AsStore`]: the app's [`Documents`] (the person's vault,
-//!   `architect_navigator::documents::VaultDocuments`; the lab's spaces);
+//!   `navigator::documents::VaultDocuments` (FastTrackStudios/navigator); the lab's spaces);
 //! - [`FileData`]: each extension's `data.json` under the host's data root
 //!   (written whole, 0600, one change at a time, never wiped by a file
 //!   that does not parse), or in memory without one;

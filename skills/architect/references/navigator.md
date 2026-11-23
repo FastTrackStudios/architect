@@ -1,17 +1,17 @@
-# The navigator (`architect-navigator`)
+# The navigator (FastTrackStudios/navigator)
 
-A port of Notebook Navigator (the Obsidian plugin) as architect's sidebar:
-a folder tree beside a list of notes. The crate is `features/navigator`.
-Navigator, the built-in extension that makes it a feature, is
-`features/navigator/extension` (`architect-navigator-extension`).
+A port of Notebook Navigator (the Obsidian plugin): a folder tree beside a
+list of notes. **It is no longer in Architect**: it is a repo of its own,
+FastTrackStudios/navigator, GPL-3.0-or-later — the crate `navigator`,
+Navigator the extension (`navigator-extension`), and a `navigator` app
+that runs it in an app-shell window. Its view draws on app-shell and
+app-shell-extensions, not Architect's shell.
 
-**Licence.** `architect-navigator` is GPL-3.0-or-later. With Navigator,
-the extension that links it, it is the only GPL code in architect (`features/navigator/README.md`, `features/navigator/LICENSE`).
-An app that links it ships under the GPL. Nothing else in architect depends
-on it but the app that draws it. Never move its code into another crate.
-Pages and extensions fill it through the MIT `architect-navigator-api`
-(below, "Providers"). A headless tool or a server
-that does not link it stays MIT OR Apache-2.0.
+Architect keeps only the MIT `architect-navigator-api` (below,
+"Providers"): what pages and extensions implement to fill the navigator,
+without linking the GPL code. The rest of this page describes the
+navigator's behaviour; its paths are the navigator repo's (`crates/navigator`
+where it says `features/navigator`).
 
 ## Rules
 

@@ -4,6 +4,12 @@ description = "Navigator: folders beside notes in the sidebar, a port of Noteboo
 weight = 55
 +++
 
+> **Moved.** The navigator and its extension are a repo of their own,
+> [FastTrackStudios/navigator](https://github.com/FastTrackStudios/navigator)
+> (GPL-3.0-or-later), drawn in app-shell's panes. Architect keeps only the
+> MIT provider API, `architect-navigator-api`. The crate paths below are
+> that repo's.
+
 ## What it is and when to use it
 
 Navigator is the sidebar of an app that keeps notes in a vault: a folder
