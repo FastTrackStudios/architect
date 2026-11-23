@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 use architect::action::ActionList;
 use architect_extensions::contrib::EmbedInput;
-use architect_extensions::embedded::EmbeddedView;
+use architect_extensions_dioxus::EmbeddedView;
 use architect_extensions::guest::Guest;
 use architect_extensions::host::{Host, SharedSections};
 use architect_extensions::process::{ProcessRunner, Processes, Restart};

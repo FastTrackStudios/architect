@@ -1,4 +1,4 @@
-//! A deferred linked extension (`linked::deferred`): linked by its
+//! A deferred linked extension (`architect_extensions_dioxus::deferred`): linked by its
 //! manifest alone, its views and actions there from the start, its code
 //! built the first time one of them is used, once.
 
@@ -6,7 +6,7 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use architect_extensions::linked::deferred::{Defer, Deferred, Loading};
+use architect_extensions_dioxus::deferred::{Defer, Deferred, Loading};
 use architect_extensions::linked::{Builder, Extension};
 use dioxus::prelude::*;
 use futures::executor::block_on;

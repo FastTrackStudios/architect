@@ -991,6 +991,7 @@ dependencies = [
  "architect-editor",
  "architect-extension-archive",
  "architect-extensions",
+ "architect-extensions-dioxus",
  "architect-favourites",
  "architect-guide",
  "architect-input",
@@ -1063,6 +1064,16 @@ dependencies = [
  "web-sys",
  "web-time",
  "wit-parser 0.261.0",
+]
+
+[[package]]
+name = "architect-extensions-dioxus"
+version = "0.1.0"
+dependencies = [
+ "architect-extensions",
+ "dioxus",
+ "futures",
+ "serde_json",
 ]
 
 [[package]]

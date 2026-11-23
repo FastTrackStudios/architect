@@ -48,7 +48,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use dioxus::prelude::*;
 use serde_json::Value as Json;
 
-use super::{Builder, Extension, Handle};
+use architect_extensions::linked::{Builder, Extension, Handle};
 
 /// What [`Defer::load`] gives back: the extension, built.
 #[cfg(not(target_family = "wasm"))]
@@ -93,7 +93,7 @@ impl<D: Defer> Extension for Deferred<D> {
     }
 
     fn build(&self, ext: &mut Builder) {
-        let Ok(manifest) = crate::Manifest::parse(D::manifest()) else {
+        let Ok(manifest) = architect_extensions::Manifest::parse(D::manifest()) else {
             return;
         };
         // Its own handle, kept: the host connects it as it links this, and
@@ -150,7 +150,7 @@ fn state(id: &str) -> Arc<State> {
 }
 
 fn id_of<D: Defer>() -> Option<String> {
-    crate::Manifest::parse(D::manifest()).ok().map(|m| m.id)
+    architect_extensions::Manifest::parse(D::manifest()).ok().map(|m| m.id)
 }
 
 /// `D`, built: once, the first time anything of it is used. Its handle
@@ -172,12 +172,8 @@ async fn load<D: Defer>(id: &str) -> Arc<Builder> {
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .as_ref()
-        && let Some(sink) = linked.sink()
     {
-        if !built.contribution.is_empty() {
-            sink.contribute(built.contribution.clone());
-        }
-        built.handle.connect(sink);
+        linked.adopt(&built);
     }
     let built = Arc::new(built);
     *slot = Some(Arc::clone(&built));
@@ -207,7 +203,7 @@ fn deferred_view<D: Defer, const V: usize>() -> Element {
         let id = id_of::<D>()?;
         let built = load::<D>(&id).await;
         provide_once(&id, &built);
-        let view = crate::Manifest::parse(D::manifest())
+        let view = architect_extensions::Manifest::parse(D::manifest())
             .ok()?
             .views
             .get(V)

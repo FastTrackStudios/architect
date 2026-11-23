@@ -374,6 +374,9 @@ hex = { workspace = true }
 # Its own host, so `cargo test --workspace` builds the tests with it; the
 # guest too, since the remote-view tests spawn themselves as one.
 architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked", "manager", "wasi", "net", "person-sync", "node", "paint-ui", "doc-sync"] }
+# The Dioxus side, for the tests that draw views (a dev-dependency back on
+# this crate: integration tests only, one copy of it).
+architect-extensions-dioxus = { path = "../extensions-dioxus" }
 # tests/linked_paint.rs: a linked paint view's widget painted, as the
 # window's renderer does.
 blitz-paint = { workspace = true, features = ["custom-widget"] }

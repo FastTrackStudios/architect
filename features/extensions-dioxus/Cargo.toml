@@ -1,0 +1,27 @@
+[package]
+name = "architect-extensions-dioxus"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "The Dioxus side of Architect extensions: views as components, the hooks a view uses (embed input, pane state, theme, work), deferred linked extensions, and the guest's renderer that serves a process extension's views to its host"
+
+# The runtime (`architect-extensions`) keeps views type-erased and draws
+# nothing; this crate is what an extension written in Dioxus links. The
+# host's chrome (the panes, toolbars and pages that mount the views) is
+# app-shell's (`app-shell-extensions`).
+
+[features]
+default = []
+
+[dependencies]
+architect-extensions = { workspace = true, features = ["linked-core", "dioxus"] }
+dioxus = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+architect-extensions = { workspace = true, features = ["linked-core", "dioxus"] }
+futures = { workspace = true }
+
+[lints]
+workspace = true

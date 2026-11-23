@@ -48,9 +48,6 @@ use serde_json::Value as Json;
 
 use crate::contrib::{Contribution, StateWrite};
 
-#[cfg(feature = "dioxus")]
-pub mod deferred;
-
 /// A view's root as the runtime keeps it: what draws the view, in the UI
 /// the app links. With feature `dioxus` it is a Dioxus component
 /// (`fn() -> Element`, [`Builder::view`], [`Builder::view_root`]); the
@@ -148,6 +145,18 @@ impl Handle {
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(sink);
+    }
+
+    /// Hands what this handle reaches on to `built`, an extension built
+    /// later than it was linked (a deferred one): `built`'s contribution
+    /// goes to the same place, and `built`'s handle reaches it from now on.
+    /// Before this handle is connected, it does nothing.
+    pub fn adopt(&self, built: &Builder) {
+        let Some(sink) = self.sink() else { return };
+        if !built.contribution.is_empty() {
+            sink.contribute(built.contribution.clone());
+        }
+        built.handle.connect(sink);
     }
 
     /// Asks the host service (`crate::hostcall`): the same call linked in

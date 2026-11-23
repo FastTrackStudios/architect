@@ -12,8 +12,8 @@
 //! with its own capabilities; the view that holds it reaches nothing of
 //! it but its place and its input.
 //!
-//! In the guest: [`EmbeddedView`] (feature `guest`) renders the
-//! placeholder.
+//! In a Dioxus view: `architect_extensions_dioxus::EmbeddedView` renders
+//! the placeholder.
 
 use crate::contrib::EmbedInput;
 
@@ -50,38 +50,6 @@ pub fn split_view(value: &str) -> Option<(&str, &str)> {
     let (extension, view) = value.rsplit_once('/')?;
     (!extension.is_empty() && !view.is_empty()).then_some((extension, view))
 }
-
-/// The guest's side.
-#[cfg(feature = "guest")]
-mod guest {
-    use dioxus::prelude::*;
-
-    use crate::contrib::EmbedInput;
-
-    /// Another extension's view, held here: `extension`'s view `view`,
-    /// given `input`, filling this element (sized as `style` says; it
-    /// fills its parent by default). The host draws it.
-    #[component]
-    pub fn EmbeddedView(
-        extension: String,
-        view: String,
-        #[props(default)] input: EmbedInput,
-        #[props(default)] style: String,
-    ) -> Element {
-        let name = format!("{extension}/{view}");
-        let input = serde_json::to_string(&input).unwrap_or_default();
-        rsx! {
-            div {
-                style: "display: block; width: 100%; height: 100%; {style}",
-                "data-architect-embed-view": "{name}",
-                "data-architect-embed-input": "{input}",
-            }
-        }
-    }
-}
-
-#[cfg(feature = "guest")]
-pub use guest::EmbeddedView;
 
 #[cfg(test)]
 mod tests {

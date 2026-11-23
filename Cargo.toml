@@ -54,6 +54,7 @@ members = [
     "features/accounts",
     "features/scripting",
     "features/extensions",
+    "features/extensions-dioxus",
     "features/extensions/documents",
     "features/process-view",
     "features/extensions/wasi-guest",
@@ -317,6 +318,7 @@ architect-orgs = { path = "features/orgs" }
 architect-accounts = { path = "features/accounts" }
 architect-scripting = { path = "features/scripting" }
 architect-extensions = { path = "features/extensions" }
+architect-extensions-dioxus = { path = "features/extensions-dioxus" }
 architect-documents = { path = "features/extensions/documents" }
 architect-process-view = { path = "features/process-view" }
 architect-extension-wasi = { path = "features/extensions/wasi-guest" }
