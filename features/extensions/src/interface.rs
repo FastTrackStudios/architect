@@ -1105,12 +1105,7 @@ pub struct WebAsk {
 #[derive(Clone)]
 pub struct WebViews(pub Rc<dyn Fn(&WebAsk) -> Element>);
 
-/// A `process` view, as [`ProcessViews`] is asked for it (#838).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProcessAsk {
-    pub extension: String,
-    pub view: String,
-}
+pub use crate::process_view::ProcessAsk;
 
 /// Draws extensions' `process` views (#838).
 ///

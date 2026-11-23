@@ -199,6 +199,8 @@ pub mod web;
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 mod web_scene;
 #[cfg(feature = "ui")]
+pub mod theme_ui;
+#[cfg(feature = "ui")]
 pub mod window_ui;
 #[cfg(feature = "host")]
 pub mod windows;

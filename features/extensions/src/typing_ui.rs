@@ -213,7 +213,7 @@ fn button(cx: &Cx, item: &ToolItem, typing: &Typing) -> TypingItem {
 #[component]
 fn TypingRows(cx: Cx, rows: Vec<MenuItem>, depth: usize, close: Callback<()>) -> Element {
     let (_, _) = (cx.ui.revision(), cx.ui.ticks());
-    let t = crate::window_ui::shell_theme();
+    let t = crate::theme_ui::shell_theme();
     let mut expanded = use_signal(|| None::<usize>);
     let host = cx.ui.host();
     let indent = depth.saturating_mul(12);

@@ -42,7 +42,7 @@ pub(crate) fn pane_views(ui: ExtensionUi) -> Vec<View> {
             };
             let caption = toolbar_caption(&ui.host(), &t);
             View::new(pane_kind(&t.key), t.decl.title.clone(), move |_| {
-                let th = crate::window_ui::shell_theme();
+                let th = crate::theme_ui::shell_theme();
                 // The strip, then what it is: a pane of buttons alone
                 // read as a view that had not drawn.
                 rsx! {
@@ -412,7 +412,7 @@ pub fn ToolbarStrip(
 ) -> Element {
     let (_, _) = (ui.revision(), ui.ticks());
     let open = use_signal(|| None::<String>);
-    let t = crate::window_ui::shell_theme();
+    let t = crate::theme_ui::shell_theme();
     let host = ui.host();
     let editor = try_use_context::<Editor>();
     // Outside a workspace (over a phone's keyboard) it has no pane, and
@@ -550,7 +550,7 @@ const fn narrow(v: f64) -> f32 {
 /// separator, a widget or a dropdown there.
 #[component]
 fn InsertChip(cx: Ctx, at: String) -> Element {
-    let t = crate::window_ui::shell_theme();
+    let t = crate::theme_ui::shell_theme();
     let Some(editor) = try_use_context::<Editor>() else {
         return rsx! {};
     };
@@ -591,7 +591,7 @@ fn EditableItem(
     #[props(default)]
     chip: bool,
 ) -> Element {
-    let t = crate::window_ui::shell_theme();
+    let t = crate::theme_ui::shell_theme();
     let Some(editor) = try_use_context::<Editor>() else {
         return rsx! {};
     };
@@ -689,7 +689,7 @@ fn EditableItem(
 
 #[component]
 fn ToolItemView(cx: Ctx, item: ToolItem, path: String) -> Element {
-    let t = crate::window_ui::shell_theme();
+    let t = crate::theme_ui::shell_theme();
     match item.kind {
         ToolKind::Button => rsx! { ToolButton { cx, item, path, joined: false } },
         ToolKind::Separator => rsx! {
@@ -734,7 +734,7 @@ fn ToolItemView(cx: Ctx, item: ToolItem, path: String) -> Element {
 fn ToolButton(cx: Ctx, item: ToolItem, path: String, joined: bool) -> Element {
     // Its action's state may have moved: read again with every change.
     let (_, _) = (cx.ui.revision(), cx.ui.ticks());
-    let t: ShellTheme = crate::window_ui::shell_theme();
+    let t: ShellTheme = crate::theme_ui::shell_theme();
     let viewport = try_use_context::<Editor>().map(|e| e.viewport);
     let kept = use_signal(Kept::default);
     let host = cx.ui.host();
@@ -915,7 +915,7 @@ fn ToolButton(cx: Ctx, item: ToolItem, path: String, joined: bool) -> Element {
 #[component]
 fn ToolMenu(cx: Ctx, rows: Vec<MenuItem>, depth: usize) -> Element {
     let (_, _) = (cx.ui.revision(), cx.ui.ticks());
-    let t = crate::window_ui::shell_theme();
+    let t = crate::theme_ui::shell_theme();
     let mut expanded = use_signal(|| None::<usize>);
     let host = cx.ui.host();
     let indent = depth.saturating_mul(10);

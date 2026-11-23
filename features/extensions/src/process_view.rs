@@ -266,6 +266,14 @@ fn stamp(file: &Path, origin: Origin) -> String {
     format!("{origin:?}:{len}:{at}")
 }
 
+/// A `process` view, as an app's process-view host is asked for it: the
+/// extension and its view (a Dioxus window's `ProcessViews` draws it).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProcessAsk {
+    pub extension: String,
+    pub view: String,
+}
+
 #[cfg(all(test, unix))]
 #[allow(clippy::unwrap_used)]
 mod tests {

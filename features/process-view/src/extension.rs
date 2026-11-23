@@ -31,7 +31,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use architect_extensions::host::Host;
-use architect_extensions::interface::{ProcessAsk, ProcessViews};
+use architect_extensions::interface::ProcessViews;
+use architect_extensions::process_view::ProcessAsk;
 use architect_extensions::process_view::{Launch, launch};
 use architect_workspace::use_pane;
 use dioxus::prelude::*;

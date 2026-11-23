@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use architect::action::{ActionCaller, ActionError, ActionFuture, ActionInfo, Effect};
 use architect_settings::{Owner, try_use_settings};
-use architect_shell::{ShellTheme, try_use_shell};
+use architect_shell::try_use_shell;
 use dioxus::prelude::*;
 use futures::StreamExt as _;
 use futures::channel::mpsc;
@@ -65,13 +65,6 @@ pub(crate) fn use_open_windows(host: &Host) -> Signal<Vec<OpenWindow>> {
     open
 }
 
-pub(crate) fn shell_theme() -> ShellTheme {
-    try_use_shell().map_or_else(
-        || ShellTheme::from_resolved(&architect_theme::use_resolved()),
-        |s| s.theme,
-    )
-}
-
 fn phone() -> bool {
     try_use_shell().is_some_and(|s| s.form() == architect_shell::FormFactor::Phone)
 }
@@ -97,7 +90,7 @@ pub fn ExtensionWindows(ui: ExtensionUi) -> Element {
 /// of the window's size holding its view.
 #[component]
 fn Sheet(ui: ExtensionUi, open: OpenWindow) -> Element {
-    let t = shell_theme();
+    let t = crate::theme_ui::shell_theme();
     let (ext, id) = (open.extension.clone(), open.window.id.clone());
     let close = move |_| {
         ui.host().close_window(&ext, &id);
@@ -202,7 +195,7 @@ fn OsWindow(ui: ExtensionUi, open: OpenWindow) -> Element {
 /// theme's `:root` sheet for `var(--…)`, and the view filling it.
 #[component]
 fn WindowPage(ui: ExtensionUi, extension: String, view: String) -> Element {
-    let t = shell_theme();
+    let t = crate::theme_ui::shell_theme();
     let root = architect_theme::try_use_root_css().map(|r| r());
     let ground = format!(
         "html, body {{ margin: 0; padding: 0; height: 100%; background: {}; }}",

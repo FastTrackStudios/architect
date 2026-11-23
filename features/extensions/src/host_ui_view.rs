@@ -363,7 +363,7 @@ pub fn HostUiLayer(host: Host) -> Element {
     let toasts = ui.toasts();
     let first = ui.waiting().into_iter().next();
     let shown = toasts.len();
-    let look = layer_look(&crate::window_ui::shell_theme());
+    let look = layer_look(&crate::theme_ui::shell_theme());
     rsx! {
         if shown > 0 {
             div {

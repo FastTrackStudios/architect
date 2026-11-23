@@ -488,7 +488,7 @@ pub fn ToolbarEditorLayer(ui: ExtensionUi) -> Element {
 fn EditBar(ui: ExtensionUi) -> Element {
     // The toolbars move under it: read again with every change.
     let (_, _) = (ui.revision(), ui.ticks());
-    let t = crate::window_ui::shell_theme();
+    let t = crate::theme_ui::shell_theme();
     let Some(editor) = try_use_context::<Editor>() else {
         return rsx! {};
     };
@@ -555,7 +555,7 @@ fn EditBar(ui: ExtensionUi) -> Element {
 /// off every toolbar) leaves it where it was.
 #[component]
 fn DragCover(ui: ExtensionUi, drag: Drag) -> Element {
-    let t = crate::window_ui::shell_theme();
+    let t = crate::theme_ui::shell_theme();
     let Some(editor) = try_use_context::<Editor>() else {
         return rsx! {};
     };
@@ -634,7 +634,7 @@ fn DragCover(ui: ExtensionUi, drag: Drag) -> Element {
 /// dropdown.
 #[component]
 pub(crate) fn InsertMenu(ui: ExtensionUi, toolbar: String, at: String) -> Element {
-    let t = crate::window_ui::shell_theme();
+    let t = crate::theme_ui::shell_theme();
     let Some(editor) = try_use_context::<Editor>() else {
         return rsx! {};
     };
@@ -792,7 +792,7 @@ pub(crate) fn keep_in(
 /// A menu under the element it opens from, kept in the window ([`Kept`]).
 #[component]
 pub(crate) fn Popover(ui: ExtensionUi, test: String, children: Element) -> Element {
-    let t = crate::window_ui::shell_theme();
+    let t = crate::theme_ui::shell_theme();
     let viewport = try_use_context::<Editor>().map(|e| e.viewport);
     let kept = use_signal(Kept::default);
     let place = kept().css();
@@ -826,7 +826,7 @@ fn input_style(t: &architect_shell::ShellTheme) -> String {
 
 #[component]
 fn Picker(ui: ExtensionUi, picking: Picking) -> Element {
-    let t = crate::window_ui::shell_theme();
+    let t = crate::theme_ui::shell_theme();
     let Some(editor) = try_use_context::<Editor>() else {
         return rsx! {};
     };
@@ -901,7 +901,7 @@ fn commands(host: &Host) -> Vec<Command> {
 /// An action, found by the palette's own search.
 #[component]
 fn ActionPicker(ui: ExtensionUi, purpose: For) -> Element {
-    let t = crate::window_ui::shell_theme();
+    let t = crate::theme_ui::shell_theme();
     let Some(editor) = try_use_context::<Editor>() else {
         return rsx! {};
     };
@@ -980,7 +980,7 @@ fn widgets(host: &Host) -> Vec<(String, String, Vec<(String, String)>)> {
 /// widget's size.
 #[component]
 fn WidgetPicker(ui: ExtensionUi, purpose: For) -> Element {
-    let t = crate::window_ui::shell_theme();
+    let t = crate::theme_ui::shell_theme();
     let Some(editor) = try_use_context::<Editor>() else {
         return rsx! {};
     };
@@ -1092,7 +1092,7 @@ fn WidgetPicker(ui: ExtensionUi, purpose: For) -> Element {
 fn SettingsSheet(ui: ExtensionUi, toolbar: String, at: Option<String>) -> Element {
     // The toolbars move under it: read again with every change.
     let (_, _) = (ui.revision(), ui.ticks());
-    let t = crate::window_ui::shell_theme();
+    let t = crate::theme_ui::shell_theme();
     let host = ui.host();
     let Some(bar) = host.toolbars().get(host.contributions(), &toolbar) else {
         return rsx! {};
@@ -1135,7 +1135,7 @@ fn SettingsSheet(ui: ExtensionUi, toolbar: String, at: Option<String>) -> Elemen
 /// A labelled row of the settings.
 #[component]
 fn Field(label: String, children: Element) -> Element {
-    let t = crate::window_ui::shell_theme();
+    let t = crate::theme_ui::shell_theme();
     rsx! {
         div { style: "display:flex; flex-direction:column; gap:4px;",
             span { style: "font-size:11px; color:{t.ink_3};", "{label}" }
@@ -1152,7 +1152,7 @@ fn Choices(
     test: String,
     pick: EventHandler<String>,
 ) -> Element {
-    let t = crate::window_ui::shell_theme();
+    let t = crate::theme_ui::shell_theme();
     rsx! {
         div { role: "radiogroup", "data-testid": "{test}", style: "display:flex; flex-wrap:wrap; gap:4px;",
             for (value, label) in choices {
@@ -1186,7 +1186,7 @@ fn Stepper(
     test: String,
     set: EventHandler<u32>,
 ) -> Element {
-    let t = crate::window_ui::shell_theme();
+    let t = crate::theme_ui::shell_theme();
     let now = value.unwrap_or(fallback);
     let b = format!(
         "width:24px; height:24px; border-radius:6px; border:1px solid {}; background:transparent; color:{}; cursor:pointer;",
@@ -1209,7 +1209,7 @@ fn ColorRow(
     test: String,
     set: EventHandler<Option<String>>,
 ) -> Element {
-    let t = crate::window_ui::shell_theme();
+    let t = crate::theme_ui::shell_theme();
     rsx! {
         Field { label,
             div { "data-testid": "{test}", style: "display:flex; flex-wrap:wrap; gap:4px; align-items:center;",
@@ -1250,7 +1250,7 @@ fn ColorRow(
 fn ItemSettings(ui: ExtensionUi, toolbar: String, at: String, item: ToolItem) -> Element {
     // The toolbars move under it: read again with every change.
     let (_, _) = (ui.revision(), ui.ticks());
-    let t = crate::window_ui::shell_theme();
+    let t = crate::theme_ui::shell_theme();
     let Some(editor) = try_use_context::<Editor>() else {
         return rsx! {};
     };
@@ -1398,7 +1398,7 @@ fn ItemSettings(ui: ExtensionUi, toolbar: String, at: String, item: ToolItem) ->
 /// a separator added at the end.
 #[component]
 fn MenuRows(ui: ExtensionUi, toolbar: String, at: String, rows: Vec<MenuItem>) -> Element {
-    let t = crate::window_ui::shell_theme();
+    let t = crate::theme_ui::shell_theme();
     let Some(editor) = try_use_context::<Editor>() else {
         return rsx! {};
     };
@@ -1497,7 +1497,7 @@ fn MenuRows(ui: ExtensionUi, toolbar: String, at: String, rows: Vec<MenuItem>) -
 fn ToolbarSettings(ui: ExtensionUi, toolbar: String) -> Element {
     // The toolbars move under it: read again with every change.
     let (_, _) = (ui.revision(), ui.ticks());
-    let t = crate::window_ui::shell_theme();
+    let t = crate::theme_ui::shell_theme();
     let Some(editor) = try_use_context::<Editor>() else {
         return rsx! {};
     };
