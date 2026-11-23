@@ -859,8 +859,7 @@ fn uncovered(manifest: &Manifest, hello: &Hello) -> Option<String> {
     if let Some(view) = manifest.views.iter().find(|v| {
         // A web or process view is the app's to draw (its `src`, its
         // `program`), not the guest's.
-        let app_draws =
-            v.kind == architect_views::WEB || v.kind == architect_views::PROCESS;
+        let app_draws = v.kind == architect_views::WEB || v.kind == architect_views::PROCESS;
         v.document.is_none() && !app_draws && !hello.views.contains(&v.id)
     }) {
         return Some(format!("it does not draw its view {}", view.id));

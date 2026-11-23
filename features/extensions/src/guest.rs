@@ -28,7 +28,7 @@
 //!
 //! A view's thread renders one event at a time: a handler that computes
 //! for a second freezes its pane for that second (its host marks it
-//! busy). Heavy work goes to [`spawn_work`] ([`use_work`] in a view): a
+//! busy). Heavy work goes to [`spawn_work`] (`architect_extensions_dioxus::use_work` in a view): a
 //! thread of its own, its progress and results back to the view as they
 //! come, cancelled when the view closes (`crate::work`). Every event is
 //! answered with a frame, empty when nothing changed (wire 5), so the
@@ -73,7 +73,7 @@ use crate::wire::{
     ViewEvent, WIRE,
 };
 pub use crate::work::{
-    Progress, UseWork, Work, WorkHandle, WorkState, WorkStatus, spawn_work, use_work,
+    Progress, Work, WorkHandle, WorkObserver, WorkState, WorkStatus, spawn_work,
 };
 
 type ActionFuture = Pin<Box<dyn Future<Output = Result<Json, String>> + Send>>;

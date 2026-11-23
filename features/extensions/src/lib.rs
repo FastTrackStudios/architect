@@ -48,11 +48,9 @@ pub mod editor;
 pub mod events;
 pub mod hostcall;
 
-pub mod languages;
-#[cfg(feature = "host")]
-pub mod vault;
 pub mod index;
 pub mod interop;
+pub mod languages;
 pub mod manifest;
 pub mod package;
 #[cfg(feature = "person-sync")]
@@ -65,6 +63,8 @@ pub mod share_layers;
 pub mod share_needs;
 #[cfg(feature = "host")]
 pub mod share_pick;
+#[cfg(feature = "host")]
+pub mod vault;
 #[cfg(feature = "host")]
 pub mod vault_needs;
 /// `[[favourites]]`: a note type's tabs and primary action.
@@ -132,6 +132,8 @@ pub mod luau_calls;
 /// handed (a WASI component's `invoke`, a TypeScript action's `ctx`).
 #[cfg(any(feature = "host", feature = "web"))]
 pub use invocation::{caller_json, invocation_json};
+#[cfg(all(feature = "remote", unix))]
+pub mod barrier;
 #[cfg(any(feature = "linked-core", all(feature = "guest", unix)))]
 pub mod linked;
 #[cfg(feature = "doc-sync")]
@@ -149,16 +151,10 @@ pub mod net;
 #[cfg(any(feature = "host", feature = "vox"))]
 pub mod node;
 pub mod overlay;
-#[cfg(all(feature = "pickers", target_os = "ios"))]
-pub(crate) mod pickers_ios;
-#[cfg(feature = "scenes")]
-pub mod scene;
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-mod web_scene;
-#[cfg(all(feature = "remote", unix))]
-pub mod barrier;
 #[cfg(feature = "page")]
 pub mod page;
+#[cfg(all(feature = "pickers", target_os = "ios"))]
+pub(crate) mod pickers_ios;
 #[cfg(feature = "host")]
 pub mod points;
 #[cfg(feature = "host")]
@@ -176,6 +172,8 @@ pub mod registries;
 mod registry_actions;
 #[cfg(all(feature = "remote", unix))]
 pub mod remote;
+#[cfg(feature = "scenes")]
+pub mod scene;
 #[cfg(feature = "host")]
 pub mod source;
 #[cfg(feature = "host")]
@@ -198,6 +196,8 @@ pub mod wasi;
 pub mod watch;
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 pub mod web;
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+mod web_scene;
 #[cfg(feature = "ui")]
 pub mod window_ui;
 #[cfg(feature = "host")]

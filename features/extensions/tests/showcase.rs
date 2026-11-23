@@ -432,4 +432,3 @@ fn templater_lite_makes_a_prompted_title_a_safe_file_name() {
     // No folder climbed out of, no `:`: one file in Inbox/.
     assert_eq!(out, "Inbox/-.-etc-pass-wd.md");
 }
-

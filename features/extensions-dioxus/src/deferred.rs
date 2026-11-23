@@ -150,7 +150,9 @@ fn state(id: &str) -> Arc<State> {
 }
 
 fn id_of<D: Defer>() -> Option<String> {
-    architect_extensions::Manifest::parse(D::manifest()).ok().map(|m| m.id)
+    architect_extensions::Manifest::parse(D::manifest())
+        .ok()
+        .map(|m| m.id)
 }
 
 /// `D`, built: once, the first time anything of it is used. Its handle

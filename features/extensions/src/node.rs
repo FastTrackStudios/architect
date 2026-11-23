@@ -154,10 +154,30 @@ pub struct Permit {
 /// an admin's.
 #[cfg(feature = "vox")]
 pub const PERMITS: &[Permit] = &[
-    Permit { method: "list", action: "read", resource: "extensions/**", audited: false },
-    Permit { method: "run", action: "write", resource: "extensions/**", audited: true },
-    Permit { method: "secrets", action: "admin", resource: "extensions/**", audited: false },
-    Permit { method: "set_secret", action: "admin", resource: "extensions/**", audited: true },
+    Permit {
+        method: "list",
+        action: "read",
+        resource: "extensions/**",
+        audited: false,
+    },
+    Permit {
+        method: "run",
+        action: "write",
+        resource: "extensions/**",
+        audited: true,
+    },
+    Permit {
+        method: "secrets",
+        action: "admin",
+        resource: "extensions/**",
+        audited: false,
+    },
+    Permit {
+        method: "set_secret",
+        action: "admin",
+        resource: "extensions/**",
+        audited: true,
+    },
 ];
 
 /// The future a [`NodeLane`] answers with: `Send` natively, not on wasm.

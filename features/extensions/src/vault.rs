@@ -83,12 +83,18 @@ impl NoteTypes for Declared {
         if all.iter().any(|d| d.extension == ext) {
             return false;
         }
-        all.push(NoteFileType { extension: ext, ..t });
+        all.push(NoteFileType {
+            extension: ext,
+            ..t
+        });
         true
     }
 
     fn declared(&self) -> Vec<NoteFileType> {
-        self.0.read().unwrap_or_else(PoisonError::into_inner).clone()
+        self.0
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 }
 

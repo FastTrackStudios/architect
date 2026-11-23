@@ -25,7 +25,6 @@ use std::time::{Duration, Instant};
 
 use architect::action::ActionList;
 use architect_extensions::contrib::EmbedInput;
-use architect_extensions_dioxus::EmbeddedView;
 use architect_extensions::guest::Guest;
 use architect_extensions::host::{Host, SharedSections};
 use architect_extensions::process::{ProcessRunner, Processes, Restart};
@@ -33,6 +32,7 @@ use architect_extensions::proto::SOCKET;
 use architect_extensions::remote::{RemoteDocument, RemoteView, mounted_views};
 use architect_extensions::wire::{Edit, Frame, Value};
 use architect_extensions::{Origin, Package};
+use architect_extensions_dioxus::EmbeddedView;
 use blitz_dom::{BaseDocument, Document as _, DocumentConfig};
 use blitz_traits::events::{
     BlitzPointerEvent, BlitzPointerId, Modifiers, MouseEventButton, MouseEventButtons, Point,

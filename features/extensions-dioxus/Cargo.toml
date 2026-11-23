@@ -13,6 +13,8 @@ description = "The Dioxus side of Architect extensions: views as components, the
 
 [features]
 default = []
+# A process extension's side (`architect_extensions::guest`): `use_work`.
+guest = ["architect-extensions/guest"]
 
 [dependencies]
 architect-extensions = { workspace = true, features = ["linked-core", "dioxus"] }

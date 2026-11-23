@@ -186,7 +186,8 @@ fn package(tmp: &Path, name: &str, manifest: &str, component: &str) -> PathBuf {
 }
 
 fn counter_manifest() -> String {
-    std::fs::read_to_string(root().join("features/extensions/tests/wasi-counter/extension.toml")).unwrap()
+    std::fs::read_to_string(root().join("features/extensions/tests/wasi-counter/extension.toml"))
+        .unwrap()
 }
 
 const COUNTER_WASM: &str = "architect_extension_wasi_counter.wasm";
