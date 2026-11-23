@@ -50,7 +50,7 @@ const MARK: Color = Color::from_rgb8(200, 30, 120);
 /// The overlay: a mark on lane `kick` from 4 s to 6 s, in the view's terms.
 #[component]
 fn Marks() -> Element {
-    let spaces = architect_extensions::overlay::spaces();
+    let spaces = architect_extensions_dioxus::overlay::spaces();
     let content = use_memo(use_reactive!(|spaces| {
         let mut scene = Scene::new();
         if let Some(s) = &spaces

@@ -7,7 +7,7 @@
 //! view's box, on its plane, clipped to it and passing the pointer
 //! through, and hands it the spaces whenever they change, as an embed's
 //! input: its `props` (`claim` is [`claim`]). The extension reads them with
-//! [`spaces`] (`linked::use_embed`) and draws in the view's terms, a
+//! `architect_extensions_dioxus::overlay::spaces` (its embed input) and draws in the view's terms, a
 //! `scene::RemoteScene` filling its box, so its element's coordinates are
 //! the view's.
 //!
@@ -78,14 +78,6 @@ pub fn from_input(input: &crate::contrib::EmbedInput) -> Option<OverlaySpaces> {
         return None;
     }
     serde_json::from_value(input.props.clone()).ok()
-}
-
-/// In an overlay's view: the spaces of the view it draws over, now; the
-/// view renders again when they change.
-#[cfg(feature = "dioxus")]
-#[must_use]
-pub fn spaces() -> Option<OverlaySpaces> {
-    crate::linked::use_embed().and_then(|i| from_input(&i))
 }
 
 /// One extension's view drawn as a layer over views of a kind.
