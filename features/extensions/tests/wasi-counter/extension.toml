@@ -1,5 +1,5 @@
 # A WASI component extension: Rust built for wasm32-wasip2
-# (`cargo build -p architect-sandbox-wasi-counter --target wasm32-wasip2`, in
+# (`cargo build -p architect-extension-wasi-counter --target wasm32-wasip2`, in
 # `devenv --profile wasi shell`), run by the app's `wasi` runner in a
 # sandbox of its own: its memory and each call's time limited, the app
 # reached only through the host service.
@@ -12,7 +12,7 @@ description = "A counter in a WASI component: its view drawn by the app, an acti
 authors = ["FastTrackStudios"]
 
 [wasm]
-component = "architect_sandbox_wasi_counter.wasm"
+component = "architect_extension_wasi_counter.wasm"
 
 # What it may ask the app for: the theme list, nothing that changes it.
 [capabilities]

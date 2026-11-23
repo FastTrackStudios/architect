@@ -92,17 +92,22 @@ impl NoteTypes for Declared {
     }
 }
 
-static NOTE_TYPES: OnceLock<Arc<dyn NoteTypes>> = OnceLock::new();
+static NOTE_TYPES: RwLock<Option<Arc<dyn NoteTypes>>> = RwLock::new(None);
 
-/// Install the app's note type registry (once, before extensions load;
-/// later calls are ignored).
+/// Install the app's note type registry (before extensions load: types
+/// declared earlier stay in the one they went to).
 pub fn set_note_types(types: Arc<dyn NoteTypes>) {
-    let _ = NOTE_TYPES.set(types);
+    *NOTE_TYPES.write().unwrap_or_else(PoisonError::into_inner) = Some(types);
 }
 
 /// The registry in force: the app's, or the runtime's own.
-pub fn note_types() -> &'static Arc<dyn NoteTypes> {
-    NOTE_TYPES.get_or_init(|| Arc::new(Declared::default()))
+pub fn note_types() -> Arc<dyn NoteTypes> {
+    static OWN: OnceLock<Arc<dyn NoteTypes>> = OnceLock::new();
+    NOTE_TYPES
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+        .unwrap_or_else(|| OWN.get_or_init(|| Arc::new(Declared::default())).clone())
 }
 
 #[cfg(test)]
