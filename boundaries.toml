@@ -601,10 +601,6 @@ layer = "L4"
 package = "architect-story-parity"
 layer = "L4"
 
-[[row]]
-package = "architect-story-fuzz"
-layer = "L4"
-
 # ── L1 engine / L2 storage / L3 host glue ─────────────────────────────────
 
 [[row]]
@@ -622,10 +618,6 @@ package = "vault-obsidian"
 layer = "L1"
 
 [[row]]
-package = "vault-entity"
-layer = "L1"
-
-[[row]]
 package = "vault-doc"
 layer = "L1"
 
@@ -633,10 +625,6 @@ layer = "L1"
 package = "vault-collab"
 layer = "L1"
 note = "vault files as co-edited Loro docs (#333)"
-
-[[row]]
-package = "vault-sync-client"
-layer = "L1"
 
 [[row]]
 package = "vault"

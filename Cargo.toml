@@ -86,10 +86,8 @@ members = [
     "features/vault/vault-live",
     "features/vault/vault-query",
     "features/vault/vault-obsidian",
-    "features/vault/vault-entity",
     "features/vault/vault-doc",
     "features/vault/vault-collab",
-    "features/vault/vault-sync-client",
     # ── links and tags (from Task, #333) ──────────────────────────────
     # ── sites: a vault published as a static site (#364) ─────────────
     # ── the Architect app (apps/ui, its desktop, mobile and web) ──────
@@ -102,7 +100,6 @@ members = [
     "features/story/architect-story-shell",
     "features/story/architect-story-snapshots",
     "features/story/architect-story-parity",
-    "features/story/architect-story-fuzz",
     # ── telemetry ─────────────────────────────────────────────────────
     "features/telemetry",
     # ── launcher ──────────────────────────────────────────────────────
@@ -150,10 +147,8 @@ vault-proto = { path = "features/vault/vault-proto", default-features = false }
 vault-live = { path = "features/vault/vault-live" }
 vault-obsidian = { path = "features/vault/vault-obsidian" }
 vault-query = { path = "features/vault/vault-query" }
-vault-entity = { path = "features/vault/vault-entity" }
 vault-doc = { path = "features/vault/vault-doc" }
 vault-collab = { path = "features/vault/vault-collab" }
-vault-sync-client = { path = "features/vault/vault-sync-client" }
 # The editor's document model and markdown pass, at the editor pin above
 # (through `architect-editor`'s `state`).
 editor-state = { git = "https://github.com/FastTrackStudios/editor", rev = "6817dc2c709fbb5a7858229592bbbc85eed49528", default-features = false }
@@ -205,7 +200,6 @@ architect-story-runtime = { path = "features/story/architect-story-runtime" }
 architect-story-shell = { path = "features/story/architect-story-shell" }
 architect-story-snapshots = { path = "features/story/architect-story-snapshots" }
 architect-story-parity = { path = "features/story/architect-story-parity" }
-architect-story-fuzz = { path = "features/story/architect-story-fuzz" }
 # launcher — the app launcher (core engine, providers, dioxus UI).
 # Renamed on vendoring: launcher-core → architect-launcher-core,
 # launcher-ui → architect-launcher-ui, providers →

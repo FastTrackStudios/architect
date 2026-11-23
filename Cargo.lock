@@ -1534,16 +1534,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "architect-story-fuzz"
-version = "0.1.0"
-dependencies = [
- "architect-story-core",
- "architect-story-runtime",
- "architect-story-snapshots",
- "proptest",
-]
-
-[[package]]
 name = "architect-story-macros"
 version = "0.1.0"
 dependencies = [
@@ -16573,21 +16563,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vault-entity"
-version = "0.1.0"
-dependencies = [
- "architect",
- "chrono",
- "serde",
- "serde_yaml",
- "tempfile",
- "thiserror 2.0.20",
- "tracing",
- "uuid",
- "vault",
-]
-
-[[package]]
 name = "vault-live"
 version = "0.1.0"
 dependencies = [
@@ -16676,20 +16651,6 @@ dependencies = [
  "uuid",
  "vault-proto",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "vault-sync-client"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "hex",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.20",
- "tracing",
- "vault-proto",
- "walkdir",
 ]
 
 [[package]]
