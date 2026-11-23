@@ -93,7 +93,7 @@ person-sync = ["host", "archive", "architect-extension-archive/sign"]
 # customizes the app — extensions, scripts, workers, themes, layouts and
 # keys, and kinds the app adds — with its MANAGER_* actions; linked in as
 # an extension of its own.
-manager = ["host", "linked", "dioxus", "dep:architect-workspace", "architect-workspace/home"]
+manager = ["host", "linked", "dioxus"]
 # The wire and the protocol (`wire`, `proto`); the derives key on `vox`.
 vox = ["dep:architect", "architect/vox", "dep:vox", "dep:thiserror"]
 # An extension's server-side part on the org's node (#583, `crate::node`):
@@ -199,9 +199,6 @@ architect-settings = { workspace = true }
 # `host`): the messages, the backends, the surface engine.
 architect-input = { workspace = true }
 # The view kinds an extension's views may name (the model, wasm-clean).
-# The panes views are drawn in: the GUI side's only (ui,
-# manager, remote).
-architect-workspace = { workspace = true, optional = true }
 # The view kinds and meters, shared with the panes.
 architect-views = { workspace = true }
 # Fuzzy matching for the index (the palette's engine, no UI).

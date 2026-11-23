@@ -33,7 +33,6 @@
 //! data in its document ([`doc`]); `ui` brings loaded extensions' sections
 //! onto the settings page ([`ui::use_extension_sections`]).
 
-
 pub mod capabilities;
 pub mod catalog;
 pub mod contrib;

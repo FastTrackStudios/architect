@@ -510,20 +510,81 @@ impl ItemKind for ThemeKind {
     }
 }
 
+/// One layout of the app's, as [`Layouts`] lists it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LayoutEntry {
+    /// Its file's name, without `.json` (`main`).
+    pub name: String,
+    /// What it calls itself; its name when it says nothing.
+    pub title: String,
+    /// One the app ships: read-only, cloned to change.
+    pub builtin: bool,
+}
+
+/// A file of the app's layouts folder that did not read.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LayoutProblem {
+    /// Relative to the folder (`layouts/main.json`, `keys.json`).
+    pub file: String,
+    pub message: String,
+}
+
+/// The app's layouts and keymap as they are now: plain data.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LayoutsNow {
+    pub layouts: Vec<LayoutEntry>,
+    /// The layout on show.
+    pub shown: String,
+    /// Whether a `keys.json` is there.
+    pub keys: bool,
+    pub problems: Vec<LayoutProblem>,
+}
+
+/// Where the app keeps its interface as files (`layouts/<name>.json`,
+/// `keys.json`), what the manager's layouts kind reads and does: the app
+/// gives one over whatever keeps them (a workspace's home folder).
+pub trait Layouts: Send + Sync {
+    /// The folder they are in.
+    fn dir(&self) -> std::path::PathBuf;
+    /// What is there now.
+    fn now(&self) -> LayoutsNow;
+    /// Shows layout `name`.
+    ///
+    /// # Errors
+    ///
+    /// When there is no such layout, or it does not read.
+    fn use_layout(&self, name: &str) -> Result<(), String>;
+    /// Reads the folder again (a file written or removed).
+    fn poll(&self);
+}
+
 /// The interface as files: each `layouts/<name>.json` and `keys.json`
 /// (`layout`, ids `layout:<name>` and `keys`).
 pub struct LayoutKind {
-    home: architect_workspace::home::Home,
+    layouts: std::sync::Arc<dyn Layouts>,
 }
 
 impl LayoutKind {
     #[must_use]
-    pub const fn new(home: architect_workspace::home::Home) -> Self {
-        Self { home }
+    pub fn new(layouts: impl Layouts + 'static) -> Self {
+        Self {
+            layouts: std::sync::Arc::new(layouts),
+        }
     }
 
     fn path(&self, name: &str) -> std::path::PathBuf {
-        self.home.dir().join("layouts").join(format!("{name}.json"))
+        self.layouts
+            .dir()
+            .join("layouts")
+            .join(format!("{name}.json"))
+    }
+
+    fn is_builtin(&self, name: &str) -> bool {
+        self.layouts
+            .now()
+            .layouts
+            .iter()
+            .any(|l| l.name == name && l.builtin)
     }
 }
 
@@ -537,26 +598,20 @@ impl ItemKind for LayoutKind {
     }
 
     fn list(&self) -> Vec<Item> {
-        let problems = self.home.problems();
-        let shown = self.home.active();
-        let mut out: Vec<Item> = self
-            .home
-            .names()
-            .into_iter()
-            .map(|n| {
-                let title = self
-                    .home
-                    .layout(&n)
-                    .and_then(|l| l.name)
-                    .unwrap_or_else(|| n.clone());
-                let mut i = Item::new("layout", format!("layout:{n}"), title);
-                let builtin = self.home.is_builtin(&n);
-                i.source = if builtin {
+        let now = self.layouts.now();
+        let problems = &now.problems;
+        let mut out: Vec<Item> = now
+            .layouts
+            .iter()
+            .map(|l| {
+                let n = &l.name;
+                let mut i = Item::new("layout", format!("layout:{n}"), l.title.clone());
+                i.source = if l.builtin {
                     "built in (read-only)".to_owned()
                 } else {
                     format!("layouts/{n}.json")
                 };
-                i.enabled = Some(n == shown);
+                i.enabled = Some(*n == now.shown);
                 "a layout".clone_into(&mut i.summary);
                 i.problems = problems
                     .iter()
@@ -565,7 +620,7 @@ impl ItemKind for LayoutKind {
                     .collect();
                 i.ops.push(Op::new("use", "Show"));
                 i.ops.push(Op::new("clone", "Clone to edit"));
-                if !builtin {
+                if !l.builtin {
                     i.ops
                         .push(Op::new("remove", "Remove its file").destructive());
                 }
@@ -590,7 +645,7 @@ impl ItemKind for LayoutKind {
         }
         let mut keys = Item::new("layout", "keys", "Keymap (keys.json)");
         "keys.json".clone_into(&mut keys.source);
-        keys.enabled = Some(self.home.keys().is_some());
+        keys.enabled = Some(now.keys);
         "the app's keys, rebound".clone_into(&mut keys.summary);
         keys.problems = problems
             .iter()
@@ -607,7 +662,7 @@ impl ItemKind for LayoutKind {
             .ok_or("keys.json is edited as a file")?;
         match op {
             "use" => {
-                self.home.use_layout(name)?;
+                self.layouts.use_layout(name)?;
                 Ok(json!({ "shown": name }))
             }
             "clone" => {
@@ -618,21 +673,21 @@ impl ItemKind for LayoutKind {
                 }
                 let text = std::fs::read_to_string(self.path(name)).map_err(|e| e.to_string())?;
                 std::fs::write(&to, text).map_err(|e| e.to_string())?;
-                let _ = self.home.poll();
+                self.layouts.poll();
                 Ok(json!({ "file": to.display().to_string() }))
             }
             "remove" => {
-                if self.home.is_builtin(name) {
+                if self.is_builtin(name) {
                     return Err(format!("{name} is built in: clone it to change it"));
                 }
                 std::fs::remove_file(self.path(name)).map_err(|e| e.to_string())?;
                 let _ = std::fs::remove_file(
-                    self.home
+                    self.layouts
                         .dir()
                         .join("layouts")
                         .join(format!("{name}.error")),
                 );
-                let _ = self.home.poll();
+                self.layouts.poll();
                 Ok(json!({ "removed": name }))
             }
             other => Err(format!("a layout has no op {other}")),

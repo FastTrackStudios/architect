@@ -464,7 +464,7 @@ fn the_manager_lists_and_acts_on_every_kind() {
         architect_theme::ThemeStore::default(),
         list.clone(),
     ));
-    manager.register(kinds::LayoutKind::new(home.clone()));
+    manager.register(kinds::LayoutKind::new(HomeLayouts(home.clone())));
     let app = ActionCaller::app();
 
     // The manager is an extension, built in.
@@ -598,4 +598,50 @@ fn the_manager_shows_an_extensions_frame_health() {
         ["manager: p50 6 ms · p99 30 ms · 1 slow of 3 frames (budget 16 ms)"]
     );
     assert_eq!(after.data["views"][0]["slow"], 1, "{}", after.data);
+}
+
+/// A workspace's home folder as the manager's layouts: what an app hands
+/// `LayoutKind`.
+struct HomeLayouts(architect_workspace::home::Home);
+
+impl architect_extensions::manager::kinds::Layouts for HomeLayouts {
+    fn dir(&self) -> std::path::PathBuf {
+        self.0.dir().to_path_buf()
+    }
+
+    fn now(&self) -> architect_extensions::manager::kinds::LayoutsNow {
+        let h = &self.0;
+        architect_extensions::manager::kinds::LayoutsNow {
+            layouts: h
+                .names()
+                .into_iter()
+                .map(|n| architect_extensions::manager::kinds::LayoutEntry {
+                    title: h
+                        .layout(&n)
+                        .and_then(|l| l.name)
+                        .unwrap_or_else(|| n.clone()),
+                    builtin: h.is_builtin(&n),
+                    name: n,
+                })
+                .collect(),
+            shown: h.active(),
+            keys: h.keys().is_some(),
+            problems: h
+                .problems()
+                .into_iter()
+                .map(|p| architect_extensions::manager::kinds::LayoutProblem {
+                    file: p.file,
+                    message: p.message,
+                })
+                .collect(),
+        }
+    }
+
+    fn use_layout(&self, name: &str) -> Result<(), String> {
+        self.0.use_layout(name).map(|_| ())
+    }
+
+    fn poll(&self) {
+        let _ = self.0.poll();
+    }
 }
