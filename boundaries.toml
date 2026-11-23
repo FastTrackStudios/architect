@@ -17,7 +17,7 @@
 # crate under features/ has a row here.
 #
 # Sibling crates that predate the one-crate ADR (auth-*, launcher-*,
-# crdt-seaorm, permissions/proto) keep explicit rows until they fold in.
+# permissions/proto) keep explicit rows until they fold in.
 #
 # [baseline] holds today's count per rule. A count above it fails; a count
 # below it fails until you lower it here, so numbers only go down.
@@ -527,11 +527,6 @@ layer = "L4"
 note = "the theme picker, a built-in extension: linked in, or its own process (guest)"
 
 [[row]]
-package = "architect-files-extension"
-layer = "L4"
-note = "Files, a built-in extension (#347): the org's projects and asset libraries in the navigator, a project's page (pin, browse, versions, checkpoints) and an asset's (properties, links, waveforms), over FILES_*; linked in, or its own process (guest)"
-
-[[row]]
 package = "architect-command-palette"
 layer = "L4"
 note = "the Command Palette, a built-in extension: ⌘K and ⌘O in the shell's palette slot; linked in, or its own process (guest). MIT"
@@ -721,11 +716,6 @@ layer = "L1"
 package = "auth-db"
 layer = "L2"
 note = "sibling of auth; fold in as a db flag"
-
-[[row]]
-package = "crdt-seaorm"
-layer = "L2"
-note = "sibling of crdt; fold in as a seaorm flag"
 
 [[row]]
 package = "architect-launcher-core"

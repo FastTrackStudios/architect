@@ -41,7 +41,6 @@ members = [
     # ── crdt ──────────────────────────────────────────────────────────
     "features/crdt/crdt",
     "features/crdt/crdt-derive",
-    "features/crdt/crdt-seaorm",
     "features/crdt/tests/derive",
     # ── ui ────────────────────────────────────────────────────────────
     "features/ui/architect-ui",
@@ -62,7 +61,6 @@ members = [
     "features/extensions/tests/wasi-hazards",
     "features/extensions/tests/wasi-counter",
     "features/files",
-    "features/files/extension",
     "features/navigator",
     "features/navigator/extension",
     "features/navigator-api",
@@ -178,7 +176,6 @@ auth-client = { path = "features/auth/auth-client" }
 auth-ui = { path = "features/auth/auth-ui" }
 crdt = { path = "features/crdt/crdt" }
 crdt-derive = { path = "features/crdt/crdt-derive" }
-crdt-seaorm = { path = "features/crdt/crdt-seaorm" }
 # Renamed on extraction (member manifests + their consumers renamed to
 # match): fts-ui → architect-ui, fts-story-* → architect-story-*,
 # task-telemetry → architect-telemetry.
@@ -318,7 +315,6 @@ architect-process-view = { path = "features/process-view" }
 architect-extension-wasi = { path = "features/extensions/wasi-guest" }
 architect-extension-archive = { path = "features/extensions/archive" }
 architect-files = { path = "features/files" }
-architect-files-extension = { path = "features/files/extension" }
 # The sidebar: a port of Notebook Navigator. GPL-3.0-or-later, the one GPL
 # crate (features/navigator/README.md): an app that links it ships under the GPL.
 architect-navigator = { path = "features/navigator" }
