@@ -1,6 +1,6 @@
 //! Validated canvas dimensions in physical pixels.
 
-use crate::Geometry;
+use crate::view::Geometry;
 
 pub(super) fn physical_size(geometry: Geometry) -> Option<(u16, u16)> {
     if !geometry.scale.is_finite() || geometry.scale <= 0.0 {

@@ -13,16 +13,16 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::anim::{Animation, Clock, Input, Linear, Map, Name, Property, Reading, Steps};
+use crate::ops::{Receiver, Sender};
 use anyrender::recording::RenderCommand;
 use architect::action::{ActionCaller, ActionList};
-use architect_scene::anim::{Animation, Clock, Input, Linear, Map, Name, Property, Reading, Steps};
-use architect_scene::ops::{Receiver, Sender};
 use peniko::kurbo::{Affine, Rect};
 use peniko::{Color, Fill};
 
 use super::*;
-use crate::PaneId;
-use crate::kinds::{KindId, Placement, ViewHost};
+use architect_views::PaneId;
+use architect_views::kinds::{KindId, Placement, ViewHost};
 
 /// What the test's clocks read: wall seconds, and the playhead.
 #[derive(Clone, Default)]
@@ -136,7 +136,7 @@ fn ctx() -> ViewCtx {
         KindId::paint(),
         (ViewHost::Blitz, Placement::Pane),
         (ActionList::new(), ActionCaller::app()),
-        crate::ctx::FrameClock::new(Duration::from_millis(4), || Duration::ZERO),
+        crate::view::FrameClock::new(Duration::from_millis(4), || Duration::ZERO),
     )
 }
 
@@ -274,7 +274,7 @@ fn a_painters_values_are_its_views_own() {
     let _ = painter.frame(AT);
     assert!(matches!(
         painter.failed(),
-        Some(architect_scene::Error::Denied("write", _))
+        Some(crate::Error::Denied("write", _))
     ));
 }
 
@@ -357,7 +357,7 @@ fn a_view_fails_the_same_way_linked_in_or_across_the_wire() {
 
 #[test]
 fn a_stepped_layer_rests_until_its_step_and_a_line_moves_every_frame() {
-    use architect_scene::anim::Next;
+    use crate::anim::Next;
     let hands = Hands::default();
     let content = Song::new(Arc::default()).content;
     let lyric = Layer::new(Arc::clone(&content)).animated(vec![Animation::new(
@@ -402,7 +402,7 @@ fn fader_name() -> Name {
 }
 
 fn fader_layers(content: &Arc<Vec<RenderCommand>>) -> Vec<(LayerKey, Layer)> {
-    use architect_scene::region::{Axis, Drag, Region, Shape};
+    use crate::region::{Axis, Drag, Region, Shape};
     let mut hovered = Layer::new(Arc::clone(content));
     hovered.visible = false;
     vec![
@@ -460,7 +460,7 @@ impl PaintView for Fader {
 
 #[test]
 fn a_linked_fader_follows_the_pointer_without_its_view_and_draws_as_one_across_the_wire() {
-    use architect_scene::region::{Axis, Interaction};
+    use crate::region::{Axis, Interaction};
     let content = Song::new(Arc::default()).content;
     let heard = Arc::new(Mutex::new(Vec::new()));
     let asked = Arc::new(AtomicUsize::new(0));
@@ -513,7 +513,7 @@ fn a_linked_fader_follows_the_pointer_without_its_view_and_draws_as_one_across_t
     let down = ViewInput::PointerDown {
         x: 10.0,
         y: 50.0,
-        button: crate::ctx::Button::Primary,
+        button: crate::view::Button::Primary,
         mods: vec![],
     };
     let _ = both(&down, 50.0);
@@ -527,7 +527,7 @@ fn a_linked_fader_follows_the_pointer_without_its_view_and_draws_as_one_across_t
     let up = ViewInput::PointerUp {
         x: 10.0,
         y: 20.0,
-        button: crate::ctx::Button::Primary,
+        button: crate::view::Button::Primary,
         mods: vec![],
     };
     let _ = both(&up, 20.0);
@@ -578,7 +578,7 @@ fn a_linked_regions_cursor_is_the_hosts_to_show() {
 
 #[test]
 fn a_flicked_list_coasts_on_the_host_without_its_view() {
-    use architect_scene::region::{Axis, Drag, Region, Shape};
+    use crate::region::{Axis, Drag, Region, Shape};
     let content = Song::new(Arc::default()).content;
     let scroll = Name::new("host.list").unwrap();
     let layers = vec![
@@ -628,7 +628,7 @@ fn a_flicked_list_coasts_on_the_host_without_its_view() {
     assert!(painter.pointer(&ViewInput::PointerDown {
         x,
         y,
-        button: crate::ctx::Button::Primary,
+        button: crate::view::Button::Primary,
         mods: vec![],
     }));
     for n in 1..=3_u8 {
@@ -640,7 +640,7 @@ fn a_flicked_list_coasts_on_the_host_without_its_view() {
     let _ = painter.pointer(&ViewInput::PointerUp {
         x,
         y,
-        button: crate::ctx::Button::Primary,
+        button: crate::view::Button::Primary,
         mods: vec![],
     });
     let _ = painter.frame(AT);

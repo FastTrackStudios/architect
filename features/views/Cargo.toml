@@ -7,4 +7,6 @@ license.workspace = true
 description = "Views as an app and its extensions agree on them: the view kinds a pane can show (dioxus, paint, web, process and the app's own) and each view's frame meters — pure data, no Dioxus, wasm-clean"
 
 [dependencies]
+# A pane's id (`PaneId`) round-trips through the workspace's files.
+facet = { workspace = true }
 thiserror = { workspace = true }

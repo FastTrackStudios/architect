@@ -83,18 +83,6 @@ dioxus = ["dep:dioxus"]
 # transform). The guest's `RemoteScene`, the host's widget, the browser's
 # canvas.
 scenes = ["dep:anyrender", "dep:peniko", "dep:architect-scene", "dep:base64"]
-# A paint view (`linked::Builder::paint`, #591): a `PaintView` that
-# records a scene for its pane and takes the pane's input. Linked in with
-# `paint-ui` it is a Blitz widget in the pane (`architect_workspace::paint`);
-# served by `guest` it is a `scene::RemoteScene`.
-paint = ["scenes", "dep:architect-workspace", "architect-workspace/paint"]
-paint-ui = ["paint", "linked", "paint-pane", "architect-workspace/paint-ui"]
-# A view's pane, linked in or as a process (`linked::use_pane_state`).
-pane = ["linked-core", "dioxus", "dep:architect-workspace", "architect-workspace/ui"]
-# `linked::PaintPane`: a `PaintView` mounted in an extension's own view,
-# `architect_workspace::PaintPane` linked in and `scene::RemotePaint` in
-# its process copy (with `guest`).
-paint-pane = ["pane", "paint", "architect-workspace/paint-ui", "dep:blitz-traits"]
 ui = [
     "host",
     # The clipboard on iOS: the general pasteboard (src/hostui.rs).
@@ -111,7 +99,6 @@ ui = [
     "architect-workspace/ui",
     "dep:architect-commands",
     "architect-commands/ui",
-    "pane",
 ]
 # The extensions page (`page`): search, install with consent, update, pin,
 # grants and logs, in architect-ui's components and the app's theme.
@@ -248,7 +235,7 @@ architect-input = { workspace = true }
 architect-shell = { workspace = true, optional = true }
 architect-ui = { workspace = true, optional = true }
 # The view kinds an extension's views may name (the model, wasm-clean).
-# The panes views are drawn in: the GUI side's only (paint, pane, ui,
+# The panes views are drawn in: the GUI side's only (ui,
 # manager, remote).
 architect-workspace = { workspace = true, optional = true }
 # The view kinds and meters, shared with the panes.
@@ -365,7 +352,7 @@ sha2 = { workspace = true }
 hex = { workspace = true }
 # Its own host, so `cargo test --workspace` builds the tests with it; the
 # guest too, since the remote-view tests spawn themselves as one.
-architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked", "manager", "wasi", "net", "person-sync", "node", "paint-ui", "doc-sync"] }
+architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked", "manager", "wasi", "net", "person-sync", "node", "doc-sync"] }
 # The Dioxus side, for the tests that draw views (a dev-dependency back on
 # this crate: integration tests only, one copy of it).
 architect-extensions-dioxus = { path = "../extensions-dioxus", features = ["guest", "paint"] }

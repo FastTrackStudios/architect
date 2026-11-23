@@ -21,6 +21,12 @@
 //!   function of a clock (wall time, the app's playhead) or of a named
 //!   value (a meter, a fader), evaluated by the host each frame.
 //!
+//! Views that paint (feature `paint`): a [`paint::PaintView`] records a
+//! scene for its pane each frame and takes the pane's input, given a
+//! [`view::ViewCtx`] (feature `ctx`) by whatever mounts it; `paint-ui`
+//! hosts one as a Blitz widget ([`paint::PaintMount`], [`paint::PaintPane`]),
+//! told its pane and theme by the shell's [`paint::Chrome`].
+//!
 //! The host hashes what it receives itself: a name is never the sender's
 //! word, so one extension can't put its bytes under another's name.
 //!
@@ -40,8 +46,12 @@ pub mod engine;
 pub mod fragment;
 pub mod layers;
 pub mod ops;
+#[cfg(feature = "paint")]
+pub mod paint;
 pub mod region;
 pub mod resource;
+#[cfg(feature = "ctx")]
+pub mod view;
 pub mod wake;
 
 pub use anim::{Animation, Clock, Clocks, Input, Linear, Map, Property, Readings, Values};

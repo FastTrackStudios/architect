@@ -22,8 +22,8 @@ use peniko::Color;
 use peniko::kurbo::{Affine, Point, Rect};
 
 use super::*;
-use crate::PaneId;
-use crate::kinds::{KindId, Placement, ViewHost};
+use architect_views::PaneId;
+use architect_views::kinds::{KindId, Placement, ViewHost};
 
 const COLS: u64 = 100;
 const ROWS: u64 = 100;
@@ -115,7 +115,7 @@ fn painter() -> Painter {
         KindId::paint(),
         (ViewHost::Blitz, Placement::Pane),
         (ActionList::new(), ActionCaller::app()),
-        crate::ctx::FrameClock::new(Duration::from_millis(16), move || began.elapsed()),
+        crate::view::FrameClock::new(Duration::from_millis(16), move || began.elapsed()),
     );
     Painter::new(
         ctx,

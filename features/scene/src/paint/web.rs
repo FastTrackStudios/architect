@@ -16,7 +16,7 @@ use wasm_bindgen::JsCast;
 use web_sys::{HtmlCanvasElement, WebGl2RenderingContext};
 
 use super::{FrameStats, PaintScene, Painter};
-use crate::{Geometry, ThemeTokens, ViewInput};
+use crate::view::{Geometry, ThemeTokens, ViewInput};
 
 /// A canvas initialization, sizing, or WebGL rendering failure.
 #[derive(Debug, thiserror::Error)]

@@ -236,13 +236,13 @@ pub use guest::{
 #[cfg(feature = "paint")]
 pub fn remote_paint_root<V>() -> dioxus::prelude::Element
 where
-    V: architect_workspace::paint::PaintView + Default,
+    V: architect_scene::paint::PaintView + Default,
 {
     use dioxus::prelude::*;
     let mount = use_hook(|| {
-        let mount = architect_workspace::paint::PaintMount::new(|_| V::default());
+        let mount = architect_scene::paint::PaintMount::new(|_| V::default());
         let wake = mount.wake_handle();
-        mount.extras(architect_workspace::Extras::default().with(wake))
+        mount.extras(architect_scene::view::Extras::default().with(wake))
     });
     rsx! { RemotePaint { mount } }
 }
@@ -253,8 +253,8 @@ mod remote_paint {
     use std::rc::Rc;
     use std::sync::Arc;
 
-    use architect_workspace::paint::{FrameStats, PaintView, Scene};
-    use architect_workspace::{ViewCtx, ViewInput};
+    use architect_scene::paint::{FrameStats, PaintView, Scene};
+    use architect_scene::view::{ViewCtx, ViewInput};
 
     use super::{Shown, ShownValues};
 
@@ -322,7 +322,7 @@ mod remote_paint {
 mod remote_paint_ui {
     use dioxus::prelude::*;
 
-    /// A [`PaintView`](architect_workspace::paint::PaintView) in a process,
+    /// A [`PaintView`](architect_scene::paint::PaintView) in a process,
     /// drawn by its host: what `linked::PaintPane` is in a process copy.
     ///
     /// The view is made from `mount` and given the same [`ViewCtx`] a linked
@@ -334,9 +334,9 @@ mod remote_paint_ui {
     /// a fragment once, then what changed. Its frames' times go into
     /// `mount`'s stats, as linked.
     ///
-    /// [`ViewCtx`]: architect_workspace::ViewCtx
+    /// [`ViewCtx`]: architect_scene::view::ViewCtx
     #[component]
-    pub fn RemotePaint(mount: architect_workspace::paint::PaintMount) -> Element {
+    pub fn RemotePaint(mount: architect_scene::paint::PaintMount) -> Element {
         use std::cell::RefCell;
         use std::rc::Rc;
         use std::sync::Arc;
@@ -344,10 +344,10 @@ mod remote_paint_ui {
 
         use super::remote_paint::{Live, Redraw};
         use super::{RemoteScene, SceneSize, Shown, ShownValues, futures_timer_delay};
-        use architect_workspace::{
-            Button, FrameClock, Geometry, KindId, PaneId, Placement, ThemeTokens, ViewCtx,
-            ViewHost, ViewInput,
+        use architect_scene::view::{
+            Button, FrameClock, Geometry, ThemeTokens, ViewCtx, ViewInput,
         };
+        use architect_views::{KindId, PaneId, Placement, ViewHost};
         use dioxus::html::geometry::WheelDelta;
         use dioxus::prelude::*;
 
@@ -406,7 +406,7 @@ mod remote_paint_ui {
         }
 
         let theme = tokens(crate::guest::use_theme().as_ref());
-        let pane = architect_extensions::linked::use_pane_state().map(|(id, _)| id);
+        let pane = crate::pane::use_pane_state().map(|(id, _)| id);
         let mut drawn = use_signal(|| 0_u64);
         // The view is made at its pane's first size, as a linked pane
         // makes it as it mounts: by then its host has told it its pane
@@ -583,7 +583,7 @@ mod remote_paint_ui {
                     let (x, y) = at(e.element_coordinates());
                     // Logical pixels, as a linked pane gives them: a line is
                     // `WHEEL_LINE` of them (a page crosses as lines).
-                    let line = architect_workspace::paint::WHEEL_LINE;
+                    let line = architect_scene::paint::WHEEL_LINE;
                     let (dx, dy) = match e.delta() {
                         WheelDelta::Pixels(d) => (d.x, d.y),
                         WheelDelta::Lines(d) => (d.x * line, d.y * line),

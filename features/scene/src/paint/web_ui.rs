@@ -12,7 +12,7 @@ use wasm_bindgen::{JsCast, closure::Closure};
 use web_sys::{HtmlCanvasElement, KeyboardEvent, PointerEvent, WheelEvent};
 
 use super::{Painter, web::WebPaintSurface};
-use crate::{Button, Geometry, ThemeTokens, ViewInput};
+use crate::view::{Button, Geometry, ThemeTokens, ViewInput};
 
 type RuntimeRef = Rc<RefCell<Option<Runtime>>>;
 

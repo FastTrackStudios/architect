@@ -24,7 +24,8 @@ use peniko::{
     kurbo::{Affine, Rect},
 };
 
-use super::{PaintMount, PaintPane, PaintView, PaintWake, Scene, ViewCtx, ViewInput};
+use super::{PaintMount, PaintPane, PaintView, PaintWake, Scene};
+use crate::{ViewCtx, ViewInput};
 
 thread_local! {
     static WAKE: RefCell<Option<PaintWake>> = const { RefCell::new(None) };

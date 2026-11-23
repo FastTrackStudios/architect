@@ -13,6 +13,7 @@
 //! - [`deferred`]: a linked extension linked by its manifest alone, its
 //!   code built (in a browser, fetched) the first time it is used;
 //! - [`EmbeddedView`]: another extension's view held in this one;
+//! - [`pane`]: the pane a view is drawn in, and where it is in it;
 //! - [`overlay::spaces`]: an overlay view's spaces;
 //! - [`use_work`] (feature `guest`): a process view's heavy work, off its
 //!   thread.
@@ -28,6 +29,7 @@ pub mod guest;
 pub mod overlay;
 #[cfg(feature = "paint")]
 mod paint_pane;
+pub mod pane;
 #[cfg(feature = "guest")]
 pub mod scene;
 #[cfg(feature = "guest")]

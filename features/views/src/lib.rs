@@ -8,12 +8,14 @@
 
 pub mod kinds;
 pub mod meter;
+mod pane;
 
 pub use kinds::{
     Capabilities, Capability, DIOXUS, Hosts, KindError, KindId, KindSpec, PAINT, PROCESS, Part,
     Placement, Placements, ViewHost, ViewKinds, WEB,
 };
 pub use meter::{FRAME_BUDGET, Meters, ViewHealth, ViewMeter, ViewReport, ViewSummary};
+pub use pane::{PaneHost, PaneHostRef, PaneId};
 
 /// The context-menu targets the workspace owns, `(kind, what it is)`:
 /// what an app's extension host declares for it

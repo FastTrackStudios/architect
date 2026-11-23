@@ -59,7 +59,7 @@ macro_rules! scope_word {
 mod bar;
 pub mod control;
 #[cfg(feature = "ctx")]
-mod ctx;
+use architect_scene::view as ctx;
 pub mod deck;
 mod drop;
 mod field_focus;

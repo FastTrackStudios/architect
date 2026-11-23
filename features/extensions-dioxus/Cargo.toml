@@ -31,11 +31,8 @@ guest = [
 # Blitz widget linked in, a scene its host composes as a process (with
 # `guest`).
 paint = [
-    "architect-extensions/paint",
-    "architect-extensions/pane",
-    "dep:architect-workspace",
-    "architect-workspace/paint-ui",
     "dep:architect-scene",
+    "architect-scene/paint-ui",
     "dep:blitz-traits",
 ]
 
@@ -43,9 +40,10 @@ paint = [
 architect-extensions = { workspace = true, features = ["linked-core", "dioxus"] }
 dioxus = { workspace = true }
 serde_json = { workspace = true }
+# A pane's id and what the shell tells a view of its pane (`pane`).
+architect-views = { workspace = true }
 architect = { workspace = true, optional = true }
 architect-theme = { workspace = true, optional = true }
-architect-workspace = { workspace = true, optional = true }
 architect-scene = { workspace = true, optional = true }
 blitz-traits = { workspace = true, optional = true }
 dioxus-html = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["serialize"], optional = true }

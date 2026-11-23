@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use anyrender::RenderContext;
 use architect::action::{ActionCaller, ActionList};
-use architect_shell::ShellTheme;
+use architect_views::PaneId;
 use blitz_dom::node::{ComputedStyles, Widget};
 use blitz_traits::events::{
     BlitzImeEvent, BlitzPointerEvent, BlitzPointerId, BlitzWheelDelta, KeyState, Modifiers,
@@ -26,8 +26,8 @@ use dioxus::prelude::*;
 use dioxus_native_dom::CustomWidgetAttr;
 
 use super::{FrameStats, PaintScene as _, PaintView, Painter, Scene};
-use crate::ctx::{Button, Extras, FrameClock, Geometry, ThemeTokens, ViewCtx, ViewInput};
-use crate::kinds::{KindId, Placement, ViewHost};
+use crate::view::{Button, Extras, FrameClock, Geometry, ThemeTokens, ViewCtx, ViewInput};
+use architect_views::kinds::{KindId, Placement, ViewHost};
 use peniko::Fill;
 use peniko::kurbo::{Affine, Rect};
 
@@ -41,7 +41,7 @@ pub struct PaintWidget {
     painter: Painter,
     wake: PaintWake,
     /// Wakes its window at its layers' next step and when a clock jumps.
-    alarm: architect_scene::wake::Alarm,
+    alarm: crate::wake::Alarm,
 }
 
 impl std::fmt::Debug for PaintWidget {
@@ -58,9 +58,9 @@ impl PaintWidget {
 
     fn with_wake(painter: Painter, wake: PaintWake) -> Self {
         let redraw = wake.clone();
-        let alarm = architect_scene::wake::Alarm::new(Arc::new(move || redraw.redraw()));
+        let alarm = crate::wake::Alarm::new(Arc::new(move || redraw.redraw()));
         if let Some(table) = painter.engine() {
-            architect_scene::engine::watch(table, alarm.waker());
+            crate::engine::watch(table, alarm.waker());
         }
         Self {
             painter,
@@ -81,9 +81,6 @@ impl PaintWidget {
         frame
     }
 }
-
-#[cfg(test)]
-mod document_tests;
 
 impl Widget for PaintWidget {
     fn handle_event(&mut self, event: &UiEvent) {
@@ -380,48 +377,26 @@ const fn narrow(v: f64) -> f32 {
     v as f32
 }
 
-/// The shell's theme as a view's tokens.
-///
-/// By the names a resolved theme gives them (`architect_theme`): its fields with `_` as `-`
-/// (`"ink-2"`), the accent trio as `"brand"`, `"brand-ink"`,
-/// `"brand-soft"` (`"accent"` is architect-ui's hover wash). What a pane
-/// gets when the app has a shell but no theme store.
-#[must_use]
-pub fn shell_tokens(theme: &ShellTheme) -> ThemeTokens {
-    [
-        ("desk", &theme.desk),
-        ("sheet", &theme.sheet),
-        ("title-bar", &theme.title_bar),
-        ("pill", &theme.pill),
-        ("rule", &theme.rule),
-        ("active", &theme.active),
-        ("ink", &theme.ink),
-        ("ink-2", &theme.ink_2),
-        ("ink-3", &theme.ink_3),
-        ("brand", &theme.accent),
-        ("brand-ink", &theme.accent_ink),
-        ("danger", &theme.danger),
-        ("scrim", &theme.scrim),
-        ("brand-soft", &theme.accent_soft),
-        ("font", &theme.font),
-    ]
-    .into_iter()
-    .fold(ThemeTokens::default(), |t, (name, value)| {
-        t.with(name, value.to_string())
-    })
+/// What the chrome a [`PaintPane`] is drawn in tells it: which pane it is
+/// and the app's theme as a view's tokens. The shell provides one around
+/// each pane ([`Chrome`] in context); without one, a pane is `""` and has
+/// no theme.
+pub trait PaneChrome {
+    /// The pane being drawn.
+    fn pane(&self) -> PaneId;
+    /// The theme's tokens now. Called in a render: reading the app's
+    /// theme there makes the pane render again when it changes.
+    fn tokens(&self) -> ThemeTokens;
 }
 
-/// The tokens a pane sees now: the app's theme store's whole resolved
-/// theme when there is one, else the shell's colours, else none. Read in
-/// a render, the component renders again when the theme changes.
-#[must_use]
-pub fn pane_tokens() -> ThemeTokens {
-    if let Some(store) = architect_theme::try_use_theme() {
-        return ThemeTokens::from(&*store.resolved().read());
+/// The [`PaneChrome`] in context, provided by the shell around a pane.
+#[derive(Clone)]
+pub struct Chrome(pub Rc<dyn PaneChrome>);
+
+impl Chrome {
+    pub fn new(chrome: impl PaneChrome + 'static) -> Self {
+        Self(Rc::new(chrome))
     }
-    architect_shell::try_use_shell()
-        .map(|s| shell_tokens(&s.theme))
-        .unwrap_or_default()
 }
 
 /// What a [`PaintPane`] mounts: its view, made once from the pane's
@@ -435,7 +410,7 @@ pub struct PaintMount {
     wake: PaintWake,
     /// The engine's values its layers read, when the mount brings them
     /// ([`PaintMount::with_engine`]).
-    engine: Option<std::sync::Arc<architect_scene::engine::EngineTable>>,
+    engine: Option<std::sync::Arc<crate::engine::EngineTable>>,
 }
 
 impl PartialEq for PaintMount {
@@ -472,10 +447,7 @@ impl PaintMount {
     /// a value shows or moves are then drawn at the level the engine last
     /// wrote; without a table they draw as if every value were full.
     #[must_use]
-    pub fn with_engine(
-        mut self,
-        table: std::sync::Arc<architect_scene::engine::EngineTable>,
-    ) -> Self {
+    pub fn with_engine(mut self, table: std::sync::Arc<crate::engine::EngineTable>) -> Self {
         self.engine = Some(table);
         self
     }
@@ -541,19 +513,22 @@ impl PaintMount {
 /// it, the window's IME is on and keys and composed text go to the view.
 #[component]
 pub fn PaintPane(mount: PaintMount) -> Element {
-    let pane = crate::use_pane();
+    let chrome = try_use_context::<Chrome>();
+    let pane_id = chrome
+        .as_ref()
+        .map_or_else(|| PaneId::new(""), |c| c.0.pane());
     let actions = try_use_context::<Arc<ActionList>>();
-    let theme = pane_tokens();
+    let theme = chrome.as_ref().map(|c| c.0.tokens()).unwrap_or_default();
     let window = try_use_context::<Arc<dyn ShellProvider>>();
     mount.wake.attach(window.clone());
     mount.wake.set_theme(theme.clone());
     let (widget, input) = use_hook(|| {
         // The app's one wall clock: a pane in any window, and the
         // animations of its layers, read the same time.
-        let clock = FrameClock::new(mount.budget, architect_scene::anim::wall_elapsed);
+        let clock = FrameClock::new(mount.budget, crate::anim::wall_elapsed);
         let actions = actions.map(|a| (*a).clone()).unwrap_or_default();
         let ctx = ViewCtx::new(
-            pane.id.clone(),
+            pane_id.clone(),
             KindId::paint(),
             (ViewHost::Blitz, Placement::Pane),
             (actions, ActionCaller::app()),
@@ -595,7 +570,7 @@ pub fn PaintPane(mount: PaintMount) -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::PaneId;
+    use architect_views::PaneId;
     use dioxus::core::NoOpMutations;
     use std::cell::RefCell;
     use std::sync::atomic::AtomicUsize;
@@ -720,7 +695,7 @@ mod tests {
     }
 
     /// A view of one layer that moves as `animation` says.
-    struct Moves(architect_scene::anim::Animation);
+    struct Moves(crate::anim::Animation);
 
     impl PaintView for Moves {
         fn input(&mut self, _: &ViewCtx, _: &ViewInput) -> bool {
@@ -749,8 +724,8 @@ mod tests {
     }
 
     fn resting(
-        animation: architect_scene::anim::Animation,
-        playhead: Arc<Mutex<Option<architect_scene::anim::Reading>>>,
+        animation: crate::anim::Animation,
+        playhead: Arc<Mutex<Option<crate::anim::Reading>>>,
     ) -> (PaintWidget, Arc<Window>) {
         let ctx = ViewCtx::new(
             PaneId::new("popout"),
@@ -759,7 +734,7 @@ mod tests {
             (ActionList::new(), ActionCaller::app()),
             FrameClock::new(Duration::from_millis(4), || Duration::ZERO),
         );
-        let clocks = architect_scene::Clocks::new(|| 0.0, move || *playhead.lock().unwrap());
+        let clocks = crate::Clocks::new(|| 0.0, move || *playhead.lock().unwrap());
         let wake = PaintWake::new();
         let window = Arc::new(Window::default());
         wake.attach(Some(window.clone()));
@@ -775,7 +750,7 @@ mod tests {
 
     #[test]
     fn a_seek_while_paused_wakes_a_pop_out_that_rests() {
-        use architect_scene::anim::{Animation, Clock, Input, Linear, Property, Reading};
+        use crate::anim::{Animation, Clock, Input, Linear, Property, Reading};
         let playhead = Arc::new(Mutex::new(Some(Reading::still(1.0))));
         let (widget, window) = resting(
             Animation::linear(
@@ -792,7 +767,7 @@ mod tests {
         let before = window.0.load(Ordering::Relaxed);
         // The main window's bar seeks; the deck says its clock moved.
         *playhead.lock().unwrap() = Some(Reading::still(2.0));
-        architect_scene::wake::clocks_moved();
+        crate::wake::clocks_moved();
         assert!(
             window.0.load(Ordering::Relaxed) > before,
             "the pop-out wasn't woken"
@@ -802,7 +777,7 @@ mod tests {
 
     #[test]
     fn a_step_wakes_its_window_when_it_comes_and_not_before() {
-        use architect_scene::anim::{Animation, Clock, Input, Map, Property, Steps};
+        use crate::anim::{Animation, Clock, Input, Map, Property, Steps};
         let (widget, window) = resting(
             Animation::new(
                 Property::Visible,
@@ -827,7 +802,7 @@ mod tests {
     }
 
     thread_local! {
-        static THEME: RefCell<Option<Signal<ShellTheme>>> = const { RefCell::new(None) };
+        static THEME: RefCell<Option<Signal<ThemeTokens>>> = const { RefCell::new(None) };
         static MOUNT_WAKE: RefCell<Option<PaintWake>> = const { RefCell::new(None) };
     }
 
@@ -844,42 +819,27 @@ mod tests {
         rsx! { PaintPane { mount } }
     }
 
-    fn theme_app() -> Element {
-        let theme = use_signal(ShellTheme::default);
-        THEME.with(|slot| *slot.borrow_mut() = Some(theme));
-        let workspace = use_signal(|| {
-            let mut workspace = crate::Workspace::new();
-            workspace
-                .open(
-                    crate::Pane::new("paint", "paint-test", "Paint"),
-                    crate::Target::Tab,
-                )
-                .unwrap();
-            workspace
-        });
-        let views = use_hook(|| {
-            crate::Views::new().view(crate::View::new(
-                "paint-test",
-                "Paint",
-                |_| rsx! { TestPaintPane {} },
-            ))
-        });
-        let screen = architect_shell::Screen {
-            width: 1000.0,
-            height: 800.0,
-            touch: false,
-            insets: architect_shell::Insets::default(),
-        };
-        rsx! {
-            architect_shell::AppShell { screen, theme: theme(), tabs: vec![], current: None,
-                on_tab: |_| (),
-                crate::WorkspaceView { workspace, views }
-            }
+    /// A shell's chrome: one pane, its theme a signal the test changes.
+    struct TestChrome(Signal<ThemeTokens>);
+
+    impl PaneChrome for TestChrome {
+        fn pane(&self) -> PaneId {
+            PaneId::new("paint-test")
+        }
+        fn tokens(&self) -> ThemeTokens {
+            self.0.read().clone()
         }
     }
 
+    fn theme_app() -> Element {
+        let theme = use_signal(|| ThemeTokens::default().with("brand", "#000000"));
+        THEME.with(|slot| *slot.borrow_mut() = Some(theme));
+        use_context_provider(|| Chrome::new(TestChrome(theme)));
+        rsx! { TestPaintPane {} }
+    }
+
     #[test]
-    fn shell_theme_change_reaches_mounted_pane_without_remounting() {
+    fn a_theme_change_reaches_a_mounted_pane_without_remounting() {
         let mut dom = VirtualDom::new(theme_app);
         dom.rebuild_in_place();
         let wake = MOUNT_WAKE.with(|slot| slot.borrow().clone().expect("mounted"));
@@ -888,7 +848,7 @@ mod tests {
         dom.in_runtime(|| {
             THEME.with(|slot| {
                 let mut theme = slot.borrow().unwrap();
-                theme.write().accent = "#123456".into();
+                theme.set(ThemeTokens::default().with("brand", "#123456"));
             });
         });
         dom.render_immediate(&mut NoOpMutations);

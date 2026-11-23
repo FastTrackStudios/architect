@@ -19,8 +19,8 @@ use std::time::Duration;
 
 use architect::action::{ActionCaller, ActionList};
 
-use crate::PaneId;
-use crate::kinds::{KindId, Placement, ViewHost};
+use architect_views::PaneId;
+use architect_views::kinds::{KindId, Placement, ViewHost};
 
 /// A view's size in logical pixels and the display's scale factor.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]

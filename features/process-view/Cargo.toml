@@ -43,7 +43,7 @@ required-features = ["demo", "guest"]
 [dependencies]
 architect-workspace = { workspace = true, features = ["paint"] }
 thiserror = { workspace = true }
-rustix = { version = "1", features = ["net", "fs", "mm", "event", "process", "shm"] }
+rustix = { version = "1", features = ["net", "fs", "mm", "event", "process", "shm", "time"] }
 wgpu = { version = "30", optional = true }
 vello = { version = "0.11", optional = true }
 anyrender_vello = { version = "0.15", optional = true }

@@ -42,25 +42,25 @@ use std::time::Duration;
 
 // What a view records with, at the versions the host draws: a crate
 // that paints needs no anyrender or peniko of its own.
+pub use crate::Layer;
+pub use crate::anim::{self, Clocks, Readings};
+use crate::anim::{Name, Space, Values};
+pub use crate::layers::Key as LayerKey;
+pub use crate::region::{self, Cursor, RegionEvent};
+pub use crate::wake;
 pub use anyrender::{PaintScene, Scene};
-pub use architect_scene::Layer;
-pub use architect_scene::anim::{self, Clocks, Readings};
-use architect_scene::anim::{Name, Space, Values};
-pub use architect_scene::layers::Key as LayerKey;
-pub use architect_scene::region::{self, Cursor, RegionEvent};
-pub use architect_scene::wake;
 pub use peniko;
 use peniko::kurbo::{Affine, Point, Rect};
 use peniko::{Color, Fill};
 
 #[cfg(feature = "paint-ui")]
 pub use widget::{
-    PaintMount, PaintPane, PaintWake, PaintWidget, WHEEL_LINE, left_view, pane_tokens,
-    shell_tokens, view_input,
+    Chrome, PaintMount, PaintPane, PaintWake, PaintWidget, PaneChrome, WHEEL_LINE, left_view,
+    view_input,
 };
 
-use crate::ctx::{Geometry, ThemeTokens, ViewCtx, ViewInput};
-use crate::meter::percentile;
+use crate::view::{Geometry, ThemeTokens, ViewCtx, ViewInput};
+use architect_views::meter::percentile;
 
 /// A view of the [`PAINT`](crate::PAINT) kind.
 pub trait PaintView: 'static {
@@ -290,17 +290,17 @@ pub struct Painter {
     held: Option<Held>,
     /// Why its view failed: it is drawn as nothing and asked nothing
     /// again, as a view in a process that sent what its host refused.
-    failed: Option<architect_scene::Error>,
+    failed: Option<crate::Error>,
     /// A cursor its regions asked for since the host last looked.
     cursor: Option<Cursor>,
     /// The engine's values its layers read, when granted them.
-    engine: Option<Arc<architect_scene::engine::EngineTable>>,
+    engine: Option<Arc<crate::engine::EngineTable>>,
 }
 
 /// A view's layers and values as its painter keeps them.
 #[derive(Debug, Default)]
 struct Held {
-    layers: architect_scene::Layers,
+    layers: crate::Layers,
     values: Values,
     /// The clocks it was last drawn at.
     drawn: Readings,
@@ -314,17 +314,17 @@ struct Held {
 
 impl Held {
     /// `layers` and `values` kept, checked as a host checks what a view
-    /// in a process sends it ([`architect_scene::ops::Receiver`]): the
+    /// in a process sends it ([`crate::ops::Receiver`]): the
     /// same limits and the same errors, so a view fails the same way
     /// linked in or not.
     fn keep(
         &mut self,
         layers: Vec<(LayerKey, Layer)>,
         values: Vec<(Name, f64)>,
-    ) -> Result<(), architect_scene::Error> {
-        use architect_scene::Error;
-        if layers.len() > architect_scene::ops::MAX_LAYERS {
-            return Err(Error::TooManyLayers(architect_scene::ops::MAX_LAYERS));
+    ) -> Result<(), crate::Error> {
+        use crate::Error;
+        if layers.len() > crate::ops::MAX_LAYERS {
+            return Err(Error::TooManyLayers(crate::ops::MAX_LAYERS));
         }
         let mut animations = 0_usize;
         for (_, layer) in &layers {
@@ -393,7 +393,7 @@ impl Painter {
     /// was granted `engine`): drawn at the level the engine last wrote,
     /// every frame while it writes.
     #[must_use]
-    pub fn with_engine(mut self, table: Arc<architect_scene::engine::EngineTable>) -> Self {
+    pub fn with_engine(mut self, table: Arc<crate::engine::EngineTable>) -> Self {
         if let Some(held) = self.held.as_mut() {
             held.values.set_engine(Some(Arc::clone(&table)));
         }
@@ -403,7 +403,7 @@ impl Painter {
 
     /// The engine's table its layers read, if granted one.
     #[must_use]
-    pub const fn engine(&self) -> Option<&Arc<architect_scene::engine::EngineTable>> {
+    pub const fn engine(&self) -> Option<&Arc<crate::engine::EngineTable>> {
         self.engine.as_ref()
     }
 
@@ -458,7 +458,7 @@ impl Painter {
     /// Why its view failed, if it did: what it returned broke a rule a
     /// host enforces on a view in a process.
     #[must_use]
-    pub const fn failed(&self) -> Option<&architect_scene::Error> {
+    pub const fn failed(&self) -> Option<&crate::Error> {
         self.failed.as_ref()
     }
 

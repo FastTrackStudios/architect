@@ -31,17 +31,17 @@ pub trait BuilderExt {
     /// `paint`, #591).
     ///
     /// `V` records an anyrender scene for the pane's size and scale
-    /// (`architect_workspace::paint::PaintView::paint`) and is given the
+    /// (`architect_scene::paint::PaintView::paint`) and is given the
     /// pane's input in its own logical pixels: pointer, wheel, touch,
     /// keys and composed text (`PaintView::input`). It is hosted as a
-    /// Blitz widget in the pane (`architect_workspace::paint::PaintPane`).
+    /// Blitz widget in the pane (`architect_scene::paint::PaintPane`).
     /// A frame is drawn after input that changed something, every frame
     /// while it says it is `animating`, and when it asks: its
     /// `ctx.extras` holds the pane's `PaintWake`.
     #[cfg(feature = "paint")]
     fn paint<V>(&mut self, id: impl Into<String>) -> &mut Self
     where
-        V: architect_workspace::paint::PaintView + Default;
+        V: architect_scene::paint::PaintView + Default;
 }
 
 impl BuilderExt for Builder {
@@ -70,7 +70,7 @@ impl BuilderExt for Builder {
     #[cfg(feature = "paint")]
     fn paint<V>(&mut self, id: impl Into<String>) -> &mut Self
     where
-        V: architect_workspace::paint::PaintView + Default,
+        V: architect_scene::paint::PaintView + Default,
     {
         let id = id.into();
         #[cfg(feature = "guest")]
@@ -87,14 +87,14 @@ impl BuilderExt for Builder {
 /// its `ctx.extras`.
 fn paint_root<V>() -> Element
 where
-    V: architect_workspace::paint::PaintView + Default,
+    V: architect_scene::paint::PaintView + Default,
 {
-    use architect_workspace::paint::{PaintMount, PaintPane};
+    use architect_scene::paint::{PaintMount, PaintPane};
     use dioxus::prelude::*;
     let mount = use_hook(|| {
         let mount = PaintMount::new(|_| V::default());
         let wake = mount.wake_handle();
-        mount.extras(architect_workspace::Extras::default().with(wake))
+        mount.extras(architect_scene::view::Extras::default().with(wake))
     });
     rsx! { PaintPane { mount } }
 }
