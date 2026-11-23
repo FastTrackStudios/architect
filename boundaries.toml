@@ -53,8 +53,8 @@ architect-server = ["server-seaorm"]
 # document: stylesheets, HTML parser), whose features include
 # tower-http, like the story crates above; the guide
 # itself reaches no server stack.
-ui-reach = 15
-transport-host = 4
+ui-reach = 13
+transport-host = 1
 lints = 1
 
 # ── L0 contracts ──────────────────────────────────────────────────────────
@@ -187,11 +187,6 @@ package = "architect-orgs"
 layer = "L0"
 
 [[row]]
-package = "architect-capture"
-layer = "L0"
-note = "Capture's model (#352): the quick-add parser, an inbox note's shape, capture targets"
-
-[[row]]
 package = "architect-accounts"
 layer = "L0"
 note = "accounts and the active one, the secret store's trait, the account store: wasm-clean"
@@ -215,14 +210,6 @@ layer = "L0"
 note = "the documents service (#706): the rpc trait, its gated implementation, a memory store; wasm-clean"
 
 [[row]]
-package = "architect-canvas"
-layer = "L0"
-
-[[row]]
-package = "architect-pages"
-layer = "L0"
-
-[[row]]
 package = "architect-theme"
 layer = "L0"
 note = "the palette, resolver, cascade and store: pure data"
@@ -233,26 +220,10 @@ layer = "L0"
 note = "a note type's favourites and primary action: pure data"
 
 [[row]]
-package = "architect-media"
-layer = "L0"
-note = "media items and collections read from frontmatter: pure data"
-
-[[row]]
-package = "architect-media"
-features = ["ui"]
-layer = "L4"
-note = "the native list of a collection, on the playhead"
-
-[[row]]
 package = "architect-theme"
 features = ["actions"]
 layer = "L0"
 note = "THEME_* on an Action List"
-
-[[row]]
-package = "architect-a2ui"
-layer = "L0"
-note = "the catalog, surfaces on Loro, events as actions; a2ui-base pinned exactly"
 
 [[row]]
 package = "architect-files"
@@ -277,15 +248,6 @@ package = "architect-files"
 features = ["agent"]
 layer = "L0"
 note = "the files agent's service (FILES_*, FilesHttpClient) and its wasm-clean wire types (#347)"
-
-[[row]]
-package = "architect-attachments"
-layer = "L0"
-
-[[row]]
-package = "architect-attachments"
-features = ["vox"]
-layer = "L0"
 
 [[row]]
 package = "architect-devices"
@@ -315,25 +277,6 @@ package = "vault-proto"
 features = ["vox"]
 layer = "L0"
 
-[[row]]
-package = "links-proto"
-layer = "L0"
-
-[[row]]
-package = "links-proto"
-features = ["vox"]
-layer = "L0"
-
-[[row]]
-package = "tag-proto"
-layer = "L0"
-
-[[row]]
-package = "tag-proto"
-features = ["vox"]
-layer = "L0"
-
-# ── L4 ui ─────────────────────────────────────────────────────────────────
 [[row]]
 package = "crdt"
 features = ["dioxus"]
@@ -400,106 +343,15 @@ features = ["ui"]
 layer = "L4"
 
 [[row]]
-package = "architect-capture"
-features = ["ui"]
-layer = "L4"
-note = "The composer, the inbox deck, the capture window"
-
-[[row]]
 package = "architect-accounts"
 features = ["ui", "keychain"]
 layer = "L4"
 note = "the shell's Account item, the switcher, the sign-in sheet, ACCOUNT_*; the issuer over its HTTP face, sessions in the keychain"
 
 [[row]]
-package = "architect-extensions"
-features = ["ui"]
-layer = "L4"
-
-[[row]]
-package = "architect-extensions"
-features = ["remote"]
-layer = "L4"
-
-[[row]]
-package = "architect-canvas"
-features = ["ui"]
-layer = "L4"
-
-[[row]]
-package = "architect-pages"
-features = ["ui"]
-layer = "L4"
-
-[[row]]
-package = "architect-webview"
-layer = "L4"
-note = "the web view kind's hosts (#222): the extensions' interface and the workspace's panes"
-
-[[row]]
-package = "architect-a2ui"
-features = ["ui"]
-layer = "L4"
-
-[[row]]
 package = "architect-theme"
 features = ["dioxus"]
 layer = "L4"
-
-[[row]]
-package = "architect-bases"
-layer = "L4"
-note = "Bases, a built-in extension: a vault's .base files as table, cards and list, base view types extensions add, BASES_* actions, the ```base fence"
-
-[[row]]
-package = "architect-projects"
-layer = "L4"
-note = "Projects, a first-party extension (#375): a page on the built-in project kind, the software and client project types, goals and milestones; linked in, or its own process (guest)"
-
-[[row]]
-package = "architect-tasks"
-layer = "L4"
-note = "Tasks, a first-party extension (#375): tasks as vault notes, its list, Today, My tasks and a kanban base view; linked in, or its own process (guest)"
-
-[[row]]
-package = "architect-threads"
-layer = "L4"
-note = "Threads, a built-in extension (#348): comments anchored to any entity, replies, mentions, resolve/reopen, kept as notes in Threads/; the comments pane; linked in, or its own process (guest)"
-
-[[row]]
-package = "architect-playhead"
-layer = "L4"
-note = "The playhead, a built-in extension (#589): architect.playhead, each extension's queue as its source on one deck per app, the active one in the Now Playing bar; wasm-clean core, `ui` the bar, `extension` linked in or its own process (guest)"
-
-[[row]]
-package = "architect-notify"
-layer = "L4"
-note = "Notify, a built-in extension (#348): notifications with a typed source in each person's note, the bell and the centre, joined with the toasts; linked in, or its own process (guest)"
-
-[[row]]
-package = "architect-updates"
-layer = "L4"
-note = "Updates, a built-in extension (#523): the updater's state, plan, actions and settings view; its network half is feature `release`, which the app (apps/distribution) turns on; linked in, or its own process (guest)"
-
-[[row]]
-package = "architect-time-tracker"
-layer = "L4"
-note = "the Time Tracker, a first-party extension (#375): timers and time entries on vault notes, totals, a timesheet base view and a report; linked in, or its own process (guest)"
-
-[[row]]
-package = "architect-calendar"
-layer = "L4"
-note = "the Calendar, a first-party extension (#336, #350): events as vault notes with repeats and exceptions, day/week/month/agenda views, calendar and timeline base views, tasks and tracked time on it; linked in, or its own process (guest)"
-
-[[row]]
-package = "architect-dayplan"
-layer = "L4"
-note = "Day Plans, a first-party extension (#444): Task's day templates, the rules and overrides that pick each day's, per-date plans and Task's resolver, as vault notes; its template editor and rules views; linked in, or its own process (guest)"
-
-[[row]]
-package = "architect-mealplan"
-layer = "L4"
-note = "Mealplan, a first-party extension: Task's meal planning as vault notes (week plans, the pantry, substitutions, grocery lists), the automatic grocery list from architect.cookbook's ingredients; one #[architect::rpc] service served in process; linked in, or its own process (guest)"
 
 [[row]]
 package = "architect-ui"
@@ -509,11 +361,6 @@ layer = "L4"
 package = "auth-ui"
 layer = "L4"
 note = "sibling of auth; fold in as a ui flag"
-
-[[row]]
-package = "architect-launcher-ui"
-layer = "L4"
-note = "sibling of launcher; fold in as a ui flag"
 
 [[row]]
 package = "architect-guide"
@@ -594,31 +441,6 @@ features = ["actions"]
 layer = "L1"
 
 [[row]]
-package = "architect-capture"
-features = ["actions"]
-layer = "L1"
-note = "CAPTURE_* and INBOX_* over the vault's VAULT_*"
-
-[[row]]
-package = "links"
-layer = "L1"
-note = "typed links' store, LINKS_* (#333)"
-
-[[row]]
-package = "links"
-features = ["actions"]
-layer = "L1"
-
-[[row]]
-package = "tag"
-layer = "L1"
-note = "the tag registry, TAGS_* (#333)"
-
-[[row]]
-package = "tag"
-features = ["actions"]
-layer = "L1"
-[[row]]
 package = "auth"
 layer = "L1"
 
@@ -650,16 +472,6 @@ layer = "L1"
 note = "synced roots (#347): projects and asset libraries held in place, a Loro manifest per root, the engine, WebDAV, the agent's service"
 
 [[row]]
-package = "architect-attachments"
-features = ["blob"]
-layer = "L1"
-
-[[row]]
-package = "architect-attachments"
-features = ["server"]
-layer = "L1"
-
-[[row]]
 package = "architect-devices"
 features = ["server", "account"]
 layer = "L1"
@@ -680,16 +492,6 @@ layer = "L2"
 note = "sibling of auth; fold in as a db flag"
 
 [[row]]
-package = "architect-launcher-core"
-layer = "L1"
-note = "sibling of launcher; fold in"
-
-[[row]]
-package = "architect-launcher-providers"
-layer = "L1"
-note = "sibling of launcher; fold in"
-
-[[row]]
 package = "architect-telemetry"
 layer = "L1"
 
@@ -700,27 +502,10 @@ layer = "L1"
 note = "the Luau runtime (mlua, C++ built from source): desk, server, mobile; not wasm yet"
 
 [[row]]
-package = "example-scripting"
-layer = "L3"
-note = "the scripting example: a task board's actions driven by Luau, saved scripts, MCP; native"
-
-[[row]]
-package = "architect-canvas"
-features = ["luau"]
-layer = "L1"
-note = "ImGui and Canvas for Luau scripts, on architect-scripting's runtime: not wasm yet"
-
-[[row]]
 package = "architect-extensions"
 features = ["host", "crdt"]
 layer = "L1"
 note = "the extensions host: Luau through architect-scripting, git through the `git` program; not wasm yet"
-
-[[row]]
-package = "architect-extensions"
-features = ["lsp"]
-layer = "L1"
-note = "language servers through the host (#512): `Host::open_code` behind `capabilities.languages`, the `EDITOR_*` actions; desk only"
 
 [[row]]
 package = "architect-extensions"
@@ -757,22 +542,6 @@ layer = "L1"
 note = "a WASI component extension's own side, built for wasm32-wasip2: its Dioxus views as the world's edits, the host service through wit-bindgen"
 
 [[row]]
-package = "example-extension-host"
-layer = "L3"
-note = "examples/extension: a host app over architect-extensions (host, process, remote) and architect-canvas; desk only"
-
-[[row]]
-package = "example-extension-counter"
-layer = "L1"
-note = "examples/extension: a process extension's program (architect-extensions guest); desk only"
-
-[[row]]
-package = "architect-webview"
-features = ["desk"]
-layer = "L3"
-note = "host glue: a wry child web view in a desk window's pane, over dioxus-native's window (its net reaches tower-http)"
-
-[[row]]
 package = "architect-mcp"
 layer = "L3"
 
@@ -787,29 +556,11 @@ features = ["server", "cli"]
 layer = "L3"
 note = "the per-app control socket on its own tokio runtime, and the actions CLI; desk only"
 
-[[row]]
-package = "architect-sites"
-layer = "L3"
-note = "a vault published as a static site (#364), read and written at build time; desk only"
 
 [[row]]
-package = "architect-sites"
-features = ["pages"]
-layer = "L3"
-note = "with extensions' embed pages (QuickJS) drawing the blocks they claim"
-
-# ── apps ──────────────────────────────────────────────────────────────────
-# The Architect app. An app (`host-dirs`), so it may enable the server
-# transports, and both builds do: `serve`, the always-on node, is in each
-# (architect `host`, `http`, `iroh`; apps/desktop/src/node).
-[[row]]
-package = "architect-desktop"
-layer = "L3"
-note = "the window (feature `gui`) plus `serve`, the headless node: the transport host and the GUI stack"
+package = "architect-views"
+layer = "L1"
 
 [[row]]
-package = "architect-desktop"
-no-default-features = true
-features = ["vox"]
-layer = "L3"
-note = "the app headless (`architect-desktop serve`, the server image): the transport host, no Blitz, wgpu or wayland"
+package = "architect-extensions-dioxus"
+layer = "L4"

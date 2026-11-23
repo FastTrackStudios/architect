@@ -41,15 +41,6 @@ features = [
     "architect-orgs/commands",
 ]
 
-# The sandbox's Keyflow editor tab (apps/ui/src/keyflow.rs): it fills its
-# pane, in the app's theme. Keyflow pinned at its main after the runtime
-# extension merged (keyflow#96), which builds against this Architect.
-[[pass]]
-name = "lab-keyflow"
-workspace = true
-packages = ["architect-app"]
-features = ["architect-app/keyflow-lab"]
-
 # `CodeEditor`'s story played headlessly on Blitz against its golden
 # (`features/editor/tests/story.rs`, #512): `architect-editor`'s `stories`
 # feature, which nothing in the workspace build turns on. (Its `syntax`
@@ -83,7 +74,23 @@ features = ["xtask/stack-test"]
 # The web view kind's desk host (#222): the package protocol's origin
 # check, navigation, host names and the overlay probes (src/desk.rs), in
 # the wry build (WebKitGTK from the dev shell).
+
+# What the Architect app's passes used to reach before the strip removed
+# the app: the accounts' sign-in over HTTP, the keychain and the share
+# actions, the editor's LSP, MCP over HTTP, presence's native and UI
+# sides, and the workspace's paint documents.
 [[pass]]
-name = "webview-desk"
-packages = ["architect-webview"]
-features = ["architect-webview/desk"]
+name = "framework-features"
+packages = ["architect-accounts", "architect-editor", "architect-mcp", "architect-presence", "architect-workspace"]
+features = [
+    "architect-accounts/http",
+    "architect-accounts/keychain",
+    "architect-accounts/actions",
+    "architect-editor/lsp-stub",
+    "architect-editor/native",
+    "architect-mcp/http",
+    "architect-presence/native",
+    "architect-presence/ui",
+    "architect-workspace/paint",
+    "architect-workspace/paint-ui",
+]

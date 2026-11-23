@@ -10,3 +10,6 @@ description = "Views as an app and its extensions agree on them: the view kinds 
 # A pane's id (`PaneId`) round-trips through the workspace's files.
 facet = { workspace = true }
 thiserror = { workspace = true }
+
+[lints]
+workspace = true

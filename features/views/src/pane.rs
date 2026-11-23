@@ -18,9 +18,10 @@ impl PaneId {
     }
 }
 
-/// What the shell tells a view drawn in one of its panes (put in context
-/// around the pane as a [`PaneHostRef`]): which pane, its state and where
-/// its view is. Read in a render, the methods that read the pane subscribe
+/// What the shell tells a view drawn in one of its panes.
+///
+/// It is put in context around the pane as a [`PaneHostRef`]: which pane,
+/// its state and where its view is. Read in a render, the methods that read the pane subscribe
 /// the component to it, as the shell's own state does.
 pub trait PaneHost {
     /// The pane's id.
