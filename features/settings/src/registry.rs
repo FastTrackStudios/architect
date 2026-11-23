@@ -1,7 +1,7 @@
 //! Every section there is now: the app's, registered once, and each
 //! extension's, registered while it is loaded.
 
-use architect_commands::fuzzy;
+use architect_palette::fuzzy;
 
 use crate::model::{Owner, Section, Setting};
 

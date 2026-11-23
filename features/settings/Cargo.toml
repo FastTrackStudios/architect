@@ -32,11 +32,15 @@ ui = [
     "dep:architect-shell",
     "architect-shell/ui",
     "dep:lucide-dioxus",
+    "dep:architect-commands",
     "architect-commands/ui",
 ]
 
 [dependencies]
-architect-commands = { workspace = true }
+# The ⌘K palette's opener for the page (`ui` only).
+architect-commands = { workspace = true, optional = true }
+# Search ranks with the palette's engine (no UI).
+architect-palette = { workspace = true }
 facet = { workspace = true }
 facet-json = { version = "0.50.0-rc.5" }
 facet-value = { version = "0.50.0-rc.7" }
