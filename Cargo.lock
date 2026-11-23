@@ -803,23 +803,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "architect-command-palette"
-version = "0.1.0"
-dependencies = [
- "architect",
- "architect-commands",
- "architect-extensions",
- "architect-extensions-dioxus",
- "architect-palette",
- "architect-settings",
- "dioxus",
- "facet",
- "futures",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
 name = "architect-commands"
 version = "0.1.0"
 dependencies = [

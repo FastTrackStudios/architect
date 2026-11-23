@@ -66,7 +66,6 @@ members = [
     "features/navigator-api",
     "features/palette",
     "features/editor",
-    "features/palette/extension",
     "features/spaces",
     "features/ui/showcase",
     "features/ui/ui-snapshot",
@@ -302,7 +301,6 @@ architect-commands = { path = "features/commands" }
 # The palette and launcher engine (MIT): sources, items, ranking.
 architect-palette = { path = "features/palette" }
 # The Command Palette, ⌘K and ⌘O as a built-in extension (MIT).
-architect-command-palette = { path = "features/palette/extension", default-features = false }
 architect-settings = { path = "features/settings" }
 architect-settings-derive = { path = "features/settings/derive" }
 architect-orgs = { path = "features/orgs" }
