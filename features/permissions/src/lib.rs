@@ -734,6 +734,9 @@ impl AuditSink for TracingAudit {
     }
 }
 
+#[cfg(feature = "auth")]
+pub mod auth_identity;
+
 #[cfg(test)]
 mod tests {
     use super::*;

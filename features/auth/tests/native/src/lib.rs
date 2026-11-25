@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod permissions_gate_tests;
+mod local;
 
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
@@ -282,16 +282,19 @@ fn authorization_metadata_key_stays_in_sync() {
 // r[verify auth.sessions.refresh-invalid]
 #[tokio::test]
 async fn vox_session_surface_round_trips_over_local_server() {
-    use architect::{LayerRouter, LocalServer, Scope};
+    use crate::local::Local;
     use auth::transport::vox::AuthVoxService;
+    use auth::vox_host::VoxRouter;
     use auth::{AuthFlowError, AuthServiceClient, SignInEmailPassword, SignUpEmailPassword};
 
     let auth = open_auth().await;
-    // Mount exactly the way a downstream server does: the rpc-emitted
-    // `auth_service_layer` binds the vox service to its descriptor.
-    let router = LayerRouter::new().merge(auth::auth_service_layer(AuthVoxService::new(auth)));
-    let scope = Scope::new();
-    let local = LocalServer::serve(router, scope.clone());
+    // Mount exactly the way the server does: the service's descriptor and
+    // its vox dispatcher.
+    let router = VoxRouter::new().with(
+        auth::auth_service_service_descriptor(),
+        auth::AuthServiceDispatcher::new(AuthVoxService::new(auth)),
+    );
+    let local = Local::serve(router);
     let client: AuthServiceClient = local.establish().await.expect("establish auth client");
 
     // sign_up → whoami: the issued token resolves to the new user.
@@ -362,8 +365,6 @@ async fn vox_session_surface_round_trips_over_local_server() {
         .await
         .expect("sign in");
     assert_eq!(signed_in.user.id, signed_up.user.id);
-
-    scope.close().await;
 }
 
 // r[verify auth.transport.vox-schema]
@@ -371,20 +372,20 @@ async fn vox_session_surface_round_trips_over_local_server() {
 async fn token_store_middleware_matches_auth_server_middleware_wire_format() {
     use std::sync::Arc;
 
-    use architect::{LayerRouter, LocalServer, Scope};
+    use crate::local::Local;
     use auth::transport::vox::AuthServerMiddleware;
+    use auth::vox_host::VoxRouter;
     use auth_client::{MemoryTokenStore, StoredSession, TokenStore, TokenStoreMiddleware};
     use session_probe::{
         SessionProbeClient, SessionProbeDispatcher, SessionProbeService,
         session_probe_service_descriptor,
     };
 
-    let router = LayerRouter::new().with(
+    let router = VoxRouter::new().with(
         session_probe_service_descriptor(),
         SessionProbeDispatcher::new(SessionProbeService).with_middleware(AuthServerMiddleware),
     );
-    let scope = Scope::new();
-    let local = LocalServer::serve(router, scope.clone());
+    let local = Local::serve(router);
 
     let store = Arc::new(MemoryTokenStore::new());
     let probe: SessionProbeClient = local.establish().await.expect("establish probe client");
@@ -408,6 +409,4 @@ async fn token_store_middleware_matches_auth_server_middleware_wire_format() {
     // Cleared store → back to unauthenticated, same clients.
     store.clear().expect("clear session");
     assert_eq!(probe.seen_token().await.expect("call after clear"), None);
-
-    scope.close().await;
 }

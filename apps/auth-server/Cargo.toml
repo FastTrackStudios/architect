@@ -21,12 +21,11 @@ name = "auth-server"
 path = "src/main.rs"
 
 [dependencies]
-architect = { workspace = true, features = ["server", "host", "http", "http-client", "local", "connect", "iroh"] }
 architect-auth = { workspace = true, features = ["full"] }
-architect-telemetry.workspace = true
+auth-macros.workspace = true
 async-trait.workspace = true
 base64.workspace = true
-auth-proto = { workspace = true, features = ["vox"] }
+auth-proto = { workspace = true, features = ["vox", "http"] }
 auth-ui.workspace = true
 axum.workspace = true
 chrono.workspace = true
@@ -47,6 +46,7 @@ sha2.workspace = true
 tokio.workspace = true
 tower-http = { workspace = true, features = ["cors", "trace"] }
 tracing.workspace = true
+tracing-subscriber.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
@@ -62,12 +62,10 @@ tower = { version = "0.5", features = ["util"] }
 # The stand-in provider, so the real HTTP client can be driven against
 # something that answers like GitHub, Google and TONE3000.
 mock-oauth = { path = "../mock-oauth" }
-# The cross-transport suite dials the vox router over iroh, loopback.
-iroh.workspace = true
+# The cross-transport suite dials the vox router over a WebSocket.
 vox-core.workspace = true
+vox-websocket = "0.10.0-rc.7"
 futures = "0.3"
-# The orgs every app reads from one sign-in (tests/surfaces.rs).
-architect-orgs = { workspace = true, features = ["auth", "server"] }
 auth-client.workspace = true
 
 [lints]

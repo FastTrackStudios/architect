@@ -10,9 +10,9 @@
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use architect::ClientError;
 use architect_orgs::Org;
 use auth_client::StoredSession;
+use auth_proto::http::ClientError;
 use auth_proto::{
     AuthFlowError, AuthServiceHttpClient, AuthSessionBundle, DeviceRegistration,
     DeviceServiceHttpClient, OrganizationServiceHttpClient, SignInEmailPassword,

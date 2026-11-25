@@ -18,11 +18,11 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use architect_permissions::{BoxIdentityFuture, IdentityResolver, Principal};
+use crate::{BoxIdentityFuture, IdentityResolver, Principal};
 
-use crate::ArchitectAuth;
-use crate::commands::CurrentSession;
-use crate::storage::AuthStorage;
+use auth::ArchitectAuth;
+use auth::commands::CurrentSession;
+use auth::storage::AuthStorage;
 
 /// Lock the identity cache, recovering from poison.
 ///

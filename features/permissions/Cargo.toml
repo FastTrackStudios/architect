@@ -8,6 +8,24 @@ description = "Framework-level authorization: Principal × Resource × Action �
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tracing = { workspace = true }
+# A signed-in session as the gate's principal (`auth_identity`).
+auth = { workspace = true, optional = true }
+
+[features]
+auth = ["dep:auth"]
+
+# tests/auth_gate.rs: the gate over a vox memory link with auth's sessions.
+[dev-dependencies]
+architect = { workspace = true, features = ["vox", "local"] }
+auth = { workspace = true, features = ["backend-db", "vox"] }
+sea-orm = { workspace = true }
+sea-orm-migration = { workspace = true }
+tokio = { workspace = true }
+vox = { workspace = true }
+
+[[test]]
+name = "auth_gate"
+required-features = ["auth"]
 
 [lints]
 workspace = true

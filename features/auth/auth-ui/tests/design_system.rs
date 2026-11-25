@@ -1,7 +1,7 @@
 //! The design system, rendered without a browser.
 //!
 //! These pages are server-rendered and ship no WASM, so every component
-//! borrowed from `architect-ui` has to produce its markup and its
+//! of the design system (`auth_ui::components`) has to produce its markup and its
 //! classes through `dioxus-ssr`. That is not something to assume: a
 //! component that reached for the DOM would compile here and render
 //! nothing, and the failure would be an unstyled page rather than an
@@ -11,8 +11,8 @@
 // helper code — see the same note in the auth-server tests.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use architect_ui::components::{Button, ButtonVariant};
 use auth_ui::assets;
+use auth_ui::components::{Button, ButtonVariant};
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use axum::routing::get;

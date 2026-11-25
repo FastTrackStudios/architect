@@ -1,8 +1,9 @@
 //! The device address book over vox: two installs of one account find
 //! each other and share the first one's org; nobody else sees them.
 
-use architect::{LayerRouter, LocalServer, Scope};
+use crate::local::Local;
 use auth::transport::vox::AuthVoxService;
+use auth::vox_host::VoxRouter;
 use auth::{
     AccountOrg, AuthFlowError, AuthServiceClient, DeviceRegistration, DeviceServiceClient,
     SignUpEmailPassword,
@@ -53,10 +54,16 @@ fn org(slug: &str) -> AccountOrg {
 #[tokio::test]
 async fn an_accounts_devices_find_each_other_and_share_the_first_org() {
     let auth = super::open_auth().await;
-    let router = LayerRouter::new()
-        .merge(auth::auth_service_layer(AuthVoxService::new(auth.clone())))
-        .merge(auth::device_service_layer(AuthVoxService::new(auth)));
-    let local = LocalServer::serve(router, Scope::new());
+    let router = VoxRouter::new()
+        .with(
+            auth::auth_service_service_descriptor(),
+            auth::AuthServiceDispatcher::new(AuthVoxService::new(auth.clone())),
+        )
+        .with(
+            auth::device_service_service_descriptor(),
+            auth::DeviceServiceDispatcher::new(AuthVoxService::new(auth)),
+        );
+    let local = Local::serve(router);
     let session: AuthServiceClient = local.establish().await.expect("auth client");
     let devices: DeviceServiceClient = local.establish().await.expect("device client");
 
@@ -157,10 +164,16 @@ async fn an_accounts_devices_find_each_other_and_share_the_first_org() {
 #[tokio::test]
 async fn a_devices_relay_reaches_its_peers() {
     let auth = super::open_auth().await;
-    let router = LayerRouter::new()
-        .merge(auth::auth_service_layer(AuthVoxService::new(auth.clone())))
-        .merge(auth::device_service_layer(AuthVoxService::new(auth)));
-    let local = LocalServer::serve(router, Scope::new());
+    let router = VoxRouter::new()
+        .with(
+            auth::auth_service_service_descriptor(),
+            auth::AuthServiceDispatcher::new(AuthVoxService::new(auth.clone())),
+        )
+        .with(
+            auth::device_service_service_descriptor(),
+            auth::DeviceServiceDispatcher::new(AuthVoxService::new(auth)),
+        );
+    let local = Local::serve(router);
     let session: AuthServiceClient = local.establish().await.expect("auth client");
     let devices: DeviceServiceClient = local.establish().await.expect("device client");
     let me = sign_up(&session, "relay@example.com").await;
@@ -191,10 +204,16 @@ async fn a_devices_relay_reaches_its_peers() {
 #[tokio::test]
 async fn two_apps_on_one_device_are_one_device() {
     let auth = super::open_auth().await;
-    let router = LayerRouter::new()
-        .merge(auth::auth_service_layer(AuthVoxService::new(auth.clone())))
-        .merge(auth::device_service_layer(AuthVoxService::new(auth)));
-    let local = LocalServer::serve(router, Scope::new());
+    let router = VoxRouter::new()
+        .with(
+            auth::auth_service_service_descriptor(),
+            auth::AuthServiceDispatcher::new(AuthVoxService::new(auth.clone())),
+        )
+        .with(
+            auth::device_service_service_descriptor(),
+            auth::DeviceServiceDispatcher::new(AuthVoxService::new(auth)),
+        );
+    let local = Local::serve(router);
     let session: AuthServiceClient = local.establish().await.expect("auth client");
     let devices: DeviceServiceClient = local.establish().await.expect("device client");
     let me = sign_up(&session, "one-ipad@example.com").await;
@@ -231,10 +250,16 @@ async fn two_apps_on_one_device_are_one_device() {
 #[tokio::test]
 async fn an_app_without_a_node_adds_its_device_only_once() {
     let auth = super::open_auth().await;
-    let router = LayerRouter::new()
-        .merge(auth::auth_service_layer(AuthVoxService::new(auth.clone())))
-        .merge(auth::device_service_layer(AuthVoxService::new(auth)));
-    let local = LocalServer::serve(router, Scope::new());
+    let router = VoxRouter::new()
+        .with(
+            auth::auth_service_service_descriptor(),
+            auth::AuthServiceDispatcher::new(AuthVoxService::new(auth.clone())),
+        )
+        .with(
+            auth::device_service_service_descriptor(),
+            auth::DeviceServiceDispatcher::new(AuthVoxService::new(auth)),
+        );
+    let local = Local::serve(router);
     let session: AuthServiceClient = local.establish().await.expect("auth client");
     let devices: DeviceServiceClient = local.establish().await.expect("device client");
     let me = sign_up(&session, "apps@example.com").await;
@@ -284,10 +309,16 @@ async fn an_app_without_a_node_adds_its_device_only_once() {
 #[tokio::test]
 async fn a_registration_is_checked_before_it_is_stored() {
     let auth = super::open_auth().await;
-    let router = LayerRouter::new()
-        .merge(auth::auth_service_layer(AuthVoxService::new(auth.clone())))
-        .merge(auth::device_service_layer(AuthVoxService::new(auth)));
-    let local = LocalServer::serve(router, Scope::new());
+    let router = VoxRouter::new()
+        .with(
+            auth::auth_service_service_descriptor(),
+            auth::AuthServiceDispatcher::new(AuthVoxService::new(auth.clone())),
+        )
+        .with(
+            auth::device_service_service_descriptor(),
+            auth::DeviceServiceDispatcher::new(AuthVoxService::new(auth)),
+        );
+    let local = Local::serve(router);
     let session: AuthServiceClient = local.establish().await.expect("auth client");
     let devices: DeviceServiceClient = local.establish().await.expect("device client");
     let me = sign_up(&session, "checks@example.com").await;

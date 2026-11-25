@@ -40,6 +40,8 @@ pub mod admin;
 pub mod api_keys;
 pub mod assets;
 pub mod chrome;
+mod cn;
+pub mod components;
 pub mod consent;
 pub mod device;
 pub mod guest;

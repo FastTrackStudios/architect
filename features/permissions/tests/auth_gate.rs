@@ -7,11 +7,11 @@ use std::sync::Arc;
 
 use architect::layer::{LayerRouter, handler_acceptor};
 use architect::permissions_gate::{PermissionsGate, UnlistedPolicy};
+use architect_permissions::auth_identity::SessionIdentityResolver;
 use architect_permissions::{
     Action, PermissionEngine, Principal, Resource, RoleEngine, Rule, ScopeEngine, StaticPrincipal,
 };
 use auth::AuthService as _;
-use auth::identity::SessionIdentityResolver;
 use auth::transport::vox::AuthClientMiddleware;
 
 mod gate_probe {

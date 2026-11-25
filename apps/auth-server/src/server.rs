@@ -1,95 +1,104 @@
-//! Assembling the running server: storage, engine, the generated faces,
-//! the plugins, the listener.
+//! Assembling the running server: storage, engine, the services' two
+//! faces, the plugins, the listener.
 //!
-//! The shape is the architect one. The auth *services* are declared once
-//! as `#[architect::service]` traits in `auth-proto`; from that
-//! declaration the framework emits the vox dispatchers, the axum routes,
-//! and the clients. This module therefore mounts, it does not write
-//! routes:
+//! The auth *services* are declared once as `#[auth_macros::service]`
+//! traits in `auth-proto`; from that declaration come the vox
+//! dispatchers, the axum routes and the clients. This module mounts them:
 //!
 //! ```text
-//! services().provide(svc)        →  the vox router     (served at /vox, and over iroh)
-//! services().provide_http(&svc)  →  the HTTP+JSON face (POST /auth/…, /organization/…)
-//! EngineHost::ungated(vox).plugin(http).plugin(oauth).plugin(pages)…
+//! vox_router(auth)   →  the vox router     (served at /vox)
+//! http_router(auth)  →  the HTTP+JSON face (POST /auth/…)
+//! Host::new(vox).plugin(http).plugin(oauth).plugin(pages)…
 //! ```
 //!
 //! What remains hand-written is what is HTTP by nature: the OAuth/OIDC
 //! redirect flows ([`crate::oauth`]) and the server-rendered pages
 //! ([`crate::ui`], `auth_ui`). Those mount as plugins next to the
-//! generated face.
+//! services.
 
-use std::path::PathBuf;
-
-use architect::host::EngineHost;
-use architect::{Layer as _, LayerRouter};
+use architect_auth::vox_host::VoxRouter;
 use architect_auth::{
     ArchitectAuth, AuthStorage,
     db::{AuthSeaOrmStorage, Migrator},
     transport::{AuthCookieConfig, vox::AuthVoxService},
 };
-use auth_proto::{AuthServiceService, DeviceServiceService, OrganizationServiceService};
 use axum::{
     Router,
     http::{HeaderValue, Method, header},
     routing::get,
 };
 use sea_orm::DatabaseConnection;
+use sea_orm_migration::MigratorTrait as _;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::config::ServerConfig;
+use crate::host::Host;
 use crate::oauth::{self, HttpState};
 use crate::ui;
 
-/// The vox WebSocket subprotocol `/vox` echoes. Re-exported from the
-/// framework host, which is what mounts `/vox` now.
-pub use architect::host::VOX_SUBPROTOCOL;
+/// The vox WebSocket subprotocol `/vox` echoes.
+pub use crate::host::VOX_SUBPROTOCOL;
 
 /// A built, not-yet-listening server.
 pub struct AuthServer {
     pub auth: ArchitectAuth<AuthSeaOrmStorage>,
-    /// Everything mounted, ready to bind. [`EngineHost::into_app`] hands
-    /// back the axum app for in-process use; [`serve`] binds it.
-    pub host: EngineHost,
+    /// Everything mounted, ready to bind. [`Host::into_app`] hands back
+    /// the axum app for in-process use; [`serve`] binds it.
+    pub host: Host,
     /// Kept so callers (tests, an embedding binary) can reach the same
     /// pool the engine writes through.
     pub db: DatabaseConnection,
 }
 
-/// The service bundle: every `#[architect::service]` trait the server
-/// mounts, bound to the one backend that implements them all. The same
-/// value provides the vox router and the HTTP router.
+/// The vox router: every service, answered by the one backend that
+/// implements them all. What `/vox` and an in-process connection serve.
 #[must_use]
-pub fn services<S>() -> impl architect::Layer<AuthVoxService<S>>
+pub fn vox_router<S>(auth: ArchitectAuth<S>) -> VoxRouter
 where
     S: AuthStorage,
 {
-    architect::layers![
-        AuthServiceService,
-        OrganizationServiceService,
-        DeviceServiceService
-    ]
+    let svc = AuthVoxService::new(auth);
+    VoxRouter::new()
+        .with(
+            auth_proto::auth_service_service_descriptor(),
+            auth_proto::AuthServiceDispatcher::new(svc.clone()),
+        )
+        .with(
+            auth_proto::organization_service_service_descriptor(),
+            auth_proto::OrganizationServiceDispatcher::new(svc.clone()),
+        )
+        .with(
+            auth_proto::device_service_service_descriptor(),
+            auth_proto::DeviceServiceDispatcher::new(svc),
+        )
 }
 
-/// The vox router — what `/vox`, the iroh endpoint, and an in-process
-/// `LocalServer` all serve.
-#[must_use]
-pub fn vox_router<S>(auth: ArchitectAuth<S>) -> LayerRouter
-where
-    S: AuthStorage,
-{
-    services().provide(AuthVoxService::new(auth))
-}
-
-/// The generated HTTP+JSON face — `POST /auth/<method>` and
-/// `POST /organization/<method>`, JSON in, JSON out, the session
-/// token in the body or as `Authorization: Bearer`.
+/// The HTTP+JSON face: `POST /auth/<method>`, JSON in, JSON out, the
+/// session token in the body or as `Authorization: Bearer`.
 #[must_use]
 pub fn http_router<S>(auth: ArchitectAuth<S>) -> Router
 where
     S: AuthStorage,
 {
-    services().provide_http(&AuthVoxService::new(auth))
+    let svc = std::sync::Arc::new(AuthVoxService::new(auth));
+    let router = auth_proto::auth_service_http::mount(svc.clone(), Router::new());
+    let router = auth_proto::organization_service_http::mount(svc.clone(), router);
+    auth_proto::device_service_http::mount(svc, router)
+}
+
+/// The database at `url`. An in-memory `SQLite` database lives in one
+/// connection, so its pool holds exactly one (a second would be empty).
+async fn connect(url: &str) -> Result<DatabaseConnection, sea_orm::DbErr> {
+    let mut options = sea_orm::ConnectOptions::new(url.to_owned());
+    let url = url.trim();
+    let in_memory = url.starts_with("sqlite:")
+        && (url.contains(":memory:") || url.contains("mode=memory"))
+        && !url.contains("cache=shared");
+    if in_memory {
+        options.max_connections(1).min_connections(1);
+    }
+    sea_orm::Database::connect(options).await
 }
 
 /// Connect, migrate, and assemble everything from a [`ServerConfig`].
@@ -108,13 +117,13 @@ pub async fn build(config: &ServerConfig) -> eyre::Result<AuthServer> {
             return Err(eyre::eyre!("AUTH_DEV_AUTO_SIGN_IN refused: {why}"));
         }
     }
-    let db = architect::storage::connect(&config.database_url)
+    let db = connect(&config.database_url)
         .await
         .map_err(|error| eyre::eyre!("connect auth database: {error}"))?;
 
     if config.run_migrations {
         tracing::info!("running auth migrations");
-        architect::storage::migrate::<Migrator>(&db)
+        Migrator::up(&db, None)
             .await
             .map_err(|error| eyre::eyre!("auth migrations: {error}"))?;
     }
@@ -154,7 +163,7 @@ pub async fn build(config: &ServerConfig) -> eyre::Result<AuthServer> {
     }
 
     let social = social_state(config)?;
-    let mut host = host_with_senders(
+    let host = host_with_senders(
         config,
         auth.clone(),
         std::sync::Arc::new(social),
@@ -162,14 +171,6 @@ pub async fn build(config: &ServerConfig) -> eyre::Result<AuthServer> {
         None,
     )
     .plugin(snapshot_plugin(config, auth.clone(), db.clone()));
-
-    if let Some(key_path) = &config.iroh_key_path {
-        tracing::info!(key = %key_path, "serving the vox router over iroh as well");
-        host = host.iroh(
-            PathBuf::from(key_path),
-            config.iroh_id_path.as_deref().map(PathBuf::from),
-        );
-    }
 
     Ok(AuthServer { auth, host, db })
 }
@@ -358,7 +359,7 @@ where
 /// Liveness and readiness. Readiness is the same check for now — the
 /// engine holds no lazily-initialised state, and a database that has
 /// gone away surfaces as a 5xx on real traffic. `/health` comes from
-/// the framework host; these are the names the deployment probes.
+/// the host; these are the names the deployment probes.
 fn probes() -> Router {
     Router::new()
         .route("/healthz", get(|| async { "ok" }))
@@ -372,7 +373,7 @@ fn host_with_senders<S>(
     social: std::sync::Arc<oauth::SocialState>,
     login_mailer: Option<std::sync::Arc<dyn auth_ui::mailer::LoginMailer>>,
     sms: Option<std::sync::Arc<dyn auth_ui::mailer::SmsSender>>,
-) -> EngineHost
+) -> Host
 where
     S: AuthStorage,
 {
@@ -405,7 +406,6 @@ where
         login_mailer.unwrap_or_else(|| mail.clone());
 
     let cors = cors_layer(config);
-    let svc = AuthVoxService::new(auth.clone());
     // `build` refused a server that asks for it and may not; an embedder
     // that skipped `build` gets the form instead.
     let auto_sign_in = crate::dev::auto_sign_in(config).unwrap_or_else(|why| {
@@ -418,9 +418,9 @@ where
     // takes the session token as an argument and checks it itself, on
     // every face (the HTTP face has no gate either). A gate here would
     // have no identity to resolve that the services don't already check.
-    EngineHost::ungated(services().provide(svc.clone()), config.bind_addr.clone())
-        // The same services, as HTTP+JSON — generated from the traits.
-        .plugin(services().provide_http(&svc))
+    Host::new(vox_router(auth.clone()), config.bind_addr.clone())
+        // The same services, as HTTP+JSON.
+        .plugin(http_router(auth.clone()))
         .plugin(probes())
         // The OAuth flows: this server as an OIDC provider, and as a
         // client of GitHub / Google / TONE3000.
@@ -511,8 +511,8 @@ fn cors_layer(config: &ServerConfig) -> CorsLayer {
         .allow_credentials(true)
 }
 
-/// Bind and serve until the process dies — `/vox`, the HTTP face, every
-/// plugin, and (when configured) the same vox router over iroh.
+/// Bind and serve until the process dies: `/vox`, the HTTP face, every
+/// plugin.
 pub async fn serve(server: AuthServer) -> eyre::Result<()> {
     server
         .host

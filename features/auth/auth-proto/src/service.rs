@@ -1,17 +1,19 @@
 //! The mountable RPC surface for architect-auth sessions.
 //!
-//! One `#[architect::rpc]` trait covering the session lifecycle:
+//! One `#[auth_macros::service]` trait covering the session lifecycle:
 //! sign-up, password sign-in, validate (`current_session`), refresh,
-//! `whoami`, and sign-out. The trait is all-async, so `vox::service`
-//! applies to it directly — the macro additionally emits the `serve` /
-//! `layer` verbs, the deferred-bind `Service` token, and a glob-safe
-//! [`prelude`] so the service mounts like any other architect service:
+//! `whoami`, and sign-out: vox's client and dispatcher, the HTTP routes
+//! and client, and a glob-safe [`prelude`]. It mounts on a vox router
+//! by its descriptor and dispatcher:
 //!
 //! ```ignore
-//! use architect_auth::{AuthVoxService, auth_service_layer};
+//! use architect_auth::{AuthServiceDispatcher, AuthVoxService, auth_service_service_descriptor};
+//! use architect_auth::vox_host::VoxRouter;
 //!
-//! let router = architect::LayerRouter::new()
-//!     .merge(auth_service_layer(AuthVoxService::new(auth)));
+//! let router = VoxRouter::new().with(
+//!     auth_service_service_descriptor(),
+//!     AuthServiceDispatcher::new(AuthVoxService::new(auth)),
+//! );
 //! ```
 //!
 //! Engine-only capabilities (TOTP, API keys, invitations, …) stay off
@@ -98,7 +100,7 @@ pub struct EmailHistoryRequest {
 }
 
 // r[impl auth.transport.vox-schema]
-#[architect::service]
+#[auth_macros::service]
 pub trait AuthService {
     /// Create an email/password user and sign them in. Returns the
     /// freshly issued session bundle (the raw token is only returned

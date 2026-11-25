@@ -45,6 +45,13 @@ tokio = { version = "1", default-features = false, features = ["rt", "sync", "ti
 
 [dev-dependencies]
 architect = { workspace = true, features = ["vox", "local", "host", "connect"] }
+# The identity server itself, in this process (tests/with_auth_server.rs).
+auth-server = { workspace = true }
+architect-auth = { workspace = true, features = ["full"] }
+auth-client = { workspace = true }
+axum = { workspace = true }
+sea-orm = { workspace = true }
+sea-orm-migration = { workspace = true }
 architect-permissions = { workspace = true }
 tokio = { workspace = true }
 vox = { workspace = true }

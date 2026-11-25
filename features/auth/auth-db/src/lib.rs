@@ -68,19 +68,18 @@ pub const fn auth_database_support_matrix() -> &'static [AuthDatabaseSupport] {
 
 pub use auth_proto::account::{
     ActiveModel as AuthAccountActiveModel, AuthAccount, AuthAccountCreate, AuthAccountList,
-    AuthAccountUpdate, Column as AuthAccountColumn,
-    Entity as AuthAccountEntity, Model as AuthAccountModel, Relation as AuthAccountRelation,
+    AuthAccountUpdate, Column as AuthAccountColumn, Entity as AuthAccountEntity,
+    Model as AuthAccountModel, Relation as AuthAccountRelation,
 };
 pub use auth_proto::agent_link::{
     ActiveModel as AuthAgentLinkActiveModel, AuthAgentLink, AuthAgentLinkCreate, AuthAgentLinkList,
-    AuthAgentLinkUpdate,
-    Column as AuthAgentLinkColumn, Entity as AuthAgentLinkEntity, Model as AuthAgentLinkModel,
-    Relation as AuthAgentLinkRelation,
+    AuthAgentLinkUpdate, Column as AuthAgentLinkColumn, Entity as AuthAgentLinkEntity,
+    Model as AuthAgentLinkModel, Relation as AuthAgentLinkRelation,
 };
 pub use auth_proto::api_key::{
     ActiveModel as AuthApiKeyActiveModel, AuthApiKey, AuthApiKeyCreate, AuthApiKeyList,
-    AuthApiKeyUpdate, Column as AuthApiKeyColumn,
-    Entity as AuthApiKeyEntity, Model as AuthApiKeyModel, Relation as AuthApiKeyRelation,
+    AuthApiKeyUpdate, Column as AuthApiKeyColumn, Entity as AuthApiKeyEntity,
+    Model as AuthApiKeyModel, Relation as AuthApiKeyRelation,
 };
 pub use auth_proto::audit_event::{
     ActiveModel as AuthAuditEventRecordActiveModel, AuthAuditEventRecord,
@@ -98,31 +97,32 @@ pub use auth_proto::device::{
 };
 pub use auth_proto::email_change::{
     ActiveModel as AuthEmailChangeActiveModel, AuthEmailChange, AuthEmailChangeCreate,
-    AuthEmailChangeList, AuthEmailChangeUpdate,
-    Column as AuthEmailChangeColumn, Entity as AuthEmailChangeEntity,
-    Model as AuthEmailChangeModel, Relation as AuthEmailChangeRelation,
+    AuthEmailChangeList, AuthEmailChangeUpdate, Column as AuthEmailChangeColumn,
+    Entity as AuthEmailChangeEntity, Model as AuthEmailChangeModel,
+    Relation as AuthEmailChangeRelation,
 };
 pub use auth_proto::invitation::{
     ActiveModel as AuthInvitationActiveModel, AuthInvitation, AuthInvitationCreate,
-    AuthInvitationList, AuthInvitationUpdate,
-    Column as AuthInvitationColumn, Entity as AuthInvitationEntity, InvitationStatus,
-    Model as AuthInvitationModel, Relation as AuthInvitationRelation,
+    AuthInvitationList, AuthInvitationUpdate, Column as AuthInvitationColumn,
+    Entity as AuthInvitationEntity, InvitationStatus, Model as AuthInvitationModel,
+    Relation as AuthInvitationRelation,
 };
 pub use auth_proto::invite_link::{
     ActiveModel as AuthInviteLinkActiveModel, AuthInviteLink, AuthInviteLinkCreate,
-    AuthInviteLinkList, AuthInviteLinkUpdate,
-    Column as AuthInviteLinkColumn, Entity as AuthInviteLinkEntity, Model as AuthInviteLinkModel,
+    AuthInviteLinkList, AuthInviteLinkUpdate, Column as AuthInviteLinkColumn,
+    Entity as AuthInviteLinkEntity, Model as AuthInviteLinkModel,
     Relation as AuthInviteLinkRelation,
 };
 pub use auth_proto::member::{
     ActiveModel as AuthMemberActiveModel, AuthMember, AuthMemberCreate, AuthMemberList,
-    AuthMemberUpdate, Column as AuthMemberColumn,
-    Entity as AuthMemberEntity, Model as AuthMemberModel, Relation as AuthMemberRelation,
+    AuthMemberUpdate, Column as AuthMemberColumn, Entity as AuthMemberEntity,
+    Model as AuthMemberModel, Relation as AuthMemberRelation,
 };
 pub use auth_proto::organization::{
     ActiveModel as AuthOrganizationActiveModel, AuthOrganization, AuthOrganizationCreate,
-    AuthOrganizationList, AuthOrganizationUpdate, Column as AuthOrganizationColumn, Entity as AuthOrganizationEntity,
-    Model as AuthOrganizationModel, Relation as AuthOrganizationRelation,
+    AuthOrganizationList, AuthOrganizationUpdate, Column as AuthOrganizationColumn,
+    Entity as AuthOrganizationEntity, Model as AuthOrganizationModel,
+    Relation as AuthOrganizationRelation,
 };
 pub use auth_proto::organization_role::{
     ActiveModel as AuthOrganizationRoleActiveModel, AuthOrganizationRole,
@@ -132,8 +132,8 @@ pub use auth_proto::organization_role::{
 };
 pub use auth_proto::passkey::{
     ActiveModel as AuthPasskeyActiveModel, AuthPasskey, AuthPasskeyCreate, AuthPasskeyList,
-    AuthPasskeyUpdate, Column as AuthPasskeyColumn,
-    Entity as AuthPasskeyEntity, Model as AuthPasskeyModel, Relation as AuthPasskeyRelation,
+    AuthPasskeyUpdate, Column as AuthPasskeyColumn, Entity as AuthPasskeyEntity,
+    Model as AuthPasskeyModel, Relation as AuthPasskeyRelation,
 };
 pub use auth_proto::passkey_ceremony::{
     ActiveModel as AuthPasskeyCeremonyActiveModel, AuthPasskeyCeremony, AuthPasskeyCeremonyCreate,
@@ -143,33 +143,35 @@ pub use auth_proto::passkey_ceremony::{
 };
 pub use auth_proto::session::{
     ActiveModel as AuthSessionActiveModel, AuthSession, AuthSessionCreate, AuthSessionList,
-    AuthSessionUpdate, Column as AuthSessionColumn,
-    Entity as AuthSessionEntity, Model as AuthSessionModel, Relation as AuthSessionRelation,
+    AuthSessionUpdate, Column as AuthSessionColumn, Entity as AuthSessionEntity,
+    Model as AuthSessionModel, Relation as AuthSessionRelation,
 };
 pub use auth_proto::team::{
-    ActiveModel as AuthTeamActiveModel, AuthTeam, AuthTeamCreate, AuthTeamList, AuthTeamUpdate, Column as AuthTeamColumn, Entity as AuthTeamEntity,
-    Model as AuthTeamModel, Relation as AuthTeamRelation,
+    ActiveModel as AuthTeamActiveModel, AuthTeam, AuthTeamCreate, AuthTeamList, AuthTeamUpdate,
+    Column as AuthTeamColumn, Entity as AuthTeamEntity, Model as AuthTeamModel,
+    Relation as AuthTeamRelation,
 };
 pub use auth_proto::team_member::{
     ActiveModel as AuthTeamMemberActiveModel, AuthTeamMember, AuthTeamMemberCreate,
-    AuthTeamMemberList, AuthTeamMemberUpdate,
-    Column as AuthTeamMemberColumn, Entity as AuthTeamMemberEntity, Model as AuthTeamMemberModel,
+    AuthTeamMemberList, AuthTeamMemberUpdate, Column as AuthTeamMemberColumn,
+    Entity as AuthTeamMemberEntity, Model as AuthTeamMemberModel,
     Relation as AuthTeamMemberRelation,
 };
 pub use auth_proto::two_factor::{
     ActiveModel as AuthTwoFactorActiveModel, AuthTwoFactor, AuthTwoFactorCreate, AuthTwoFactorList,
-    AuthTwoFactorUpdate,
-    Column as AuthTwoFactorColumn, Entity as AuthTwoFactorEntity, Model as AuthTwoFactorModel,
-    Relation as AuthTwoFactorRelation,
+    AuthTwoFactorUpdate, Column as AuthTwoFactorColumn, Entity as AuthTwoFactorEntity,
+    Model as AuthTwoFactorModel, Relation as AuthTwoFactorRelation,
 };
 pub use auth_proto::user::{
-    ActiveModel as AuthUserActiveModel, AuthUser, AuthUserCreate, AuthUserList, AuthUserUpdate, Column as AuthUserColumn, Entity as AuthUserEntity,
-    Model as AuthUserModel, Relation as AuthUserRelation,
+    ActiveModel as AuthUserActiveModel, AuthUser, AuthUserCreate, AuthUserList, AuthUserUpdate,
+    Column as AuthUserColumn, Entity as AuthUserEntity, Model as AuthUserModel,
+    Relation as AuthUserRelation,
 };
 pub use auth_proto::verification::{
     ActiveModel as AuthVerificationActiveModel, AuthVerification, AuthVerificationCreate,
-    AuthVerificationList, AuthVerificationUpdate, Column as AuthVerificationColumn, Entity as AuthVerificationEntity,
-    Model as AuthVerificationModel, Relation as AuthVerificationRelation,
+    AuthVerificationList, AuthVerificationUpdate, Column as AuthVerificationColumn,
+    Entity as AuthVerificationEntity, Model as AuthVerificationModel,
+    Relation as AuthVerificationRelation,
 };
 
 pub mod migrations;

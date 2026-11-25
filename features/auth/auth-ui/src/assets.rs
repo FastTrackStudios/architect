@@ -29,9 +29,8 @@ use crate::chrome::STYLE;
 
 /// The design system's tokens and every utility these pages use.
 ///
-/// Compiled from `tailwind.css` in this crate, which scans both this
-/// crate's sources and `architect-ui`'s — see the note there for why it
-/// cannot simply inject `architect_ui::UTILITIES_CSS`.
+/// Compiled from `tailwind.css` in this crate, which scans this crate's
+/// sources (its copies of the design system's components included).
 const UTILITIES: &str = include_str!("../assets/utilities.css");
 
 /// Everything the pages need, in cascade order.

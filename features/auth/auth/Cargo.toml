@@ -13,10 +13,8 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
 [dependencies]
 percent-encoding = { workspace = true }
-architect-permissions.workspace = true
 auth-proto.workspace = true
 auth-db = { workspace = true, optional = true }
-architect = { workspace = true, optional = true }
 async-trait.workspace = true
 argon2.workspace = true
 axum = { workspace = true, optional = true }
@@ -44,12 +42,19 @@ webauthn-rs.workspace = true
 url = "2"
 uuid.workspace = true
 vox = { workspace = true, optional = true }
+# Serving the services over vox (`vox_host`): a WebSocket, or in-process.
+vox-core = { workspace = true, optional = true }
+vox-types = { workspace = true, optional = true }
+facet = { workspace = true, optional = true }
+futures = { version = "0.3", optional = true }
+tokio = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
 
 [features]
 default = []
 backend-db = ["dep:auth-db", "dep:sea-orm", "dep:sea-orm-migration", "auth-proto/server"]
 vox = ["dep:vox", "auth-proto/vox"]
-axum = ["dep:architect", "dep:axum", "architect/server-axum"]
+axum = ["vox", "dep:axum", "dep:vox-core", "dep:vox-types", "dep:facet", "dep:futures", "dep:tokio", "dep:tracing", "auth-proto/http"]
 full = ["backend-db", "vox", "axum", "auth-proto/full"]
 
 [dev-dependencies]

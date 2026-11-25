@@ -1178,15 +1178,20 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-atom",
+ "architect-auth",
  "architect-commands",
  "architect-permissions",
  "architect-shell",
  "auth-client",
  "auth-proto",
+ "auth-server",
+ "axum",
  "dioxus",
  "facet",
  "facet-json",
  "futures-util",
+ "sea-orm",
+ "sea-orm-migration",
  "tokio",
  "uuid",
  "vox",
@@ -1203,9 +1208,15 @@ dependencies = [
 name = "architect-permissions"
 version = "0.1.0"
 dependencies = [
+ "architect",
+ "auth",
+ "sea-orm",
+ "sea-orm-migration",
  "serde",
  "serde_json",
+ "tokio",
  "tracing",
+ "vox",
 ]
 
 [[package]]
@@ -1956,8 +1967,6 @@ dependencies = [
 name = "auth"
 version = "0.1.0"
 dependencies = [
- "architect",
- "architect-permissions",
  "argon2",
  "async-trait",
  "auth-db",
@@ -1967,6 +1976,8 @@ dependencies = [
  "chacha20poly1305",
  "chrono",
  "cookie",
+ "facet",
+ "futures",
  "hex",
  "hkdf",
  "jsonwebtoken",
@@ -1985,9 +1996,12 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "totp-rs",
+ "tracing",
  "url",
  "uuid",
  "vox",
+ "vox-core",
+ "vox-types",
  "webauthn-authenticator-rs",
  "webauthn-rs",
 ]
@@ -2039,8 +2053,6 @@ dependencies = [
 name = "auth-native-tests"
 version = "0.1.0"
 dependencies = [
- "architect",
- "architect-permissions",
  "auth",
  "auth-client",
  "chrono",
@@ -2049,17 +2061,20 @@ dependencies = [
  "tokio",
  "uuid",
  "vox",
+ "vox-core",
 ]
 
 [[package]]
 name = "auth-proto"
 version = "0.1.0"
 dependencies = [
- "architect",
  "auth-macros",
+ "axum",
  "chrono",
  "facet",
+ "facet-json",
  "fake",
+ "reqwest 0.12.28",
  "sea-orm",
  "thiserror 2.0.20",
  "uuid",
@@ -2070,12 +2085,10 @@ dependencies = [
 name = "auth-server"
 version = "0.1.0"
 dependencies = [
- "architect",
  "architect-auth",
- "architect-orgs",
- "architect-telemetry",
  "async-trait",
  "auth-client",
+ "auth-macros",
  "auth-proto",
  "auth-ui",
  "axum",
@@ -2086,7 +2099,6 @@ dependencies = [
  "eyre",
  "futures",
  "hex",
- "iroh",
  "k256",
  "lettre",
  "mock-oauth",
@@ -2103,9 +2115,11 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
+ "tracing-subscriber",
  "url",
  "uuid",
  "vox-core",
+ "vox-websocket",
  "webauthn-authenticator-rs",
 ]
 
@@ -2114,11 +2128,11 @@ name = "auth-ui"
 version = "0.1.0"
 dependencies = [
  "architect-auth",
- "architect-ui",
  "async-trait",
  "auth-proto",
  "axum",
  "chrono",
+ "clsx",
  "dioxus",
  "dioxus-ssr",
  "qrcodegen",
@@ -2130,6 +2144,7 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
+ "tw_merge",
  "uuid",
 ]
 

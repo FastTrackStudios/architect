@@ -4,7 +4,7 @@
 //!
 //! These are HTTP by nature — browser redirects, form posts, a discovery
 //! document — so they are the one part of the server that is written as
-//! axum routes rather than declared as an `#[architect::service]` trait.
+//! axum routes rather than declared as an `#[auth_macros::service]` trait.
 //! The session and organization APIs used to live here too, as
 //! hand-written JSON twins of the vox services; they are now generated
 //! from the same traits (`auth_proto::AuthService`,
@@ -526,7 +526,7 @@ async fn dev_auto_sign_in<S>(
 where
     S: AuthStorage,
 {
-    use architect_telemetry::wide;
+    use crate::host::wide;
     let email = state.dev_auto_sign_in.as_deref()?;
     let asks_for_form = params.prompt.as_deref().is_some_and(|p| {
         p.split(' ')
@@ -1518,7 +1518,7 @@ async fn linked_token<S>(
 where
     S: AuthStorage,
 {
-    use architect_telemetry::wide;
+    use crate::host::wide;
 
     let outcome = |name: &'static str| wide::set("auth.linked_token.outcome", name);
 

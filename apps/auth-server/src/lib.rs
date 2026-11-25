@@ -13,23 +13,23 @@
 //! This crate closes that gap. It is both:
 //!
 //! * a **library** — [`server::build`] hands back a configured engine
-//!   and an [`EngineHost`](architect::host::EngineHost) you can turn into
-//!   an axum [`Router`](axum::Router) and mount inside a larger app; and
+//!   and a [`Host`](host::Host) you can turn into an axum
+//!   [`Router`](axum::Router) and mount inside a larger app; and
 //! * a **binary** (`auth-server`) — configuration from the environment,
 //!   migrations on boot, listener, health probes.
 //!
 //! # Surfaces
 //!
-//! The services are declared once, as `#[architect::service]` traits in
+//! The services are declared once, as `#[auth_macros::service]` traits in
 //! `auth-proto`, and every wire below is generated from them — nothing in
 //! this crate hand-writes a route that mirrors an RPC method:
 //!
 //! | Path | Purpose |
 //! |------|---------|
 //! | `/vox` | vox RPC over WebSocket — the native path for the Rust apps |
-//! | iroh (`AUTH_IROH_KEY_FILE`) | the same vox router, peer to peer |
 //! | `POST /auth/<method>` | `AuthService` as HTTP+JSON — sign-up, sign-in, session, refresh, sign-out, profile |
-//! | `POST /organization/<method>` | `OrganizationService` as HTTP+JSON — orgs, members, invitations, roles |
+//! | `POST /auth/organization/<method>` | `OrganizationService` as HTTP+JSON — orgs, members, invitations, roles |
+//! | `POST /auth/devices/<method>` | `DeviceService` as HTTP+JSON — an account's devices and the org they share |
 //! | `/.well-known/openid-configuration` | OIDC discovery |
 //! | `/oauth2/{authorize,token,userinfo}` | OIDC provider |
 //! | `/auth/jwt/jwks` | key set (see the caveat below) |
@@ -54,12 +54,14 @@
 //! a change in `auth/src/flows.rs`, not here.
 //!
 //! **The wire surface is what the traits declare.** `architect-auth`'s
-//! engine speaks ~150 commands; the two `#[architect::service]` traits
-//! expose the session and organization lifecycles. Exposing more is a
+//! engine speaks ~150 commands; the three `#[auth_macros::service]` traits
+//! expose the session, organization and device lifecycles. Exposing more is a
 //! trait method away — both faces and both clients follow.
 
 pub mod config;
 pub mod dev;
+pub mod env;
+pub mod host;
 pub mod mail;
 pub mod oauth;
 pub mod server;
@@ -69,5 +71,5 @@ pub mod ui;
 pub use config::{ConfigError, ServerConfig, SocialConfig, SocialProviderConfig};
 pub use server::{
     AuthServer, VOX_SUBPROTOCOL, app_router, app_router_with_social, build, build_engine,
-    http_router, serve, services, vox_router,
+    http_router, serve, vox_router,
 };

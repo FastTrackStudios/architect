@@ -12,12 +12,10 @@
 //! Every generated client implements the service trait itself, so each
 //! scenario is one generic `async fn` over `AuthService` +
 //! `OrganizationService` — no adapter in between.
-//! * **vox, in-process** — the same `LayerRouter` over a memory link
-//!   (`architect::LocalServer`), driven by the generated vox clients;
+//! * **vox, in-process** — the same `VoxRouter` over a memory link
+//!   (`vox_host::local`), driven by the generated vox clients;
 //! * **vox over WebSocket** — the same router behind `/vox` on a real
-//!   socket, dialed through `architect::connect`;
-//! * **vox over iroh** — the same router on an iroh endpoint, dialed
-//!   peer to peer over loopback (relays and lookup off).
+//!   socket, dialed with vox's own WebSocket link.
 //!
 //! A behaviour that holds on one and not another is a bug in the
 //! framework's face, not in the auth engine — which is exactly the kind
@@ -35,12 +33,8 @@
     clippy::future_not_send
 )]
 
-use std::sync::Arc;
-
-use architect::connect::{Endpoint, Pool};
-use architect::iroh_link::{self, VOX_ALPN};
-use architect::{LocalServer, Scope};
 use architect_auth::db::{AuthSeaOrmStorage, Migrator};
+use architect_auth::vox_host::local;
 use auth_proto::{
     AuthFlowError, AuthService, AuthServiceClient, AuthServiceHttpClient, AuthSessionBundle,
     Invite, NewOrganization, OrganizationService, OrganizationServiceClient,
@@ -49,7 +43,6 @@ use auth_proto::{
 use auth_server::{ServerConfig, server};
 use sea_orm::Database;
 use sea_orm_migration::MigratorTrait;
-use vox_core::FromVoxLane as _;
 
 const PASSWORD: &str = "correct horse battery staple";
 
@@ -111,7 +104,7 @@ async fn spawn_app(
 async fn http_stack() -> HttpStack {
     let (config, auth) = engine().await;
     let base = format!("http://{}", spawn_app(&config, auth).await);
-    let transport = architect::http::HttpClient::new(base);
+    let transport = auth_proto::http::HttpClient::new(base);
     Stack {
         name: "http",
         auth: AuthServiceHttpClient::new(transport.clone()),
@@ -122,102 +115,36 @@ async fn http_stack() -> HttpStack {
 
 async fn local_vox_stack() -> VoxStack {
     let (_config, auth) = engine().await;
-    let scope = Scope::new();
-    let local = LocalServer::serve(server::vox_router(auth), scope.clone());
+    let router = server::vox_router(auth);
+    let (auth, serving_auth) = local::establish(&router).await.expect("establish auth");
+    let (orgs, serving_orgs) = local::establish(&router).await.expect("establish orgs");
     Stack {
         name: "vox (in-process)",
-        auth: local.establish().await.expect("establish auth"),
-        orgs: local.establish().await.expect("establish orgs"),
-        _keep: vec![Box::new(scope), Box::new(local)],
+        auth,
+        orgs,
+        _keep: vec![Box::new(serving_auth), Box::new(serving_orgs)],
     }
+}
+
+/// A client of the vox router at `url`, over a fresh WebSocket.
+async fn dial<C: vox_core::FromVoxLane>(url: &str) -> C {
+    let link = vox_websocket::WsLink::connect(url)
+        .await
+        .expect("dial /vox");
+    vox_core::initiator_on(link)
+        .establish::<C>()
+        .await
+        .expect("vox handshake over the WebSocket")
 }
 
 async fn websocket_vox_stack() -> VoxStack {
     let (config, auth) = engine().await;
-    let addr = spawn_app(&config, auth).await;
-    // A pool of our own rather than the process-global one: every stack
-    // is a distinct server, and the global pool would happily hand a
-    // second test the first test's socket.
-    let pool = Pool::default();
-    let endpoint = Endpoint::url(format!("ws://{addr}/vox"));
+    let url = format!("ws://{}/vox", spawn_app(&config, auth).await);
     Stack {
         name: "vox (websocket)",
-        auth: pool.client(&endpoint).await.expect("dial /vox"),
-        orgs: pool.client(&endpoint).await.expect("dial /vox"),
-        _keep: vec![Box::new(pool)],
-    }
-}
-
-async fn bind_iroh() -> iroh::Endpoint {
-    iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
-        .alpns(vec![VOX_ALPN.to_vec()])
-        .bind_addr("127.0.0.1:0")
-        .expect("bind_addr")
-        .bind()
-        .await
-        .expect("bind iroh endpoint")
-}
-
-fn direct_addr(endpoint: &iroh::Endpoint) -> iroh::EndpointAddr {
-    iroh::EndpointAddr::from_parts(
-        endpoint.id(),
-        endpoint
-            .bound_sockets()
-            .into_iter()
-            .map(iroh::TransportAddr::Ip),
-    )
-}
-
-/// A lane client that keeps the raw caller — one iroh connection, many
-/// typed clients over it.
-#[derive(Clone)]
-struct Lane {
-    caller: vox_core::Caller,
-    _connection: Option<vox_core::ConnectionHandle>,
-}
-
-impl vox_core::FromVoxLane for Lane {
-    const SERVICE_NAME: &'static str = "surfaces";
-    fn from_vox_lane(
-        caller: vox_core::Caller,
-        connection: Option<vox_core::ConnectionHandle>,
-    ) -> Self {
-        Self {
-            caller,
-            _connection: connection,
-        }
-    }
-}
-
-async fn iroh_vox_stack() -> VoxStack {
-    let (_config, auth) = engine().await;
-    let router = server::vox_router(auth);
-
-    let server_endpoint = bind_iroh().await;
-    let server_addr = direct_addr(&server_endpoint);
-    let serving = tokio::spawn({
-        let endpoint = server_endpoint.clone();
-        async move { iroh_link::serve_router(&endpoint, router).await }
-    });
-
-    let client_endpoint = bind_iroh().await;
-    let link = iroh_link::connect(&client_endpoint, server_addr)
-        .await
-        .expect("dial over iroh");
-    let lane: Lane = vox_core::initiator_on(link)
-        .establish()
-        .await
-        .expect("vox handshake over iroh");
-    Stack {
-        name: "vox (iroh)",
-        auth: AuthServiceClient::from_vox_lane(lane.caller.clone(), None),
-        orgs: OrganizationServiceClient::from_vox_lane(lane.caller.clone(), None),
-        _keep: vec![
-            Box::new(lane),
-            Box::new(serving),
-            Box::new(server_endpoint),
-            Box::new(client_endpoint),
-        ],
+        auth: dial(&url).await,
+        orgs: dial(&url).await,
+        _keep: Vec::new(),
     }
 }
 
@@ -238,8 +165,6 @@ where
     let s = local_vox_stack().await;
     run(s.name, scenario.call(&s.auth, &s.orgs)).await;
     let s = websocket_vox_stack().await;
-    run(s.name, scenario.call(&s.auth, &s.orgs)).await;
-    let s = iroh_vox_stack().await;
     run(s.name, scenario.call(&s.auth, &s.orgs)).await;
 }
 
@@ -530,62 +455,6 @@ async fn org_isolation() {
         another_accounts_org_is_neither_listed_nor_readable
     ))
     .await;
-}
-
-/// architect-orgs' live fetch: two apps signed in with the one session
-/// show the same orgs, with the person's role in each.
-async fn every_app_reads_the_same_orgs_from_one_sign_in<A: AuthService, O: OrganizationService>(
-    auth: &A,
-    orgs: &O,
-) {
-    use architect_orgs::{Orgs, Role};
-
-    let me = signed_up(auth, "owner@example.com").await;
-    let band = orgs
-        .create_organization(me.token.clone(), new_org("The Band", "the-band"))
-        .await
-        .expect("create");
-    let session =
-        auth_client::StoredSession::new(me.token.clone()).with_user_id(me.user.id.to_string());
-
-    let task = Orgs::new(architect_orgs::fetch(orgs, &session).await.expect("fetch"));
-    let studio = Orgs::new(architect_orgs::fetch(orgs, &session).await.expect("fetch"));
-    assert_eq!(task, studio);
-    let org = task.current().expect("one org, selected");
-    assert_eq!(org.id.0, band.organization.id.to_string());
-    assert_eq!(org.name, "The Band");
-    assert_eq!(org.role, Role::Owner);
-
-    // Signed out: the fetch says so, and the app keeps its cached list.
-    auth.sign_out(me.token).await.expect("sign out");
-    assert!(architect_orgs::fetch(orgs, &session).await.is_err());
-}
-
-#[tokio::test]
-async fn orgs_fetched_live() {
-    on_every_transport(scenario!(every_app_reads_the_same_orgs_from_one_sign_in)).await;
-}
-
-/// A server confining its services to the caller's org learns the same
-/// orgs from the caller's token as the apps do.
-#[tokio::test]
-async fn a_confining_server_learns_the_callers_orgs_from_the_identity_server() {
-    use architect_orgs::server::{Directory as _, IdentityServer};
-
-    let stack = local_vox_stack().await;
-    let me = signed_up(&stack.auth, "owner@example.com").await;
-    stack
-        .orgs
-        .create_organization(me.token.clone(), new_org("The Band", "the-band"))
-        .await
-        .expect("create");
-    let session = auth_client::StoredSession::new(me.token.clone());
-    let apps = architect_orgs::fetch(&stack.orgs, &session)
-        .await
-        .expect("fetch");
-    let directory = IdentityServer(stack.orgs.clone());
-    assert_eq!(directory.orgs(&me.token).await.expect("directory"), apps);
-    assert!(directory.orgs("not-a-session").await.is_err());
 }
 
 async fn an_invitation_puts_the_invitee_in_the_org_and_roles_change<
@@ -1039,9 +908,9 @@ async fn the_generated_paths_are_the_whole_json_api() {
     let (config, auth) = engine().await;
     let base = format!("http://{}", spawn_app(&config, auth).await);
     let http = reqwest::Client::new();
-    for (_, path) in auth_proto::service::http::PATHS
+    for (_, path) in auth_proto::auth_service_http::PATHS
         .iter()
-        .chain(auth_proto::organizations::http::PATHS)
+        .chain(auth_proto::organization_service_http::PATHS)
     {
         let status = http
             .post(format!("{base}{path}"))
@@ -1073,26 +942,4 @@ async fn the_generated_paths_are_the_whole_json_api() {
             .status();
         assert_ne!(status.as_u16(), 404, "{live} must stay mounted");
     }
-}
-
-/// The process-global pool, as an app would use it: one socket, both
-/// clients, the bearer riding the WebSocket handshake.
-#[tokio::test]
-async fn one_pooled_websocket_serves_every_client() {
-    let (config, auth) = engine().await;
-    let addr = spawn_app(&config, auth).await;
-    let endpoint = Endpoint::url(format!("ws://{addr}/vox"));
-    let pool = Arc::new(Pool::default());
-    let auth_client: AuthServiceClient = pool.client(&endpoint).await.expect("dial");
-    let org_client: OrganizationServiceClient = pool.client(&endpoint).await.expect("dial");
-    let bundle = AuthServiceClient::sign_up_email_password(
-        &auth_client,
-        sign_up_input("pooled@example.com"),
-    )
-    .await
-    .expect("sign up");
-    let orgs = OrganizationServiceClient::list_organizations(&org_client, bundle.token)
-        .await
-        .expect("list");
-    assert!(orgs.is_empty());
 }

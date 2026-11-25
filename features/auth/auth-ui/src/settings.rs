@@ -24,7 +24,7 @@ use axum::response::{Html, IntoResponse as _, Response};
 use dioxus::prelude::*;
 
 use crate::UiState;
-use architect_ui::components::{
+use crate::components::{
     Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel, SidebarHeader,
     SidebarMenu, SidebarMenuButton, SidebarMenuButtonRenderAs, SidebarMenuItem, SidebarProvider,
 };

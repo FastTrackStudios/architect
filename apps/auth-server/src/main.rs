@@ -9,7 +9,7 @@ use auth_server::{ServerConfig, server};
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    architect::host::boot("info,auth_server=debug");
+    auth_server::host::boot("info,auth_server=debug");
 
     let config = ServerConfig::load()?;
     tracing::info!(

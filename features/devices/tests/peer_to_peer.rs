@@ -57,8 +57,14 @@ async fn issuer() -> Issuer {
         .build()
         .unwrap();
     let router = LayerRouter::new()
-        .merge(auth::auth_service_layer(AuthVoxService::new(auth.clone())))
-        .merge(auth::device_service_layer(AuthVoxService::new(auth)));
+        .with(
+            auth::auth_service_service_descriptor(),
+            auth::AuthServiceDispatcher::new(AuthVoxService::new(auth.clone())),
+        )
+        .with(
+            auth::device_service_service_descriptor(),
+            auth::DeviceServiceDispatcher::new(AuthVoxService::new(auth)),
+        );
     let server = LocalServer::serve(router, LocalScope::new());
     let devices = server.establish().await.unwrap();
     Issuer { server, devices }

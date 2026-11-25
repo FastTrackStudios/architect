@@ -1,9 +1,9 @@
 use architect_auth::{
-    ArchitectAuth, AuthServiceDispatcher, auth_service_layer,
+    ArchitectAuth, AuthServiceDispatcher, auth_service_service_descriptor,
     client::{MemoryTokenStore, StoredSession, TokenStore, TokenStoreMiddleware},
     db::{AuthSeaOrmStorage, Migrator},
-    proto::architect::LayerRouter,
     transport::vox::{AuthClientMiddleware, AuthServerMiddleware, AuthVoxService},
+    vox_host::VoxRouter,
 };
 use sea_orm::Database;
 use sea_orm_migration::MigratorTrait;
@@ -17,8 +17,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .storage(AuthSeaOrmStorage::new(db))
         .build()?;
 
-    // Mount the session surface like any other architect service…
-    let _router = LayerRouter::new().merge(auth_service_layer(AuthVoxService::new(auth.clone())));
+    // Mount the session surface on a vox router (what `/vox` serves)…
+    let _router = VoxRouter::new().with(
+        auth_service_service_descriptor(),
+        AuthServiceDispatcher::new(AuthVoxService::new(auth.clone())),
+    );
 
     // …or build the dispatcher by hand to wrap it in middleware.
     let _dispatcher =

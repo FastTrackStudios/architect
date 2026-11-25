@@ -1,7 +1,5 @@
 //! Wire contract for architect-auth.
 
-pub use architect;
-
 // r[impl auth.core.entities.single-source]
 pub mod account;
 pub mod agent_link;
@@ -9,6 +7,7 @@ pub mod api_key;
 pub mod audit_event;
 pub mod device;
 pub mod email_change;
+pub mod http;
 pub mod invitation;
 pub mod invite_link;
 pub mod member;
@@ -26,19 +25,16 @@ pub mod user;
 pub mod verification;
 
 // r[verify auth.core.entities.single-source]
-pub use account::{
-    AuthAccount, AuthAccountCreate, AuthAccountList, AuthAccountUpdate,
-};
-pub use agent_link::{
-    AuthAgentLink, AuthAgentLinkCreate, AuthAgentLinkList, AuthAgentLinkUpdate,
-};
+pub use account::{AuthAccount, AuthAccountCreate, AuthAccountList, AuthAccountUpdate};
+pub use agent_link::{AuthAgentLink, AuthAgentLinkCreate, AuthAgentLinkList, AuthAgentLinkUpdate};
 pub use api_key::{AuthApiKey, AuthApiKeyCreate, AuthApiKeyList, AuthApiKeyUpdate};
 pub use audit_event::{
     AuthAuditEventRecord, AuthAuditEventRecordCreate, AuthAuditEventRecordList,
     AuthAuditEventRecordUpdate,
 };
 pub use invitation::{
-    AuthInvitation, AuthInvitationCreate, AuthInvitationList, AuthInvitationUpdate, InvitationStatus,
+    AuthInvitation, AuthInvitationCreate, AuthInvitationList, AuthInvitationUpdate,
+    InvitationStatus,
 };
 pub use invite_link::{
     AuthInviteLink, AuthInviteLinkCreate, AuthInviteLinkList, AuthInviteLinkUpdate,
@@ -51,23 +47,17 @@ pub use organization_role::{
     AuthOrganizationRole, AuthOrganizationRoleCreate, AuthOrganizationRoleList,
     AuthOrganizationRoleUpdate,
 };
-pub use passkey::{
-    AuthPasskey, AuthPasskeyCreate, AuthPasskeyList, AuthPasskeyUpdate,
-};
+pub use passkey::{AuthPasskey, AuthPasskeyCreate, AuthPasskeyList, AuthPasskeyUpdate};
 pub use passkey_ceremony::{
     AuthPasskeyCeremony, AuthPasskeyCeremonyCreate, AuthPasskeyCeremonyList,
     AuthPasskeyCeremonyUpdate, PasskeyCeremonyKind,
 };
-pub use session::{
-    AuthSession, AuthSessionCreate, AuthSessionList, AuthSessionUpdate,
-};
+pub use session::{AuthSession, AuthSessionCreate, AuthSessionList, AuthSessionUpdate};
 pub use team::{AuthTeam, AuthTeamCreate, AuthTeamList, AuthTeamUpdate};
 pub use team_member::{
     AuthTeamMember, AuthTeamMemberCreate, AuthTeamMemberList, AuthTeamMemberUpdate,
 };
-pub use two_factor::{
-    AuthTwoFactor, AuthTwoFactorCreate, AuthTwoFactorList, AuthTwoFactorUpdate,
-};
+pub use two_factor::{AuthTwoFactor, AuthTwoFactorCreate, AuthTwoFactorList, AuthTwoFactorUpdate};
 pub use user::{AuthUser, AuthUserCreate, AuthUserList, AuthUserUpdate};
 pub use verification::{
     AuthVerification, AuthVerificationCreate, AuthVerificationList, AuthVerificationUpdate,
@@ -151,12 +141,10 @@ pub struct AuthSessionBundle {
     pub token: String,
 }
 
-// The session RPC surface. The prelude glob carries the trait plus the
-// vox-gated client/dispatcher/descriptor and the `AuthServiceService` /
-// `auth_service_layer` / `auth_service_serve` mount verbs; the explicit
-// re-exports preserve the names downstream code mounted with before the
-// trait moved into `service` (`AuthServiceDispatcher::new(..)` +
-// `auth_service_service_descriptor()`).
+// The session RPC surface. The prelude glob carries the trait, its HTTP
+// face (`auth_service_http`), its HTTP client, and the vox-gated client,
+// dispatcher and descriptor (`AuthServiceDispatcher::new(..)` +
+// `auth_service_service_descriptor()`, what a vox router mounts).
 pub use service::AUTHORIZATION_METADATA_KEY;
 pub use service::OrgMember;
 pub use service::prelude::*;
@@ -168,8 +156,8 @@ pub use service::{AuthServiceDispatcher, auth_service_service_descriptor};
 pub use device::ensure_registered;
 pub use device::prelude::*;
 pub use device::{
-    AccountOrg, AuthAccountOrg, AuthDevice, AuthDeviceCreate, DeviceDirectory,
-    DeviceRegistration, PeerDevice, Registered,
+    AccountOrg, AuthAccountOrg, AuthDevice, AuthDeviceCreate, DeviceDirectory, DeviceRegistration,
+    PeerDevice, Registered,
 };
 
 // The organization surface — same shape, second trait.
@@ -191,8 +179,8 @@ pub struct Page {
 /// A call that never reached the engine is an internal failure from the
 /// caller's point of view — which is what lets `AuthServiceClient` and
 /// `AuthServiceHttpClient` implement `AuthService` itself.
-impl From<architect::TransportError> for AuthFlowError {
-    fn from(e: architect::TransportError) -> Self {
+impl From<http::TransportError> for AuthFlowError {
+    fn from(e: http::TransportError) -> Self {
         Self::Internal(e.to_string())
     }
 }
@@ -203,7 +191,7 @@ impl From<architect::TransportError> for AuthFlowError {
 /// stable code the engine's taxonomy (`auth::transport::AUTH_ERROR_TAXONOMY`)
 /// has always promised. Declared here because the type is declared here;
 /// the taxonomy test in `auth` pins the two against each other.
-impl architect::http::HttpError for AuthFlowError {
+impl http::HttpError for AuthFlowError {
     fn status(&self) -> u16 {
         match self {
             Self::InvalidCredentials | Self::SessionExpired => 401,

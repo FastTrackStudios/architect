@@ -14,41 +14,41 @@ use crate::mail::MailConfig;
 /// Anything the operator can set. Every field has an env var; only the
 /// database URL and the signing secret are mandatory.
 ///
-/// The simple fields read themselves (`#[derive(architect::Config)]`,
+/// The simple fields read themselves (`#[derive(auth_macros::Config)]`,
 /// prefix `AUTH_`); the three that need parsing beyond a scalar — the
 /// OIDC client list, the social providers, and the mail block's public
 /// origin — are filled in by [`ServerConfig::load`].
-#[derive(Clone, Debug, architect::Config)]
-#[architect(prefix = "AUTH")]
+#[derive(Clone, Debug, auth_macros::Config)]
+#[config(prefix = "AUTH")]
 pub struct ServerConfig {
     /// `host:port` the HTTP/WebSocket listener binds to.
-    #[architect(default = "0.0.0.0:8080")]
+    #[config(default = "0.0.0.0:8080")]
     pub bind_addr: String,
     /// `SeaORM` connection string. `postgres://…` in the cluster,
     /// `sqlite://…` for local development.
-    #[architect(secret)]
+    #[config(secret)]
     pub database_url: String,
     /// Session-token signing secret. Minimum 32 bytes — architect-auth
     /// rejects anything shorter, which is the check that keeps a
     /// misconfigured deploy from issuing forgeable tokens.
-    #[architect(secret)]
+    #[config(secret)]
     pub secret: String,
     /// Public origin this server is reached at, e.g.
     /// `https://auth.fasttrackstudio.app`. Every OIDC endpoint in the
     /// discovery document is derived from it, so it must be the
     /// externally visible URL, not the pod address.
-    #[architect(default = "http://localhost:8080")]
+    #[config(default = "http://localhost:8080")]
     pub base_url: String,
     /// OIDC issuer. Defaults to `base_url`; split out because an issuer
     /// is a stable identity that outlives a hostname change.
     pub oidc_issuer: Option<String>,
     /// Session lifetime in seconds.
-    #[architect(default = 60 * 60 * 24 * 30)]
+    #[config(default = 60 * 60 * 24 * 30)]
     pub session_ttl_seconds: i64,
     /// Whether a fresh account must verify its email before it can sign
     /// in. Off by default so a first deploy is usable before SMTP is
     /// wired up.
-    #[architect(default = false)]
+    #[config(default = false)]
     pub require_email_verification: bool,
     /// Relying-party id for passkeys — the registrable domain, e.g.
     /// `fasttrackstudio.app`.
@@ -58,15 +58,15 @@ pub struct ServerConfig {
     /// Registered OIDC clients, parsed from `AUTH_OIDC_CLIENTS` (JSON),
     /// with `AUTH_OIDC_CLIENTS_EXTRA` (or its `_FILE` form) merged over
     /// the top.
-    #[architect(skip)]
+    #[config(skip)]
     pub oidc_clients: Vec<OidcClientConfig>,
     /// Whether clients may self-register at `/oauth2/register`. Off by
     /// default: on a public issuer, dynamic registration is an open door.
-    #[architect(env = "AUTH_OIDC_DYNAMIC_REGISTRATION", default = false)]
+    #[config(env = "AUTH_OIDC_DYNAMIC_REGISTRATION", default = false)]
     pub oidc_allow_dynamic_client_registration: bool,
     /// Run migrations on boot. On in normal operation; an operator can
     /// turn it off to gate schema changes behind a separate job.
-    #[architect(default = true)]
+    #[config(default = true)]
     pub run_migrations: bool,
     /// Load a sanitised snapshot into an empty *local* database on
     /// boot. `AUTH_IMPORT_SNAPSHOT=/path/to/auth-snapshot.json`.
@@ -75,22 +75,13 @@ pub struct ServerConfig {
     /// gets the published development password, which is why this is
     /// refused against anything but a local database.
     pub import_snapshot: Option<String>,
-    /// Also serve the vox router over iroh, peer to peer. The endpoint's
-    /// secret key persists at this path (a stable id across restarts);
-    /// `AUTH_IROH_KEY_FILE=/var/lib/auth/iroh.key`. Unset means no p2p.
-    #[architect(env = "AUTH_IROH_KEY_FILE")]
-    pub iroh_key_path: Option<String>,
-    /// Where to write the iroh endpoint id on boot, for other devices
-    /// and agents to read. `AUTH_IROH_ID_FILE`.
-    #[architect(env = "AUTH_IROH_ID_FILE")]
-    pub iroh_id_path: Option<String>,
     /// Fill an empty *local* database with the fixed development cast,
     /// and serve it. `AUTH_DEV_SEED=1`.
     ///
     /// Off by default and refused against anything but a local
     /// database, because it creates accounts whose password is a
     /// published constant.
-    #[architect(default = false)]
+    #[config(default = false)]
     pub dev_seed: bool,
     /// Sign this account in by itself at `/oauth2/authorize` instead of
     /// showing the sign-in form: the local dev stack's demo account
@@ -101,15 +92,15 @@ pub struct ServerConfig {
     /// debug build bound to loopback, its public origin is this machine,
     /// the account is a demo one (`@local.test`) and the database is the
     /// dev stack's own (`<state>/auth/auth.db` beside its `fill.json`).
-    #[architect(env = "AUTH_DEV_AUTO_SIGN_IN")]
+    #[config(env = "AUTH_DEV_AUTO_SIGN_IN")]
     pub dev_auto_sign_in: Option<String>,
     /// Outgoing mail. Without `AUTH_SMTP_HOST` the mailer only logs, and
     /// every flow that has to reach a person — verification, password
     /// reset — completes as far as minting a token and no further.
-    #[architect(nested)]
+    #[config(nested)]
     pub mail: MailConfig,
     /// Social providers and the linked-token policy. See the module docs.
-    #[architect(skip)]
+    #[config(skip)]
     pub social: SocialConfig,
 }
 
@@ -208,7 +199,7 @@ impl Default for SocialConfig {
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error(transparent)]
-    Env(#[from] architect::config::ConfigError),
+    Env(#[from] crate::env::ConfigError),
     #[error("{0} is required but not set")]
     Missing(&'static str),
     #[error("{var} is set but unreadable: {source}")]
@@ -439,8 +430,6 @@ impl ServerConfig {
             oidc_allow_dynamic_client_registration: false,
             run_migrations: true,
             import_snapshot: None,
-            iroh_key_path: None,
-            iroh_id_path: None,
             dev_seed: false,
             dev_auto_sign_in: None,
             social: SocialConfig::disabled(),
@@ -638,11 +627,11 @@ fn read_secret(var: &'static str) -> Result<String, ConfigError> {
 }
 
 fn optional_secret(var: &'static str) -> Result<Option<String>, ConfigError> {
-    Ok(architect::config::secret(var)?)
+    Ok(crate::env::secret(var)?)
 }
 
 fn optional(var: &str) -> Option<String> {
-    architect::config::var(var)
+    crate::env::var(var)
 }
 
 #[cfg(test)]

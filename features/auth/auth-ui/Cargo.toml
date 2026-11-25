@@ -13,11 +13,13 @@ description = "Server-rendered account, organization and invitation pages for ar
 rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
 [dependencies]
+# Class merging for the design system's components (src/cn.rs).
+clsx = { workspace = true }
+tw_merge = { workspace = true }
 architect-auth = { workspace = true, features = ["full"] }
 # The design system. Its components render through `dioxus-ssr` like any
 # other; what they need beyond markup is its two embedded stylesheets,
 # which this crate serves rather than asking a consumer to build Tailwind.
-architect-ui.workspace = true
 async-trait.workspace = true
 auth-proto.workspace = true
 axum.workspace = true

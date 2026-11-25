@@ -1,4 +1,4 @@
-//! The organization surface: one `#[architect::rpc]` trait, both faces.
+//! The organization surface: one `#[auth_macros::service]` trait, both faces.
 //!
 //! Everything a relying party needs to answer "which orgs is this person
 //! in, and what may they do there" — the orgs a session belongs to with
@@ -108,7 +108,7 @@ pub struct Invite {
 // bought nothing — and `path` takes a single segment by design, so
 // `auth/organization` would have meant nesting the router by hand at the
 // mount site to say the same thing.
-#[architect::service(path = "auth")]
+#[auth_macros::service(path = "auth")]
 pub trait OrganizationService {
     /// Every org this session belongs to, with the caller's role in each.
     /// One call, one round trip, and a relying party needs no membership

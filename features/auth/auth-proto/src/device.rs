@@ -171,7 +171,7 @@ impl From<AuthAccountOrg> for AccountOrg {
 /// The account's device address book. Every call is scoped to the
 /// account the token names; a device can see and remove only its own
 /// account's devices.
-#[architect::service(path = "auth")]
+#[auth_macros::service(path = "auth")]
 pub trait DeviceService {
     /// Say this install is signed in here, with its endpoint id; offer an
     /// org to share if the account has none. Returns the directory.

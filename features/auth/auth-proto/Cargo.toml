@@ -12,7 +12,6 @@ repository.workspace = true
 rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
 [dependencies]
-architect.workspace = true
 auth-macros.workspace = true
 chrono.workspace = true
 facet.workspace = true
@@ -21,14 +20,27 @@ uuid.workspace = true
 vox = { workspace = true, optional = true }
 sea-orm = { workspace = true, optional = true }
 fake = { workspace = true, optional = true }
+facet-json = { version = "0.50.0-rc.5" }
+axum = { workspace = true, optional = true }
+
+# The HTTP client: reqwest over fetch in a browser, rustls natively.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+reqwest = { version = "0.12", default-features = false, optional = true }
+# Ids are minted in the browser too: its randomness.
+uuid = { workspace = true, features = ["js"] }
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"], optional = true }
 
 [features]
 default = ["vox"]
-vox = ["dep:vox", "architect/vox"]
+vox = ["dep:vox"]
 sea-orm = ["dep:sea-orm"]
-server = ["architect/server-seaorm", "sea-orm"]
-fake = ["dep:fake", "architect/fake"]
-full = ["vox", "server", "fake"]
+server = ["sea-orm"]
+fake = ["dep:fake"]
+# The services' HTTP routes (axum), and their HTTP client (reqwest).
+http = ["dep:axum"]
+http-client = ["dep:reqwest"]
+full = ["vox", "server", "fake", "http", "http-client"]
 
 [lints]
 workspace = true

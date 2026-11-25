@@ -668,7 +668,7 @@ pub mod axum {
     use uuid::Uuid;
 
     // r[impl auth.transport.axum-feature]
-    pub use architect::axum_ws;
+    pub use crate::vox_host::axum_ws;
 
     // r[impl auth.transport.axum-feature]
     #[derive(Clone, Debug, PartialEq, Eq)]

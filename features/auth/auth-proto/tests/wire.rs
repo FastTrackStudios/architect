@@ -23,17 +23,24 @@ fn paths(service: &str, p: &[(&str, &str)]) -> Vec<String> {
 #[test]
 fn the_wire_is_what_shipped_apps_call() {
     let mut lines = Vec::new();
-    lines.extend(methods(auth_proto::service::auth_service_service_descriptor()));
+    lines.extend(methods(
+        auth_proto::service::auth_service_service_descriptor(),
+    ));
     lines.extend(methods(
         auth_proto::organizations::organization_service_service_descriptor(),
     ));
-    lines.extend(methods(auth_proto::device::device_service_service_descriptor()));
+    lines.extend(methods(
+        auth_proto::device::device_service_service_descriptor(),
+    ));
     lines.extend(paths("AuthService", auth_proto::auth_service_http::PATHS));
     lines.extend(paths(
         "OrganizationService",
         auth_proto::organization_service_http::PATHS,
     ));
-    lines.extend(paths("DeviceService", auth_proto::device_service_http::PATHS));
+    lines.extend(paths(
+        "DeviceService",
+        auth_proto::device_service_http::PATHS,
+    ));
     let now = lines.join("\n") + "\n";
     let golden = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/wire.golden");
     if std::env::var_os("BLESS").is_some() {
@@ -41,5 +48,8 @@ fn the_wire_is_what_shipped_apps_call() {
         return;
     }
     let pinned = std::fs::read_to_string(&golden).expect("tests/wire.golden");
-    assert_eq!(now, pinned, "the wire changed; BLESS=1 only if that is meant");
+    assert_eq!(
+        now, pinned,
+        "the wire changed; BLESS=1 only if that is meant"
+    );
 }

@@ -19,12 +19,13 @@ pub mod crypto;
 pub mod devices;
 pub mod expiry;
 pub mod flows;
-pub mod identity;
 pub mod percent;
 pub mod plugins;
 pub mod storage;
 pub mod test_utils;
 pub mod transport;
+#[cfg(feature = "axum")]
+pub mod vox_host;
 
 pub use commands::{
     ACCESS_TOKEN_TYPE, AcceptInvitation, ActiveDeviceSession, AddTeamMember, AdditionalFieldSpec,
