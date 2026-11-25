@@ -16,20 +16,18 @@ use uuid::Uuid;
 /// `max_role` is `admin` or `member`. Owner is never inheritable: an
 /// agent cannot delete or hand over an organization on somebody's
 /// behalf, whatever it was told.
-#[architect::entity(table_name = "auth_agent_links", repo)]
+#[auth_macros::entity(table_name = "auth_agent_links")]
 #[derive(Eq)]
 pub struct AuthAgentLink {
-    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
+    #[entity(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
     pub id: Uuid,
     /// The person whose memberships are inherited.
-    #[architect(filterable, sortable)]
     pub owner_user_id: Uuid,
     /// The account doing the inheriting.
-    #[architect(filterable, sortable)]
     pub agent_user_id: Uuid,
     /// The highest role the agent may hold through this link.
     pub max_role: String,
-    #[architect(exclude(create, update), on_create = Utc::now())]
+    #[entity(exclude(create, update), on_create = Utc::now())]
     pub created_at: DateTime<Utc>,
 }
 

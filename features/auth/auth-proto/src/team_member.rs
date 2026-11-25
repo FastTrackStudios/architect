@@ -1,16 +1,14 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-#[architect::entity(table_name = "auth_team_members", repo)]
+#[auth_macros::entity(table_name = "auth_team_members")]
 #[derive(Eq)]
 pub struct AuthTeamMember {
-    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
+    #[entity(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
     pub id: Uuid,
-    #[architect(filterable, sortable)]
     pub team_id: Uuid,
-    #[architect(filterable, sortable)]
     pub user_id: Uuid,
-    #[architect(exclude(create, update), on_create = Utc::now())]
+    #[entity(exclude(create, update), on_create = Utc::now())]
     pub created_at: DateTime<Utc>,
 }
 

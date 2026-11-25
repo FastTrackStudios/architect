@@ -17,15 +17,13 @@ use uuid::Uuid;
 /// stolen database dump therefore yields no working link, and the
 /// consequence — that the plaintext is shown exactly once, at
 /// creation — is the intended one.
-#[architect::entity(table_name = "auth_invite_links", repo)]
+#[auth_macros::entity(table_name = "auth_invite_links")]
 #[derive(Eq)]
 pub struct AuthInviteLink {
-    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
+    #[entity(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
     pub id: Uuid,
-    #[architect(filterable, sortable)]
     pub organization_id: Uuid,
     /// `hash_token(secret, token)` — never the token.
-    #[architect(filterable)]
     pub token_hash: String,
     /// An optional human label, so a list of links is readable.
     pub label: Option<String>,
@@ -33,17 +31,16 @@ pub struct AuthInviteLink {
     pub role: String,
     pub created_by: Uuid,
     /// `None` means the link does not expire on its own.
-    #[architect(sortable)]
     pub expires_at: Option<DateTime<Utc>>,
     /// `None` means unlimited.
     pub max_uses: Option<i32>,
-    #[architect(exclude(create))]
+    #[entity(exclude(create))]
     pub uses: i32,
     /// Set once, and never unset: a revoked link stays revoked so the
     /// same URL cannot be brought back to life after being shared
     /// somewhere it should not have been.
     pub revoked_at: Option<DateTime<Utc>>,
-    #[architect(exclude(create, update), on_create = Utc::now())]
+    #[entity(exclude(create, update), on_create = Utc::now())]
     pub created_at: DateTime<Utc>,
 }
 

@@ -34,6 +34,7 @@ members = [
     "features/auth/architect-auth",
     "features/auth/auth",
     "features/auth/auth-proto",
+    "features/auth/auth-macros",
     "features/auth/auth-db",
     "features/auth/auth-client",
     "features/auth/auth-ui",
@@ -164,6 +165,7 @@ architect-auth = { path = "features/auth/architect-auth" }
 auth-server = { path = "apps/auth-server" }
 auth = { path = "features/auth/auth" }
 auth-proto = { path = "features/auth/auth-proto" }
+auth-macros = { path = "features/auth/auth-macros" }
 auth-db = { path = "features/auth/auth-db" }
 auth-client = { path = "features/auth/auth-client" }
 auth-ui = { path = "features/auth/auth-ui" }

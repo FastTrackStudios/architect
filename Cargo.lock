@@ -2026,6 +2026,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "auth-macros"
+version = "0.1.0"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "auth-native-tests"
 version = "0.1.0"
 dependencies = [
@@ -2046,6 +2056,7 @@ name = "auth-proto"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "auth-macros",
  "chrono",
  "facet",
  "fake",

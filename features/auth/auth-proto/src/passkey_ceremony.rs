@@ -22,27 +22,23 @@ use uuid::Uuid;
 /// state itself is not a credential — completing a ceremony still
 /// needs a valid signature — but a database dump should not let
 /// somebody resume ceremonies either.
-#[architect::entity(table_name = "auth_passkey_ceremonies", repo)]
+#[auth_macros::entity(table_name = "auth_passkey_ceremonies")]
 #[derive(Eq)]
 pub struct AuthPasskeyCeremony {
-    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
+    #[entity(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
     pub id: Uuid,
     /// `hash_token(secret, handle)` — never the handle.
-    #[architect(filterable)]
     pub handle_hash: String,
     /// `registration` or `authentication`.
-    #[architect(filterable)]
     pub kind: String,
     /// Who is registering. `None` for a discoverable sign-in, where the
     /// whole point is that the server does not yet know who is at the
     /// keyboard.
-    #[architect(filterable)]
     pub user_id: Option<Uuid>,
     /// The serialised `webauthn-rs` state.
     pub state_json: String,
-    #[architect(sortable)]
     pub expires_at: DateTime<Utc>,
-    #[architect(exclude(create, update), on_create = Utc::now())]
+    #[entity(exclude(create, update), on_create = Utc::now())]
     pub created_at: DateTime<Utc>,
 }
 

@@ -20,32 +20,28 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-#[architect::entity(table_name = "auth_user_email_history", repo)]
+#[auth_macros::entity(table_name = "auth_user_email_history")]
 #[derive(Eq)]
 pub struct AuthEmailChange {
-    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
+    #[entity(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
     pub id: Uuid,
     /// The account whose address changed. Stable across the whole chain —
     /// migrating an email never mints a new user, so anything keyed on
     /// this id (tasks, timers, authorship) stays attached.
-    #[architect(filterable, sortable)]
     pub user_id: Uuid,
     /// The address held BEFORE this change. `None` only when the account
     /// had no email at all — the column on `auth_users` is nullable, so
     /// this one is too rather than inventing an empty string.
-    #[architect(filterable)]
     pub previous_email: Option<String>,
     /// The address held AFTER this change.
-    #[architect(filterable)]
     pub new_email: String,
     /// Who performed it. `None` = the user changed their own address;
     /// `Some(id)` = an operator or admin migrated it on their behalf.
-    #[architect(filterable)]
     pub changed_by: Option<Uuid>,
     /// Free text, for migrations done in bulk ("consolidating onto the
     /// personal domain") so the trail explains itself later.
     pub reason: Option<String>,
-    #[architect(exclude(create, update), on_create = Utc::now())]
+    #[entity(exclude(create, update), on_create = Utc::now())]
     pub created_at: DateTime<Utc>,
 }
 

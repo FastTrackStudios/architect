@@ -70,6 +70,7 @@ fn map_txn_err(err: TransactionError<sea_orm::DbErr>) -> AuthFlowError {
 // r[impl auth.storage.transactions]
 // r[impl auth.storage.clock]
 #[async_trait]
+// r[impl auth.storage.repo-first]
 impl AuthStorage for AuthSeaOrmStorage {
     fn capabilities(&self) -> AuthStorageCapabilities {
         AuthStorageCapabilities::transactional("sea-orm", AuthStorageClock::BackendGeneratedUtc)
@@ -2141,5 +2142,18 @@ impl AuthStorage for AuthSeaOrmStorage {
             .await
             .map(|_| ())
             .map_err(map_db_err)
+    }
+}
+
+#[cfg(test)]
+mod contract_tests {
+    // r[verify auth.storage.repo-first]
+    // r[verify auth.storage.no-public-sql]
+    /// The database backend is reached through the storage contract, not
+    /// through SQL adapters of its own.
+    #[test]
+    fn the_database_backend_implements_the_storage_contract() {
+        fn implements<T: crate::storage::AuthStorage>() {}
+        implements::<super::AuthSeaOrmStorage>();
     }
 }

@@ -1,6 +1,5 @@
 //! `SeaORM` backend for architect-auth entities.
 
-// r[impl auth.storage.repo-first]
 // r[impl auth.storage.no-public-sql]
 // r[impl auth.storage.backend-parity]
 // r[impl auth.storage.transactions]
@@ -69,24 +68,23 @@ pub const fn auth_database_support_matrix() -> &'static [AuthDatabaseSupport] {
 
 pub use auth_proto::account::{
     ActiveModel as AuthAccountActiveModel, AuthAccount, AuthAccountCreate, AuthAccountList,
-    AuthAccountRepo, AuthAccountRepoStorage, AuthAccountUpdate, Column as AuthAccountColumn,
+    AuthAccountUpdate, Column as AuthAccountColumn,
     Entity as AuthAccountEntity, Model as AuthAccountModel, Relation as AuthAccountRelation,
 };
 pub use auth_proto::agent_link::{
     ActiveModel as AuthAgentLinkActiveModel, AuthAgentLink, AuthAgentLinkCreate, AuthAgentLinkList,
-    AuthAgentLinkRepo, AuthAgentLinkRepoStorage, AuthAgentLinkUpdate,
+    AuthAgentLinkUpdate,
     Column as AuthAgentLinkColumn, Entity as AuthAgentLinkEntity, Model as AuthAgentLinkModel,
     Relation as AuthAgentLinkRelation,
 };
 pub use auth_proto::api_key::{
     ActiveModel as AuthApiKeyActiveModel, AuthApiKey, AuthApiKeyCreate, AuthApiKeyList,
-    AuthApiKeyRepo, AuthApiKeyRepoStorage, AuthApiKeyUpdate, Column as AuthApiKeyColumn,
+    AuthApiKeyUpdate, Column as AuthApiKeyColumn,
     Entity as AuthApiKeyEntity, Model as AuthApiKeyModel, Relation as AuthApiKeyRelation,
 };
 pub use auth_proto::audit_event::{
     ActiveModel as AuthAuditEventRecordActiveModel, AuthAuditEventRecord,
-    AuthAuditEventRecordCreate, AuthAuditEventRecordList, AuthAuditEventRecordRepo,
-    AuthAuditEventRecordRepoStorage, AuthAuditEventRecordUpdate,
+    AuthAuditEventRecordCreate, AuthAuditEventRecordList, AuthAuditEventRecordUpdate,
     Column as AuthAuditEventRecordColumn, Entity as AuthAuditEventRecordEntity,
     Model as AuthAuditEventRecordModel, Relation as AuthAuditEventRecordRelation,
 };
@@ -100,83 +98,77 @@ pub use auth_proto::device::{
 };
 pub use auth_proto::email_change::{
     ActiveModel as AuthEmailChangeActiveModel, AuthEmailChange, AuthEmailChangeCreate,
-    AuthEmailChangeList, AuthEmailChangeRepo, AuthEmailChangeRepoStorage, AuthEmailChangeUpdate,
+    AuthEmailChangeList, AuthEmailChangeUpdate,
     Column as AuthEmailChangeColumn, Entity as AuthEmailChangeEntity,
     Model as AuthEmailChangeModel, Relation as AuthEmailChangeRelation,
 };
 pub use auth_proto::invitation::{
     ActiveModel as AuthInvitationActiveModel, AuthInvitation, AuthInvitationCreate,
-    AuthInvitationList, AuthInvitationRepo, AuthInvitationRepoStorage, AuthInvitationUpdate,
+    AuthInvitationList, AuthInvitationUpdate,
     Column as AuthInvitationColumn, Entity as AuthInvitationEntity, InvitationStatus,
     Model as AuthInvitationModel, Relation as AuthInvitationRelation,
 };
 pub use auth_proto::invite_link::{
     ActiveModel as AuthInviteLinkActiveModel, AuthInviteLink, AuthInviteLinkCreate,
-    AuthInviteLinkList, AuthInviteLinkRepo, AuthInviteLinkRepoStorage, AuthInviteLinkUpdate,
+    AuthInviteLinkList, AuthInviteLinkUpdate,
     Column as AuthInviteLinkColumn, Entity as AuthInviteLinkEntity, Model as AuthInviteLinkModel,
     Relation as AuthInviteLinkRelation,
 };
 pub use auth_proto::member::{
     ActiveModel as AuthMemberActiveModel, AuthMember, AuthMemberCreate, AuthMemberList,
-    AuthMemberRepo, AuthMemberRepoStorage, AuthMemberUpdate, Column as AuthMemberColumn,
+    AuthMemberUpdate, Column as AuthMemberColumn,
     Entity as AuthMemberEntity, Model as AuthMemberModel, Relation as AuthMemberRelation,
 };
 pub use auth_proto::organization::{
     ActiveModel as AuthOrganizationActiveModel, AuthOrganization, AuthOrganizationCreate,
-    AuthOrganizationList, AuthOrganizationRepo, AuthOrganizationRepoStorage,
-    AuthOrganizationUpdate, Column as AuthOrganizationColumn, Entity as AuthOrganizationEntity,
+    AuthOrganizationList, AuthOrganizationUpdate, Column as AuthOrganizationColumn, Entity as AuthOrganizationEntity,
     Model as AuthOrganizationModel, Relation as AuthOrganizationRelation,
 };
 pub use auth_proto::organization_role::{
     ActiveModel as AuthOrganizationRoleActiveModel, AuthOrganizationRole,
-    AuthOrganizationRoleCreate, AuthOrganizationRoleList, AuthOrganizationRoleRepo,
-    AuthOrganizationRoleRepoStorage, AuthOrganizationRoleUpdate,
+    AuthOrganizationRoleCreate, AuthOrganizationRoleList, AuthOrganizationRoleUpdate,
     Column as AuthOrganizationRoleColumn, Entity as AuthOrganizationRoleEntity,
     Model as AuthOrganizationRoleModel, Relation as AuthOrganizationRoleRelation,
 };
 pub use auth_proto::passkey::{
     ActiveModel as AuthPasskeyActiveModel, AuthPasskey, AuthPasskeyCreate, AuthPasskeyList,
-    AuthPasskeyRepo, AuthPasskeyRepoStorage, AuthPasskeyUpdate, Column as AuthPasskeyColumn,
+    AuthPasskeyUpdate, Column as AuthPasskeyColumn,
     Entity as AuthPasskeyEntity, Model as AuthPasskeyModel, Relation as AuthPasskeyRelation,
 };
 pub use auth_proto::passkey_ceremony::{
     ActiveModel as AuthPasskeyCeremonyActiveModel, AuthPasskeyCeremony, AuthPasskeyCeremonyCreate,
-    AuthPasskeyCeremonyList, AuthPasskeyCeremonyRepo, AuthPasskeyCeremonyRepoStorage,
-    AuthPasskeyCeremonyUpdate, Column as AuthPasskeyCeremonyColumn,
+    AuthPasskeyCeremonyList, AuthPasskeyCeremonyUpdate, Column as AuthPasskeyCeremonyColumn,
     Entity as AuthPasskeyCeremonyEntity, Model as AuthPasskeyCeremonyModel, PasskeyCeremonyKind,
     Relation as AuthPasskeyCeremonyRelation,
 };
 pub use auth_proto::session::{
     ActiveModel as AuthSessionActiveModel, AuthSession, AuthSessionCreate, AuthSessionList,
-    AuthSessionRepo, AuthSessionRepoStorage, AuthSessionUpdate, Column as AuthSessionColumn,
+    AuthSessionUpdate, Column as AuthSessionColumn,
     Entity as AuthSessionEntity, Model as AuthSessionModel, Relation as AuthSessionRelation,
 };
 pub use auth_proto::team::{
-    ActiveModel as AuthTeamActiveModel, AuthTeam, AuthTeamCreate, AuthTeamList, AuthTeamRepo,
-    AuthTeamRepoStorage, AuthTeamUpdate, Column as AuthTeamColumn, Entity as AuthTeamEntity,
+    ActiveModel as AuthTeamActiveModel, AuthTeam, AuthTeamCreate, AuthTeamList, AuthTeamUpdate, Column as AuthTeamColumn, Entity as AuthTeamEntity,
     Model as AuthTeamModel, Relation as AuthTeamRelation,
 };
 pub use auth_proto::team_member::{
     ActiveModel as AuthTeamMemberActiveModel, AuthTeamMember, AuthTeamMemberCreate,
-    AuthTeamMemberList, AuthTeamMemberRepo, AuthTeamMemberRepoStorage, AuthTeamMemberUpdate,
+    AuthTeamMemberList, AuthTeamMemberUpdate,
     Column as AuthTeamMemberColumn, Entity as AuthTeamMemberEntity, Model as AuthTeamMemberModel,
     Relation as AuthTeamMemberRelation,
 };
 pub use auth_proto::two_factor::{
     ActiveModel as AuthTwoFactorActiveModel, AuthTwoFactor, AuthTwoFactorCreate, AuthTwoFactorList,
-    AuthTwoFactorRepo, AuthTwoFactorRepoStorage, AuthTwoFactorUpdate,
+    AuthTwoFactorUpdate,
     Column as AuthTwoFactorColumn, Entity as AuthTwoFactorEntity, Model as AuthTwoFactorModel,
     Relation as AuthTwoFactorRelation,
 };
 pub use auth_proto::user::{
-    ActiveModel as AuthUserActiveModel, AuthUser, AuthUserCreate, AuthUserList, AuthUserRepo,
-    AuthUserRepoStorage, AuthUserUpdate, Column as AuthUserColumn, Entity as AuthUserEntity,
+    ActiveModel as AuthUserActiveModel, AuthUser, AuthUserCreate, AuthUserList, AuthUserUpdate, Column as AuthUserColumn, Entity as AuthUserEntity,
     Model as AuthUserModel, Relation as AuthUserRelation,
 };
 pub use auth_proto::verification::{
     ActiveModel as AuthVerificationActiveModel, AuthVerification, AuthVerificationCreate,
-    AuthVerificationList, AuthVerificationRepo, AuthVerificationRepoStorage,
-    AuthVerificationUpdate, Column as AuthVerificationColumn, Entity as AuthVerificationEntity,
+    AuthVerificationList, AuthVerificationUpdate, Column as AuthVerificationColumn, Entity as AuthVerificationEntity,
     Model as AuthVerificationModel, Relation as AuthVerificationRelation,
 };
 
@@ -199,24 +191,6 @@ pub use migrations::Migrator;
 )]
 mod tests {
     use super::{AuthDatabaseKind, auth_database_support_matrix, auth_db_storage_capabilities};
-
-    // r[verify auth.storage.repo-first]
-    // r[verify auth.storage.no-public-sql]
-    #[test]
-    fn public_surface_exports_repositories_not_sql_adapters() {
-        assert!(
-            std::any::type_name::<super::AuthUserRepoStorage<sea_orm::DatabaseConnection>>()
-                .contains("RepoStorage")
-        );
-        assert!(
-            std::any::type_name::<super::AuthSessionRepoStorage<sea_orm::DatabaseConnection>>()
-                .contains("RepoStorage")
-        );
-        assert!(
-            std::any::type_name::<super::AuthAccountRepoStorage<sea_orm::DatabaseConnection>>()
-                .contains("RepoStorage")
-        );
-    }
 
     // r[verify auth.storage.backend-parity]
     // r[verify auth.storage.transactions]

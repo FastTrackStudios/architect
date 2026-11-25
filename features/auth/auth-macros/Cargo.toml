@@ -1,0 +1,20 @@
+[package]
+name = "auth-macros"
+description = "auth's table rows: #[auth_macros::entity] writes a row's Create/Update/List types and its sea-orm entity"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2", features = ["full", "extra-traits"] }
+quote = "1"
+proc-macro2 = "1"
+heck = "0.5"
+
+[lints]
+workspace = true

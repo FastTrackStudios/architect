@@ -24,21 +24,18 @@ impl InvitationStatus {
     }
 }
 
-#[architect::entity(table_name = "auth_invitations", repo)]
+#[auth_macros::entity(table_name = "auth_invitations")]
 #[derive(Eq)]
 pub struct AuthInvitation {
-    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
+    #[entity(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
     pub id: Uuid,
-    #[architect(filterable, sortable)]
     pub organization_id: Uuid,
-    #[architect(filterable, sortable)]
     pub email: String,
     pub role: String,
-    #[architect(filterable)]
     pub status: String,
     pub inviter_id: Uuid,
     pub expires_at: DateTime<Utc>,
-    #[architect(exclude(create, update), on_create = Utc::now())]
+    #[entity(exclude(create, update), on_create = Utc::now())]
     pub created_at: DateTime<Utc>,
 }
 

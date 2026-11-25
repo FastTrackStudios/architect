@@ -27,55 +27,50 @@ pub mod verification;
 
 // r[verify auth.core.entities.single-source]
 pub use account::{
-    AuthAccount, AuthAccountCreate, AuthAccountList, AuthAccountRepo, AuthAccountUpdate,
+    AuthAccount, AuthAccountCreate, AuthAccountList, AuthAccountUpdate,
 };
 pub use agent_link::{
-    AuthAgentLink, AuthAgentLinkCreate, AuthAgentLinkList, AuthAgentLinkRepo, AuthAgentLinkUpdate,
+    AuthAgentLink, AuthAgentLinkCreate, AuthAgentLinkList, AuthAgentLinkUpdate,
 };
-pub use api_key::{AuthApiKey, AuthApiKeyCreate, AuthApiKeyList, AuthApiKeyRepo, AuthApiKeyUpdate};
+pub use api_key::{AuthApiKey, AuthApiKeyCreate, AuthApiKeyList, AuthApiKeyUpdate};
 pub use audit_event::{
     AuthAuditEventRecord, AuthAuditEventRecordCreate, AuthAuditEventRecordList,
-    AuthAuditEventRecordRepo, AuthAuditEventRecordUpdate,
+    AuthAuditEventRecordUpdate,
 };
 pub use invitation::{
-    AuthInvitation, AuthInvitationCreate, AuthInvitationList, AuthInvitationRepo,
-    AuthInvitationUpdate, InvitationStatus,
+    AuthInvitation, AuthInvitationCreate, AuthInvitationList, AuthInvitationUpdate, InvitationStatus,
 };
 pub use invite_link::{
-    AuthInviteLink, AuthInviteLinkCreate, AuthInviteLinkList, AuthInviteLinkRepo,
-    AuthInviteLinkUpdate,
+    AuthInviteLink, AuthInviteLinkCreate, AuthInviteLinkList, AuthInviteLinkUpdate,
 };
-pub use member::{AuthMember, AuthMemberCreate, AuthMemberList, AuthMemberRepo, AuthMemberUpdate};
+pub use member::{AuthMember, AuthMemberCreate, AuthMemberList, AuthMemberUpdate};
 pub use organization::{
-    AuthOrganization, AuthOrganizationCreate, AuthOrganizationList, AuthOrganizationRepo,
-    AuthOrganizationUpdate,
+    AuthOrganization, AuthOrganizationCreate, AuthOrganizationList, AuthOrganizationUpdate,
 };
 pub use organization_role::{
     AuthOrganizationRole, AuthOrganizationRoleCreate, AuthOrganizationRoleList,
-    AuthOrganizationRoleRepo, AuthOrganizationRoleUpdate,
+    AuthOrganizationRoleUpdate,
 };
 pub use passkey::{
-    AuthPasskey, AuthPasskeyCreate, AuthPasskeyList, AuthPasskeyRepo, AuthPasskeyUpdate,
+    AuthPasskey, AuthPasskeyCreate, AuthPasskeyList, AuthPasskeyUpdate,
 };
 pub use passkey_ceremony::{
     AuthPasskeyCeremony, AuthPasskeyCeremonyCreate, AuthPasskeyCeremonyList,
-    AuthPasskeyCeremonyRepo, AuthPasskeyCeremonyUpdate, PasskeyCeremonyKind,
+    AuthPasskeyCeremonyUpdate, PasskeyCeremonyKind,
 };
 pub use session::{
-    AuthSession, AuthSessionCreate, AuthSessionList, AuthSessionRepo, AuthSessionUpdate,
+    AuthSession, AuthSessionCreate, AuthSessionList, AuthSessionUpdate,
 };
-pub use team::{AuthTeam, AuthTeamCreate, AuthTeamList, AuthTeamRepo, AuthTeamUpdate};
+pub use team::{AuthTeam, AuthTeamCreate, AuthTeamList, AuthTeamUpdate};
 pub use team_member::{
-    AuthTeamMember, AuthTeamMemberCreate, AuthTeamMemberList, AuthTeamMemberRepo,
-    AuthTeamMemberUpdate,
+    AuthTeamMember, AuthTeamMemberCreate, AuthTeamMemberList, AuthTeamMemberUpdate,
 };
 pub use two_factor::{
-    AuthTwoFactor, AuthTwoFactorCreate, AuthTwoFactorList, AuthTwoFactorRepo, AuthTwoFactorUpdate,
+    AuthTwoFactor, AuthTwoFactorCreate, AuthTwoFactorList, AuthTwoFactorUpdate,
 };
-pub use user::{AuthUser, AuthUserCreate, AuthUserList, AuthUserRepo, AuthUserUpdate};
+pub use user::{AuthUser, AuthUserCreate, AuthUserList, AuthUserUpdate};
 pub use verification::{
-    AuthVerification, AuthVerificationCreate, AuthVerificationList, AuthVerificationRepo,
-    AuthVerificationUpdate,
+    AuthVerification, AuthVerificationCreate, AuthVerificationList, AuthVerificationUpdate,
 };
 
 // r[impl auth.core.errors-stable]
@@ -173,7 +168,7 @@ pub use service::{AuthServiceDispatcher, auth_service_service_descriptor};
 pub use device::ensure_registered;
 pub use device::prelude::*;
 pub use device::{
-    AccountOrg, AuthAccountOrg, AuthDevice, AuthDeviceCreate, AuthDeviceRepo, DeviceDirectory,
+    AccountOrg, AuthAccountOrg, AuthDevice, AuthDeviceCreate, DeviceDirectory,
     DeviceRegistration, PeerDevice, Registered,
 };
 
@@ -182,6 +177,16 @@ pub use organizations::prelude::*;
 pub use organizations::{
     Invite, IssuedInvitation, LinkedAgent, NewOrganization, OrganizationBundle, OrganizationMember,
 };
+
+/// Which page of a list: its index (from 0) and how many rows it holds.
+#[derive(Debug, Clone, PartialEq, Eq, Default, facet::Facet)]
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
+pub struct Page {
+    /// Zero-indexed page number.
+    pub index: u32,
+    /// Rows per page.
+    pub size: u32,
+}
 
 /// A call that never reached the engine is an internal failure from the
 /// caller's point of view — which is what lets `AuthServiceClient` and

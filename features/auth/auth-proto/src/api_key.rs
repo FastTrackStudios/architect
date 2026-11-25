@@ -1,15 +1,14 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-#[architect::entity(table_name = "auth_api_keys", repo)]
+#[auth_macros::entity(table_name = "auth_api_keys")]
 #[derive(Eq)]
 pub struct AuthApiKey {
-    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
+    #[entity(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
     pub id: Uuid,
     pub name: Option<String>,
     pub prefix: Option<String>,
     pub key_hash: String,
-    #[architect(filterable, sortable)]
     pub user_id: Uuid,
     pub enabled: bool,
     pub rate_limit_enabled: bool,
@@ -20,9 +19,9 @@ pub struct AuthApiKey {
     pub expires_at: Option<DateTime<Utc>>,
     pub permissions_json: Option<String>,
     pub metadata_json: Option<String>,
-    #[architect(exclude(create, update), on_create = Utc::now())]
+    #[entity(exclude(create, update), on_create = Utc::now())]
     pub created_at: DateTime<Utc>,
-    #[architect(exclude(create, update), on_create = Utc::now(), on_update = Utc::now())]
+    #[entity(exclude(create, update), on_create = Utc::now(), on_update = Utc::now())]
     pub updated_at: DateTime<Utc>,
 }
 

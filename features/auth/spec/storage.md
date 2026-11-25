@@ -7,8 +7,9 @@ weight = 130
 # Storage and Migrations
 
 r[auth.storage.repo-first]
-Storage backends MUST implement Architect-style repo or service
-contracts rather than exposing SQL assembly through public adapters.
+Storage backends MUST implement auth's storage contract (the
+`AuthStorage` trait) rather than exposing SQL assembly through public
+adapters.
 
 r[auth.storage.backend-parity]
 All supported backends MUST preserve the same observable auth behavior

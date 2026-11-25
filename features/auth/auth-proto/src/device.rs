@@ -23,14 +23,13 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 /// One install, signed in as `user_id`.
-#[architect::entity(table_name = "auth_devices", repo)]
+#[auth_macros::entity(table_name = "auth_devices")]
 #[derive(Eq)]
 pub struct AuthDevice {
     /// The install's own id, chosen once by the device and kept with its
     /// data — stable across sign-ins, so re-registering updates the row.
-    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
+    #[entity(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
     pub id: Uuid,
-    #[architect(filterable, sortable)]
     pub user_id: Uuid,
     /// What a person calls it ("Cody's iPhone").
     pub name: String,
@@ -42,9 +41,9 @@ pub struct AuthDevice {
     /// The iroh relay the device is reachable through (`https://…`), so a
     /// peer dials it without a discovery round.
     pub relay_url: Option<String>,
-    #[architect(exclude(create, update), on_create = Utc::now())]
+    #[entity(exclude(create, update), on_create = Utc::now())]
     pub created_at: DateTime<Utc>,
-    #[architect(exclude(create, update), on_create = Utc::now(), on_update = Utc::now())]
+    #[entity(exclude(create, update), on_create = Utc::now(), on_update = Utc::now())]
     pub last_seen_at: DateTime<Utc>,
 }
 
@@ -56,13 +55,12 @@ pub mod account_org {
     use chrono::{DateTime, Utc};
     use uuid::Uuid;
 
-    #[architect::entity(table_name = "auth_account_orgs", repo)]
+    #[auth_macros::entity(table_name = "auth_account_orgs")]
     #[derive(Eq)]
     pub struct AuthAccountOrg {
-        #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
+        #[entity(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
         pub id: Uuid,
         /// One per account (a unique index).
-        #[architect(filterable)]
         pub user_id: Uuid,
         /// The org's own id, as its nodes know it.
         pub org_id: Uuid,
@@ -70,7 +68,7 @@ pub mod account_org {
         pub display_name: String,
         /// The device that offered it.
         pub first_device_id: Uuid,
-        #[architect(exclude(create, update), on_create = Utc::now())]
+        #[entity(exclude(create, update), on_create = Utc::now())]
         pub created_at: DateTime<Utc>,
     }
 
