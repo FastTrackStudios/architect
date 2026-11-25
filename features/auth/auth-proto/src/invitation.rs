@@ -1,7 +1,8 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-#[architect::wire]
+#[derive(facet::Facet, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Copy, Eq)]
 #[repr(u8)]
 pub enum InvitationStatus {

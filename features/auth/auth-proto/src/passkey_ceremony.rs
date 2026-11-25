@@ -51,7 +51,8 @@ pub struct AuthPasskeyCeremony {
 /// Stored as a string, and checked on completion: a registration state
 /// must not be redeemable by the authentication endpoint or the other
 /// way round, even though both are opaque blobs to this crate.
-#[architect::wire]
+#[derive(facet::Facet, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Copy, Eq)]
 #[repr(u8)]
 pub enum PasskeyCeremonyKind {

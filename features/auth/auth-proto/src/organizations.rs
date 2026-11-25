@@ -22,7 +22,8 @@ use crate::{AuthAgentLink, AuthFlowError, AuthInvitation, AuthMember, AuthOrgani
 /// The user is resolved server-side for the same reason
 /// [`OrganizationMember`] carries one: a list of agent ids is not a
 /// list anybody can act on.
-#[architect::wire]
+#[derive(facet::Facet, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Eq)]
 pub struct LinkedAgent {
     pub link: AuthAgentLink,
@@ -36,7 +37,8 @@ pub struct LinkedAgent {
 /// the pair `(slug, role)` is the whole answer to "may this principal
 /// act here", and splitting it invites a caller to read one without the
 /// other.
-#[architect::wire]
+#[derive(facet::Facet, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Eq)]
 pub struct OrganizationBundle {
     pub organization: AuthOrganization,
@@ -47,7 +49,8 @@ pub struct OrganizationBundle {
 ///
 /// A member list that shows user ids is not a member list. The user is
 /// resolved server-side so no caller has to fan out over the ids.
-#[architect::wire]
+#[derive(facet::Facet, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Eq)]
 pub struct OrganizationMember {
     pub member: AuthMember,
@@ -59,7 +62,8 @@ pub struct OrganizationMember {
 /// The token is returned once, here, and never readable again — the
 /// invitation row stores a hash. Whoever calls `invite_member` is
 /// responsible for delivering it.
-#[architect::wire]
+#[derive(facet::Facet, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Eq)]
 pub struct IssuedInvitation {
     pub invitation: AuthInvitation,
@@ -67,7 +71,8 @@ pub struct IssuedInvitation {
 }
 
 /// What a new organization is called. The caller becomes its owner.
-#[architect::wire]
+#[derive(facet::Facet, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Eq)]
 pub struct NewOrganization {
     pub name: String,
@@ -80,7 +85,8 @@ pub struct NewOrganization {
 }
 
 /// Who to invite, and as what.
-#[architect::wire]
+#[derive(facet::Facet, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Eq)]
 pub struct Invite {
     pub organization_id: Uuid,

@@ -31,7 +31,8 @@ use uuid::Uuid;
 /// The member's `role` joined with the user's display `name` + `email`,
 /// so clients (rates editor, owner dashboard) get a ready-to-render list
 /// without a second per-user round-trip.
-#[architect::wire]
+#[derive(facet::Facet, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Eq)]
 pub struct OrgMember {
     pub user_id: Uuid,
@@ -48,7 +49,8 @@ pub struct OrgMember {
 pub const AUTHORIZATION_METADATA_KEY: &str = "authorization";
 
 /// Wire form of a self-service email change.
-#[architect::wire]
+#[derive(facet::Facet, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Eq)]
 pub struct ChangeEmailRequest {
     /// Identifies the account; the change always applies to the
@@ -58,7 +60,8 @@ pub struct ChangeEmailRequest {
 }
 
 /// Wire form of a self-service password change.
-#[architect::wire]
+#[derive(facet::Facet, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Eq)]
 pub struct ChangePasswordRequest {
     /// Identifies the account. The change always applies to the session's
@@ -71,7 +74,8 @@ pub struct ChangePasswordRequest {
 }
 
 /// Wire form of an operator-performed email migration.
-#[architect::wire]
+#[derive(facet::Facet, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Eq)]
 pub struct MigrateUserEmailRequest {
     /// Authorizes the call AND identifies who to record as `changed_by`.
@@ -85,7 +89,8 @@ pub struct MigrateUserEmailRequest {
 }
 
 /// Wire form of a history read.
-#[architect::wire]
+#[derive(facet::Facet, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Eq)]
 pub struct EmailHistoryRequest {
     pub session_token: String,
@@ -219,7 +224,8 @@ pub trait AuthService {
 }
 
 /// Wire form of a self-service profile change.
-#[architect::wire]
+#[derive(facet::Facet, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Eq)]
 pub struct UpdateProfileRequest {
     /// Identifies the account; the change always applies to the

@@ -80,7 +80,9 @@ pub use verification::{
 
 // r[impl auth.core.errors-stable]
 // r[verify auth.core.errors-stable]
-#[architect::wire]
+#[derive(facet::Facet, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
+#[repr(u8)]
 #[derive(Eq, thiserror::Error)]
 pub enum AuthFlowError {
     #[error("invalid credentials")]
@@ -99,7 +101,8 @@ pub enum AuthFlowError {
     Internal(String),
 }
 
-#[architect::wire]
+#[derive(facet::Facet, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Eq)]
 pub struct SignInEmailPassword {
     pub email: String,
@@ -110,7 +113,8 @@ pub struct SignInEmailPassword {
 
 /// A device with no browser of its own being signed in (RFC 8628 —
 /// a CLI, a TV): what it shows its person, and what it polls with.
-#[architect::wire]
+#[derive(facet::Facet, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Eq)]
 pub struct DeviceSignIn {
     /// What the device polls with. A secret: never shown.
@@ -129,7 +133,8 @@ pub struct DeviceSignIn {
 
 /// Wire shape of `ArchitectAuth::create_email_password_user` — the
 /// sign-up command, minus nothing: same fields, RPC-serializable.
-#[architect::wire]
+#[derive(facet::Facet, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Eq)]
 pub struct SignUpEmailPassword {
     pub email: String,
@@ -142,7 +147,8 @@ pub struct SignUpEmailPassword {
     pub user_agent: Option<String>,
 }
 
-#[architect::wire]
+#[derive(facet::Facet, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Eq)]
 pub struct AuthSessionBundle {
     pub user: AuthUser,

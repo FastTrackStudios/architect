@@ -81,7 +81,8 @@ pub mod account_org {
 pub use account_org::AuthAccountOrg;
 
 /// An org, as a device names it.
-#[architect::wire]
+#[derive(facet::Facet, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Eq)]
 pub struct AccountOrg {
     pub id: Uuid,
@@ -90,7 +91,8 @@ pub struct AccountOrg {
 }
 
 /// What a device says about itself when it registers.
-#[architect::wire]
+#[derive(facet::Facet, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Eq)]
 pub struct DeviceRegistration {
     /// The install's own id ([`AuthDevice::id`]).
@@ -107,7 +109,8 @@ pub struct DeviceRegistration {
 }
 
 /// One of the account's devices, as another of them sees it.
-#[architect::wire]
+#[derive(facet::Facet, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Eq)]
 pub struct PeerDevice {
     pub device_id: Uuid,
@@ -120,7 +123,8 @@ pub struct PeerDevice {
 
 /// Everything a device needs to find the others: the shared org and
 /// every device signed in as this account (the asking one included).
-#[architect::wire]
+#[derive(facet::Facet, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Eq)]
 pub struct DeviceDirectory {
     pub account_org: Option<AccountOrg>,
