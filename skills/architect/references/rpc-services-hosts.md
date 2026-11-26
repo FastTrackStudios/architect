@@ -99,7 +99,7 @@ EngineHost::new(backend.clone().into_router(), gate, config.bind) // gate: Permi
 ```
 
 - `into_router()` = vox `LayerRouter`; `into_http_router()` = axum router.
-- **Every vox lane is gated** by the `PermissionsGate` given to `new` (`crates/architect/src/host.rs` `EngineHost::new`; it reports the gate's `coverage` of the router): `/vox` wraps each connection with `wrap_shared_with_bearer` (bearer from `Authorization` or the `vox.bearer.` subprotocol), the iroh lane with `wrap_shared_with_proved_caller` (`Principal::Host { endpoint }` from the handshake; a call presenting a bearer resolves from it), each `vox_at` lane like `/vox`, inside the lane's scope. `EngineHost::ungated(router, bind)` is the opt-out: no gate, `caller()` is `None`, a `warn` on every start. Use it only for a router that checks its own tokens (`apps/auth-server/src/server.rs`), a demo with no accounts (`examples/greeter/src/main.rs`) or a loopback test; say why at the call site. `.gate()` hands back the `Arc<PermissionsGate>` (for a `PermissionsService` oracle). The HTTP face is not behind the vox gate. Test: `crates/architect/tests/host_gate.rs`.
+- **Every vox lane is gated** by the `PermissionsGate` given to `new` (`crates/architect/src/host.rs` `EngineHost::new`; it reports the gate's `coverage` of the router): `/vox` wraps each connection with `wrap_shared_with_bearer` (bearer from `Authorization` or the `vox.bearer.` subprotocol), the iroh lane with `wrap_shared_with_proved_caller` (`Principal::Host { endpoint }` from the handshake; a call presenting a bearer resolves from it), each `vox_at` lane like `/vox`, inside the lane's scope. `EngineHost::ungated(router, bind)` is the opt-out: no gate, `caller()` is `None`, a `warn` on every start. Use it only for a router that checks its own tokens (`auth:apps/auth-server/src/server.rs`), a demo with no accounts (`examples/greeter/src/main.rs`) or a loopback test; say why at the call site. `.gate()` hands back the `Arc<PermissionsGate>` (for a `PermissionsService` oracle). The HTTP face is not behind the vox gate. Test: `crates/architect/tests/host_gate.rs`.
 - `/health` and `/vox` (WS, subprotocol `vox.v1`) are always mounted; `/version.json` (`{rev, version, built_at}`, `no-store`) is mounted before the SPA fallback.
 - `plugin` is an alias of `extend`; plugins merge before the SPA fallback. `finish(wrap)` wraps the assembled app after plugins and the SPA fallback. `plugin` is the escape hatch.
 - Protocol mounts (`crates/architect/src/host/mount.rs`), each hook seeing a `RequestHead` (the same `architect::http::RequestHead` a byte method takes: path params, headers, `bearer()` from `Authorization` or the `vox.bearer.` subprotocol):
@@ -110,7 +110,7 @@ EngineHost::new(backend.clone().into_router(), gate, config.bind) // gate: Permi
   - `.otlp_forward("/otlp", upstream, |head| async { Ok(()) / Err(impl IntoResponse) })` (architect feature `otlp-forward`, `crates/architect/src/host/otlp.rs`): `POST /otlp/v1/{traces,logs,metrics}` forwarded with its content type; other signals `404`, collector down `502`.
   - `.mcp(server, token)` / `.mcp_at(path, resolve)`: `architect_mcp::host::McpHost` (feature `host`); see `references/commands-mcp.md`.
   - Tests: `crates/architect/tests/host_mounts.rs`, `examples/greeter/tests/host_mounts.rs`.
-- `serve()` binds TCP and spawns iroh if configured: `.iroh(key_path, id_path)` + optional `.iroh_lookup(PeerLookup::N0AndLan)`, or `.iroh_endpoint(endpoint)` for an endpoint the app bound (a test's loopback endpoint). Real use: `apps/auth-server/src/server.rs`. The key file is created 0600 on unix.
+- `serve()` binds TCP and spawns iroh if configured: `.iroh(key_path, id_path)` + optional `.iroh_lookup(PeerLookup::N0AndLan)`, or `.iroh_endpoint(endpoint)` for an endpoint the app bound (a test's loopback endpoint). Real use: `auth:apps/auth-server/src/server.rs`. The key file is created 0600 on unix.
 
 ## 4. Connect
 
@@ -176,7 +176,7 @@ Cannot:
 |---|---|
 | in-process, vox memory link, HTTP, SSE, mock override | `examples/greeter/tests/round_trip.rs` `in_process`, `over_vox`, `over_http`, `streams_over_http`, `a_mock_replaces_the_real_greeter`; `crates/architect/tests/http_face.rs` |
 | named MCP = HTTP | `examples/greeter/tests/mcp.rs` `greet_over_mcp_is_greet_over_http` |
-| vox over WebSocket and iroh, one suite | `apps/auth-server/tests/surfaces.rs` `websocket_vox_stack`, `iroh_vox_stack` |
+| vox over WebSocket and iroh, one suite | `auth:apps/auth-server/tests/surfaces.rs` `websocket_vox_stack`, `iroh_vox_stack` |
 | vox over iroh | `crates/architect/tests/iroh_link.rs` `vox_connection_over_iroh` |
 | iroh redial after a peer restart, dial error kinds | `crates/architect/tests/iroh_link.rs` `redial_by_id_after_crash_restart_behind_a_blackhole`, `a_silent_peer_times_out_without_retry_and_is_unreachable_with_it` |
 | iroh LAN, bare id | `crates/architect/tests/iroh_lan.rs` (needs a multicast interface; skips on macOS unless `ARCHITECT_LAN_TESTS=1`) |

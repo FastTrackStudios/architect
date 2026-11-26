@@ -1,7 +1,7 @@
 //! Accounts on an issuer: who is signed in on this device, and how.
 //!
 //! An app signs in at the issuer (FTS's is `auth.fasttrackstudio.app`, the
-//! `apps/auth-server` deployment) and may hold several accounts, one of them
+//! `auth:apps/auth-server` deployment) and may hold several accounts, one of them
 //! active. Signing in is optional: an app works signed out.
 //!
 //! - [`Account`], [`AccountsFile`]: the accounts and the active one, the

@@ -78,7 +78,7 @@ Other dials:
   retries once after a peer restart; branch on `DialError::of(&err)`
   kinds, not on message text (`crates/architect/src/iroh_link.rs`).
 - A test with several servers uses its own `Pool::default()` rather
-  than the global one (`apps/auth-server/tests/surfaces.rs`
+  than the global one (`auth:apps/auth-server/tests/surfaces.rs`
   `websocket_vox_stack`).
 
 Wrap a one-off connect that may meet a server still booting in

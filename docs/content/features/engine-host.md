@@ -26,7 +26,7 @@ The gate is on every vox lane the host owns, by default:
 
 `EngineHost::ungated(router, bind)` is the opt-out: no gate on any lane, no
 caller in any handler, and a `warn` on every start. It is for a router whose
-services check their own tokens (`apps/auth-server`), a demo with no accounts
+services check their own tokens (`auth:apps/auth-server`), a demo with no accounts
 (`examples/greeter`), or a loopback test.
 
 Use it for every server binary. Reach for `.plugin(Router)` only for what no
@@ -127,7 +127,7 @@ behind the gate as the `Principal::Host` it proved.
 - `examples/greeter/tests/host_mounts.rs`: `otlp_forward` passing the three
   signals once authorized; MCP mounted per path and on loopback.
 - `crates/architect/tests/version_json.rs`: the fields, `null` when unset.
-- `apps/auth-server/src/server.rs`: a real host.
+- `auth:apps/auth-server/src/server.rs`: a real host.
 
 ## Status
 

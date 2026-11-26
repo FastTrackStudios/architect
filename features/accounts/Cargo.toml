@@ -19,7 +19,7 @@ description = "Accounts on an issuer: who is signed in, their sessions in the pl
 [features]
 default = []
 keychain = ["dep:keyring", "dep:tracing"]
-http = ["architect-orgs/auth", "dep:auth-proto", "dep:architect-spaces", "architect-spaces/vox", "dep:architect", "architect/http-client", "architect/connect", "dep:architect-devices", "architect-devices/vox", "dep:tokio", "dep:uuid", "dep:webbrowser", "dep:reqwest"]
+http = ["architect-orgs/auth", "dep:auth-proto", "auth-proto/http-client", "dep:architect-spaces", "architect-spaces/vox", "dep:architect", "architect/http-client", "architect/connect", "dep:architect-devices", "architect-devices/vox", "dep:tokio", "dep:uuid", "dep:webbrowser", "dep:reqwest"]
 actions = ["http", "architect/action-list"]
 ui = ["actions", "dep:dioxus", "dep:architect-shell", "architect-shell/ui", "dep:lucide-dioxus", "dep:futures-channel", "dep:futures-util"]
 

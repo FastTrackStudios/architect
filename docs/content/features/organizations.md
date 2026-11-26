@@ -113,7 +113,7 @@ under another org's path, then applies the role's rules inside the org.
 - `features/orgs/tests/host_lane.rs` (feature `server`): on an `EngineHost`
   org lane a member of another org is refused at the gate; an unscoped org
   lane fails closed under `ConfinedEngine::require_org`.
-- `apps/auth-server/tests/surfaces.rs`: orgs fetched live on every transport;
+- `auth:apps/auth-server/tests/surfaces.rs`: orgs fetched live on every transport;
   a confining server learning the caller's orgs from the identity server.
 
 ## Status

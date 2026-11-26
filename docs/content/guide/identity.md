@@ -4,7 +4,7 @@ description = "Sign a person in against the one identity server, keep the sessio
 weight = 120
 +++
 
-Every FastTrackStudio app signs in to one identity server (`apps/auth-server`,
+Every FastTrackStudio app signs in to one identity server (`auth:apps/auth-server`,
 deployed as fts-auth) and reads the person's organizations from it, so an
 org is the same org in every app. In this chapter you will:
 
@@ -18,7 +18,7 @@ org is the same org in every app. In this chapter you will:
    its org;
 6. read across every org for an "All organizations" view.
 
-The crates: the auth family under `features/auth` (there is no
+The crates: the auth family under `auth:crates` (there is no
 `architect::auth` re-export; depend on them directly),
 `architect-permissions` (`features/permissions`), architect's
 `crates/architect/src/permissions_gate.rs`, and `architect-orgs`
@@ -26,7 +26,7 @@ The crates: the auth family under `features/auth` (there is no
 
 ## 1. Sign in and keep the session
 
-`auth-client` (`features/auth/auth-client`) is the client kit: wasm-clean,
+`auth-client` (`auth:crates/auth-client`) is the client kit: wasm-clean,
 protocol only (your app posts with its own HTTP client).
 
 - **A desktop or web app** signs in with OIDC and PKCE:
@@ -60,11 +60,11 @@ sign in again. Refresh tokens rotate, so run one refresh per store at a time.
 
 ## 2. Register the device
 
-The account keeps a device address book (`features/auth/auth-proto/src/device.rs`
+The account keeps a device address book (`auth:crates/auth-proto/src/device.rs`
 `DeviceService`: `register_device`, `list_devices`, `forget_device`). Every
 FTS app on one machine registers under the same device id, derived from what
 the platform gives every app of one developer alike
-(`features/auth/auth-client/src/this_device.rs` `install_id`, `device_id`),
+(`auth:crates/auth-client/src/this_device.rs` `install_id`, `device_id`),
 so the account lists an iPad once however many apps run on it:
 
 ```rust

@@ -74,7 +74,7 @@ uses `SelfLane::open` for its own side and `pull(&local, &peer, &ours, timeout)`
    admitted hosts only, after a lineage check.
 7. `features/crdt/crdt/src/peer.rs` `SelfLane`, `exchange`, `pull`: the
    pairwise sweep.
-8. `features/auth/auth-proto/src/device.rs` `DeviceDirectory`: the person's
+8. `auth:crates/auth-proto/src/device.rs` `DeviceDirectory`: the person's
    other devices' endpoint ids.
 
 A device dials with `iroh_link::connect`. `serve_peers` hands the proved id to

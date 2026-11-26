@@ -136,7 +136,7 @@ cargo xtask feature new <name>    # a feature crate with a passing test
 | `features/control`, `features/mcp` | The Action List from the command line and a control socket, and to a model over MCP |
 | `features/scene`, `features/process-view`, `features/views` | Painted scenes, process views, view kinds and their meters |
 | `features/` | And the other features: `input`, `settings`, `scripting`, `auth`, `permissions`, `orgs`, `crdt` and more |
-| `apps/auth-server`, `apps/mock-oauth` | The identity server, and a mock OAuth provider for its tests |
+| `auth:apps/auth-server`, `auth:apps/mock-oauth` | The identity server, and a mock OAuth provider for its tests |
 | `apps/site` | The public site and these docs |
 | `skills/architect`, `skills/architect-extensions` | The agent skills: the framework, and writing an extension |
 | `xtask` | `cargo xtask`: `feature new`, `boundaries`, `docs`, `tags`, `fleet-bump` |

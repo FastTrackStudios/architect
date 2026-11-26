@@ -38,7 +38,7 @@ features/
 
 In this repo that is `crates/architect` (the facade crate and its
 proc-macro crates beside it), `features/atom`, `features/crdt`,
-`features/auth` and the rest, `apps/auth-server` (the identity server, a
+`auth:crates` and the rest, `auth:apps/auth-server` (the identity server, a
 full app built this way) and `examples/greeter`, the reference feature
 with a server on top.
 

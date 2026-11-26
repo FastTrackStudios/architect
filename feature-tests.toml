@@ -94,3 +94,21 @@ features = [
     "architect-workspace/paint",
     "architect-workspace/paint-ui",
 ]
+
+# What the auth test crate's build turned on before auth left for
+# FastTrackStudios/auth: the facade's HTTP and entity-storage tests, the
+# orgs service against an in-process issuer, and the permission gate.
+[[pass]]
+name = "auth-consumers"
+packages = ["architect", "architect-orgs", "architect-permissions"]
+features = [
+    "architect/server",
+    "architect/vox",
+    "architect/http",
+    "architect/http-client",
+    "architect/local",
+    "architect/dispatch-tokio",
+    "architect-orgs/auth",
+    "architect-orgs/server",
+    "architect-permissions/auth",
+]

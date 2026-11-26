@@ -115,6 +115,10 @@ pub struct Table {
     /// Package names whose lockfile sources must agree (one tag per lock).
     #[serde(default, rename = "single-source")]
     pub single_source: Vec<String>,
+    /// Names a `single-source` pattern matches that come from elsewhere on
+    /// purpose (another repository's crates, taken at one rev).
+    #[serde(default, rename = "single-source-exempt")]
+    pub single_source_exempt: Vec<String>,
     /// The forbidden sets.
     #[serde(default)]
     pub forbidden: Forbidden,
@@ -678,6 +682,10 @@ pub fn check(table: &Table, facts: &Facts) -> Vec<Violation> {
             .single_source
             .iter()
             .any(|pattern| name_matches(pattern, name))
+            && !table
+                .single_source_exempt
+                .iter()
+                .any(|pattern| name_matches(pattern, name))
         {
             sources
                 .entry(name.as_str())

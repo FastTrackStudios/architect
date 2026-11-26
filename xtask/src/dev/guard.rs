@@ -119,7 +119,7 @@ pub fn check_inherited<'a>(vars: impl IntoIterator<Item = (&'a str, &'a str)>) -
 
 /// The dev stack's auto sign-in settings, each with the issuer settings
 /// of its process that must be loopback for it to start: the auth
-/// server's (`AUTH_DEV_AUTO_SIGN_IN`, `apps/auth-server/src/dev.rs`) and
+/// server's (`AUTH_DEV_AUTO_SIGN_IN`, `auth:apps/auth-server/src/dev.rs`) and
 /// the window's (`ARCHITECT_DEV_SIGN_IN`, `apps/desktop/src/dev.rs`).
 pub const AUTO_SIGN_IN: [(&str, &[&str]); 2] = [
     (

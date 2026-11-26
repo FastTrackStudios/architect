@@ -86,7 +86,7 @@ parses path parameters (`400 invalid_path`) and query arguments
 
 ## Tests to read
 
-- `apps/auth-server/tests/surfaces.rs`: one scenario over HTTP, `LocalServer`,
+- `auth:apps/auth-server/tests/surfaces.rs`: one scenario over HTTP, `LocalServer`,
   pooled WebSocket and iroh.
 - `examples/greeter/tests/round_trip.rs`: in process, HTTP and SSE.
 - `crates/architect/tests/http_routes.rs`: every face runs one scenario; a

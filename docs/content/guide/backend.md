@@ -176,7 +176,7 @@ let made = repo.create(GadgetCreate { name: "flux".into(), weight: 3, note: None
 - `architect::storage::connect` sizes the pool: an in-memory SQLite URL
   gets a pool of one, because each SQLite memory connection is its own
   empty database. `sqlite://./app.db?mode=rwc` is a file; Postgres URLs
-  work as SeaORM accepts them (`apps/auth-server/tests/postgres.rs`).
+  work as SeaORM accepts them (`auth:apps/auth-server/tests/postgres.rs`).
 - `architect::migrator!` collects migrations in order; list hand-written
   ones beside the derived ones.
 - The derived migration only creates. A later column change is a
@@ -185,7 +185,7 @@ let made = repo.create(GadgetCreate { name: "flux".into(), weight: 3, note: None
   a 500 to the client. Check for the conflict yourself where it
   matters.
 
-`apps/auth-server/src/server.rs` `build` is the production version:
+`auth:apps/auth-server/src/server.rs` `build` is the production version:
 connect, migrate when configured, wrap the storage in the engine,
 assemble the host.
 
@@ -306,7 +306,7 @@ of the call on the span with `architect_telemetry::wide::set`
 (`features/telemetry/src/lib.rs` `wide`):
 
 ```rust
-// apps/auth-server/src/oauth.rs, linked_token
+// auth:apps/auth-server/src/oauth.rs, linked_token
 use architect_telemetry::wide;
 
 let outcome = |name: &'static str| wide::set("auth.linked_token.outcome", name);

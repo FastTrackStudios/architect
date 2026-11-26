@@ -40,9 +40,6 @@ cargo check --target wasm32-unknown-unknown \
 ## Run the tests
 
 ```sh
-# One scenario over every wire: direct, in process, WebSocket, iroh, HTTP.
-cargo test -p auth-server --test surfaces
-
 # The facade: layers, HTTP face, iroh loopback, reconnect, RPC spans.
 cargo test -p architect
 
@@ -56,8 +53,9 @@ environment is wired up correctly.
 ## Run a server
 
 The identity server is the full-size server in this repo, and it runs
-with recipes of its own (`just auth-dev`, `just auth-demo`,
-`just auth-e2e`). Its `EngineHost` serves vox over WebSocket at `/vox`,
+with recipes of its own (`just auth-dev`, `just auth-demo`; they
+run it from a FastTrackStudios/auth checkout, `../auth` unless
+`LOCAL_STACK_AUTH_PATH` says otherwise). Its `EngineHost` serves vox over WebSocket at `/vox`,
 the HTTP routes and SSE streams, and `/health`.
 
 ## Next

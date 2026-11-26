@@ -43,7 +43,7 @@ The generated clients implement the service trait, so write the
 scenario once as `async fn scenario(s: &impl Greeter)` and call it with
 the backend itself, a `LocalServer` client, a WebSocket client, an iroh
 client and the HTTP client. `examples/greeter/tests/round_trip.rs` and
-`apps/auth-server/tests/surfaces.rs` are the pattern. Mocks: merge one
+`auth:apps/auth-server/tests/surfaces.rs` are the pattern. Mocks: merge one
 over the bundle — `Memory::layers().merge(greeter::layer(Mock))` — and
 it replaces the real service on vox **and** HTTP.
 
@@ -110,8 +110,9 @@ whole transport-and-dispatcher pipeline without involving a browser.
 This is where you put tests that span features (auth + multi-row
 updates + permission checks together).
 
-Run with `cargo test -p auth-server` (`apps/auth-server/tests/`: real
-clients against a real server).
+These live with the identity server now: `auth:apps/auth-server/tests/`
+(real clients against a real server), run in a FastTrackStudios/auth
+checkout.
 
 ## Layer 3: real browser, real server
 
@@ -127,7 +128,7 @@ every byte goes through facet encoding on a real transport, into a real
 database, and back.
 
 architect itself has no browser suite since the example app left the
-tree; `just auth-e2e` runs the identity server's end-to-end flow, and
+tree; the identity server's end-to-end flow runs in FastTrackStudios/auth, and
 Task carries the wasm tests of its features. Both run the same three browser tests.
 
 ## Booting an app in a sandbox (`architect::testing`)

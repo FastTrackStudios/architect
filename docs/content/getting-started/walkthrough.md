@@ -7,7 +7,7 @@ weight = 15
 This walks the entire architect flow on one small feature, a greeter:
 an entity, a service with its error and a stream, an in-memory backend, a
 server and one test scenario run over every wire. `cargo xtask feature
-new <name>` scaffolds the same shape, and `apps/auth-server` is the
+new <name>` scaffolds the same shape, and `auth:apps/auth-server` is the
 full-size server built this way.
 
 ## The mental model
@@ -209,7 +209,7 @@ cycle / missing-provider / conflict diagnostics); see
 
 Run one scenario in process, over vox and over HTTP, plus the SSE
 stream. For a feature that has to hold on every wire, copy the shape of
-`apps/auth-server/tests/surfaces.rs` (one scenario over direct,
+`auth:apps/auth-server/tests/surfaces.rs` (one scenario over direct,
 `LocalServer`, WebSocket, iroh and HTTP). See
 [testing strata](@/architecture/testing.md).
 

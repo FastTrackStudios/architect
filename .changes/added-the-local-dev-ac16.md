@@ -1,5 +1,4 @@
 ---
-"auth-server" = "minor"
 "xtask" = "minor"
 ---
 

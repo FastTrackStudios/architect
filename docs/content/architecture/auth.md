@@ -4,7 +4,7 @@ description = "architect-auth — the session RPC surface, the server middleware
 weight = 53
 +++
 
-Auth lives in `features/auth/` as its own crate family — there is **no
+Auth lives in `auth:crates/` as its own crate family — there is **no
 `architect::auth` re-export** (it would cycle the dependency graph;
 depend on the auth crates directly). The split follows the
 [monorepo layout](@/architecture/layout.md):
@@ -28,7 +28,7 @@ client and dispatcher, the axum router (`POST /auth/<method>`,
 HTTP client (`AuthServiceHttpClient`, `OrganizationServiceHttpClient`,
 `DeviceServiceHttpClient`). See [the HTTP face](@/architecture/http.md).
 
-`AuthService` has 14 methods (`features/auth/auth-proto/src/service.rs`
+`AuthService` has 14 methods (`auth:crates/auth-proto/src/service.rs`
 `AuthService`; argument types abbreviated here):
 
 ```rust,ignore
@@ -57,12 +57,12 @@ pub trait AuthService {
 ```
 
 `DeviceService` is the account's device address book, each call scoped
-to the account the token names (`features/auth/auth-proto/src/device.rs`
+to the account the token names (`auth:crates/auth-proto/src/device.rs`
 `DeviceService`): `register_device` (this install, with its iroh
 endpoint id; returns the `DeviceDirectory`), `list_devices` and
 `forget_device`. `auth_proto::ensure_registered` registers a device
 once for every app on it; the tests are
-`features/auth/tests/native/src/devices_tests.rs`.
+`auth:tests/native/src/devices_tests.rs`.
 
 The `AuthSessionBundle` a sign-up/sign-in/refresh returns carries the
 raw token (only its hash is stored server-side), the `AuthUser`, and
@@ -74,7 +74,7 @@ token dead. Sign-out is idempotent and doesn't reveal token existence.
 `AuthVoxService` adapts the engine to the trait; the rpc-emitted
 `auth_service_layer` binds it into a `LayerRouter`. This is verbatim
 how the integration tests mount it
-(`features/auth/tests/native`, over the
+(`auth:tests/native`, over the
 [in-process transport](@/architecture/local.md) — full wire, no
 socket):
 
@@ -189,7 +189,7 @@ server sees it verbatim; cleared → none again, same clients.
 
 ## The server
 
-`apps/auth-server` mounts exactly that: `services().provide(svc)` for
+`auth:apps/auth-server` mounts exactly that: `services().provide(svc)` for
 vox (served at `/vox` and, with `AUTH_IROH_KEY_FILE`, over iroh),
 `services().provide_http(&svc)` for HTTP, and the OAuth/OIDC flows and
 the hosted pages as plugins on an `architect::host::EngineHost`. Nothing
@@ -206,7 +206,7 @@ proved, `Principal::Host`) and every `vox_at` lane
 (`crates/architect/src/host.rs` `EngineHost`,
 `crates/architect/tests/host_gate.rs`). See
 [EngineHost](@/features/engine-host.md).
-`apps/auth-server/tests/surfaces.rs` runs one suite over every
+`auth:apps/auth-server/tests/surfaces.rs` runs one suite over every
 transport.
 
 ## Beyond the RPC surface
@@ -233,6 +233,6 @@ There's also an **axum HTTP guard** for plain HTTP routes
 (`auth::transport::axum`): `require_session` as a `route_layer`
 extracts a bearer token or session cookie and injects an
 `AuthenticatedSession` extension — see
-`features/auth/architect-auth/examples/axum_http.rs`. The vox path
+`auth:crates/architect-auth/examples/axum_http.rs`. The vox path
 above is the architect-idiomatic one; reach for the axum guard only on
 routes that genuinely live outside vox.

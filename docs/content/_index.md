@@ -15,7 +15,7 @@ on plain Rust types write the wire types, the vox and HTTP clients and
 routes and the Action List actions. The facade crate lives in
 `crates/architect`, its proc-macros in `crates/`, the features
 (the extension runtime, control and MCP, scenes and process views,
-input, settings, auth) in `features/`. `apps/auth-server` is a
+input, settings, auth) in `features/`. `auth:apps/auth-server` is a
 full-size server built the same way. The app's shell, workspace,
 toolbars and UI are not here: they are FastTrackStudio/app-shell
 (`app-shell:crates/app-shell-extensions` draws extensions in it).

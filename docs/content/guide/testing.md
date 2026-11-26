@@ -57,7 +57,7 @@ every wire is what the generated `HttpError` and transport variant are
 for.
 
 For a service set that must hold on every transport, copy
-`apps/auth-server/tests/surfaces.rs`. Each scenario is a generic
+`auth:apps/auth-server/tests/surfaces.rs`. Each scenario is a generic
 `async fn` over the service traits, and `on_every_transport` runs it
 over four stacks, each a fresh in-memory database:
 
@@ -226,7 +226,7 @@ docs and skills name that does not exist (`xtask/src/docs.rs`). Cite
 code as a path plus a symbol, never a line number.
 
 Not in CI: `just lint` (clippy with `--all-features`),
-`just ui-css-check`, `just auth-e2e` and the UI snapshot tests.
+`just ui-css-check` and the UI snapshot tests.
 
 ## 7. Feature-gated tests
 

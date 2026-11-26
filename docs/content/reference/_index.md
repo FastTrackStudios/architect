@@ -17,8 +17,8 @@ a feature.
 | `architect-rpc-derive` | `crates/architect-rpc-derive` | `#[architect::service]` / `rpc` / `http` — sync/async trait → vox service + `Layer` token + HTTP router + HTTP client. |
 | `architect-action-derive` | `crates/architect-action-derive` | `#[architect::actions]` — named-command traits with menu/CLI metadata. |
 | `crdt`, `crdt-derive` | `features/crdt/` | Loro CRDT layer — the local-first feature every `#[architect(crdt)]` entity builds on. |
-| `auth-proto`, `auth`, `auth-db`, `auth-client`, `auth-ui`, `architect-auth` | `features/auth/` | The identity feature — see [the auth feature](@/architecture/auth.md). |
-| `auth-server` | `apps/auth-server` | The identity server: the generated faces plus the OAuth/OIDC and page plugins. |
+| `auth-proto`, `auth`, `auth-db`, `auth-client`, `auth-ui`, `architect-auth` | `auth:crates/` | The identity feature — see [the auth feature](@/architecture/auth.md). |
+| `auth-server` | `auth:apps/auth-server` | The identity server: the generated faces plus the OAuth/OIDC and page plugins. |
 | `xtask` | `xtask` | `cargo xtask feature new <name>` scaffolds a feature; tags, mirror, fleet tooling. |
 
 ## Cargo features

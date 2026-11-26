@@ -87,7 +87,7 @@ them apart; only the dial differs.
 
 The iroh key file is created `0600`; `id_path`, when given, receives
 the endpoint id so other processes can find it.
-`apps/auth-server/src/server.rs` `build` turns iroh on from config.
+`auth:apps/auth-server/src/server.rs` `build` turns iroh on from config.
 
 In-process serving is the same router with no socket:
 
@@ -273,7 +273,7 @@ let app = EngineHost::ungated(LayerRouter::new(), "127.0.0.1:0")
 `.finish(|app| …)` wraps the assembled app (CORS, a trace layer) after
 plugins and the SPA fallback. `.plugin(router)` stays for what neither
 a service nor a mount covers: OAuth redirects, server-rendered pages.
-`apps/auth-server/src/server.rs` `host_with_senders` shows both.
+`auth:apps/auth-server/src/server.rs` `host_with_senders` shows both.
 
 ## 6. Health, version and the web bundle
 
@@ -288,7 +288,7 @@ a service nor a mount covers: OAuth redirects, server-rendered pages.
   ```sh
   ARCHITECT_BUILD_REV=$(git rev-parse HEAD) \
   ARCHITECT_BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
-  cargo build --release -p auth-server
+  cargo build --release -p <your-server>
   ```
 
 - `.web(Some(bundle))` serves a built SPA as the fallback;

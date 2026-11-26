@@ -28,3 +28,4 @@ apps/sandbox/media/tests/golden/*.got.html
 
 # A development copy of an example page writes why it failed beside it.
 examples/showcase/**/*.error
+.auth/

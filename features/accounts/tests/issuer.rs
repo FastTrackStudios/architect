@@ -1,4 +1,4 @@
-//! The accounts against the real issuer: `apps/auth-server` in process,
+//! The accounts against the real issuer: `auth:apps/auth-server` in process,
 //! seeded with its dev people, over HTTP on loopback.
 
 #![allow(

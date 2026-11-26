@@ -468,7 +468,7 @@ the way typed vox clients share one `Caller`. Native and wasm (`fetch`).
 
 ## Testing every face at once
 
-`apps/auth-server/tests/surfaces.rs` is the pattern: a small adapter
+`auth:apps/auth-server/tests/surfaces.rs` is the pattern: a small adapter
 over the generated clients, and each scenario run over HTTP, vox
 in-process (`LocalServer`), vox over WebSocket (`architect::connect`),
 and vox over iroh (loopback). A behaviour that holds on one transport

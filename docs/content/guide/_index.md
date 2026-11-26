@@ -16,7 +16,7 @@ The running example is a greeter: an entity (`Note`), a service
 (`Greeter`) with its error and a stream, an in-memory backend, a server,
 and tests that run one scenario over every wire. It is small enough to
 hold in your head, and every chapter adds to it or points at the larger
-code that does the same thing for real (`apps/auth-server`, and Studio
+code that does the same thing for real (`auth:apps/auth-server`, and Studio
 in its own repo).
 
 ## Part 1: the backend half

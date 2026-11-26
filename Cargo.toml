@@ -28,16 +28,6 @@ members = [
     "crates/architect-action-derive",
     # ── the reference example ─────────────────────────────────────────
     # ── apps ──────────────────────────────────────────────────────────
-    "apps/auth-server",
-    "apps/mock-oauth",
-    # ── auth ──────────────────────────────────────────────────────────
-    "features/auth/architect-auth",
-    "features/auth/auth",
-    "features/auth/auth-proto",
-    "features/auth/auth-db",
-    "features/auth/auth-client",
-    "features/auth/auth-ui",
-    "features/auth/tests/native",
     # ── crdt ──────────────────────────────────────────────────────────
     "features/crdt/crdt",
     "features/crdt/crdt-derive",
@@ -160,13 +150,14 @@ architect-control = { path = "features/control" }
 architect-derive = { path = "crates/architect-derive" }
 architect-rpc-derive = { path = "crates/architect-rpc-derive" }
 architect-action-derive = { path = "crates/architect-action-derive" }
-architect-auth = { path = "features/auth/architect-auth" }
-auth-server = { path = "apps/auth-server" }
-auth = { path = "features/auth/auth" }
-auth-proto = { path = "features/auth/auth-proto" }
-auth-db = { path = "features/auth/auth-db" }
-auth-client = { path = "features/auth/auth-client" }
-auth-ui = { path = "features/auth/auth-ui" }
+# auth (FastTrackStudios/auth): the identity library and its server, a
+# repository of its own. One rev for every crate of it.
+architect-auth = { git = "https://github.com/FastTrackStudios/auth", rev = "36b877c96ce2875a299e1931ef4851587d99997e" }
+auth-server = { git = "https://github.com/FastTrackStudios/auth", rev = "36b877c96ce2875a299e1931ef4851587d99997e" }
+auth = { git = "https://github.com/FastTrackStudios/auth", rev = "36b877c96ce2875a299e1931ef4851587d99997e" }
+auth-proto = { git = "https://github.com/FastTrackStudios/auth", rev = "36b877c96ce2875a299e1931ef4851587d99997e" }
+auth-db = { git = "https://github.com/FastTrackStudios/auth", rev = "36b877c96ce2875a299e1931ef4851587d99997e" }
+auth-client = { git = "https://github.com/FastTrackStudios/auth", rev = "36b877c96ce2875a299e1931ef4851587d99997e" }
 crdt = { path = "features/crdt/crdt" }
 crdt-derive = { path = "features/crdt/crdt-derive" }
 # Renamed on extraction (member manifests + their consumers renamed to
