@@ -524,10 +524,12 @@ impl Stack {
             c
         };
         match process {
-            Process::MockOauth => bin("DEV_STACK_BIN_MOCK_OAUTH")
-                .map_or_else(|| in_auth("mock-oauth"), Command::new),
-            Process::Auth => bin("DEV_STACK_BIN_AUTH")
-                .map_or_else(|| in_auth("auth-server"), Command::new),
+            Process::MockOauth => {
+                bin("DEV_STACK_BIN_MOCK_OAUTH").map_or_else(|| in_auth("mock-oauth"), Command::new)
+            }
+            Process::Auth => {
+                bin("DEV_STACK_BIN_AUTH").map_or_else(|| in_auth("auth-server"), Command::new)
+            }
             // The same binary with no window: its `serve`.
             Process::App if headless => {
                 let mut c = bin("DEV_STACK_BIN_APP").map_or_else(
