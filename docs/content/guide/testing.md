@@ -226,7 +226,7 @@ docs and skills name that does not exist (`xtask/src/docs.rs`). Cite
 code as a path plus a symbol, never a line number.
 
 Not in CI: `just lint` (clippy with `--all-features`),
-`just ui-css-check`, `just auth-e2e` and the UI snapshot tests.
+`just ui-css-check` and the UI snapshot tests.
 
 ## 7. Feature-gated tests
 

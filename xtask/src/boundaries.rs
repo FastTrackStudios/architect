@@ -115,6 +115,10 @@ pub struct Table {
     /// Package names whose lockfile sources must agree (one tag per lock).
     #[serde(default, rename = "single-source")]
     pub single_source: Vec<String>,
+    /// Names a `single-source` pattern matches that come from elsewhere on
+    /// purpose (another repository's crates, taken at one rev).
+    #[serde(default, rename = "single-source-exempt")]
+    pub single_source_exempt: Vec<String>,
     /// The forbidden sets.
     #[serde(default)]
     pub forbidden: Forbidden,
@@ -678,6 +682,10 @@ pub fn check(table: &Table, facts: &Facts) -> Vec<Violation> {
             .single_source
             .iter()
             .any(|pattern| name_matches(pattern, name))
+            && !table
+                .single_source_exempt
+                .iter()
+                .any(|pattern| name_matches(pattern, name))
         {
             sources
                 .entry(name.as_str())
@@ -1070,7 +1078,7 @@ mod tests {
 
     const TABLE: &str = r#"
         single-source = ["architect", "auth*"]
-        unmapped-ok = ["auth:crates/tests"]
+        unmapped-ok = ["features/auth/tests"]
 
         [forbidden]
         engine = ["sea-orm", "axum", "iroh"]
@@ -1247,10 +1255,10 @@ mod tests {
         let mut facts = clean();
         facts
             .members
-            .push(member("auth-proto", "auth:crates/auth-proto"));
+            .push(member("auth-proto", "features/auth/auth-proto"));
         facts
             .members
-            .push(member("auth-tests", "auth:tests/native"));
+            .push(member("auth-tests", "features/auth/tests/native"));
         facts.members.push(Member {
             proc_macro: true,
             ..member("crdt-derive", "features/crdt/crdt-derive")

@@ -25,7 +25,11 @@
 contract-target = "wasm32-unknown-unknown"
 host-dirs = ["apps"]
 unmapped-ok = ["features/crdt/tests", "features/extensions/tests"]
-single-source = ["architect", "architect-*", "auth", "auth-*", "crdt", "crdt-*", "ui-snapshot"]
+single-source = ["architect", "architect-*", "crdt", "crdt-*", "ui-snapshot"]
+# Auth is FastTrackStudios/auth's, taken at one rev: its crates come from
+# there, not this checkout. (Its own `architect` dependency is patched back
+# to this checkout, so architect still has one source.)
+single-source-exempt = ["architect-auth", "auth", "auth-*"]
 
 [forbidden]
 engine = [
@@ -53,8 +57,10 @@ architect-server = ["server-seaorm"]
 # document: stylesheets, HTML parser), whose features include
 # tower-http, like the story crates above; the guide
 # itself reaches no server stack.
-ui-reach = 13
-transport-host = 1
+# 2026-11-26 (-7, -1): auth leaves for FastTrackStudios/auth, and with it
+# auth-ui's server stack and server-axum.
+ui-reach = 6
+transport-host = 0
 lints = 1
 
 # ── L0 contracts ──────────────────────────────────────────────────────────
