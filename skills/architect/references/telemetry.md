@@ -28,7 +28,7 @@ Crate `features/telemetry` (`architect_telemetry`). Native only; wasm gets stubs
 **R3. Enrich the span, don't log:**
 - Dotted keys: `wide::set("org.slug", slug.clone())`, `wide::set("mcp.tool", name.to_owned())`.
 - Cast counts to `i64` (`i64::try_from(n).unwrap_or(i64::MAX)`); display-only values with `wide::set_display("media.token_error", &format!("{e:?}"))`.
-- A local closure for a fixed key family: `let outcome = |name: &'static str| wide::set("auth.linked_token.outcome", name);` (`apps/auth-server/src/oauth.rs`).
+- A local closure for a fixed key family: `let outcome = |name: &'static str| wide::set("auth.linked_token.outcome", name);` (`auth:apps/auth-server/src/oauth.rs`).
 
 **R4. Stage timing:** in the hot path `let mut stages = architect_telemetry::timing::Stages::start();` then `stages.mark("comp.rank_ms")` (dotted keys, unit in the name). The subscriber must carry `timing::DIRECTIVE` in its `EnvFilter` and a `timing::Recorder::default()` layer; read back with `timing::recent(n)` (Session: `studio:apps/session/daw/src/perf.rs`, `studio:apps/session/daw/tests/perf_slip.rs`). Action runs are timed only with `timing::DIRECTIVES` in the global filter.
 

@@ -5,7 +5,7 @@ weight = 50
 +++
 
 architect's client/server story is opinionated. These are the rules
-architect's apps (`apps/auth-server`, Task, Session) follow, why they exist, and how each one
+architect's apps (`auth:apps/auth-server`, Task, Session) follow, why they exist, and how each one
 is kept from drifting. Copy them into your own project.
 
 ## 1. All client↔server data flows through vox services
@@ -86,7 +86,7 @@ call, or (worse) a silent desync. The example pins one rev in the root
 | No Dioxus server fns (§1) | review (no automated gate yet) |
 | facet-only wire (§2) | the `Entity` derive emits facet; serde derive would be redundant |
 | Wasm-clean contracts (§3–4) | CI `check wasm` step: `cargo check --target wasm32-unknown-unknown` on the framework crates; `cargo xtask feature new` scaffolds contracts its test checks for wasm |
-| Real wire round-trips (§5) | `examples/greeter/tests/round_trip.rs`, `apps/auth-server/tests/surfaces.rs` |
+| Real wire round-trips (§5) | `examples/greeter/tests/round_trip.rs`, `auth:apps/auth-server/tests/surfaces.rs` |
 | Hand-rolled widgets, signal/prop misuse | dioxus-MCP audits — run manually |
 
 The dioxus-MCP audits aren't CLI-runnable, so they're a manual companion

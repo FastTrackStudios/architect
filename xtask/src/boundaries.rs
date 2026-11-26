@@ -1070,7 +1070,7 @@ mod tests {
 
     const TABLE: &str = r#"
         single-source = ["architect", "auth*"]
-        unmapped-ok = ["features/auth/tests"]
+        unmapped-ok = ["auth:crates/tests"]
 
         [forbidden]
         engine = ["sea-orm", "axum", "iroh"]
@@ -1247,10 +1247,10 @@ mod tests {
         let mut facts = clean();
         facts
             .members
-            .push(member("auth-proto", "features/auth/auth-proto"));
+            .push(member("auth-proto", "auth:crates/auth-proto"));
         facts
             .members
-            .push(member("auth-tests", "features/auth/tests/native"));
+            .push(member("auth-tests", "auth:tests/native"));
         facts.members.push(Member {
             proc_macro: true,
             ..member("crdt-derive", "features/crdt/crdt-derive")

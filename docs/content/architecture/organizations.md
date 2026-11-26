@@ -36,7 +36,7 @@ window (or "all"), and every architect feature reads it.
 
 ## One identity server, every app
 
-The orgs live in one place: the identity server (`apps/auth-server`
+The orgs live in one place: the identity server (`auth:apps/auth-server`
 here, deployed for FastTrackStudio as `fts-auth` at
 `auth.fasttrackstudio.app`). Every app — Task, Studio, Keyflow,
 Ignition, the next one — signs in there and reads its orgs, members,
@@ -162,7 +162,7 @@ reads across `Members::scope_of` the caller.
 
 - architect-auth: organizations, members, roles, teams, invitations,
   invite links, devices, agent links — the model and its services;
-  `apps/auth-server`, the server, deployed as fts-auth so one account
+  `auth:apps/auth-server`, the server, deployed as fts-auth so one account
   spans the apps (Task used to keep an auth store per org).
 - architect-permissions: capabilities and the gate on every service call.
 - Task: `OrgSelection` and the org switcher (→ the shell), per-org sync

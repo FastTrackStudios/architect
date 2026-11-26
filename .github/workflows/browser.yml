@@ -58,10 +58,16 @@ jobs:
           echo "FIREFOX=$(build firefox)/bin/firefox" >> "$GITHUB_ENV"
           echo "GECKODRIVER=$(build geckodriver)/bin/geckodriver" >> "$GITHUB_ENV"
           echo "NODE=$(build nodejs_24)/bin/node" >> "$GITHUB_ENV"
+      - name: the issuer's source (FastTrackStudios/auth, at the rev Cargo.toml pins)
+        run: |
+          rev=$(sed -n 's/^auth-server = .*rev = "\([0-9a-f]*\)".*/\1/p' Cargo.toml)
+          test -n "$rev"
+          git clone -q https://github.com/FastTrackStudios/auth .auth
+          git -C .auth checkout -q "$rev"
       - name: the island node and an issuer
         run: |
           cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
-          cargo build -q -p auth-server
+          (cd .auth && cargo build -q -p auth-server)
       # The browser runs outside the dev shell's libraries.
       - name: a share link opened as its guest
         # The web bundle's build, then the tests: never the job's 45 minutes.

@@ -1,20 +1,21 @@
 +++
 title = "Auth"
-description = "Accounts and sessions: the auth engine, its services on every transport, the client kit (token store, OIDC with PKCE, device flow), and apps/auth-server."
+description = "Accounts and sessions: the auth engine, its services on every transport, the client kit (token store, OIDC with PKCE, device flow), and auth:apps/auth-server."
 weight = 30
 +++
 
 ## What it is and when to use it
 
-Auth is a family of crates under `features/auth`. `auth-proto` declares
+Auth is a family of crates in its own repository, FastTrackStudios/auth
+(`auth:crates`), which architect pins by rev. `auth-proto` declares
 `AuthService`, `OrganizationService` and `DeviceService` once, as
-`#[architect::service]` traits, so each has a vox face, an HTTP face
+`#[auth_macros::service]` traits, so each has a vox face, an HTTP face
 (`POST /auth/<method>`) and clients for both. `auth` is the engine
 (`ArchitectAuth`): accounts, sessions (only a token's hash is stored),
 organizations, devices, OIDC provider, device flow, passkeys and two-factor.
 `auth-client` is the wasm-clean client kit: a stored session, token stores,
 middleware that attaches the bearer to every vox call, OIDC with PKCE and
-refresh, and the RFC 8628 device flow. `apps/auth-server` is the deployable
+refresh, and the RFC 8628 device flow. `auth:apps/auth-server` is the deployable
 server (deployed as fts-auth).
 
 Use it to sign people in and to know who is calling. What a caller may do is
@@ -25,7 +26,7 @@ the deployment is in `skills/architect/references/fts-auth.md`.
 ## A minimal example
 
 `architect-auth` with feature `full`. From
-`features/auth/architect-auth/examples/vox_rpc.rs`:
+`auth:crates/architect-auth/examples/vox_rpc.rs`:
 
 ```rust
 use architect::{LayerRouter, LocalServer, Scope};
@@ -59,30 +60,30 @@ store.save(&stored_session(&bundle))?;
 A server protects its own services with `AuthServerMiddleware` (the handler
 reads `AuthVoxContext`), or resolves the bearer for the permissions gate with
 `SessionIdentityResolver`. Plain axum routes use `require_session`
-(`features/auth/architect-auth/examples/axum_http.rs`).
+(`auth:crates/architect-auth/examples/axum_http.rs`).
 
 ## Code tour
 
-1. `features/auth/auth-proto/src/service.rs` `AuthService`: sign up and in,
+1. `auth:crates/auth-proto/src/service.rs` `AuthService`: sign up and in,
    device sign-in, `current_session`, `refresh_session`, `whoami`, `sign_out`,
    profile changes.
-2. `features/auth/auth-proto/src/organizations.rs` `OrganizationService` and
-   `features/auth/auth-proto/src/device.rs` `DeviceService`: orgs, members,
+2. `auth:crates/auth-proto/src/organizations.rs` `OrganizationService` and
+   `auth:crates/auth-proto/src/device.rs` `DeviceService`: orgs, members,
    invitations, roles; a person's devices.
-3. `features/auth/auth/src/config.rs` `ArchitectAuthBuilder` and
-   `features/auth/auth/src/lib.rs` `ArchitectAuth`: the engine.
-4. `features/auth/auth/src/transport.rs` `AuthVoxService`,
+3. `auth:crates/auth/src/config.rs` `ArchitectAuthBuilder` and
+   `auth:crates/auth/src/lib.rs` `ArchitectAuth`: the engine.
+4. `auth:crates/auth/src/transport.rs` `AuthVoxService`,
    `AuthServerMiddleware`, `AuthVoxContext`: the engine as the traits, and the
    server side of the bearer.
-5. `features/auth/auth/src/identity.rs` `SessionIdentityResolver`: a bearer to
+5. `auth:crates/auth/src/identity.rs` `SessionIdentityResolver`: a bearer to
    a `Principal`, cached briefly.
-6. `features/auth/auth-client/src/lib.rs` `StoredSession`, `TokenStore`,
+6. `auth:crates/auth-client/src/lib.rs` `StoredSession`, `TokenStore`,
    `FileTokenStore`, `MemoryTokenStore`, `TokenStoreMiddleware`.
-7. `features/auth/auth-client/src/oidc.rs` `authorize_url`, `Pkce`,
-   `refresh_if_needed`; `features/auth/auth-client/src/device.rs` `start_body`,
+7. `auth:crates/auth-client/src/oidc.rs` `authorize_url`, `Pkce`,
+   `refresh_if_needed`; `auth:crates/auth-client/src/device.rs` `start_body`,
    `poll_body`.
-8. `apps/auth-server/src/server.rs` `services`, `build`, `serve`: the three
-   services on every face; `apps/auth-server/src/oauth.rs` the OIDC routes and
+8. `auth:apps/auth-server/src/server.rs` `services`, `build`, `serve`: the three
+   services on every face; `auth:apps/auth-server/src/oauth.rs` the OIDC routes and
    hosted pages.
 
 A client signs in through `AuthServiceClient` or `AuthServiceHttpClient`.
@@ -104,7 +105,7 @@ and comes back on the app's scheme, `app.fasttrackstudio.architect:/oauth/callba
 on a desk it opens in the default browser and comes back on a loopback
 port the app listens on, `http://127.0.0.1:<port>/oauth/callback`. The
 issuer matches a registered loopback redirect on any port (RFC 8252 §7.3,
-`features/auth/auth/src/flows.rs` `redirect_matches`), never `localhost`.
+`auth:crates/auth/src/flows.rs` `redirect_matches`), never `localhost`.
 
 The code buys an OIDC access token, which the issuer's vox services do not
 take: they take sessions. So the app trades it at once for an issuer
@@ -132,17 +133,17 @@ headless node, the CLI: `Accounts::sign_in_with_code`).
 
 ## Tests to read
 
-- `apps/auth-server/tests/surfaces.rs`: one scenario over HTTP, in-process
+- `auth:apps/auth-server/tests/surfaces.rs`: one scenario over HTTP, in-process
   vox, WebSocket and iroh: sessions, a wrong password, org isolation,
   invitations and roles, orgs fetched live.
-- `features/auth/tests/native/src/lib.rs`: the session surface over
+- `auth:tests/native/src/lib.rs`: the session surface over
   `LocalServer` (refresh rotates the token, sign-out); the token middleware
   matching the server middleware's wire format; a short secret refused.
-- `apps/auth-server/tests/device_and_accounts.rs`: the device code approved
+- `auth:apps/auth-server/tests/device_and_accounts.rs`: the device code approved
   and refused; several accounts and switching.
-- `apps/auth-server/tests/http_surface.rs`: the OIDC provider, pages, CORS.
-- `apps/auth-server/tests/mock_oauth.rs` and `apps/auth-server/tests/social.rs`:
-  social sign-in against `apps/mock-oauth`.
+- `auth:apps/auth-server/tests/http_surface.rs`: the OIDC provider, pages, CORS.
+- `auth:apps/auth-server/tests/mock_oauth.rs` and `auth:apps/auth-server/tests/social.rs`:
+  social sign-in against `auth:apps/mock-oauth`.
 
 ## Status
 

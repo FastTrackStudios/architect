@@ -25,7 +25,7 @@ are a different tool: [Capability tokens](@/architecture/capability.md).
 ## A minimal example
 
 `architect-permissions`; the gate is `architect::permissions_gate` (feature
-`vox`, native). From `features/auth/tests/native/src/permissions_gate_tests.rs`:
+`vox`, native). From `auth:tests/native/src/permissions_gate_tests.rs`:
 
 ```rust
 use architect::permissions_gate::{PermissionsGate, UnlistedPolicy};
@@ -71,7 +71,7 @@ the gate resolved. For actions: `list.set_authorizer(engine)` and run with
    `CompositeEngine`, `AllowAll`, `Rule`: engines to start from.
 4. `features/permissions/src/lib.rs` `MethodPermit`, `ServicePermits`,
    `AuditSink`, `TracingAudit`: the tables and the audit trail.
-5. `features/auth/auth/src/identity.rs` `SessionIdentityResolver`: a bearer to
+5. `auth:crates/auth/src/identity.rs` `SessionIdentityResolver`: a bearer to
    a user or anonymous.
 6. `crates/architect/src/permissions_gate.rs` `PermissionsGate` (`permit`,
    `unlisted`, `observe_only`, `coverage`, `wrap_shared_with_bearer`,
@@ -92,7 +92,7 @@ which case the denial is audited and the call goes through.
 
 ## Tests to read
 
-- `features/auth/tests/native/src/permissions_gate_tests.rs`: roles enforced
+- `auth:tests/native/src/permissions_gate_tests.rs`: roles enforced
   over validated sessions; a scope engine gating by prefix; observe-only
   letting denials through; a handler seeing the resolved caller; an untabled
   service denied by default and served when allowed; coverage naming every gap.

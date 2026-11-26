@@ -5,7 +5,7 @@
 //! socket and called through the typed client.
 //!
 //! These methods keep their vox face, so one scenario runs on every face
-//! at once (`apps/auth-server/tests/surfaces.rs` style): the backend in
+//! at once (`auth:apps/auth-server/tests/surfaces.rs` style): the backend in
 //! process, the HTTP client, and the vox client over a `LocalServer`.
 
 #![allow(

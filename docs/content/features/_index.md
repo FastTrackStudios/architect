@@ -38,7 +38,7 @@ When a page and the code disagree, the code is right.
 
 ## Identity
 
-- [Auth](@/features/auth.md): the auth engine, its services, the client kit, `apps/auth-server`.
+- [Auth](@/features/auth.md): the auth engine, its services, the client kit, `auth:apps/auth-server`.
 - [Permissions](@/features/permissions.md): `Principal`, permit tables, `PermissionsGate`, the Action List authorizer.
 - [Organizations](@/features/organizations.md): `architect-orgs`, the current org, scopes, server confinement.
 

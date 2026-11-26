@@ -1,6 +1,5 @@
 ---
 "architect-atom" = "minor"
-"architect-auth" = "minor"
 "architect-devices" = "minor"
 "architect-files" = "minor"
 "architect-form" = "minor"
@@ -20,16 +19,8 @@
 "architect-story-snapshots" = "minor"
 "architect-telemetry" = "minor"
 "architect-ui" = "minor"
-"auth" = "minor"
-"auth-client" = "minor"
-"auth-db" = "minor"
-"auth-native-tests" = "minor"
-"auth-proto" = "minor"
-"auth-server" = "minor"
-"auth-ui" = "minor"
 "crdt" = "minor"
 "crdt-derive-tests" = "minor"
-"mock-oauth" = "minor"
 "xtask" = "minor"
 ---
 

@@ -23,7 +23,7 @@ use crate::model::{Account, Device};
 /// FTS's issuer.
 pub const DEFAULT_ISSUER: &str = "https://auth.fasttrackstudio.app";
 
-/// Names another issuer (a self-hosted one, a local `apps/auth-server`).
+/// Names another issuer (a self-hosted one, a local `auth:apps/auth-server`).
 pub const ISSUER_ENV: &str = "ARCHITECT_AUTH_ISSUER";
 
 /// [`ISSUER_ENV`]'s issuer when set, else [`DEFAULT_ISSUER`].

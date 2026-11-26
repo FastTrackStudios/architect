@@ -57,7 +57,7 @@ every wire is what the generated `HttpError` and transport variant are
 for.
 
 For a service set that must hold on every transport, copy
-`apps/auth-server/tests/surfaces.rs`. Each scenario is a generic
+`auth:apps/auth-server/tests/surfaces.rs`. Each scenario is a generic
 `async fn` over the service traits, and `on_every_transport` runs it
 over four stacks, each a fresh in-memory database:
 

@@ -31,7 +31,7 @@ use fill::{Decision, Fill, Mode};
 use guard::Production;
 
 /// The password every seeded and every mirrored account has on the local
-/// auth server (`apps/auth-server/src/dev.rs` `DEV_PASSWORD`). Published on
+/// auth server (`auth:apps/auth-server/src/dev.rs` `DEV_PASSWORD`). Published on
 /// purpose: it opens nothing anywhere else.
 pub const DEV_PASSWORD: &str = "development-password";
 
@@ -71,7 +71,7 @@ pub const NATIVE_LOOPBACK_REDIRECT: &str = "http://127.0.0.1/oauth/callback";
 pub const NATIVE_SCHEME_REDIRECT: &str = "app.fasttrackstudio.architect:/oauth/callback";
 
 /// The account the stack's web app and window sign in as by themselves
-/// on the demo seed: its owner of `acme` (`apps/auth-server/src/dev.rs`
+/// on the demo seed: its owner of `acme` (`auth:apps/auth-server/src/dev.rs`
 /// `DEV_PEOPLE`). Never set on a mirror, whose accounts are real people's.
 pub const DEV_SIGN_IN_EMAIL: &str = fill::DEMO_NODE_EMAIL;
 /// The file, in the app's folder of the stack's state, that holds the
@@ -515,11 +515,19 @@ impl Stack {
             c.args(["run", "-q"]).args(args).current_dir(&self.root);
             c
         };
+        // The issuer and the mock provider live in FastTrackStudios/auth:
+        // run from its checkout (`auth_checkout`), built there.
+        let in_auth = |package: &str| {
+            let mut c = Command::new("cargo");
+            c.args(["run", "-q", "-p", package])
+                .current_dir(auth_checkout(&self.root));
+            c
+        };
         match process {
             Process::MockOauth => bin("DEV_STACK_BIN_MOCK_OAUTH")
-                .map_or_else(|| cargo(&["-p", "mock-oauth"]), Command::new),
+                .map_or_else(|| in_auth("mock-oauth"), Command::new),
             Process::Auth => bin("DEV_STACK_BIN_AUTH")
-                .map_or_else(|| cargo(&["-p", "auth-server"]), Command::new),
+                .map_or_else(|| in_auth("auth-server"), Command::new),
             // The same binary with no window: its `serve`.
             Process::App if headless => {
                 let mut c = bin("DEV_STACK_BIN_APP").map_or_else(
@@ -1736,4 +1744,23 @@ mod tests {
         assert_eq!(mode(&dir.join("a/b")), 0o700);
         std::fs::remove_dir_all(dir).unwrap();
     }
+}
+
+/// The FastTrackStudios/auth checkout the issuer and the mock provider run
+/// from: `LOCAL_STACK_AUTH_PATH`, else `../auth` beside this checkout (as
+/// `LOCAL_STACK_STUDIO_PATH` / `../studio` for Studio). One that is not
+/// there is said now, with how to get it, rather than as a cargo error.
+fn auth_checkout(root: &std::path::Path) -> PathBuf {
+    let dir = std::env::var_os("LOCAL_STACK_AUTH_PATH")
+        .filter(|v| !v.is_empty())
+        .map_or_else(|| root.join("../auth"), PathBuf::from);
+    if !dir.join("Cargo.toml").exists() {
+        eprintln!(
+            "the issuer lives in FastTrackStudios/auth: clone it beside this checkout \
+             (git clone https://github.com/FastTrackStudios/auth {}) or set \
+             LOCAL_STACK_AUTH_PATH to one",
+            dir.display()
+        );
+    }
+    dir
 }

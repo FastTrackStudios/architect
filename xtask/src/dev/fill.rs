@@ -18,7 +18,7 @@ pub const TOKEN_FILE_VAR: &str = "AUTH_ADMIN_TOKEN_FILE";
 /// How long the mirror may take before the stack gives up on it.
 pub const MIRROR_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// The demo seed's node account and org (`apps/auth-server/src/dev.rs`
+/// The demo seed's node account and org (`auth:apps/auth-server/src/dev.rs`
 /// `DEV_ORGS`: Ada owns `acme`).
 pub const DEMO_NODE_EMAIL: &str = "ada@local.test";
 pub const DEMO_NODE_ORG: &str = "acme";

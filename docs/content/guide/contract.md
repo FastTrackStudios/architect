@@ -81,7 +81,7 @@ takes `#[architect::wire]`, which writes the same derive line and adds
 `#[repr(u8)]` to enums:
 
 ```rust
-// features/auth/auth-proto/src/device.rs
+// auth:crates/auth-proto/src/device.rs
 #[architect::wire]
 #[derive(Eq)]
 pub struct AccountOrg {

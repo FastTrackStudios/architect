@@ -67,22 +67,6 @@ ui-css-check: ui-css
     fi
     echo "utilities.css is up to date"
 
-# The auth pages' sheet. Same generated-but-committed deal as `ui-css`,
-# scanning this crate AND architect-ui so a class used here but not by
-# any architect-ui component still gets a rule — without it the element
-# renders unstyled and nothing warns.
-auth-ui-css:
-    cd features/auth/auth-ui && tailwindcss -i tailwind.css -o assets/utilities.css --minify
-
-auth-ui-css-check: auth-ui-css
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if ! git diff --quiet -- features/auth/auth-ui/assets/utilities.css; then
-        echo "auth-ui's utilities.css is out of date — run 'just auth-ui-css' and commit the result" >&2
-        exit 1
-    fi
-    echo "auth-ui utilities.css is up to date"
-
 check:
     cargo check --workspace --all-targets
 
@@ -256,7 +240,7 @@ auth-dev:
 # points a server at it; leave that unset and the real providers are
 # used, which is why production needs no flag to stay safe.
 mock-oauth:
-    cargo run -p mock-oauth
+    cd "${LOCAL_STACK_AUTH_PATH:-../auth}" && cargo run -p mock-oauth
 
 # The full demo: mock providers and a freshly seeded auth server.
 #
@@ -265,8 +249,8 @@ mock-oauth:
 auth-demo:
     #!/usr/bin/env bash
     set -euo pipefail
-    cargo build -p mock-oauth -p auth-server
-    cargo run -p mock-oauth &
+    (cd "${LOCAL_STACK_AUTH_PATH:-../auth}" && cargo build -p mock-oauth -p auth-server)
+    (cd "${LOCAL_STACK_AUTH_PATH:-../auth}" && cargo run -p mock-oauth) &
     mock=$!
     trap 'kill "$mock" 2>/dev/null || true' EXIT
     just auth-dev
@@ -310,13 +294,8 @@ auth-replay SNAPSHOT="auth-snapshot.json" DB="./auth-replay.db":
     rm -f "{{DB}}"
     exec cargo xtask dev auth --port 8080 --db "{{DB}}" --import "{{SNAPSHOT}}"
 
-# Browser tests for the auth pages, against a server this starts itself.
-#
-# First run downloads a browser and builds the server. On NixOS the
-# downloaded browser cannot find libglib, so point it at a system one:
-#   nix-shell -p chromium --run 'PLAYWRIGHT_CHROMIUM_PATH=$(which chromium) just auth-e2e'
-auth-e2e:
-    cd apps/auth-server/e2e && npm install && npx playwright test
+# The auth pages' browser tests (and their sheet, `auth-ui-css`) live with
+# them in FastTrackStudios/auth.
 
 # ── The whole stack on your machine (`devenv up`, #541) ─────────────
 # docs/content/guide/local-stack.md. Every recipe here is `cargo xtask dev`.
@@ -503,9 +482,9 @@ app-guest-linked-test:
 # headless over BiDi off the audio graph; `SHOTS=<dir>` keeps screenshots.
 app-share-guest-test:
     devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
-    devenv shell -- cargo build -q -p auth-server
+    devenv shell -- bash -c 'cd "${LOCAL_STACK_AUTH_PATH:-../auth}" && cargo build -q -p auth-server'
     devenv shell -- bash scripts/web-bundle.sh target/web-bundle
-    ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" ARCHITECT_AUTH_SERVER="$PWD/target/debug/auth-server" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-share-guest.test.mjs
+    ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" ARCHITECT_AUTH_SERVER="${LOCAL_STACK_AUTH_PATH:-$PWD/../auth}/target/debug/auth-server" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-share-guest.test.mjs
 
 # A collection note's native list (#668): the demo's setlist in
 # `/app/?demo` and as a share link's guest (a node sharing a copy of it):
